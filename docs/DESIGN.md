@@ -98,8 +98,8 @@ in SQLite (which sits inside the data dir and is a rebuildable index).
 | Layer | Holds | Set by |
 |---|---|---|
 | Bootstrap | data dir only | `--data-dir` flag or `FORGEUI_DATA_DIR` env; default `~/.forgeui` |
-| `config.yaml` | ComfyUI mode (`managed` / `local_url`), ComfyUI install path, URL, model folders per kind, `keys` (§11.4), `ui` prefs (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
-| Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--models-dir kind=path`), applied for that process only, never written back |
+| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
+| Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--comfy-mode`, `--models-dir kind=path`, `--host`, `--port`), applied for that process only, never written back |
 
 First run: if `config.yaml` is absent the app writes one with defaults and
 empty model folders, starts, and Settings shows a first-run state (no ComfyUI

@@ -1,0 +1,5 @@
+# Local data dir when the app is run from the repo.
+/data/
+# Frontend build output (embedded into the binary).
+/src/frontend/dist/
+/dist/

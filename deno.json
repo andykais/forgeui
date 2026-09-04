@@ -1,0 +1,30 @@
+{
+  "version": "0.1.0",
+  "tasks": {
+    "start": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-run --allow-write src/main.ts",
+    "reindex": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-write src/main.ts reindex",
+    "test": "deno test --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
+    "check": "deno check src tests",
+    "fmt": "deno fmt",
+    "lint": "deno lint"
+  },
+  "imports": {
+    "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
+    "@std/assert": "jsr:@std/assert@^1.0.14",
+    "@std/async": "jsr:@std/async@^1.0.14",
+    "@std/cli": "jsr:@std/cli@^1.0.22",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@std/fs": "jsr:@std/fs@^1.0.19",
+    "@std/media-types": "jsr:@std/media-types@^1.1.0",
+    "@std/path": "jsr:@std/path@^1.1.2",
+    "@std/ulid": "jsr:@std/ulid@^1.0.0",
+    "@std/yaml": "jsr:@std/yaml@^1.2.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "exclude": ["docs/", "dist/", "data/"]
+}
