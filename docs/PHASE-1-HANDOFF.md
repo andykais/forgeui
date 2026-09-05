@@ -152,6 +152,14 @@ phase" note, so `krea2-img2img` and `ltx` load and list but cannot generate.
 
 ## Before trusting it on real hardware
 
+*Done, in Phase 2 M5: `deno task comfy:setup` provisions a CPU-only ComfyUI
+and SD 1.5, `deno task test:comfy` and `deno task test:e2e:comfy` run against
+it, and `docs/HARDWARE-CHECKLIST.md` records what that proved. Two bugs came
+out of it — the `/comfy/*` proxy forwarded the browser's `Origin`, which
+ComfyUI answers with 403, and the editor screen looked for
+`app.graphToPrompt()` before ComfyUI's frontend existed. The list below is
+what was outstanding.*
+
 1. **Write the contract check.** §14.1 describes an opt-in test tagged `comfy`
    that runs a trivial graph (`EmptyImage` → `SaveImage`) against a real local
    ComfyUI to verify the assumptions the fake is built on. It was never

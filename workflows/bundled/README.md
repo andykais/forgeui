@@ -14,16 +14,21 @@ from then on (§4.6).
 | `flux-klein`    | Flux Klein            | flux    | image | prompt, size, seed, loras                                       |
 | `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, size, seed                                              |
 | `ltx`           | LTX Video             | ltx     | video | prompt, size, frames, fps, seed, loras                          |
+| `sd15`          | Stable Diffusion 1.5  | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
 below.
 
-## The model filenames are placeholders
+## The model filenames are placeholders — except `sd15`
 
-None of these graphs have been run: this repository has no models and no GPU.
-Every model filename below is a **placeholder** and will not resolve on your
-machine until you point it at a file you actually have.
+`sd15` names the checkpoint `deno task comfy:setup` downloads
+(`v1-5-pruned-emaonly-fp16.safetensors`), so it runs as shipped and is what the
+contract check generates with (`docs/HARDWARE-CHECKLIST.md`).
+
+The other seven have never been run: this repository has no GPU and none of
+their weights. Every model filename below is a **placeholder** and will not
+resolve on your machine until you point it at a file you actually have.
 
 | workflow                 | placeholder filenames                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------- |

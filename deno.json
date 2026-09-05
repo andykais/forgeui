@@ -16,7 +16,8 @@
     "ui:check": "cd src/frontend && npm run check",
     "ui:fmt": "cd src/frontend && npm run fmt",
     "test:ui": "cd src/frontend && npm run test",
-    "test:e2e": "cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test"
+    "test:e2e": "cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.config.ts",
+    "test:e2e:comfy": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.comfy.config.ts\""
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
@@ -46,6 +47,7 @@
     "tests/e2e/.tmp-data/",
     "tests/e2e/test-results/",
     "tests/e2e/*.spec.ts",
+    "tests/e2e/playwright.comfy.config.ts",
     "tests/e2e/playwright.config.ts"
   ]
 }

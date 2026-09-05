@@ -63,7 +63,7 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
   await expect(page.getByPlaceholder("Search prompts…")).toBeVisible();
 });
 
-test("the workflows screen lists the seven bundled workflows", async ({ page }) => {
+test("the workflows screen lists the bundled workflows", async ({ page }) => {
   await page.goto("/workflows");
   await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
   for (
@@ -75,6 +75,7 @@ test("the workflows screen lists the seven bundled workflows", async ({ page }) 
       "Anima",
       "Flux Klein",
       "Z-Image Turbo",
+      "Stable Diffusion 1.5",
     ]
   ) {
     await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();

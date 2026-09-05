@@ -14,7 +14,11 @@
    */
   let frame = $state<HTMLIFrameElement | null>(null);
   let saving = $state(false);
+  let ready = $state(false);
   let unreachable = $state<string | null>(null);
+
+  /** How long ComfyUI's frontend may take to put itself on the window. */
+  const FRONTEND_TIMEOUT_MS = 60_000;
 
   const workflowId = $derived(router.current.query.get("workflow"));
   const workflow = $derived(app.workflow(workflowId));
@@ -41,11 +45,29 @@
     }
   }
 
+  /**
+   * The iframe's `load` event fires long before ComfyUI's frontend has
+   * booted and put its app on the window, so waiting for the object is the
+   * only way to tell "not ready yet" from "this build does not expose it".
+   */
+  async function waitForFrontend(
+    timeoutMs = FRONTEND_TIMEOUT_MS,
+  ): Promise<ComfyFrontend | null> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const editor = frontend();
+      if (typeof editor?.graphToPrompt === "function") return editor;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return null;
+  }
+
   /** Load this workflow's LiteGraph document into the editor. */
   async function onLoad() {
     unreachable = null;
+    ready = false;
     if (!workflowId) return;
-    const editor = frontend();
+    const editor = await waitForFrontend();
     if (!editor?.loadGraphData) {
       unreachable =
         "This ComfyUI build does not expose app.loadGraphData(); open the workflow from ComfyUI's own menu instead.";
@@ -54,6 +76,7 @@
     const detail = await api.workflow(workflowId);
     try {
       editor.loadGraphData(detail.ui_json);
+      ready = true;
     } catch (cause) {
       unreachable = cause instanceof Error ? cause.message : String(cause);
     }
@@ -61,7 +84,7 @@
 
   async function saveAndReturn() {
     if (!workflowId) return;
-    const editor = frontend();
+    const editor = await waitForFrontend(5000);
     if (!editor?.graphToPrompt) {
       unreachable =
         "This ComfyUI build does not expose app.graphToPrompt(), so the app cannot capture the graph.";
@@ -99,8 +122,12 @@
         <span class="warn mono">{unreachable}</span>
       {/if}
       <button onclick={() => navigate(`/workflows/${workflowId}`)}>Discard</button>
-      <button class="primary" disabled={saving} onclick={saveAndReturn}>
-        {saving ? "Saving…" : "Save & return"}
+      <button
+        class="primary"
+        disabled={saving || (!ready && !unreachable)}
+        onclick={saveAndReturn}
+      >
+        {saving ? "Saving…" : !ready && !unreachable ? "Loading…" : "Save & return"}
       </button>
     </header>
   {/if}

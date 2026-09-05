@@ -12,6 +12,13 @@ const port = 7899;
 
 export default defineConfig({
   testDir: ".",
+  /**
+   * Only the smoke test. `comfy.spec.ts` needs a real ComfyUI
+   * (`deno task test:e2e:comfy`); `shots.spec.ts` and `video.spec.ts` are the
+   * documentation demos, run by name, and they leave state behind that the
+   * smoke test would then trip over.
+   */
+  testIgnore: /(comfy|shots|video)\.spec\.ts/,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

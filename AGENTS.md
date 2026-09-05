@@ -3,9 +3,11 @@
 ForgeUI — a workflow-first frontend for ComfyUI. Deno + SQLite + Svelte.
 
 **This repository is under active development. Phase 1 is complete** (the core
-generation loop: workflows, jobs, outputs, gallery, reindex, UI). Phases 2–5 are
-not started. Nothing here has ever run against a real ComfyUI — every test uses
-the in-process fake in `tests/fake-comfy/`.
+generation loop: workflows, jobs, outputs, gallery, reindex, UI) and verified
+against a real ComfyUI; Phase 2 is under way at M5. The default suite still uses
+the in-process fake in `tests/fake-comfy/` and needs nothing installed, but
+`deno task comfy:setup` provisions a real CPU-only ComfyUI that `test:comfy` and
+`test:e2e:comfy` drive (`docs/HARDWARE-CHECKLIST.md`).
 
 ## Read these first
 
@@ -48,7 +50,11 @@ deno task ui:check / ui:fmt          # svelte-check / prettier
 deno task test:ui                    # param-panel component tests (vitest)
 deno task test:e2e                   # Playwright smoke test against the built app
 UPDATE_GOLDEN=1 deno task test       # accept new golden files, never silently
-FORGEUI_COMFY_URL=… deno task test:comfy   # §14.1 contract check, real ComfyUI
+
+deno task comfy:setup                # once: a pinned ComfyUI, CPU torch, SD 1.5
+deno task comfy:serve                # run that ComfyUI in the foreground
+deno task test:comfy                 # §14.1 contract check + the app-level run
+deno task test:e2e:comfy             # the browser half, including the editor
 ```
 
 `deno check`/`lint`/`fmt` exclude `src/frontend/` and the Playwright specs —
@@ -82,9 +88,16 @@ multi-output, error mid-graph, cancel queued, cancel running, disconnect and
 reconnect, death before `executed`). `tests/e2e/serve.ts` runs it as a managed
 child process behind a stub interpreter, so the whole spawn path is exercised.
 
-`tests/contract/comfy_test.ts` is the exception: it talks to a real ComfyUI and
-is ignored unless `FORGEUI_COMFY_URL` is set, so `deno task test` still needs
-nothing. When it disagrees with the fake, the fake is what changes.
+`tests/contract/` is the exception: it talks to a real ComfyUI and every test is
+ignored unless `FORGEUI_COMFY_URL` is set, so `deno task test` still needs
+nothing. `scripts/with_comfy.ts` sets that (and the rest of
+`tests/contract/env.ts`) by starting the ComfyUI `scripts/setup-comfy.sh`
+provisioned. When the contract check disagrees with the fake, the fake is what
+changes.
+
+`sd15` is the one bundled workflow that can actually run: its weights are a
+download rather than a choice, so it is what the contract check generates with.
+Keep it working.
 
 Prefer a test that goes through the HTTP or WebSocket interface over one that
 pokes the database. When a browser-visible change is involved, look at it:
