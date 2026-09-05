@@ -2,6 +2,22 @@ import type { Database } from "@db/sqlite";
 import type { ConfigStore } from "../config/config.ts";
 import { ConfigError } from "../config/validate.ts";
 import type { DataPaths } from "../config/paths.ts";
+import { ComfyHttpError } from "../comfy/client.ts";
+import { LaunchError } from "../comfy/launch.ts";
+import type { ComfyManager } from "../comfy/manager.ts";
+import {
+  COMFY_PREFIX,
+  isWebSocketUpgrade,
+  proxyHttp,
+  proxyWebSocket,
+} from "../comfy/proxy.ts";
+import {
+  ComfyOfflineError,
+  JobNotFoundError,
+  JobRequestError,
+  type JobRunner,
+  JobSubmitError,
+} from "../jobs/pipeline.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -12,13 +28,19 @@ import {
 } from "../workflows/loader.ts";
 import { BodyError, error, methodNotAllowed, notFound } from "./json.ts";
 import { configRoutes } from "./routes/config.ts";
+import { jobRoutes } from "./routes/jobs.ts";
+import { systemRoutes } from "./routes/system.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
+import type { WsHub } from "./ws.ts";
 
 export interface AppContext {
   config: ConfigStore;
   db: Database;
   paths: DataPaths;
   workflows: WorkflowStore;
+  comfy: ComfyManager;
+  jobs: JobRunner;
+  hub: WsHub;
 }
 
 export interface RouteMatch {
@@ -43,7 +65,12 @@ interface CompiledRoute extends Route {
 }
 
 export function routeTable(ctx: AppContext): Route[] {
-  return [...configRoutes(ctx), ...workflowRoutes(ctx)];
+  return [
+    ...configRoutes(ctx),
+    ...workflowRoutes(ctx),
+    ...jobRoutes(ctx),
+    ...systemRoutes(ctx),
+  ];
 }
 
 const PLACEHOLDER_PAGE = `<!doctype html>
@@ -55,7 +82,8 @@ const PLACEHOLDER_PAGE = `<!doctype html>
 `;
 
 export function createHandler(
-  routes: Route[],
+  ctx: AppContext,
+  routes: Route[] = routeTable(ctx),
 ): (req: Request) => Promise<Response> {
   const compiled: CompiledRoute[] = routes.map((route) => ({
     ...route,
@@ -64,6 +92,28 @@ export function createHandler(
 
   return async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
+
+    // The app's own event stream, and the ComfyUI proxy (§4.1).
+    if (url.pathname === "/ws") {
+      if (!isWebSocketUpgrade(req)) {
+        return error(400, "bad_request", "/ws expects a websocket upgrade");
+      }
+      return ctx.hub.handle(req);
+    }
+    if (
+      url.pathname === COMFY_PREFIX ||
+      url.pathname.startsWith(`${COMFY_PREFIX}/`)
+    ) {
+      const target = () => ctx.comfy.client.url;
+      try {
+        return isWebSocketUpgrade(req)
+          ? proxyWebSocket(req, url, { target })
+          : await proxyHttp(req, url, { target });
+      } catch (cause) {
+        return handlerError(cause, req);
+      }
+    }
+
     const methodsForPath: string[] = [];
     for (const route of compiled) {
       const result = route.pattern.exec({ pathname: url.pathname });
@@ -94,16 +144,36 @@ export function createHandler(
 }
 
 function handlerError(cause: unknown, req: Request): Response {
-  if (cause instanceof WorkflowNotFoundError) {
+  if (
+    cause instanceof WorkflowNotFoundError || cause instanceof JobNotFoundError
+  ) {
     return error(404, "not_found", cause.message);
   }
-  if (cause instanceof WorkflowConflictError) {
+  if (cause instanceof WorkflowConflictError || cause instanceof LaunchError) {
     return error(409, "conflict", cause.message);
+  }
+  if (cause instanceof ComfyOfflineError) {
+    return error(503, "comfy_offline", cause.message);
+  }
+  if (cause instanceof JobSubmitError) {
+    // ComfyUI refused the graph: the job row records the attempt either way.
+    const response = error(502, "comfy_rejected", cause.message);
+    return new Response(
+      JSON.stringify({
+        error: { code: "comfy_rejected", message: cause.message },
+        node_errors: cause.nodeErrors,
+        job: cause.job,
+      }),
+      { status: response.status, headers: response.headers },
+    );
+  }
+  if (cause instanceof ComfyHttpError) {
+    return error(502, "comfy_error", cause.message);
   }
   if (
     cause instanceof ConfigError || cause instanceof BodyError ||
     cause instanceof ManifestError || cause instanceof ParamError ||
-    cause instanceof RewriteError
+    cause instanceof RewriteError || cause instanceof JobRequestError
   ) {
     return error(400, "bad_request", cause.message);
   }
@@ -123,7 +193,7 @@ export function startHttpServer(
   ctx: AppContext,
   options: { hostname?: string; port?: number; signal?: AbortSignal } = {},
 ): Promise<HttpServer> {
-  const handler = createHandler(routeTable(ctx));
+  const handler = createHandler(ctx);
   const hostname = options.hostname ?? ctx.config.config.server.host;
   const port = options.port ?? ctx.config.config.server.port;
 

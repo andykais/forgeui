@@ -60,5 +60,5 @@ saving replaces it with the editor's own.
   encoding, so `size` means the same thing as it does everywhere else.
 - Only core ComfyUI nodes are used, so nothing here depends on custom nodes.
 - Two of these cannot be generated from yet: `krea2-img2img` needs the
-  content-addressed input store behind `image` params, and `ltx` writes a
-  video. Both are later phases; the workflows load, list and rewrite today.
+  content-addressed input store behind `image` params, and `ltx` writes a video.
+  Both are later phases; the workflows load, list and rewrite today.

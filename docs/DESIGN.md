@@ -246,12 +246,21 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
    `filename_prefix` to `<jobid>/out` so all files land in `staging/<jobid>/`.
 4. **Persist job** (status `queued`) *before* submitting, so a crash or refresh
    never loses it.
-5. `POST /prompt` with the app's `client_id`; store `prompt_id`.
+5. `POST /prompt` with the app's `client_id` and a `prompt_id` the app chose
+   itself, recorded on the job row before the request goes out so the first
+   events cannot arrive before the app knows whose they are. A ComfyUI that
+   ignores the supplied id and answers with its own is accommodated.
 6. **Progress** via WebSocket: `execution_start`, `executing` (node), `progress`
    (step/max within node), `executed`, `execution_error`. Progress is stored on
    the job row so any client, after any refresh, sees the same state.
    ComfyUI's binary preview frames are relayed to clients as binary `/ws`
-   messages prefixed with the job id (push; never polled).
+   messages prefixed with the job id (push; never polled): `uint32` event (1 =
+   preview), `uint32` format (1 = JPEG, 2 = PNG, as ComfyUI tags it), `uint32`
+   job id length, the job id in UTF-8, then the image bytes.
+   Every (re)connection to ComfyUI is followed by a reconcile pass over the
+   jobs the app still thinks are in flight, resolving them from `/queue` and
+   `/history`; that is how a dropped socket or a ComfyUI that died before
+   `executed` ends up settled.
 7. On completion: `rename()` `staging/<jobid>/*` → `outputs/YYYY/MM/DD/`, write
    the sidecar, embed a copy of the sidecar in PNG `tEXt` as a convenience
    (videos are not embedded — the sidecar is canonical and MP4 metadata is
@@ -793,6 +802,7 @@ POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
+GET  /api/jobs/:id                      one job row with the ids of its outputs
 GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2; sort newest|oldest
 GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven)
 GET  /api/outputs/count?filters         total under the active filters (lazy)

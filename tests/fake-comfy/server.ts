@@ -31,6 +31,8 @@ export interface FakeComfyOptions {
   /** ComfyUI's `--input-directory`; the app's `<appdata>/comfy-input`. */
   inputDir?: string;
   hostname?: string;
+  /** Fixed port; 0 (the default) lets the OS choose. */
+  port?: number;
   /** Scenario used for prompts with no queued scenario. */
   scenario?: ScenarioName | Scenario;
   /** Overrides the size taken from the graph's latent node. */
@@ -179,7 +181,7 @@ export class FakeComfy {
     const fake = new FakeComfy(options);
     fake.#server = Deno.serve({
       hostname: options.hostname ?? "127.0.0.1",
-      port: 0,
+      port: options.port ?? 0,
       onListen: () => {},
     }, (req) => fake.#handle(req));
     return fake;

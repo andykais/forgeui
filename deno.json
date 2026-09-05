@@ -3,7 +3,7 @@
   "tasks": {
     "start": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-run --allow-write src/main.ts",
     "reindex": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-write src/main.ts reindex",
-    "test": "deno test --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
+    "test": "deno test --allow-run --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
     "check": "deno check src tests",
     "fmt": "deno fmt",
     "lint": "deno lint"
@@ -18,7 +18,8 @@
     "@std/media-types": "jsr:@std/media-types@^1.1.0",
     "@std/path": "jsr:@std/path@^1.1.2",
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
-    "@std/yaml": "jsr:@std/yaml@^1.2.0"
+    "@std/yaml": "jsr:@std/yaml@^1.2.0",
+    "@std/streams": "jsr:@std/streams@^1.0.12"
   },
   "compilerOptions": {
     "strict": true,
@@ -26,5 +27,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "exclude": ["docs/", "dist/", "data/"]
+  "exclude": [
+    "docs/",
+    "dist/",
+    "data/"
+  ]
 }
