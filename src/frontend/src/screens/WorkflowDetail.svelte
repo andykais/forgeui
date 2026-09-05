@@ -13,6 +13,7 @@
   } from "../types.ts";
   import ParamPanel from "../components/params/ParamPanel.svelte";
   import { defaultFor } from "../stores/panel.svelte.ts";
+  import { plain } from "../lib/state.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
 
   /**
@@ -59,7 +60,7 @@
           ]);
           detail = loaded;
           inputs = literals;
-          draft = loaded.manifest ? structuredClone(loaded.manifest) : null;
+          draft = loaded.manifest ? plain(loaded.manifest) : null;
           resetPreview();
         })(),
     );
@@ -222,7 +223,7 @@
     try {
       const saved = await api.saveWorkflow(id, { manifest: draft });
       detail = saved;
-      draft = saved.manifest ? structuredClone(saved.manifest) : null;
+      draft = saved.manifest ? plain(saved.manifest) : null;
       await app.refreshWorkflows();
       toasts.message(
         saved.has_bundled

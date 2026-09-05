@@ -17,6 +17,7 @@ test("a generation, watched from the browser", async ({ page }) => {
   await page.locator(".workflow-card").click();
   await page.waitForTimeout(900);
   await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
   await page.waitForTimeout(500);
 
   // The panel is rendered from this workflow's manifest alone.

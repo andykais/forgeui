@@ -117,7 +117,7 @@
 
       {#if linked}
         <div class="row strength">
-          <span class="label">strength</span>
+          <span class="strength-label">strength</span>
           <input
             type="range"
             min="-1"
@@ -144,7 +144,7 @@
         </div>
       {:else}
         <div class="row strength">
-          <span class="label">model</span>
+          <span class="strength-label">model</span>
           <input
             type="range"
             min="-1"
@@ -174,7 +174,7 @@
           </button>
         </div>
         <div class="row strength">
-          <span class="label">clip</span>
+          <span class="strength-label">clip</span>
           <input
             type="range"
             min="-1"
@@ -272,9 +272,12 @@
     gap: 6px;
   }
 
-  .strength .label {
-    width: 48px;
+  /* Lower case and wide enough not to clip, as frame 01 draws it. */
+  .strength-label {
+    width: 54px;
     flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--text-4);
   }
 
   .strength input[type="range"] {

@@ -199,7 +199,12 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="generate">
-  <section class="panel scroll">
+  <!--
+    `data-panel-loading` is how anything outside can tell that the panel is
+    still being filled from the last job for this workflow: values applied
+    while a field is being edited would fight the edit.
+  -->
+  <section class="panel scroll" data-panel-loading={panel.loading}>
     <div class="card-wrap">
       <button class="workflow-card" onclick={() => (pickerOpen = !pickerOpen)}>
         <span class="thumb">

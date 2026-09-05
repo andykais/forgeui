@@ -1,6 +1,7 @@
 import { api } from "../api.ts";
 import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
 import { app } from "./app.svelte.ts";
+import { plain } from "../lib/state.svelte.ts";
 
 /**
  * The Generate param panel (§11.2, §11.3). Selecting a workflow fills the
@@ -27,7 +28,7 @@ export function defaultFor(param: Param): unknown {
     case "checkpoint":
       return (param.default as string) ?? "";
     case "lora_list":
-      return structuredClone((param.default as LoraRow[]) ?? []);
+      return ((param.default as LoraRow[]) ?? []).map((row) => ({ ...row }));
     default:
       return null;
   }
@@ -53,7 +54,7 @@ export function fillValues(
   for (const param of manifest.params) {
     const provided = params[param.key];
     values[param.key] =
-      provided === undefined ? defaultFor(param) : structuredClone(provided);
+      provided === undefined ? defaultFor(param) : plain(provided);
   }
   const known = new Set(manifest.params.map((param) => param.key));
   return {

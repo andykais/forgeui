@@ -64,7 +64,9 @@ the generated launch flags and the managed child's captured log.
 ![Settings](screenshots/phase-1/settings.png)
 
 Also in that directory: `generate-workflow-picker.png` (grouped by family and
-kind) and `gallery-table.png` (MODELS chips, SIZE, seed, DURATION).
+kind), `generate-lora-picker.png` (the read-only model scan feeding the
+picker), and `gallery-table.png` (the table half of the toggle — MODELS chips,
+SIZE, seed, DURATION).
 
 ## State
 

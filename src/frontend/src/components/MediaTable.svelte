@@ -81,12 +81,16 @@
         <td class="prompt">{output.prompt ?? output.id}</td>
         <td><span class="badge">{output.workflow_id ?? "—"}</span></td>
         <td class="models">
-          {#each chips.slice(0, 2) as chip (chip)}
-            <span class="badge">{chip}</span>
-          {/each}
-          {#if chips.length > 2}
-            <span class="badge">+{chips.length - 2}</span>
-          {/if}
+          <span class="chips">
+            {#each chips.slice(0, 2) as chip (chip)}
+              <span class="badge" title={chip}>{chip}</span>
+            {/each}
+            {#if chips.length > 2}
+              <span class="badge" title={chips.slice(2).join(", ")}>
+                +{chips.length - 2}
+              </span>
+            {/if}
+          </span>
         </td>
         <td class="mono">{dimensions(output.width, output.height, output.duration_ms)}</td
         >
@@ -167,10 +171,22 @@
     white-space: nowrap;
   }
 
+  /* Checkpoint first, then LoRAs, with `+n` overflow — on one line (§11.2). */
   .models {
+    max-width: 190px;
+  }
+
+  .chips {
     display: flex;
     gap: 4px;
-    flex-wrap: wrap;
-    border-top: 0;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .chips .badge {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 88px;
   }
 </style>

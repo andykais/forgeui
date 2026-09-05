@@ -50,6 +50,7 @@ async function pickWorkflow(
     })
     .first()
     .click();
+  await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
 }
 
 test("photograph every screen", async ({ page }) => {
@@ -68,6 +69,18 @@ test("photograph every screen", async ({ page }) => {
     const field = page.locator('[data-param="prompt"] textarea');
     await expect(field).toBeVisible();
     await field.fill(prompt);
+
+    // Two LoRAs on the last run, so the chain splice, the picker and the
+    // MODELS chips all have something real behind them.
+    if (index === RUNS.length - 1) {
+      await page.getByRole("button", { name: /Add/ }).click();
+      await page.waitForTimeout(200);
+      await page.screenshot({ path: `${shots}/generate-lora-picker.png` });
+      await page.getByRole("button", { name: /film-grain-35mm/ }).click();
+      await page.getByRole("button", { name: /Add/ }).click();
+      await page.getByRole("button", { name: /soft-studio-light/ }).click();
+      await page.waitForTimeout(200);
+    }
     const generate = page.getByRole("button", { name: "Generate", exact: true });
     await expect(generate).toBeEnabled();
     await generate.click();

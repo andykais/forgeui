@@ -10,6 +10,7 @@ import type {
   WorkflowSummary,
 } from "../types.ts";
 import { decodePreviewFrame } from "../lib/preview.ts";
+import { plain } from "../lib/state.svelte.ts";
 
 /**
  * Everything the screens share, in one place: the config (including the UI
@@ -225,7 +226,7 @@ class AppState {
   /** Optimistic locally, then persisted: Settings has no save button (§11.2). */
   #patchUi(patch: unknown, apply: (ui: Config["ui"]) => void): void {
     if (!this.config) return;
-    const next = structuredClone(this.config);
+    const next = plain(this.config);
     apply(next.ui);
     this.config = next;
     api.patchConfig({ ui: patch }).catch((cause) => {

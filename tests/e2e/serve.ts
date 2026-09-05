@@ -26,6 +26,25 @@ await Deno.writeTextFile(
 );
 await Deno.chmod(stub, 0o755);
 
+/**
+ * A couple of fixture LoRAs, so the pickers and the MODELS chips have
+ * something real to show and the read-only model scan is exercised end to
+ * end. A safetensors file is an 8-byte little-endian header length, a JSON
+ * header, then tensor bytes; the Phase 1 scan only stats them, but a
+ * plausible file costs nothing.
+ */
+const loraDir = join(dataDir, "models", "loras");
+await Deno.mkdir(loraDir, { recursive: true });
+for (const name of ["film-grain-35mm", "soft-studio-light"]) {
+  const header = new TextEncoder().encode(
+    JSON.stringify({ __metadata__: { name } }),
+  );
+  const file = new Uint8Array(8 + header.length + 16);
+  new DataView(file.buffer).setBigUint64(0, BigInt(header.length), true);
+  file.set(header, 8);
+  await Deno.writeFile(join(loraDir, `${name}.safetensors`), file);
+}
+
 // Extra args reach the child verbatim (§3.1), which is how the demo slows
 // the fake down enough to watch progress arrive.
 const stepDelay = Deno.env.get("FORGEUI_E2E_STEP_DELAY");
@@ -38,6 +57,8 @@ await Deno.writeTextFile(
     `  url: http://127.0.0.1:${comfyPort}`,
     `  python: ${stub}`,
     ...(stepDelay ? [`  extra_args: ["--step-delay", "${stepDelay}"]`] : []),
+    "model_folders:",
+    `  loras: ["${loraDir}"]`,
     "",
   ].join("\n"),
 );
