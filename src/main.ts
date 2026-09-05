@@ -18,6 +18,7 @@ import { JobRunner } from "./jobs/pipeline.ts";
 import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
 import { ModelLibrary } from "./models/library.ts";
+import { SampleStore } from "./samples/store.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -44,6 +45,7 @@ export interface App {
   jobs: JobRunner;
   outputs: OutputStore;
   models: ModelLibrary;
+  samples: SampleStore;
   hub: WsHub;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
@@ -84,7 +86,8 @@ async function startAppWith(
       hub.broadcast({ type: "system_status", data: status }),
   });
   const outputs = new OutputStore({ db, paths, hub });
-  const models = new ModelLibrary({ db, paths, config: store, hub });
+  const samples = new SampleStore({ db, paths });
+  const models = new ModelLibrary({ db, paths, config: store, hub, samples });
   const jobs = new JobRunner({
     db,
     paths,
@@ -109,6 +112,7 @@ async function startAppWith(
     jobs,
     outputs,
     models,
+    samples,
     hub,
   };
   let server: HttpServer;
@@ -152,6 +156,7 @@ async function startAppWith(
     jobs,
     outputs,
     models,
+    samples,
     hub,
     createdConfig: created,
     async shutdown() {

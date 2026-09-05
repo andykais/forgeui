@@ -1,5 +1,5 @@
 import { FAMILIES } from "../../workflows/types.ts";
-import type { ModelMetaPatch } from "../../db/queries.ts";
+import type { ModelPatch } from "../../models/library.ts";
 import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 
@@ -22,8 +22,8 @@ function optionalString(
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function readMetaPatch(body: Record<string, unknown>): ModelMetaPatch {
-  const patch: ModelMetaPatch = {};
+function readMetaPatch(body: Record<string, unknown>): ModelPatch {
+  const patch: ModelPatch = {};
   const displayName = optionalString(body.display_name, "display_name");
   if (displayName !== undefined) patch.display_name = displayName;
   const notes = optionalString(body.notes, "notes");
@@ -55,9 +55,19 @@ function readMetaPatch(body: Record<string, unknown>): ModelMetaPatch {
     patch.tags = tags;
   }
 
+  // "Set as thumbnail" (§8.3); null goes back to the newest output.
+  if (body.thumb_sample_id !== undefined) {
+    if (
+      body.thumb_sample_id !== null && typeof body.thumb_sample_id !== "string"
+    ) {
+      throw new BodyError("thumb_sample_id: expected a sample id or null");
+    }
+    patch.thumb_sample_id = body.thumb_sample_id;
+  }
+
   if (Object.keys(patch).length === 0) {
     throw new BodyError(
-      "nothing to change: expected display_name, family, notes or tags",
+      "nothing to change: expected display_name, family, notes, tags or thumb_sample_id",
     );
   }
   return patch;

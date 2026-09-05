@@ -30,6 +30,12 @@ import {
   ModelNotFoundError,
   ModelUnhashedError,
 } from "../models/library.ts";
+import {
+  NotImplementedError,
+  SampleError,
+  SampleNotFoundError,
+  type SampleStore,
+} from "../samples/store.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -44,6 +50,7 @@ import { jobRoutes } from "./routes/jobs.ts";
 import { maintenanceRoutes } from "./routes/maintenance.ts";
 import { modelRoutes } from "./routes/models.ts";
 import { outputRoutes } from "./routes/outputs.ts";
+import { sampleRoutes } from "./routes/samples.ts";
 import { serveFrontend } from "./static.ts";
 import { systemRoutes } from "./routes/system.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
@@ -58,6 +65,7 @@ export interface AppContext {
   jobs: JobRunner;
   outputs: OutputStore;
   models: ModelLibrary;
+  samples: SampleStore;
   hub: WsHub;
 }
 
@@ -89,6 +97,7 @@ export function routeTable(ctx: AppContext): Route[] {
     ...jobRoutes(ctx),
     ...outputRoutes(ctx),
     ...modelRoutes(ctx),
+    ...sampleRoutes(ctx),
     ...systemRoutes(ctx),
     ...maintenanceRoutes(ctx),
   ];
@@ -164,9 +173,13 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof WorkflowNotFoundError ||
     cause instanceof JobNotFoundError ||
     cause instanceof OutputNotFoundError ||
-    cause instanceof ModelNotFoundError
+    cause instanceof ModelNotFoundError ||
+    cause instanceof SampleNotFoundError
   ) {
     return error(404, "not_found", cause.message);
+  }
+  if (cause instanceof NotImplementedError) {
+    return error(501, "not_implemented", cause.message);
   }
   if (cause instanceof ModelUnhashedError) {
     // Not an error the user can act on: the hasher is simply not there yet.
@@ -201,7 +214,8 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof ConfigError || cause instanceof BodyError ||
     cause instanceof ManifestError || cause instanceof ParamError ||
     cause instanceof RewriteError || cause instanceof JobRequestError ||
-    cause instanceof CursorError || cause instanceof MediaPathError
+    cause instanceof CursorError || cause instanceof MediaPathError ||
+    cause instanceof SampleError
   ) {
     return error(400, "bad_request", cause.message);
   }

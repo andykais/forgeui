@@ -313,10 +313,20 @@ export function insertOutputModels(
   let inserted = 0;
   for (const model of models) {
     if (!model.hash) continue;
-    statement.run(outputId, model.hash, model.role);
+    statement.run(outputId, normalizeModelHash(model.hash), model.role);
     inserted++;
   }
   return inserted;
+}
+
+/**
+ * A model hash is the bare lowercase hex sha256 of the file, which is what
+ * `models.hash` and every URL use. A sidecar written by hand (or by a future
+ * version) may spell it `sha256:…`, so it is stripped on the way in (§8.1).
+ */
+export function normalizeModelHash(hash: string): string {
+  const bare = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
+  return bare.toLowerCase();
 }
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
@@ -881,6 +891,108 @@ export function modelCountsByFamily(db: Database): Map<string, number> {
     counts.set(family ?? "unset", count);
   }
   return counts;
+}
+
+/**
+ * Sample media for a model (§8.3): dropped on the model page, or promoted
+ * from an output. Stored in `samples/<model_hash>/` with a sidecar in the
+ * same schema as an output's, so Reuse Parameters works on both.
+ */
+export interface SampleRow {
+  id: string;
+  model_hash: string;
+  /** Relative to `<appdata>`, like every other path in the index. */
+  path: string;
+  sidecar_path: string;
+  kind: string;
+  source_url: string | null;
+  params: Record<string, unknown> | null;
+  created_at: number;
+}
+
+const SAMPLE_COLUMNS =
+  `id, model_hash, path, sidecar_path, kind, source_url, params_json,
+  created_at`;
+
+type SampleRecord = [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string | null,
+  string | null,
+  number,
+];
+
+function toSample(record: SampleRecord): SampleRow {
+  return {
+    id: record[0],
+    model_hash: record[1],
+    path: record[2],
+    sidecar_path: record[3],
+    kind: record[4],
+    source_url: record[5],
+    params: record[6] === null
+      ? null
+      : parse<Record<string, unknown>>(record[6], {}),
+    created_at: record[7],
+  };
+}
+
+export function insertSample(db: Database, sample: SampleRow): void {
+  db.prepare(
+    `INSERT INTO samples (id, model_hash, path, sidecar_path, kind,
+                          source_url, params_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sample.id,
+    sample.model_hash,
+    sample.path,
+    sample.sidecar_path,
+    sample.kind,
+    sample.source_url,
+    sample.params === null ? null : JSON.stringify(sample.params),
+    sample.created_at,
+  );
+}
+
+export function getSample(db: Database, id: string): SampleRow | null {
+  const record = db.prepare(
+    `SELECT ${SAMPLE_COLUMNS} FROM samples WHERE id = ?`,
+  )
+    .value<SampleRecord>(id);
+  return record ? toSample(record) : null;
+}
+
+/** The Samples strip of the model page, newest first. */
+export function listSamples(db: Database, modelHash: string): SampleRow[] {
+  return db.prepare(
+    `SELECT ${SAMPLE_COLUMNS} FROM samples WHERE model_hash = ?
+      ORDER BY created_at DESC, id DESC`,
+  ).values<SampleRecord>(modelHash).map(toSample);
+}
+
+export function deleteSampleRow(db: Database, id: string): boolean {
+  return db.prepare(`DELETE FROM samples WHERE id = ?`).run(id) > 0;
+}
+
+/** A thumbnail that pointed at a sample cannot outlive it. */
+export function clearThumbPath(db: Database, path: string): void {
+  db.prepare(`UPDATE models SET thumb_path = NULL WHERE thumb_path = ?`)
+    .run(path);
+}
+
+/** Most recent surviving output per model, for the thumbnail fallback (§8.1). */
+export function latestOutputPathByModel(db: Database): Map<string, string> {
+  const rows = db.prepare(
+    `SELECT om.model_hash, o.path, max(o.created_at)
+       FROM output_models om
+       JOIN outputs o ON o.id = om.output_id
+      WHERE o.deleted_at IS NULL AND o.kind = 'image'
+      GROUP BY om.model_hash`,
+  ).values<[string, string, number]>();
+  return new Map(rows.map(([hash, path]) => [hash, path]));
 }
 
 export interface WorkflowUsage {

@@ -6,13 +6,17 @@ import type { ConfigStore } from "../config/config.ts";
 import {
   getModel,
   getModelByPath,
+  latestOutputPathByModel,
   listModels,
   type ModelMetaPatch,
   type ModelRow,
+  normalizeModelHash,
   refreshModelUsage,
   type SidecarModelRef,
   updateModelMeta,
 } from "../db/queries.ts";
+import { mediaUrl } from "../outputs/store.ts";
+import type { SampleStore, SampleView } from "../samples/store.ts";
 import type { WsHub } from "../http/ws.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
@@ -61,12 +65,19 @@ export interface ModelView {
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
+  /** The chosen sample, else the most recent output, else nothing (§8.1). */
+  thumb_url: string | null;
   output_count: number;
   last_used_at: number | null;
   /** True until the hash lands; the UI shows the `hashing` badge (§8.1). */
   hashing: boolean;
   /** False when the row survives but the file is no longer on disk. */
   present: boolean;
+}
+
+/** The model page: the header, plus its Samples strip (§8.1, §8.3). */
+export interface ModelDetail extends ModelView {
+  samples: SampleView[];
 }
 
 export interface ModelListFilters {
@@ -102,11 +113,18 @@ export function decodePathId(id: string): string | null {
   }
 }
 
+/** `thumb_sample_id` is resolved to a path here rather than by the caller. */
+export interface ModelPatch extends ModelMetaPatch {
+  thumb_sample_id?: string | null;
+}
+
 export interface ModelLibraryOptions {
   db: Database;
   paths: DataPaths;
   config: ConfigStore;
   hub: WsHub;
+  /** The Samples strip and "Set as thumbnail" (§8.3). */
+  samples?: SampleStore;
   scanner?: ModelScanner;
   now?: () => number;
 }
@@ -118,6 +136,7 @@ export class ModelLibrary {
   #paths: DataPaths;
   #config: ConfigStore;
   #hub: WsHub;
+  #samples?: SampleStore;
   #index: SidecarModelIndex | null = null;
   #scanning: Promise<void> | null = null;
 
@@ -126,6 +145,7 @@ export class ModelLibrary {
     this.#paths = options.paths;
     this.#config = options.config;
     this.#hub = options.hub;
+    this.#samples = options.samples;
     this.scanner = options.scanner ??
       new ModelScanner(() => options.config.config);
     this.hasher = new ModelHasher({
@@ -187,15 +207,18 @@ export class ModelLibrary {
 
   list(filters: ModelListFilters = {}): ModelView[] {
     const views: ModelView[] = [];
+    const thumbs = latestOutputPathByModel(this.#db);
     for (const model of this.scanner.registry.values()) {
       if (filters.kind && model.kind !== filters.kind) continue;
-      views.push(this.#view(model, getModelByPath(this.#db, model.path)));
+      views.push(
+        this.#view(model, getModelByPath(this.#db, model.path), thumbs),
+      );
     }
     // A hashed model whose file has gone still has a page and a history, so
     // it stays listed rather than disappearing from under its outputs.
     for (const row of listModels(this.#db, filters.kind)) {
       if (this.scanner.registry.has(row.path)) continue;
-      views.push(this.#view(null, row));
+      views.push(this.#view(null, row, thumbs));
     }
     const filtered = views.filter((view) =>
       matchesFamily(view, filters.family) && matchesQuery(view, filters.q)
@@ -207,31 +230,51 @@ export class ModelLibrary {
     return filtered;
   }
 
-  get(id: string): ModelView | null {
+  get(id: string): ModelDetail | null {
     const path = decodePathId(id);
-    if (path !== null) {
-      const scanned = this.scanner.registry.get(path) ?? null;
-      const row = getModelByPath(this.#db, path);
-      if (!scanned && !row) return null;
-      return this.#view(scanned, row);
-    }
-    const row = getModel(this.#db, id);
-    if (!row) return null;
-    return this.#view(this.scanner.registry.get(row.path) ?? null, row);
+    const row = path !== null
+      ? getModelByPath(this.#db, path)
+      : getModel(this.#db, normalizeModelHash(id));
+    const scanned = path !== null
+      ? this.scanner.registry.get(path) ?? null
+      : row
+      ? this.scanner.registry.get(row.path) ?? null
+      : null;
+    if (!scanned && !row) return null;
+    const view = this.#view(scanned, row, latestOutputPathByModel(this.#db));
+    return {
+      ...view,
+      samples: view.hash ? this.#samples?.list(view.hash) ?? [] : [],
+    };
   }
 
-  require(id: string): ModelView {
+  require(id: string): ModelDetail {
     const view = this.get(id);
     if (!view) throw new ModelNotFoundError(id);
     return view;
   }
 
   /** The edit-in-place header (§8.1); 409 until the file has been hashed. */
-  patch(id: string, patch: ModelMetaPatch): ModelView {
+  patch(id: string, patch: ModelPatch): ModelDetail {
     const view = this.require(id);
     if (view.hash === null) throw new ModelUnhashedError(view.name);
-    updateModelMeta(this.#db, view.hash, patch);
+    const { thumb_sample_id, ...meta } = patch;
+    if (thumb_sample_id !== undefined) {
+      meta.thumb_path = thumb_sample_id === null
+        ? null
+        : this.#thumbPathOf(view.hash, thumb_sample_id);
+    }
+    updateModelMeta(this.#db, view.hash, meta);
     return this.require(view.hash);
+  }
+
+  /** "Set as thumbnail" (§8.3): the sample has to be one of this model's. */
+  #thumbPathOf(hash: string, sampleId: string): string {
+    const sample = this.#samples?.get(sampleId);
+    if (!sample || sample.model_hash !== hash) {
+      throw new ModelNotFoundError(sampleId);
+    }
+    return sample.path;
   }
 
   familyCounts(): FamilyCount[] {
@@ -286,7 +329,11 @@ export class ModelLibrary {
     }
   }
 
-  #view(scanned: ScannedModel | null, row: ModelRow | null): ModelView {
+  #view(
+    scanned: ScannedModel | null,
+    row: ModelRow | null,
+    thumbs: Map<string, string>,
+  ): ModelView {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
     const name = scanned?.name ?? filename;
@@ -305,6 +352,7 @@ export class ModelLibrary {
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
       thumb_path: row?.thumb_path ?? null,
+      thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
       last_used_at: row?.last_used_at ?? null,
       hashing: row === null,
@@ -331,6 +379,15 @@ export class ModelLibrary {
 /** Usage figures after outputs changed under a set of models. */
 export function refreshUsageFor(db: Database, hashes: string[]): void {
   if (hashes.length > 0) refreshModelUsage(db, hashes);
+}
+
+/** The chosen sample, else the most recent output, else an empty plate. */
+function thumbUrl(row: ModelRow | null, thumbs: Map<string, string>):
+  | string
+  | null {
+  if (!row) return null;
+  const path = row.thumb_path ?? thumbs.get(row.hash) ?? null;
+  return path === null ? null : mediaUrl(path);
 }
 
 function matchesFamily(view: ModelView, family?: string): boolean {
