@@ -15,11 +15,16 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 | `docs/MOCK-REVISIONS.md`    | Changes to the UI mocks that have been decided but may not yet be drawn.                   |
 | `docs/MOCK-REVIEW.md`       | Review log of the mocks against the spec; every item carries its decision. Reference only. |
 | `docs/mocks/`               | Frame PNGs (numbered) and the source `.dc.html` of the mocks.                              |
-| `.cursor/rules/project.mdc` | Rules the coding agent reads on every request.                                             |
+| `docs/PHASE-1-HANDOFF.md`   | What Phase 1 delivered, the decisions worth knowing, and where Phase 2 picks up.           |
+| `AGENTS.md`                 | How to navigate and build the repo, and the conventions a coding agent must follow.        |
+
+Phase 1 is complete; see the handoff document. Phases 2–5 of DESIGN.md §13 are
+not started.
 
 ## Running it
 
-Requires [Deno](https://deno.com) 2.x; there is nothing else to install.
+Requires [Deno](https://deno.com) 2.x to run. Node is needed only to build the
+interface, which ships pre-built in a release.
 
 ```sh
 deno task start --data-dir ./data   # serve the UI and the API
