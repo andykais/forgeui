@@ -677,6 +677,212 @@ export function listOutputsForJob(db: Database, jobId: string): OutputRow[] {
   ).values<OutputRecord>(jobId).map(toOutput);
 }
 
+/**
+ * A hashed model (§7). The row exists only once the background hasher has
+ * finished the file; until then a model is known by its path alone (§8.1).
+ */
+export interface ModelRow {
+  hash: string;
+  path: string;
+  kind: string;
+  size: number;
+  mtime: number;
+  display_name: string | null;
+  family: string | null;
+  notes: string | null;
+  tags: string[];
+  thumb_path: string | null;
+  output_count: number;
+  last_used_at: number | null;
+  last_seen_at: number;
+}
+
+const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
+  notes, tags_json, thumb_path, output_count, last_used_at, last_seen_at`;
+
+type ModelRecord = [
+  string,
+  string,
+  string,
+  number,
+  number,
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+  number,
+  number | null,
+  number,
+];
+
+function toModel(record: ModelRecord): ModelRow {
+  return {
+    hash: record[0],
+    path: record[1],
+    kind: record[2],
+    size: record[3],
+    mtime: record[4],
+    display_name: record[5],
+    family: record[6],
+    notes: record[7],
+    tags: parse<string[]>(record[8], []),
+    thumb_path: record[9],
+    output_count: record[10],
+    last_used_at: record[11],
+    last_seen_at: record[12],
+  };
+}
+
+export interface NewModel {
+  hash: string;
+  path: string;
+  kind: string;
+  size: number;
+  mtime: number;
+  last_seen_at: number;
+}
+
+/**
+ * Record a file the hasher finished. Editable metadata is left alone, so a
+ * re-hash of the same file never loses a display name. `path` is unique: a
+ * file whose bytes changed gets a new hash, and the row that used to hold
+ * that path goes.
+ */
+export function upsertModel(db: Database, model: NewModel): void {
+  db.prepare(`DELETE FROM models WHERE path = ? AND hash != ?`).run(
+    model.path,
+    model.hash,
+  );
+  db.prepare(
+    `INSERT INTO models (hash, path, kind, size, mtime, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(hash) DO UPDATE SET
+       path = excluded.path, kind = excluded.kind, size = excluded.size,
+       mtime = excluded.mtime, last_seen_at = excluded.last_seen_at`,
+  ).run(
+    model.hash,
+    model.path,
+    model.kind,
+    model.size,
+    model.mtime,
+    model.last_seen_at,
+  );
+}
+
+export function getModel(db: Database, hash: string): ModelRow | null {
+  const record = db.prepare(
+    `SELECT ${MODEL_COLUMNS} FROM models WHERE hash = ?`,
+  ).value<ModelRecord>(hash);
+  return record ? toModel(record) : null;
+}
+
+export function getModelByPath(db: Database, path: string): ModelRow | null {
+  const record = db.prepare(
+    `SELECT ${MODEL_COLUMNS} FROM models WHERE path = ?`,
+  ).value<ModelRecord>(path);
+  return record ? toModel(record) : null;
+}
+
+export function listModels(db: Database, kind?: string): ModelRow[] {
+  return kind === undefined
+    ? db.prepare(`SELECT ${MODEL_COLUMNS} FROM models ORDER BY path`)
+      .values<ModelRecord>().map(toModel)
+    : db.prepare(
+      `SELECT ${MODEL_COLUMNS} FROM models WHERE kind = ? ORDER BY path`,
+    ).values<ModelRecord>(kind).map(toModel);
+}
+
+/** The file is still where it was; only the sighting is news. */
+export function markModelSeen(db: Database, hash: string, at: number): void {
+  db.prepare(`UPDATE models SET last_seen_at = ? WHERE hash = ?`).run(at, hash);
+}
+
+export interface ModelMetaPatch {
+  display_name?: string | null;
+  family?: string | null;
+  notes?: string | null;
+  tags?: string[];
+  thumb_path?: string | null;
+}
+
+/** The edit-in-place header of §8.1. Nothing here touches the file. */
+export function updateModelMeta(
+  db: Database,
+  hash: string,
+  patch: ModelMetaPatch,
+): boolean {
+  const sets: string[] = [];
+  const values: (string | null)[] = [];
+  if (patch.display_name !== undefined) {
+    sets.push("display_name = ?");
+    values.push(patch.display_name);
+  }
+  if (patch.family !== undefined) {
+    sets.push("family = ?");
+    values.push(patch.family);
+  }
+  if (patch.notes !== undefined) {
+    sets.push("notes = ?");
+    values.push(patch.notes);
+  }
+  if (patch.tags !== undefined) {
+    sets.push("tags_json = ?");
+    values.push(JSON.stringify(patch.tags));
+  }
+  if (patch.thumb_path !== undefined) {
+    sets.push("thumb_path = ?");
+    values.push(patch.thumb_path);
+  }
+  if (sets.length === 0) return false;
+  return db.prepare(`UPDATE models SET ${sets.join(", ")} WHERE hash = ?`)
+    .run(...values, hash) > 0;
+}
+
+/**
+ * `output_count` and `last_used_at` are derived from `output_models` (§7).
+ * Recomputing them is cheaper to keep right than incrementing them, and it is
+ * what makes soft delete, restore and reindex agree without extra bookkeeping.
+ */
+export function refreshModelUsage(db: Database, hashes?: string[]): void {
+  const where = hashes === undefined
+    ? ""
+    : `WHERE hash IN (${hashes.map(() => "?").join(", ")})`;
+  if (hashes !== undefined && hashes.length === 0) return;
+  db.prepare(
+    `UPDATE models SET
+       output_count = (
+         SELECT count(*) FROM output_models om
+           JOIN outputs o ON o.id = om.output_id
+          WHERE om.model_hash = models.hash AND o.deleted_at IS NULL),
+       last_used_at = (
+         SELECT max(o.created_at) FROM output_models om
+           JOIN outputs o ON o.id = om.output_id
+          WHERE om.model_hash = models.hash AND o.deleted_at IS NULL)
+     ${where}`,
+  ).run(...(hashes ?? []));
+}
+
+/** Which models an output used, for the usage figures it affects. */
+export function modelHashesForOutput(db: Database, outputId: string): string[] {
+  return db.prepare(
+    `SELECT model_hash FROM output_models WHERE output_id = ?`,
+  ).values<[string]>(outputId).map(([hash]) => hash);
+}
+
+/** Model counts per family, for `GET /api/families`; null → `unset`. */
+export function modelCountsByFamily(db: Database): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (
+    const [family, count] of db.prepare(
+      `SELECT family, count(*) FROM models GROUP BY family`,
+    ).values<[string | null, number]>()
+  ) {
+    counts.set(family ?? "unset", count);
+  }
+  return counts;
+}
+
 export interface WorkflowUsage {
   /** When the workflow was last submitted, ms since epoch. */
   last_job_at: number | null;

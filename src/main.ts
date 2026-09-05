@@ -17,7 +17,7 @@ import { WsHub } from "./http/ws.ts";
 import { JobRunner } from "./jobs/pipeline.ts";
 import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
-import { ModelScanner } from "./models/scan.ts";
+import { ModelLibrary } from "./models/library.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -28,6 +28,8 @@ export interface StartAppOptions {
   quiet?: boolean;
   /** Do not connect to (or spawn) ComfyUI; used by tests that do not need it. */
   skipComfy?: boolean;
+  /** Do not scan or hash the model folders on boot; tests drive it by hand. */
+  skipModels?: boolean;
 }
 
 export interface App {
@@ -41,7 +43,7 @@ export interface App {
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
-  models: ModelScanner;
+  models: ModelLibrary;
   hub: WsHub;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
@@ -82,9 +84,21 @@ async function startAppWith(
       hub.broadcast({ type: "system_status", data: status }),
   });
   const outputs = new OutputStore({ db, paths, hub });
-  const jobs = new JobRunner({ db, paths, workflows, comfy, hub, outputs });
-  const models = new ModelScanner(() => store.config);
-  hub.onHello(() => [{ type: "system_status", data: comfy.status() }]);
+  const models = new ModelLibrary({ db, paths, config: store, hub });
+  const jobs = new JobRunner({
+    db,
+    paths,
+    workflows,
+    comfy,
+    hub,
+    outputs,
+    resolveModels: (refs) => models.resolveModels(refs),
+  });
+  hub.onHello(() => [
+    { type: "system_status", data: comfy.status() },
+    { type: "rescan_progress", data: models.progress.rescan },
+    { type: "hashing_progress", data: models.progress.hashing },
+  ]);
 
   const ctx = {
     config: store,
@@ -109,6 +123,9 @@ async function startAppWith(
     throw cause;
   }
   if (!options.skipComfy) comfy.start();
+  // The library scans and hashes in the background: the UI must come up
+  // whether or not somebody pointed it at a terabyte of models (§8.1).
+  if (!options.skipModels) models.startBackground();
 
   if (!options.quiet) {
     console.log(`ForgeUI ${APP_VERSION} — ${server.url}`);
@@ -138,9 +155,11 @@ async function startAppWith(
     hub,
     createdConfig: created,
     async shutdown() {
+      models.stop();
       outputs.close();
       hub.close();
       await comfy.close();
+      await models.idle();
       await server.shutdown();
       db.close();
     },
@@ -184,9 +203,22 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     if (args.command === "reindex") {
-      const { db, paths } = await bootstrap(args);
+      const { store, db, paths } = await bootstrap(args);
       try {
-        const result = await reindex({ db, paths });
+        // Scan (but do not hash) so sidecars that name a model the library
+        // has already hashed get their `output_models` rows back (§8.1).
+        const models = new ModelLibrary({
+          db,
+          paths,
+          config: store,
+          hub: new WsHub(),
+        });
+        await models.scanner.rescan();
+        const result = await reindex({
+          db,
+          paths,
+          resolveModels: (refs) => models.resolveModels(refs),
+        });
         console.log(
           `reindexed ${result.outputs} outputs from ${result.sidecars} sidecars`,
         );

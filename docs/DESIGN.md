@@ -439,7 +439,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
 ### 8.1 Model library
 - Scans configured folders (read-only) on startup and on demand (Rescan).
   Scan and background-hash progress are pushed on `/ws` as `rescan_progress`
-  and `hashing_progress` events and shown in the queue strip's status area.
+  and `hashing_progress` events and shown in the queue strip's status area:
+  `{running, folders_done, folders_total, models}` and
+  `{running, done, total, current, bytes_done, bytes_total}`, where `done` and
+  `total` count the files queued for this pass and `current` is the model's
+  name. Both are pushed, never polled.
 - A model appears in pickers as soon as it is scanned, identified by `path`.
   Its `models` row (keyed by `hash`) exists only once the background hasher
   has finished it; until then display name, family, notes, tags and thumbnail
@@ -839,8 +843,9 @@ GET  /api/config                        contents of config.yaml (effective, afte
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
 GET  /api/models?kind&family&q          q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+                                        hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail")
+PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup

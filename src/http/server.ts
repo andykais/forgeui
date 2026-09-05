@@ -25,7 +25,11 @@ import {
   OutputNotFoundError,
   type OutputStore,
 } from "../outputs/store.ts";
-import type { ModelScanner } from "../models/scan.ts";
+import {
+  ModelLibrary,
+  ModelNotFoundError,
+  ModelUnhashedError,
+} from "../models/library.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -53,7 +57,7 @@ export interface AppContext {
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
-  models: ModelScanner;
+  models: ModelLibrary;
   hub: WsHub;
 }
 
@@ -159,9 +163,14 @@ function handlerError(cause: unknown, req: Request): Response {
   if (
     cause instanceof WorkflowNotFoundError ||
     cause instanceof JobNotFoundError ||
-    cause instanceof OutputNotFoundError
+    cause instanceof OutputNotFoundError ||
+    cause instanceof ModelNotFoundError
   ) {
     return error(404, "not_found", cause.message);
+  }
+  if (cause instanceof ModelUnhashedError) {
+    // Not an error the user can act on: the hasher is simply not there yet.
+    return error(409, "hashing", cause.message);
   }
   if (cause instanceof OutputGoneError) {
     // The undo window closed and the bytes are gone (§11.2).

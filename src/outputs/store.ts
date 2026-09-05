@@ -10,10 +10,12 @@ import {
   getOutput,
   listOutputs,
   type ListOutputsOptions,
+  modelHashesForOutput,
   type OutputFilters,
   outputModelsFor,
   type OutputRow,
   outputsDeletedBefore,
+  refreshModelUsage,
   restoreOutput,
   softDeleteOutput,
 } from "../db/queries.ts";
@@ -154,6 +156,8 @@ export class OutputStore {
     const row = this.require(id);
     if (row.deleted_at === null) {
       softDeleteOutput(this.#db, id, this.#now());
+      // A deleted output no longer counts towards the models it used (§7).
+      refreshModelUsage(this.#db, modelHashesForOutput(this.#db, id));
     }
     this.#scheduleRemoval(id, this.undoWindowMs);
     const output = this.require(id);
@@ -176,6 +180,7 @@ export class OutputStore {
       this.#timers.delete(id);
     }
     restoreOutput(this.#db, id);
+    refreshModelUsage(this.#db, modelHashesForOutput(this.#db, id));
     const restored = this.require(id);
     this.#hub.broadcast({ type: "output", data: this.view(restored) });
     return restored;

@@ -6,6 +6,8 @@ import {
   insertOutputModels,
   type JobRow,
   type OutputRow,
+  refreshModelUsage,
+  type SidecarModelRef,
 } from "../db/queries.ts";
 import type { ComfyImageRef } from "../comfy/events.ts";
 import { sha256Hex } from "../workflows/hash.ts";
@@ -44,6 +46,12 @@ export interface CompleteJobInput {
   images: JobOutputImages[];
   timing: { total_ms: number; nodes: Record<string, number> };
   createdAt: Date;
+  /**
+   * Fills in the hash of every model the library has already hashed, so
+   * `output_models` is written at completion (§8.1). The sidecar keeps the
+   * `hash: null` the graph knew; the backfill links the rest later.
+   */
+  resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
 }
 
 export interface CompleteJobResult {
@@ -172,7 +180,10 @@ export async function completeJob(
     });
   }
 
+  // The sidecar records what the graph named; the index records what the
+  // library has hashed so far (§6.2, §8.1).
   const models = collectModels(job.api_graph);
+  const resolved = input.resolveModels?.(models) ?? models;
   const sidecarOutputs: SidecarOutput[] = moved.map((entry) => ({
     file: entry.file,
     kind: entry.kind,
@@ -241,9 +252,15 @@ export async function completeJob(
       created_at: createdAt.getTime(),
     };
     insertOutput(db, row);
-    insertOutputModels(db, row.id, models);
+    insertOutputModels(db, row.id, resolved);
     rows.push(row);
   }
+  refreshModelUsage(
+    db,
+    resolved.map((model) => model.hash).filter((hash): hash is string =>
+      hash !== null
+    ),
+  );
 
   await removeStagingDir(paths, job.id);
   return { outputs: rows, sidecar, sidecarPath };

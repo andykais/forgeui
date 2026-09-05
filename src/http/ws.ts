@@ -5,7 +5,14 @@
  */
 
 export interface WsEvent {
-  type: "job" | "output" | "output_deleted" | "system_status";
+  type:
+    | "job"
+    | "output"
+    | "output_deleted"
+    | "system_status"
+    /** The model library's two background passes (§8.1). */
+    | "rescan_progress"
+    | "hashing_progress";
   data: unknown;
 }
 

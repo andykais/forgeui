@@ -10,6 +10,8 @@ import {
   jobExists,
   type OutputRow,
   rebuildOutputsFts,
+  refreshModelUsage,
+  type SidecarModelRef,
 } from "../db/queries.ts";
 import { promptText } from "../jobs/completion.ts";
 import { readPngSize } from "../jobs/png.ts";
@@ -37,6 +39,11 @@ export interface ReindexResult {
 export interface ReindexOptions {
   db: Database;
   paths: DataPaths;
+  /**
+   * Fills in the hashes a sidecar could not know, by name (§8.1). Without it
+   * only sidecars that already carry hashes produce `output_models` rows.
+   */
+  resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Report progress while walking a large outputs tree. */
   onProgress?: (done: number) => void;
 }
@@ -160,7 +167,8 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
       // A rebuild replaces whatever was there before.
       deleteOutputRow(db, id);
       insertOutput(db, row);
-      result.output_models += insertOutputModels(db, id, sidecar.models);
+      const models = options.resolveModels?.(sidecar.models) ?? sidecar.models;
+      result.output_models += insertOutputModels(db, id, models);
       result.outputs++;
       seen.add(id);
       options.onProgress?.(result.outputs);
@@ -190,5 +198,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
   }
 
   rebuildOutputsFts(db);
+  // `output_count` and `last_used_at` are derived from what was just rebuilt.
+  refreshModelUsage(db);
   return result;
 }

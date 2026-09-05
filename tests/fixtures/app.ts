@@ -47,6 +47,12 @@ export interface TestAppOptions {
   comfyUrl?: string;
   /** Leave the data dir behind; for a dir the caller owns. */
   keepDataDir?: boolean;
+  /**
+   * Let the boot scan and hash the model folders. Off by default so a test's
+   * fixtures never race the background pass; drive it with
+   * `app.models.rescan()` instead.
+   */
+  scanModels?: boolean;
 }
 
 export async function startTestApp(
@@ -81,6 +87,7 @@ export async function startTestApp(
     quiet: true,
     skipComfy: !options.comfy && !options.comfyUrl &&
       !options.argv?.includes("managed"),
+    skipModels: options.scanModels !== true,
   });
   if (fake || options.comfyUrl) await app.comfy.waitForState("running", 15_000);
 
@@ -114,6 +121,7 @@ export async function startTestApp(
       for (const socket of sockets) socket.close();
       // Let the pipeline finish what it started before the files go away.
       await app.jobs.idle();
+      await app.models.idle();
       await app.shutdown();
       await fake?.close();
       await app.jobs.idle();
