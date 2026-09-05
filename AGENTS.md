@@ -4,9 +4,9 @@ ForgeUI — a workflow-first frontend for ComfyUI. Deno + SQLite + Svelte.
 
 **This repository is under active development. Phase 1 is complete** (the core
 generation loop: workflows, jobs, outputs, gallery, reindex, UI) and verified
-against a real ComfyUI; Phase 2 is under way — M5 and M6 are done, so the model
-library has a backend but no screen yet. The default suite still uses the
-in-process fake in `tests/fake-comfy/` and needs nothing installed, but
+against a real ComfyUI; Phase 2 is under way — M5, M6 and M7 are done, so the
+model library and samples have a backend but no screen yet. The default suite
+still uses the in-process fake in `tests/fake-comfy/` and needs nothing, but
 `deno task comfy:setup` provisions a real CPU-only ComfyUI that `test:comfy` and
 `test:e2e:comfy` drive (`docs/HARDWARE-CHECKLIST.md`).
 
@@ -17,8 +17,8 @@ in-process fake in `tests/fake-comfy/` and needs nothing installed, but
 | `docs/DESIGN.md`             | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating. |
 | `docs/PHASE-1-HANDOFF.md`    | What is done, the non-obvious decisions, and where Phase 2 picks up.                                                                     |
 | `docs/IMPLEMENT-PHASE-1.md`  | The Phase 1 work plan and its conventions.                                                                                               |
-| `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan. M5 is blocked on the hardware checklist below.                                                                    |
-| `docs/HARDWARE-CHECKLIST.md` | What the user must verify against a real ComfyUI before Phase 2 goes past M5.                                                            |
+| `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan. M5–M7 are done; M8 (ETA from node timings) is next.                                                               |
+| `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                   |
 | `docs/MOCK-REVISIONS.md`     | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
 
 ## Layout
@@ -32,10 +32,11 @@ src/workflows/  manifest validation, param coercion, graph rewrite, loader
 src/jobs/       submit/progress/completion pipeline, sidecar, png
 src/outputs/    gallery queries, soft delete, reindex
 src/models/     the folder scan, the background hasher, output_models backfill
+src/samples/    per-model sample media: file drop, promote, thumbnails
 src/http/       router, routes/*, /ws hub, media, static
 src/frontend/   the Svelte app — npm + Vite, the only non-Deno toolchain
 tests/          unit/ integration/ golden/ fake-comfy/ fixtures/ e2e/
-workflows/bundled/<id>/   the seven workflows of §4.6 (+ README)
+workflows/bundled/<id>/   the eight workflows of §4.6 (+ README)
 ```
 
 ## Commands

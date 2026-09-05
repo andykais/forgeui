@@ -1,6 +1,6 @@
 # Bundled workflows
 
-The seven workflows of DESIGN §4.6, shipped with the app and copied into
+The eight workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).

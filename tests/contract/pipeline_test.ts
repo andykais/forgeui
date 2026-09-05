@@ -50,6 +50,13 @@ interface JobResponse extends Omit<JobRow, "params" | "api_graph"> {
   outputs: string[];
 }
 
+interface SampleView {
+  id: string;
+  model_hash: string;
+  path: string;
+  reusable: boolean;
+}
+
 interface ModelEntry {
   hash: string | null;
   filename: string;
@@ -282,6 +289,27 @@ contractTest("a real generation runs end to end through the app", async () => {
     assertEquals(
       linked.outputs[0]?.models.map((model) => model.role),
       ["checkpoint"],
+    );
+
+    // Promote to sample: a hard link, so the model's sample and the output
+    // are two names for the same bytes on a real filesystem (§8.3).
+    const promoted = await app.json<{ samples: SampleView[] }>(
+      `/api/outputs/${submitted.id}-0/promote`,
+      {
+        method: "POST",
+        body: JSON.stringify({ model_hashes: [checkpoint.hash] }),
+      },
+    );
+    const sample = promoted.samples[0]!;
+    assertEquals(sample.model_hash, checkpoint.hash);
+    assertEquals(sample.reusable, true);
+    const sampleStat = await Deno.stat(join(app.paths.root, sample.path));
+    assertEquals(sampleStat.ino, (await Deno.stat(image)).ino);
+    assertEquals(
+      (await app.json<{ samples: SampleView[] }>(
+        `/api/models/${checkpoint.hash}`,
+      )).samples.map((entry) => entry.id),
+      [sample.id],
     );
 
     // Rerun now ⟳ queues the frozen graph verbatim: same seed, same image.
