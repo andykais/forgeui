@@ -139,6 +139,8 @@
     outputs = outputs.filter((entry) => entry.id !== output.id);
     if (selectedId === output.id) select(null);
     if (total !== null) total -= 1;
+    // The day divider's count has to follow the tile that just left.
+    void loadDayCounts();
     toasts.undo(output, undo_window_ms, (restored) => {
       // Back where it was, so the undo does not move the grid around.
       const descending = filters.sort !== "oldest";

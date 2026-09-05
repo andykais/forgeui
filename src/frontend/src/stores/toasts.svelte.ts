@@ -1,4 +1,5 @@
 import { api } from "../api.ts";
+import { shortId } from "../lib/format.ts";
 import type { Output } from "../types.ts";
 
 /**
@@ -26,7 +27,7 @@ class ToastState {
     const id = `delete:${output.id}`;
     this.#push({
       id,
-      message: `Deleted ${output.id.slice(-7)}`,
+      message: `Deleted ${shortId(output.id)}`,
       undo: async () => {
         this.dismiss(id);
         try {

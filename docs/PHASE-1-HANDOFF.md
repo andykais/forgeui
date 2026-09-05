@@ -12,6 +12,60 @@ to do that is on disk, not just in memory.
 **Nothing in this repository has run against a real ComfyUI.** Every test uses
 the in-process fake. Read "Before trusting it on real hardware" below first.
 
+## What it looks like
+
+Taken from the end-to-end run against the fake ComfyUI;
+`tests/e2e/shots.spec.ts` regenerates all of them. Every image is a flat teal
+square because the fake writes a solid fixture PNG — there is no model here.
+
+Generate: the workflow card and its picker at the top of the param panel, the
+panel rendered from the manifest alone, and this session's results on the
+right. Compare with mock frame 01.
+
+![Generate](screenshots/phase-1/generate.png)
+
+A job in flight — percent, ETA, node label and step counter over the preview
+frames ComfyUI streams, with the running chip in the queue strip. The card
+spans two columns so the numbers stay readable at a distance.
+
+![A running job](screenshots/phase-1/generate-running.png)
+
+The focused view keeps the panel at 360px and uses Gallery's viewer layout,
+with the follow-latest chip and the "newest" badge of §11.4.
+
+![Generate, focused](screenshots/phase-1/generate-focused.png)
+
+Gallery: filters as URL params, day dividers whose counts arrive from a
+separate call, and the tiles / table toggle.
+
+![Gallery](screenshots/phase-1/gallery.png)
+
+The viewer, shared with Generate: metadata sidebar in §11.2's order, copyable
+absolute paths under FILES, and the filmstrip walking the filtered set.
+
+![The viewer](screenshots/phase-1/gallery-viewer.png)
+
+Delete has no confirmation — the tile goes, the counts follow, and an undo
+toast stands in for it while the bytes wait out the window.
+
+![Delete and undo](screenshots/phase-1/gallery-delete-undo.png)
+
+The workflows table is the manifest surface at a glance, and the manifest
+editor of §4.7 lists exposed inputs in panel order with the synthetic LoRA
+chain row and a live panel preview.
+
+![Workflows](screenshots/phase-1/workflows.png)
+
+![The manifest editor](screenshots/phase-1/workflow-manifest-editor.png)
+
+Settings renders the `config.yaml` sections of frame 08 read-only, including
+the generated launch flags and the managed child's captured log.
+
+![Settings](screenshots/phase-1/settings.png)
+
+Also in that directory: `generate-workflow-picker.png` (grouped by family and
+kind) and `gallery-table.png` (MODELS chips, SIZE, seed, DURATION).
+
 ## State
 
 | | |

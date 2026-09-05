@@ -134,6 +134,11 @@
     font-size: 11px;
   }
 
+  /* The preview frame behind this can be any colour, so scrim the text. */
+  .card.running .head {
+    background: linear-gradient(rgb(13 13 13 / 72%), transparent);
+  }
+
   .foot {
     position: relative;
     margin-top: auto;
