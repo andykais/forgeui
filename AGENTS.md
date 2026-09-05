@@ -4,8 +4,9 @@ ForgeUI — a workflow-first frontend for ComfyUI. Deno + SQLite + Svelte.
 
 **This repository is under active development. Phase 1 is complete** (the core
 generation loop: workflows, jobs, outputs, gallery, reindex, UI) and verified
-against a real ComfyUI; Phase 2 is under way at M5. The default suite still uses
-the in-process fake in `tests/fake-comfy/` and needs nothing installed, but
+against a real ComfyUI; Phase 2 is under way — M5 and M6 are done, so the model
+library has a backend but no screen yet. The default suite still uses the
+in-process fake in `tests/fake-comfy/` and needs nothing installed, but
 `deno task comfy:setup` provisions a real CPU-only ComfyUI that `test:comfy` and
 `test:e2e:comfy` drive (`docs/HARDWARE-CHECKLIST.md`).
 
@@ -30,7 +31,7 @@ src/comfy/      http client, ws client, child process, launch flags, proxy
 src/workflows/  manifest validation, param coercion, graph rewrite, loader
 src/jobs/       submit/progress/completion pipeline, sidecar, png
 src/outputs/    gallery queries, soft delete, reindex
-src/models/     the minimal read-only model scan (full library is Phase 2)
+src/models/     the folder scan, the background hasher, output_models backfill
 src/http/       router, routes/*, /ws hub, media, static
 src/frontend/   the Svelte app — npm + Vite, the only non-Deno toolchain
 tests/          unit/ integration/ golden/ fake-comfy/ fixtures/ e2e/
@@ -98,6 +99,12 @@ changes.
 `sd15` is the one bundled workflow that can actually run: its weights are a
 download rather than a choice, so it is what the contract check generates with.
 Keep it working.
+
+Model hashing never blocks anything: pickers, generation and the gallery all
+work with zero hashed models, and anything needing a hash degrades to a `path`
+identity or a disabled control (§8.1). Tests drive the library with
+`app.models.rescan()`; `startTestApp` leaves the boot pass off so fixtures
+cannot race it.
 
 Prefer a test that goes through the HTTP or WebSocket interface over one that
 pokes the database. When a browser-visible change is involved, look at it:

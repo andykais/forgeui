@@ -38,12 +38,18 @@ async function measure(root: string): Promise<StorageUse> {
   return use;
 }
 
-async function fileSize(path: string): Promise<number> {
-  try {
-    return (await Deno.stat(path)).size;
-  } catch {
-    return 0;
+/** `app.db` and the two files WAL mode keeps beside it (§7). */
+async function databaseUse(path: string): Promise<StorageUse> {
+  const use: StorageUse = { files: 0, bytes: 0 };
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+    try {
+      use.bytes += (await Deno.stat(candidate)).size;
+      use.files++;
+    } catch {
+      // Only `app.db` is always there.
+    }
   }
+  return use;
 }
 
 /** §12's `/api/system/*` group: what Settings and the queue strip read. */
@@ -98,7 +104,7 @@ export function systemRoutes(ctx: AppContext): Route[] {
           measure(ctx.paths.inputs),
           measure(ctx.paths.samples),
           measure(ctx.paths.staging),
-          fileSize(ctx.paths.db),
+          databaseUse(ctx.paths.db),
         ]);
         // Model folders are not measured: they are somebody else's disk, and
         // the app never writes there (§3).
@@ -108,12 +114,12 @@ export function systemRoutes(ctx: AppContext): Route[] {
           inputs,
           samples,
           staging,
-          db: { files: db > 0 ? 1 : 0, bytes: db },
+          db,
           total: {
             files: outputs.files + inputs.files + samples.files +
-              staging.files + (db > 0 ? 1 : 0),
+              staging.files + db.files,
             bytes: outputs.bytes + inputs.bytes + samples.bytes +
-              staging.bytes + db,
+              staging.bytes + db.bytes,
           },
         });
       },

@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import { decodePreviewFrame } from "../../src/http/ws.ts";
 import {
@@ -48,6 +48,14 @@ interface JobResponse extends Omit<JobRow, "params" | "api_graph"> {
   params: Record<string, unknown>;
   api_graph: ApiGraph;
   outputs: string[];
+}
+
+interface ModelEntry {
+  hash: string | null;
+  filename: string;
+  hashing: boolean;
+  output_count: number;
+  last_used_at: number | null;
 }
 
 interface OutputView {
@@ -216,9 +224,9 @@ contractTest("a real generation runs end to end through the app", async () => {
     assertEquals(view.width, SIZE[0]);
     assertEquals(view.height, SIZE[1]);
     assert(view.generation_ms !== null && view.generation_ms > 0);
-    // Empty because nothing is hashed yet: `output_models` rows need a hash,
-    // and M6 is what gives them one (§8.1). The sidecar above already names
-    // the checkpoint, which is why the backfill can find it later.
+    // Nothing has been hashed yet, so there is nothing to link it to: the
+    // sidecar names the checkpoint, and the backfill below is what turns that
+    // into a row (§8.1).
     assertEquals(view.models, []);
     const media = await app.fetch(view.media_url);
     assertEquals(media.status, 200);
@@ -247,6 +255,34 @@ contractTest("a real generation runs end to end through the app", async () => {
       "no preview frames were relayed (ComfyUI needs --preview-method auto)",
     );
     assert(previews[0]!.format === 1 || previews[0]!.format === 2);
+
+    // Hashing a real checkpoint — two gigabytes, streamed — and linking the
+    // generation that came out of it back to it (§8.1). This is the only
+    // place the hasher meets a file of the size it was written for.
+    await app.json("/api/maintenance/rescan-models", { method: "POST" });
+    await app.models.idle();
+    const library = await app.json<{ models: ModelEntry[] }>(
+      "/api/models?kind=checkpoints",
+    );
+    const checkpoint = library.models.find((model) =>
+      model.filename === CHECKPOINT
+    );
+    assert(checkpoint, `${CHECKPOINT} is not in the library`);
+    assertEquals(checkpoint.hashing, false);
+    assertMatch(checkpoint.hash ?? "", /^[0-9a-f]{64}$/);
+    assertEquals(checkpoint.output_count, 1, "the backfill linked the output");
+    assert(checkpoint.last_used_at !== null);
+
+    const linked = await app.json<{ outputs: OutputView[] }>(
+      `/api/outputs?models=${checkpoint.hash}`,
+    );
+    assertEquals(linked.outputs.map((output) => output.id), [
+      `${submitted.id}-0`,
+    ]);
+    assertEquals(
+      linked.outputs[0]?.models.map((model) => model.role),
+      ["checkpoint"],
+    );
 
     // Rerun now ⟳ queues the frozen graph verbatim: same seed, same image.
     const rerun = await app.json<JobResponse>("/api/jobs/rerun", {
