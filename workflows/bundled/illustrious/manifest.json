@@ -1,0 +1,94 @@
+{
+  "id": "illustrious",
+  "name": "Illustrious XL",
+  "family": "sdxl",
+  "kind": "image",
+  "category": null,
+  "description": "Text-to-image with Illustrious XL. Prompt and negative prompt are booru-style tags.",
+  "params": [
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "bind": "6.text"
+    },
+    {
+      "key": "negative",
+      "label": "Negative prompt",
+      "type": "text",
+      "default": "worst quality, low quality, jpeg artifacts",
+      "bind": "7.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1024,
+        1024
+      ],
+      "step": 16,
+      "bind": {
+        "w": "5.width",
+        "h": "5.height"
+      }
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "sdxl"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "1.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "6.clip",
+            "7.clip"
+          ]
+        }
+      }
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "advanced": true,
+      "default": 28,
+      "min": 1,
+      "max": 100,
+      "bind": "3.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "advanced": true,
+      "default": 5.0,
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "bind": "3.cfg"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "image"
+    }
+  ]
+}

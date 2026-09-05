@@ -2,13 +2,23 @@ import type { Database } from "@db/sqlite";
 import type { ConfigStore } from "../config/config.ts";
 import { ConfigError } from "../config/validate.ts";
 import type { DataPaths } from "../config/paths.ts";
+import { ManifestError } from "../workflows/manifest.ts";
+import { ParamError } from "../workflows/coerce.ts";
+import { RewriteError } from "../workflows/rewrite.ts";
+import {
+  WorkflowConflictError,
+  WorkflowNotFoundError,
+  type WorkflowStore,
+} from "../workflows/loader.ts";
 import { BodyError, error, methodNotAllowed, notFound } from "./json.ts";
 import { configRoutes } from "./routes/config.ts";
+import { workflowRoutes } from "./routes/workflows.ts";
 
 export interface AppContext {
   config: ConfigStore;
   db: Database;
   paths: DataPaths;
+  workflows: WorkflowStore;
 }
 
 export interface RouteMatch {
@@ -33,7 +43,7 @@ interface CompiledRoute extends Route {
 }
 
 export function routeTable(ctx: AppContext): Route[] {
-  return [...configRoutes(ctx)];
+  return [...configRoutes(ctx), ...workflowRoutes(ctx)];
 }
 
 const PLACEHOLDER_PAGE = `<!doctype html>
@@ -84,7 +94,17 @@ export function createHandler(
 }
 
 function handlerError(cause: unknown, req: Request): Response {
-  if (cause instanceof ConfigError || cause instanceof BodyError) {
+  if (cause instanceof WorkflowNotFoundError) {
+    return error(404, "not_found", cause.message);
+  }
+  if (cause instanceof WorkflowConflictError) {
+    return error(409, "conflict", cause.message);
+  }
+  if (
+    cause instanceof ConfigError || cause instanceof BodyError ||
+    cause instanceof ManifestError || cause instanceof ParamError ||
+    cause instanceof RewriteError
+  ) {
     return error(400, "bad_request", cause.message);
   }
   console.error(`${req.method} ${req.url} failed:`, cause);

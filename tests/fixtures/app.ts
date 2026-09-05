@@ -1,3 +1,4 @@
+import { dirname, join } from "@std/path";
 import { type App, startApp } from "../../src/main.ts";
 import type { EnvSource } from "../../src/config/config.ts";
 
@@ -30,7 +31,9 @@ export async function startTestApp(
   const dataDir = options.dataDir ??
     await Deno.makeTempDir({ prefix: "forgeui-test-" });
   for (const [name, contents] of Object.entries(options.files ?? {})) {
-    await Deno.writeTextFile(`${dataDir}/${name}`, contents);
+    const path = join(dataDir, name);
+    await Deno.mkdir(dirname(path), { recursive: true });
+    await Deno.writeTextFile(path, contents);
   }
 
   const app = await startApp({

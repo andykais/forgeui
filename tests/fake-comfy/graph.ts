@@ -6,44 +6,19 @@
  * reaches for a custom node fails in tests instead of at the user's machine.
  */
 
-export interface ApiNode {
-  class_type: string;
-  inputs: Record<string, unknown>;
-  _meta?: { title?: string };
-}
+import {
+  CORE_NODE_TYPES,
+  OUTPUT_NODE_TYPES,
+} from "../../src/workflows/nodes.ts";
+import type { ApiGraph, ApiNode } from "../../src/workflows/types.ts";
 
-export type ApiGraph = Record<string, ApiNode>;
-
-/** Core ComfyUI nodes the bundled workflows are allowed to use. */
-export const CORE_NODE_TYPES: readonly string[] = [
-  "CLIPLoader",
-  "CLIPSetLastLayer",
-  "CLIPTextEncode",
-  "CheckpointLoaderSimple",
-  "ConditioningZeroOut",
-  "DualCLIPLoader",
-  "EmptyLatentImage",
-  "EmptySD3LatentImage",
-  "ImageScale",
-  "KSampler",
-  "KSamplerAdvanced",
-  "LoadImage",
-  "LoraLoader",
-  "LoraLoaderModelOnly",
-  "ModelSamplingSD3",
-  "SaveAnimatedWEBP",
-  "SaveImage",
-  "UNETLoader",
-  "VAEDecode",
-  "VAEEncode",
-  "VAELoader",
-];
-
-/** Nodes that write files, i.e. the ones a prompt is queued for. */
-export const OUTPUT_NODE_TYPES: readonly string[] = [
-  "SaveAnimatedWEBP",
-  "SaveImage",
-];
+export type { ApiGraph, ApiNode };
+/**
+ * The fake accepts exactly the node types the app knows about, so a bundled
+ * workflow that reaches for anything else fails here instead of on a user's
+ * machine (§4.6).
+ */
+export { CORE_NODE_TYPES, OUTPUT_NODE_TYPES };
 
 export interface NodeError {
   errors: {

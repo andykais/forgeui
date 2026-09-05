@@ -1,0 +1,85 @@
+{
+  "id": "ltx",
+  "name": "LTX Video",
+  "family": "ltx",
+  "kind": "video",
+  "category": null,
+  "description": "Text-to-video with LTX Video. Frames must be 8n+1; FPS drives the LTXV conditioning.",
+  "params": [
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "bind": "6.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        768,
+        512
+      ],
+      "step": 64,
+      "bind": {
+        "w": "5.width",
+        "h": "5.height"
+      }
+    },
+    {
+      "key": "frames",
+      "label": "Frames",
+      "type": "int",
+      "default": 97,
+      "min": 9,
+      "max": 257,
+      "step": 8,
+      "bind": "5.length"
+    },
+    {
+      "key": "fps",
+      "label": "FPS",
+      "type": "int",
+      "default": 25,
+      "min": 1,
+      "max": 60,
+      "bind": "10.frame_rate"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "ltx"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "2.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "6.clip",
+            "7.clip"
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "video"
+    }
+  ]
+}

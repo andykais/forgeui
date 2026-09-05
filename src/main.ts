@@ -12,6 +12,7 @@ import { writeExtraModelPaths } from "./config/extra_model_paths.ts";
 import type { DataPaths } from "./config/paths.ts";
 import { openDatabase } from "./db/db.ts";
 import { type HttpServer, startHttpServer } from "./http/server.ts";
+import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
 export interface StartAppOptions {
@@ -28,6 +29,7 @@ export interface App {
   config: ConfigStore;
   db: Database;
   paths: DataPaths;
+  workflows: WorkflowStore;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
   shutdown(): Promise<void>;
@@ -46,10 +48,13 @@ async function startAppWith(
   args: CliArgs,
   options: StartAppOptions,
 ): Promise<App> {
-  const { store, db, paths, created } = await bootstrap(args, options.env);
+  const { store, db, paths, created, workflows } = await bootstrap(
+    args,
+    options.env,
+  );
   let server: HttpServer;
   try {
-    server = await startHttpServer({ config: store, db, paths });
+    server = await startHttpServer({ config: store, db, paths, workflows });
   } catch (cause) {
     db.close();
     throw cause;
@@ -72,6 +77,7 @@ async function startAppWith(
     config: store,
     db,
     paths,
+    workflows,
     createdConfig: created,
     async shutdown() {
       await server.shutdown();
@@ -88,8 +94,11 @@ async function bootstrap(args: CliArgs, env?: EnvSource) {
   });
   assertAbsoluteModelFolders(store.config);
   await writeExtraModelPaths(store.paths, store.config);
+  // Bundled workflows are app-owned and refreshed on every launch (§4.6).
+  await syncBundledWorkflows(store.paths.bundledWorkflows);
+  const workflows = await WorkflowStore.load(store.paths);
   const db = openDatabase(store.paths.db);
-  return { store, db, paths: store.paths, created };
+  return { store, db, paths: store.paths, created, workflows };
 }
 
 async function main(argv: string[]): Promise<number> {
