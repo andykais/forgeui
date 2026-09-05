@@ -16,6 +16,7 @@ if (import.meta.main) {
       "input-directory",
       "extra-model-paths-config",
       "scenario",
+      "step-delay",
     ],
     unknown: () => true,
   });
@@ -33,6 +34,8 @@ if (import.meta.main) {
     hostname: flags.listen ?? "127.0.0.1",
     port,
     scenario: (flags.scenario as ScenarioName) ?? "success",
+    // Pacing, so a demo can show progress arriving rather than a blink.
+    stepDelayMs: Number(flags["step-delay"] ?? "0"),
   });
 
   // Lines the log route can show, in the spirit of ComfyUI's own startup.

@@ -91,9 +91,7 @@
 
   /** Counts arrive after the rows; they are allowed to pop in late (§11.2). */
   async function loadDayCounts() {
-    const dates = [
-      ...new Set(outputs.map((output) => localDate(output.created_at))),
-    ].filter((date) => dayCounts[date] === undefined);
+    const dates = [...new Set(outputs.map((output) => localDate(output.created_at)))];
     if (dates.length === 0) return;
     const counts = await api.outputDays(dates, filters).catch(() => ({}));
     dayCounts = { ...dayCounts, ...counts };
@@ -141,7 +139,23 @@
     outputs = outputs.filter((entry) => entry.id !== output.id);
     if (selectedId === output.id) select(null);
     if (total !== null) total -= 1;
-    toasts.undo(output, undo_window_ms);
+    toasts.undo(output, undo_window_ms, (restored) => {
+      // Back where it was, so the undo does not move the grid around.
+      const descending = filters.sort !== "oldest";
+      const at = outputs.findIndex((entry) =>
+        descending
+          ? entry.created_at < restored.created_at ||
+            (entry.created_at === restored.created_at && entry.id < restored.id)
+          : entry.created_at > restored.created_at ||
+            (entry.created_at === restored.created_at && entry.id > restored.id),
+      );
+      outputs =
+        at < 0
+          ? [...outputs, restored]
+          : [...outputs.slice(0, at), restored, ...outputs.slice(at)];
+      if (total !== null) total += 1;
+      void loadDayCounts();
+    });
   }
 
   function onKeydown(event: KeyboardEvent) {

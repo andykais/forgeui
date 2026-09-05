@@ -75,6 +75,12 @@ class PanelState {
   submitting = $state(false);
   submitError = $state<string | null>(null);
   loading = $state(false);
+  /**
+   * Keys the user has edited since the current fill started. Filling the panel
+   * from the last job is a round trip, and whatever was typed during it has to
+   * survive.
+   */
+  #touched = new Set<string>();
 
   get manifest(): Manifest | null {
     return this.detail?.manifest ?? null;
@@ -117,6 +123,7 @@ class PanelState {
     this.workflowId = id;
     this.loading = true;
     this.submitError = null;
+    this.#touched.clear();
     try {
       const detail = await api.workflow(id);
       this.detail = detail;
@@ -140,6 +147,7 @@ class PanelState {
   async editWith(id: string, params: Record<string, unknown>): Promise<void> {
     this.workflowId = id;
     this.loading = true;
+    this.#touched.clear();
     try {
       const detail = await api.workflow(id);
       this.detail = detail;
@@ -158,6 +166,10 @@ class PanelState {
 
   #fill(manifest: Manifest, params: Record<string, unknown>): void {
     const filled = fillValues(manifest, params);
+    // Anything typed while this was in flight wins over the stored value.
+    for (const key of this.#touched) {
+      if (key in this.values) filled.values[key] = this.values[key];
+    }
     this.values = filled.values;
     this.warnings = filled.warnings;
   }
@@ -175,6 +187,7 @@ class PanelState {
   }
 
   set(key: string, value: unknown): void {
+    this.#touched.add(key);
     this.values = { ...this.values, [key]: value };
   }
 
@@ -184,6 +197,7 @@ class PanelState {
    */
   resetToDefaults(): void {
     if (!this.manifest) return;
+    this.#touched.clear();
     const values = { ...this.values };
     for (const param of this.manifest.params) {
       if (

@@ -81,8 +81,8 @@ async function startAppWith(
     onStatus: (status) =>
       hub.broadcast({ type: "system_status", data: status }),
   });
-  const jobs = new JobRunner({ db, paths, workflows, comfy, hub });
   const outputs = new OutputStore({ db, paths, hub });
+  const jobs = new JobRunner({ db, paths, workflows, comfy, hub, outputs });
   const models = new ModelScanner(() => store.config);
   hub.onHello(() => [{ type: "system_status", data: comfy.status() }]);
 

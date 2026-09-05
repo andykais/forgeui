@@ -63,28 +63,33 @@
           <LoaderCircle size={13} class="spin" />
           ComfyUI starting…
         </span>
-      {:else if running}
-        <div class="chip running-chip" title={runningName ?? ""}>
-          <span class="name">{runningName}</span>
-          <span class="bar">
-            <span class="fill" style:width={`${running.progress?.pct ?? 0}%`}></span>
-          </span>
-          <span class="pct mono">{Math.round(running.progress?.pct ?? 0)}%</span>
-          <span class="eta mono dim">{clock(running.progress?.eta_ms)}</span>
-          <button
-            class="cancel"
-            title="Cancel the running job"
-            aria-label="Cancel the running job"
-            onclick={() => api.cancelJob(running.id)}
-          >
-            <X size={12} />
-          </button>
-        </div>
+      {:else if !running && queued.length === 0}
+        <span class="idle dim">idle — nothing running</span>
+      {/if}
+
+      {#if !starting}
+        {#if running}
+          <div class="chip running-chip" title={runningName ?? ""}>
+            <span class="name">{runningName}</span>
+            <span class="bar">
+              <span class="fill" style:width={`${running.progress?.pct ?? 0}%`}></span>
+            </span>
+            <span class="pct mono">{Math.round(running.progress?.pct ?? 0)}%</span>
+            <span class="eta mono dim">{clock(running.progress?.eta_ms)}</span>
+            <button
+              class="cancel"
+              title="Cancel the running job"
+              aria-label="Cancel the running job"
+              onclick={() => api.cancelJob(running.id)}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        {/if}
+        <!-- Queued jobs collapse into one count chip per workflow (§11.1). -->
         {#each queuedByWorkflow as [name, count] (name)}
           <span class="chip queued-chip mono">{name} queued ×{count}</span>
         {/each}
-      {:else}
-        <span class="idle dim">idle — nothing running</span>
       {/if}
 
       <span class="spacer"></span>

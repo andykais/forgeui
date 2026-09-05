@@ -21,6 +21,7 @@ import {
   updateJobStatus,
 } from "../db/queries.ts";
 import type { WsHub } from "../http/ws.ts";
+import type { OutputStore } from "../outputs/store.ts";
 import { isOutputNodeType } from "../workflows/nodes.ts";
 import { coerceParams } from "../workflows/coerce.ts";
 import { rewriteGraph } from "../workflows/rewrite.ts";
@@ -109,6 +110,8 @@ export interface JobRunnerOptions {
   workflows: WorkflowStore;
   comfy: ComfyManager;
   hub: WsHub;
+  /** Used to broadcast outputs in the shape the API returns them. */
+  outputs: OutputStore;
   now?: () => number;
 }
 
@@ -118,6 +121,7 @@ export class JobRunner {
   #workflows: WorkflowStore;
   #comfy: ComfyManager;
   #hub: WsHub;
+  #outputs: OutputStore;
   #now: () => number;
   #live = new Map<string, LiveJob>();
   #byPrompt = new Map<string, string>();
@@ -131,6 +135,7 @@ export class JobRunner {
     this.#workflows = options.workflows;
     this.#comfy = options.comfy;
     this.#hub = options.hub;
+    this.#outputs = options.outputs;
     this.#now = options.now ?? Date.now;
   }
 
@@ -495,7 +500,10 @@ export class JobRunner {
       this.#forget(jobId);
       this.#broadcastJob(jobId);
       for (const output of result.outputs) {
-        this.#hub.broadcast({ type: "output", data: output });
+        this.#hub.broadcast({
+          type: "output",
+          data: this.#outputs.view(output),
+        });
       }
     } catch (cause) {
       await this.#failAndClean(jobId, {

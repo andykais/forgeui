@@ -251,12 +251,18 @@ Deno.test("progress and previews arrive on the app's /ws", async () => {
     assert(progress.node_total > 1);
     assert(progress.pct > 0 && progress.pct <= 100);
 
-    // The output event carries the indexed row.
+    // The output event carries the row in the shape the API returns it, so a
+    // live tile has everything a reloaded one does — the media URL included.
     const outputs = socket.json("output").map((message) =>
-      message.data as unknown as OutputRow
+      message.data as unknown as OutputRow & { media_url: string }
     );
     assertEquals(outputs.length, 1);
     assertEquals(outputs[0]?.id, `${submitted.id}-0`);
+    assertEquals(outputs[0]?.media_url, `/api/media/${outputs[0]?.path}`);
+    const fromEvent = await app.fetch(outputs[0]!.media_url);
+    assertEquals(fromEvent.status, 200);
+    assertEquals(fromEvent.headers.get("content-type"), "image/png");
+    await fromEvent.body?.cancel();
 
     // ComfyUI's preview frame is relayed with the job id in front (§5 step 6).
     const previews = socket.binary();

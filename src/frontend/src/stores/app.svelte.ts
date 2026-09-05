@@ -59,7 +59,9 @@ class AppState {
   jobOutputs(job: Job): Output[] {
     return job.outputs
       .map((id) => this.outputs[id])
-      .filter((output): output is Output => output !== undefined);
+      .filter(
+        (output): output is Output => output !== undefined && output.deleted_at === null,
+      );
   }
 
   async load(): Promise<void> {
@@ -147,14 +149,16 @@ class AppState {
       case "job":
         this.#mergeJob(message.data as Job);
         break;
-      case "output": {
-        const output = message.data as Output;
-        this.outputs = { ...this.outputs, [output.id]: output };
-        break;
-      }
+      case "output":
       case "output_deleted": {
         const output = message.data as Output;
-        this.outputs = { ...this.outputs, [output.id]: output };
+        this.outputs = {
+          ...this.outputs,
+          [output.id]: {
+            ...output,
+            media_url: output.media_url ?? `/api/media/${output.path}`,
+          },
+        };
         break;
       }
     }

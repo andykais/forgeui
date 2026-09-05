@@ -26,6 +26,9 @@ await Deno.writeTextFile(
 );
 await Deno.chmod(stub, 0o755);
 
+// Extra args reach the child verbatim (§3.1), which is how the demo slows
+// the fake down enough to watch progress arrive.
+const stepDelay = Deno.env.get("FORGEUI_E2E_STEP_DELAY");
 await Deno.writeTextFile(
   join(dataDir, "config.yaml"),
   [
@@ -34,6 +37,7 @@ await Deno.writeTextFile(
     `  path: ${join(dataDir, "ComfyUI")}`,
     `  url: http://127.0.0.1:${comfyPort}`,
     `  python: ${stub}`,
+    ...(stepDelay ? [`  extra_args: ["--step-delay", "${stepDelay}"]`] : []),
     "",
   ].join("\n"),
 );

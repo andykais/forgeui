@@ -39,13 +39,36 @@ them.
 
 ## Tests
 
-`deno task test` needs no GPU and no ComfyUI: `tests/fake-comfy/` is an
-in-process stand-in whose per-prompt behaviour comes from the data-driven
-scenarios in `tests/fake-comfy/scenarios.ts`. Golden files under `tests/golden/`
-are only rewritten when asked:
+| Command              | What it covers                                   |
+| -------------------- | ------------------------------------------------ |
+| `deno task test`     | unit, golden and server integration tests        |
+| `deno task test:ui`  | param-panel component tests (vitest + jsdom)     |
+| `deno task test:e2e` | the Playwright smoke test, against the built app |
+
+None of them need a GPU or a real ComfyUI: `tests/fake-comfy/` is a stand-in
+whose per-prompt behaviour comes from the data-driven scenarios in
+`tests/fake-comfy/scenarios.ts`, and the end-to-end test runs it as a managed
+child process behind a stub interpreter. The Playwright test uses the browser
+already installed on the machine (`channel: "chrome"`).
+
+Golden files under `tests/golden/` are only rewritten when asked:
 
 ```sh
 UPDATE_GOLDEN=1 deno task test
+```
+
+## The interface
+
+The Svelte app lives in `src/frontend/`, is built by Vite into
+`src/frontend/dist/`, and is served by the Deno process — so `deno task start`
+serves the API and the UI on one port. Node is only needed to build it.
+
+```sh
+deno task ui:install   # once: npm install inside src/frontend
+deno task ui:build     # build into dist/, which the Deno server serves
+deno task ui:dev       # Vite dev server on :5173, proxying /api, /ws and /comfy
+deno task ui:check     # svelte-check
+deno task ui:fmt       # prettier
 ```
 
 ## Starting the build

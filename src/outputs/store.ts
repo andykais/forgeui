@@ -86,6 +86,15 @@ export class OutputStore {
     this.#now = options.now ?? Date.now;
   }
 
+  /**
+   * The shape every client sees for an output. The pipeline broadcasts this
+   * rather than the raw row, so a live tile has the same fields a reloaded
+   * one does — including the media URL.
+   */
+  view(row: OutputRow): OutputView {
+    return this.#decorate([row])[0]!;
+  }
+
   list(options: ListOutputsOptions = {}): OutputPage {
     const limit = options.limit;
     const rows = listOutputs(this.#db, options);
@@ -148,7 +157,7 @@ export class OutputStore {
     }
     this.#scheduleRemoval(id, this.undoWindowMs);
     const output = this.require(id);
-    this.#hub.broadcast({ type: "output_deleted", data: output });
+    this.#hub.broadcast({ type: "output_deleted", data: this.view(output) });
     return { output, undo_window_ms: this.undoWindowMs };
   }
 
@@ -168,7 +177,7 @@ export class OutputStore {
     }
     restoreOutput(this.#db, id);
     const restored = this.require(id);
-    this.#hub.broadcast({ type: "output", data: restored });
+    this.#hub.broadcast({ type: "output", data: this.view(restored) });
     return restored;
   }
 
