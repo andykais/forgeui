@@ -15,6 +15,8 @@ import { openDatabase } from "./db/db.ts";
 import { type HttpServer, startHttpServer } from "./http/server.ts";
 import { WsHub } from "./http/ws.ts";
 import { JobRunner } from "./jobs/pipeline.ts";
+import { reindex } from "./outputs/reindex.ts";
+import { OutputStore } from "./outputs/store.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -37,6 +39,7 @@ export interface App {
   workflows: WorkflowStore;
   comfy: ComfyManager;
   jobs: JobRunner;
+  outputs: OutputStore;
   hub: WsHub;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
@@ -77,13 +80,25 @@ async function startAppWith(
       hub.broadcast({ type: "system_status", data: status }),
   });
   const jobs = new JobRunner({ db, paths, workflows, comfy, hub });
+  const outputs = new OutputStore({ db, paths, hub });
   hub.onHello(() => [{ type: "system_status", data: comfy.status() }]);
 
-  const ctx = { config: store, db, paths, workflows, comfy, jobs, hub };
+  const ctx = {
+    config: store,
+    db,
+    paths,
+    workflows,
+    comfy,
+    jobs,
+    outputs,
+    hub,
+  };
   let server: HttpServer;
   try {
     // Orphan staging dirs and jobs left running by the last process (§M2).
     await jobs.sweepAtStartup();
+    // Deletions whose undo window closed while the app was down (§11.2).
+    await outputs.resumeDeletions();
     server = await startHttpServer(ctx);
   } catch (cause) {
     db.close();
@@ -114,9 +129,11 @@ async function startAppWith(
     workflows,
     comfy,
     jobs,
+    outputs,
     hub,
     createdConfig: created,
     async shutdown() {
+      outputs.close();
       hub.close();
       await comfy.close();
       await server.shutdown();
@@ -162,10 +179,27 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     if (args.command === "reindex") {
-      const { db } = await bootstrap(args);
-      db.close();
-      console.error("forgeui: reindex is not implemented yet (milestone M3)");
-      return 3;
+      const { db, paths } = await bootstrap(args);
+      try {
+        const result = await reindex({ db, paths });
+        console.log(
+          `reindexed ${result.outputs} outputs from ${result.sidecars} sidecars`,
+        );
+        if (result.jobs_created > 0) {
+          console.log(`recreated ${result.jobs_created} job rows`);
+        }
+        if (result.removed.length > 0) {
+          console.log(
+            `dropped ${result.removed.length} rows whose files are gone`,
+          );
+        }
+        for (const error of result.errors) {
+          console.error(`  ! ${error.path}: ${error.message}`);
+        }
+        return result.errors.length > 0 ? 1 : 0;
+      } finally {
+        db.close();
+      }
     }
     const app = await startAppWith(args, {});
     const stop = async () => {

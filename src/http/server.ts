@@ -18,6 +18,13 @@ import {
   type JobRunner,
   JobSubmitError,
 } from "../jobs/pipeline.ts";
+import { CursorError } from "../outputs/cursor.ts";
+import { MediaPathError } from "./media.ts";
+import {
+  OutputGoneError,
+  OutputNotFoundError,
+  type OutputStore,
+} from "../outputs/store.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -29,6 +36,8 @@ import {
 import { BodyError, error, methodNotAllowed, notFound } from "./json.ts";
 import { configRoutes } from "./routes/config.ts";
 import { jobRoutes } from "./routes/jobs.ts";
+import { maintenanceRoutes } from "./routes/maintenance.ts";
+import { outputRoutes } from "./routes/outputs.ts";
 import { systemRoutes } from "./routes/system.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
 import type { WsHub } from "./ws.ts";
@@ -40,6 +49,7 @@ export interface AppContext {
   workflows: WorkflowStore;
   comfy: ComfyManager;
   jobs: JobRunner;
+  outputs: OutputStore;
   hub: WsHub;
 }
 
@@ -69,7 +79,9 @@ export function routeTable(ctx: AppContext): Route[] {
     ...configRoutes(ctx),
     ...workflowRoutes(ctx),
     ...jobRoutes(ctx),
+    ...outputRoutes(ctx),
     ...systemRoutes(ctx),
+    ...maintenanceRoutes(ctx),
   ];
 }
 
@@ -145,9 +157,15 @@ export function createHandler(
 
 function handlerError(cause: unknown, req: Request): Response {
   if (
-    cause instanceof WorkflowNotFoundError || cause instanceof JobNotFoundError
+    cause instanceof WorkflowNotFoundError ||
+    cause instanceof JobNotFoundError ||
+    cause instanceof OutputNotFoundError
   ) {
     return error(404, "not_found", cause.message);
+  }
+  if (cause instanceof OutputGoneError) {
+    // The undo window closed and the bytes are gone (§11.2).
+    return error(410, "gone", cause.message);
   }
   if (cause instanceof WorkflowConflictError || cause instanceof LaunchError) {
     return error(409, "conflict", cause.message);
@@ -173,7 +191,8 @@ function handlerError(cause: unknown, req: Request): Response {
   if (
     cause instanceof ConfigError || cause instanceof BodyError ||
     cause instanceof ManifestError || cause instanceof ParamError ||
-    cause instanceof RewriteError || cause instanceof JobRequestError
+    cause instanceof RewriteError || cause instanceof JobRequestError ||
+    cause instanceof CursorError || cause instanceof MediaPathError
   ) {
     return error(400, "bad_request", cause.message);
   }

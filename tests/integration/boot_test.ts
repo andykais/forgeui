@@ -169,7 +169,7 @@ Deno.test("CLI model folders override the file for one run only", async () => {
 
 Deno.test("unknown routes and methods answer in JSON", async () => {
   await withTestApp(async (app) => {
-    const missing = await app.fetch("/api/outputs");
+    const missing = await app.fetch("/api/nothing-here");
     assertEquals(missing.status, 404);
     assertEquals(
       (await missing.json() as { error: { code: string } }).error.code,

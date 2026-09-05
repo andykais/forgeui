@@ -804,7 +804,11 @@ GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
 GET  /api/jobs/:id                      one job row with the ids of its outputs
 GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2; sort newest|oldest
-GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven)
+                                        rows carry the row of §7 plus media_url, the models chips
+                                        and generation_ms (the job's wall clock, for DURATION)
+GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);
+                                        `tz_offset` in minutes (as getTimezoneOffset() reports it)
+                                        so the counts match the dividers the client drew
 GET  /api/outputs/count?filters         total under the active filters (lazy)
 GET  /api/outputs/:id                   with sidecar contents
 GET  /api/outputs/:id/lineage           {parents[], children[]}; each node: id, family, deleted (→ "?" marker)

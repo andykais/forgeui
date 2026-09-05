@@ -254,7 +254,12 @@ export class JobRunner {
     params: Record<string, unknown>;
     graph: ApiGraph;
   }): Promise<JobRow> {
-    const createdAt = this.#now();
+    // Truncated to the second because the sidecar is the source of truth and
+    // §6.2 records `created_at` to the second: this keeps the row, the sidecar
+    // and the `outputs/YYYY/MM/DD` directory in exact agreement, so `reindex`
+    // reproduces the row rather than approximating it. Durations come from
+    // started_at/finished_at, which stay at millisecond precision.
+    const createdAt = Math.floor(this.#now() / 1000) * 1000;
     insertJob(this.#db, {
       id: input.jobId,
       workflow_id: input.workflowId,
