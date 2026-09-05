@@ -33,7 +33,7 @@ interface WorkflowDetail extends WorkflowSummary {
   ui_json: { nodes: unknown[]; links: unknown[] };
 }
 
-/** The seven of §4.6, in the order the Workflows screen shows them (by name). */
+/** The eight of §4.6, in the order the Workflows screen shows them (by name). */
 const BUNDLED = [
   ["anima", "Anima"],
   ["flux-klein", "Flux Klein"],
@@ -41,6 +41,7 @@ const BUNDLED = [
   ["krea2-img2img", "Flux Krea 2 (img2img)"],
   ["illustrious", "Illustrious XL"],
   ["ltx", "LTX Video"],
+  ["sd15", "Stable Diffusion 1.5"],
   ["z-image-turbo", "Z-Image Turbo"],
 ] as const;
 
@@ -59,7 +60,7 @@ async function detail(
   return await response.json() as WorkflowDetail;
 }
 
-Deno.test("the seven bundled workflows load and list", async () => {
+Deno.test("the bundled workflows load and list", async () => {
   await withTestApp(async (app) => {
     const workflows = await list(app);
     assertEquals(
@@ -117,11 +118,19 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     assertEquals(keys("flux-klein"), ["prompt", "size", "seed", "loras"]);
     assertEquals(keys("z-image-turbo"), ["prompt", "size", "seed"]);
+    assertEquals(keys("sd15"), [
+      "prompt",
+      "negative",
+      "size",
+      "seed",
+      "loras",
+    ]);
+    assertEquals(byId.get("sd15")!.params.advanced, 2); // steps, cfg
 
     assertEquals(byId.get("ltx")!.kind, "video");
     assertEquals(
       [...byId.values()].map((w) => w.family),
-      ["anima", "flux", "flux", "flux", "sdxl", "ltx", "z-image"],
+      ["anima", "flux", "flux", "flux", "sdxl", "ltx", "sd15", "z-image"],
     );
   });
 });

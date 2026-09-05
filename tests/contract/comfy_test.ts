@@ -17,6 +17,13 @@ import {
 import type { ApiGraph } from "../../src/workflows/types.ts";
 import { TestSocket, type WsJsonMessage } from "../fake-comfy/client.ts";
 import { tinyPng } from "../fixtures/png.ts";
+import {
+  CHECKPOINT,
+  COMFY_URL,
+  contractTest,
+  INPUT_DIR,
+  OUTPUT_DIR,
+} from "./env.ts";
 
 /**
  * The contract check of §14.1, and the only test in this repository that
@@ -25,31 +32,18 @@ import { tinyPng } from "../fixtures/png.ts";
  * names the thing the fake got wrong. **A failure is fixed in the fake, not
  * papered over in the app.**
  *
- * Opt in with the environment, or run `deno task test:comfy`:
- *
  * ```sh
- * FORGEUI_COMFY_URL=http://127.0.0.1:8188 deno task test:comfy
+ * deno task comfy:setup   # once: a pinned ComfyUI, CPU torch, one checkpoint
+ * deno task test:comfy    # starts it, runs this, shuts it down
  * ```
  *
- * | Variable | Effect |
- * |---|---|
- * | `FORGEUI_COMFY_URL` | required; without it every test here is ignored |
- * | `FORGEUI_COMFY_OUTPUT_DIR` | ComfyUI's `--output-directory`: checks files on disk and cleans up after |
- * | `FORGEUI_COMFY_INPUT_DIR` | ComfyUI's `--input-directory`: removes the uploaded fixture afterwards |
- * | `FORGEUI_COMFY_CKPT` | a checkpoint filename; enables the two tests that need a sampler |
+ * `tests/contract/env.ts` describes the environment variables; the graphs
+ * here need no model at all beyond the two sampler tests, which cover
+ * `progress` events and binary preview frames because nothing without a
+ * sampler emits either.
  *
- * The graphs need no model: `EmptyImage` → `SaveImage`. Only the sampler
- * tests — `progress` events and binary preview frames, which nothing without
- * a sampler emits — need `FORGEUI_COMFY_CKPT`, and they expect ComfyUI to
- * have been started with `--preview-method auto`.
- *
- * See `docs/HARDWARE-CHECKLIST.md` for the manual half of the check.
+ * See `docs/HARDWARE-CHECKLIST.md` for what is left for a human to check.
  */
-
-const COMFY_URL = Deno.env.get("FORGEUI_COMFY_URL");
-const OUTPUT_DIR = Deno.env.get("FORGEUI_COMFY_OUTPUT_DIR");
-const INPUT_DIR = Deno.env.get("FORGEUI_COMFY_INPUT_DIR");
-const CHECKPOINT = Deno.env.get("FORGEUI_COMFY_CKPT");
 
 /** How long a model-free graph may take, end to end. */
 const TRIVIAL_TIMEOUT_MS = 30_000;
@@ -62,24 +56,6 @@ const IMAGE_NODE = "1";
 const SAVE_NODE = "2";
 /** Where the deliberately escaping `filename_prefix` points. */
 const ESCAPE_DIR = "forgeui-contract-escape";
-
-interface ContractTestOptions {
-  /** Needs a real checkpoint, so it is skipped unless one was named. */
-  sampler?: boolean;
-}
-
-function contractTest(
-  name: string,
-  fn: () => Promise<void>,
-  options: ContractTestOptions = {},
-): void {
-  Deno.test({
-    name,
-    ignore: COMFY_URL === undefined ||
-      (options.sampler === true && CHECKPOINT === undefined),
-    fn,
-  });
-}
 
 interface Harness {
   client: ComfyClient;

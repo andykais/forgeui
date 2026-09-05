@@ -215,10 +215,17 @@ Initial set:
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux | image | prompt, seed, size, loras |
 | `z-image-turbo` | z-image | image | prompt, seed, size; few steps by default |
+| `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
-Anima, Flux Klein, Z-Image Turbo. This list is final for v1 and must match
-the Workflows screen and the use-in-workflow popover in the mocks. Editing
+Anima, Flux Klein, Z-Image Turbo, Stable Diffusion 1.5. This list is final for
+v1 and must match the Workflows screen and the use-in-workflow popover in the
+mocks.
+
+`sd15` earns its place by being runnable: its weights are a two-gigabyte
+download and it produces an image on a CPU in seconds, so it is the workflow
+the contract check (§14.1) generates with. The other seven need a GPU and
+hand-picked model files. Editing
 workflows (Kontext-style), inpainting and dedicated upscalers are not bundled;
 they are ordinary user workflows added later.
 
@@ -447,7 +454,7 @@ Model hashing runs in a background worker; a model is re-hashed only if
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
 - **Families are a hardcoded list** in the app — `flux`, `sdxl`, `anima`,
-  `ltx`, `z-image` — served by `GET /api/families` with counts; there is no
+  `ltx`, `z-image`, `sd15` — served by `GET /api/families` with counts; there is no
   family CRUD and the app attaches no behaviour to a family, it is only the
   matching key between a workflow's `family` and a model's. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the

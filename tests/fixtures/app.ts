@@ -40,6 +40,13 @@ export interface TestAppOptions {
    * `local_url` mode. Without this the app boots with no ComfyUI at all.
    */
   comfy?: boolean | Partial<FakeComfyOptions>;
+  /**
+   * Connect to a ComfyUI that is already running instead of starting the
+   * fake — the real one, in `tests/contract/`.
+   */
+  comfyUrl?: string;
+  /** Leave the data dir behind; for a dir the caller owns. */
+  keepDataDir?: boolean;
 }
 
 export async function startTestApp(
@@ -64,14 +71,18 @@ export async function startTestApp(
     });
     argv.push("--comfy-mode", "local_url", "--comfy-url", fake.url);
   }
+  if (options.comfyUrl) {
+    argv.push("--comfy-mode", "local_url", "--comfy-url", options.comfyUrl);
+  }
 
   const app = await startApp({
     argv,
     env: EMPTY_ENV,
     quiet: true,
-    skipComfy: !options.comfy && !options.argv?.includes("managed"),
+    skipComfy: !options.comfy && !options.comfyUrl &&
+      !options.argv?.includes("managed"),
   });
-  if (fake) await app.comfy.waitForState("running", 5000);
+  if (fake || options.comfyUrl) await app.comfy.waitForState("running", 15_000);
 
   const sockets: TestSocket[] = [];
   return Object.assign(app, {
@@ -106,7 +117,9 @@ export async function startTestApp(
       await app.shutdown();
       await fake?.close();
       await app.jobs.idle();
-      await Deno.remove(dataDir, { recursive: true });
+      if (!options.keepDataDir) {
+        await Deno.remove(dataDir, { recursive: true });
+      }
     },
   });
 }

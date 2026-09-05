@@ -13,7 +13,14 @@ export type ApiGraph = Record<string, ApiNode>;
 export type ApiLink = [string, number];
 
 /** Hardcoded family list (§8.1); the app attaches no behaviour to a family. */
-export const FAMILIES = ["flux", "sdxl", "anima", "ltx", "z-image"] as const;
+export const FAMILIES = [
+  "flux",
+  "sdxl",
+  "anima",
+  "ltx",
+  "z-image",
+  "sd15",
+] as const;
 export type Family = typeof FAMILIES[number];
 
 export const PARAM_TYPES = [
