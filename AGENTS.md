@@ -9,14 +9,14 @@ the in-process fake in `tests/fake-comfy/`.
 
 ## Read these first
 
-| Document                    | Why                                                                                                                                      |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/DESIGN.md`            | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating. |
-| `docs/PHASE-1-HANDOFF.md`   | What is done, the non-obvious decisions, and where Phase 2 picks up.                                                                     |
-| `docs/IMPLEMENT-PHASE-1.md` | The Phase 1 work plan and its conventions.                                                                                              |
-| `docs/IMPLEMENT-PHASE-2.md` | The Phase 2 work plan. M5 is blocked on the hardware checklist below.                                                                    |
-| `docs/HARDWARE-CHECKLIST.md`| What the user must verify against a real ComfyUI before Phase 2 goes past M5.                                                            |
-| `docs/MOCK-REVISIONS.md`    | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
+| Document                     | Why                                                                                                                                      |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/DESIGN.md`             | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating. |
+| `docs/PHASE-1-HANDOFF.md`    | What is done, the non-obvious decisions, and where Phase 2 picks up.                                                                     |
+| `docs/IMPLEMENT-PHASE-1.md`  | The Phase 1 work plan and its conventions.                                                                                               |
+| `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan. M5 is blocked on the hardware checklist below.                                                                    |
+| `docs/HARDWARE-CHECKLIST.md` | What the user must verify against a real ComfyUI before Phase 2 goes past M5.                                                            |
+| `docs/MOCK-REVISIONS.md`     | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
 
 ## Layout
 
@@ -82,9 +82,9 @@ multi-output, error mid-graph, cancel queued, cancel running, disconnect and
 reconnect, death before `executed`). `tests/e2e/serve.ts` runs it as a managed
 child process behind a stub interpreter, so the whole spawn path is exercised.
 
-`tests/contract/comfy_test.ts` is the exception: it talks to a real ComfyUI
-and is ignored unless `FORGEUI_COMFY_URL` is set, so `deno task test` still
-needs nothing. When it disagrees with the fake, the fake is what changes.
+`tests/contract/comfy_test.ts` is the exception: it talks to a real ComfyUI and
+is ignored unless `FORGEUI_COMFY_URL` is set, so `deno task test` still needs
+nothing. When it disagrees with the fake, the fake is what changes.
 
 Prefer a test that goes through the HTTP or WebSocket interface over one that
 pokes the database. When a browser-visible change is involved, look at it:
