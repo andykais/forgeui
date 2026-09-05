@@ -23,8 +23,9 @@ proceed past M5 until the user reports the checklist green — several Phase 2
 features (thumbnails, samples, output↔model links) are worthless if the
 pipeline they hang off doesn't work for real.
 
-**2. Amend DESIGN.md first** for the three things Phase 2 needs that it does
-not yet say. Proposed wording follows; edit DESIGN.md, then implement.
+**2. Amend DESIGN.md first** for the two things Phase 2 needs that it does
+not yet say, and one rescheduling. Proposed wording follows; edit DESIGN.md,
+then implement.
 
 - **§8.1, unhashed models.** "A model appears in pickers as soon as it is
   scanned, identified by `path`. Its `models` row (keyed by `hash`) exists
@@ -36,16 +37,11 @@ not yet say. Proposed wording follows; edit DESIGN.md, then implement.
   `models[].name` matches and whose `hash` is `null`; the sidecar is not
   rewritten. `reindex` applies the same name-based resolution for sidecars
   with `hash: null`."
-- **§8.1, Civitai.** "`fetch-info` calls
-  `GET https://civitai.com/api/v1/model-versions/by-hash/<sha256>` and
-  stores the response as `civitai_json`. If `family` is unset it is set from
-  `baseModel` via a fixed map (`Flux.1 D|S|Krea` → `flux`; `SDXL 1.0`,
-  `Illustrious`, `Pony`, `NoobAI` → `sdxl`; `LTXV` → `ltx`; unknown → left
-  unset). No images are downloaded by `fetch-info`. Sample import from a
-  Civitai *model* URL lists that version's images and imports each; from an
-  *image* URL imports that one image. Generation data is stored as `raw`
-  (§8.3). All Civitai calls go through an injectable fetch and are
-  user-triggered."
+- **§13, Civitai moves to Phase 3.** `fetch-info`, Civitai URL import and
+  the infotext parser leave Phase 2. Phase 2 samples come only from file
+  drop and Promote to sample; family is set by the user. Add "Civitai
+  fetch-info and URL import (raw only)" to the Phase 3 line and remove it
+  from Phase 2.
 - **§5.1, seeding node timings.** "`node_timings` is seeded from the
   `timing.nodes` block of every existing sidecar on first launch after this
   phase and updated after every successful job (EWMA, α = 0.3)."
@@ -64,12 +60,13 @@ not yet say. Proposed wording follows; edit DESIGN.md, then implement.
 3. Models screen: tabs per kind, tiles/table, search over display name /
    filename / tags, family filter with `unset` chip, per-card SET FAMILY,
    Rescan. Model detail: edit-in-place header (display name, family combo,
-   tags, notes), full sha256 line, Copy path, Fetch info from Civitai,
-   Samples strip, and the standard gallery filtered to that model.
-4. Samples: drop a file, paste a Civitai URL, or Promote to sample from any
-   output (models popover, multi-select). Sample hover menu: Set as
-   thumbnail, Delete. Imported samples show `raw` read-only and have no Edit
-   in Generate; promoted ones behave like outputs.
+   tags, notes), full sha256 line, Copy path, Samples strip, and the
+   standard gallery filtered to that model. The "Fetch info from Civitai"
+   button and the Civitai URL field are **not rendered** in this phase.
+4. Samples: drop a file or Promote to sample from any output (models
+   popover, multi-select). Sample hover menu: Set as thumbnail, Delete.
+   Dropped files get a sidecar with empty `params` and no Edit in
+   Generate; promoted ones behave like outputs.
 5. Every model reference in the UI is a display name and a link: viewer
    PARAMS rows (shift-click filters the grid), gallery MODELS chips, the
    models filter popover (grouped checkpoints/LoRAs with counts), the LoRA
@@ -87,9 +84,9 @@ not yet say. Proposed wording follows; edit DESIGN.md, then implement.
 ## Out of scope
 
 Content-addressed inputs, `image`/`mask`/`video` params, Use in workflow,
-Upscale image, video outputs, sweeps, `deno compile`, any Civitai
-*mapping* of generation data onto workflow params (raw only), model
-downloading of any kind.
+Upscale image, video outputs, sweeps, `deno compile`, **anything Civitai**
+(fetch-info, URL import, infotext parsing — all Phase 3), model downloading
+of any kind. Leave `civitai_json` in the schema untouched and unused.
 
 ## Milestones, in order
 
@@ -129,22 +126,19 @@ downloading of any kind.
   `output_models` rows from sidecars with `hash: null`; reindex produces
   identical `output_models`; every route through HTTP.
 
-### M7 — samples and Civitai
+### M7 — samples
 - `samples/<model_hash>/` layout (§3), `samples` table, sidecar per sample
-  in the §6.2 schema with `params: {}` / `workflow: null` and `raw` for
-  imports; full sidecar copy + hard link for promotions.
-- Routes: `POST /api/models/:hash/samples` (multipart upload or
-  `{civitai_url}`), `DELETE /api/samples/:id`, `POST
-  /api/outputs/:id/promote {model_hashes[]}`, `POST
-  /api/models/:hash/fetch-info`, `PATCH … thumb_sample_id`.
-- Infotext parser (A1111 text chunk, Civitai `meta`) → `raw` only.
-- Civitai client behind an injectable `fetch`; tests use recorded fixture
-  responses; no network in the default suite.
-- Tests: import by file sets kind/size from the bytes; model-URL import
-  creates one sample per image with `raw`; promote to two models creates
-  two rows hard-linked to one file; delete removes the row and the file but
-  never the output it was promoted from; fetch-info sets family only when
-  unset.
+  in the §6.2 schema: dropped files get `params: {}` / `workflow: null` /
+  `raw: null`; promotions get a full copy of the output's sidecar plus a
+  hard link to its media.
+- Routes: `POST /api/models/:hash/samples` (multipart upload only; the
+  `{civitai_url}` body form returns 501 until Phase 3), `DELETE
+  /api/samples/:id`, `POST /api/outputs/:id/promote {model_hashes[]}`,
+  `PATCH … thumb_sample_id`.
+- Tests: import by file sets kind/size from the bytes; promote to two
+  models creates two rows hard-linked to one file; delete removes the row
+  and the file but never the output it was promoted from; set-as-thumbnail
+  updates `thumb_path` and the card.
 
 ### M8 — ETA from node timings
 - On first launch after M8, seed `node_timings` from every sidecar's
@@ -159,8 +153,8 @@ downloading of any kind.
   frames 04/05, with the MOCK-REVISIONS changes (no multi-select, no
   "New family…", no Use in Generate, no Reveal). Unhashed models render
   with a `hashing` badge and disabled edits.
-- Samples strip: drop zone, Civitai URL field + Import, hover menu (Set as
-  thumbnail, Delete), read-only `raw` on imported samples.
+- Samples strip: drop zone and hover menu (Set as thumbnail, Delete). No
+  URL field, no Fetch info button — leave the space, don't stub them.
 - **Pickers**: LoRA and checkpoint pickers gain thumbnails, output count,
   last used, "added" state, family filter default + "Show all" (frame 09).
 - **Gallery**: models filter popover grouped with counts and display
@@ -184,8 +178,9 @@ addition:
 - **Never block on hashing.** Pickers, generation and the gallery must work
   with zero hashed models. Anything that needs a hash degrades to a `path`
   identity or a disabled control, never to an error.
-- **No Civitai call without a click.** `fetch-info` and URL import are the
-  only two entry points; nothing runs on scan, on page load or on a timer.
+- **No outbound network at all in Phase 2.** The app makes no HTTP calls
+  except to the local ComfyUI; Civitai arrives in Phase 3 behind explicit
+  user actions.
 
 ## When to stop and ask
 
@@ -194,5 +189,3 @@ addition:
 - `graphToPrompt()` is unreachable through the proxy.
 - A model file type in the folders is not a safetensors/ckpt the hasher
   understands, and you would need a format-specific reader.
-- Civitai's API shape differs from the fixtures in a way the parser can't
-  absorb.
