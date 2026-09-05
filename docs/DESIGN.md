@@ -269,6 +269,9 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
 
 ### 5.1 Progress estimation
 Per-node durations are recorded per `workflow_hash` after each successful run.
+`node_timings` is seeded from the `timing.nodes` block of every existing
+sidecar on first launch after this phase and updated after every successful
+job (EWMA, α = 0.3).
 Overall progress = elapsed weight of finished nodes + fractional weight of the
 current node (from `progress` step/max). First run of a workflow falls back to
 equal weights. Displays: percent, ETA, current node label, step x/y.
@@ -430,6 +433,15 @@ Model hashing runs in a background worker; a model is re-hashed only if
 - Scans configured folders (read-only) on startup and on demand (Rescan).
   Scan and background-hash progress are pushed on `/ws` as `rescan_progress`
   and `hashing_progress` events and shown in the queue strip's status area.
+- A model appears in pickers as soon as it is scanned, identified by `path`.
+  Its `models` row (keyed by `hash`) exists only once the background hasher
+  has finished it; until then display name, family, notes, tags and thumbnail
+  cannot be edited and the UI shows a `hashing` state. At job completion,
+  `output_models` rows are written for every model whose hash is known. When a
+  model finishes hashing, a backfill pass inserts `output_models` rows for
+  existing outputs whose sidecar `models[].name` matches and whose `hash` is
+  `null`; the sidecar is not rewritten. `reindex` applies the same name-based
+  resolution for sidecars with `hash: null`.
 - Each model has: thumbnail (chosen sample or first output), family, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
@@ -851,12 +863,13 @@ not after it.
 
 **Phase 2 — models & discoverability**
 Read-only model scan, background hashing, model/LoRA pages with filtered
-gallery, family filtering in pickers, samples import (file drop + Civitai
-URL), promote-to-sample, node-timing-based ETA.
+gallery, family filtering in pickers, samples import (file drop),
+promote-to-sample, node-timing-based ETA.
 
 **Phase 3 — inputs & video polish**
 Content-addressed inputs, `image`/`video` params, "Use in workflow" + "Upscale image", provenance,
-orphan sweeps, LTX bundled workflow verified end-to-end, video previews.
+orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
+Civitai fetch-info and URL import (raw only).
 
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows, lineage view.
