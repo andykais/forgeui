@@ -1,0 +1,65 @@
+{
+  "id": "flux-klein",
+  "name": "Flux Klein",
+  "family": "flux",
+  "kind": "image",
+  "category": null,
+  "description": "Text-to-image with Flux Klein. Steps, CFG, sampler and scheduler are fixed.",
+  "params": [
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "bind": "6.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1024,
+        1024
+      ],
+      "step": 16,
+      "bind": {
+        "w": "5.width",
+        "h": "5.height"
+      }
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "flux"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "2.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "6.clip"
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "image"
+    }
+  ]
+}

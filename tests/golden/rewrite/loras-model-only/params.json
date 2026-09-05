@@ -1,0 +1,14 @@
+{
+  "prompt": "a granite bowl of figs",
+  "seed": 12345,
+  "loras": [
+    {
+      "name": "film-grain.safetensors",
+      "strength_model": 0.8
+    },
+    {
+      "name": "detail.safetensors",
+      "strength_model": 0.6
+    }
+  ]
+}

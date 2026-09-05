@@ -1,0 +1,103 @@
+{
+  "id": "krea2-img2img",
+  "name": "Flux Krea 2 (img2img)",
+  "family": "flux",
+  "kind": "image",
+  "category": "img2img",
+  "description": "Image-to-image with Flux Krea 2. The image is resized to Size before encoding.",
+  "params": [
+    {
+      "key": "image",
+      "label": "Image",
+      "type": "image",
+      "required": true,
+      "bind": "10.image"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "bind": "6.text"
+    },
+    {
+      "key": "denoise",
+      "label": "Denoise",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "bind": "3.denoise"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1024,
+        1024
+      ],
+      "step": 16,
+      "bind": {
+        "w": "11.width",
+        "h": "11.height"
+      }
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "flux"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "2.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "6.clip"
+          ]
+        }
+      }
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "advanced": true,
+      "default": 28,
+      "min": 1,
+      "max": 100,
+      "bind": "3.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "advanced": true,
+      "default": 1.0,
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "bind": "3.cfg"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "image"
+    }
+  ]
+}

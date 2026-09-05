@@ -1,0 +1,11 @@
+{
+  "prompt": "a granite bowl of figs",
+  "seed": 12345,
+  "size": [
+    1000,
+    1500
+  ],
+  "steps": 500,
+  "cfg": 7.34,
+  "loras": []
+}

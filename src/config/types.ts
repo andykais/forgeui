@@ -1,0 +1,76 @@
+/** Shapes of `config.yaml` (DESIGN.md §3.1, §11.4). */
+
+export type ComfyMode = "managed" | "local_url";
+
+export type TileSize = "small" | "large" | "table";
+
+/** Screens that own a per-screen `ui` preference. */
+export const UI_SCREENS = ["generate", "gallery", "models"] as const;
+export type UiScreen = typeof UI_SCREENS[number];
+
+/** The key actions bound in `config.yaml`; §11.4 allows no others. */
+export const KEY_ACTIONS = [
+  "select_prev",
+  "select_next",
+  "select_up",
+  "select_down",
+  "fullscreen",
+  "close",
+] as const;
+export type KeyAction = typeof KEY_ACTIONS[number];
+
+export interface ServerConfig {
+  /** Interface the app's own HTTP server binds to. */
+  host: string;
+  /** Port the UI, the API and the `/comfy/*` proxy are served on. */
+  port: number;
+}
+
+export interface ComfyConfig {
+  mode: ComfyMode;
+  /** ComfyUI install directory; required in `managed` mode. */
+  path: string | null;
+  /** Where ComfyUI listens. In `managed` mode the child is launched on it. */
+  url: string;
+  /** Interpreter for `managed` mode; null → look inside the install dir. */
+  python: string | null;
+  /** Appended verbatim to the generated launch flags. */
+  extra_args: string[];
+}
+
+/** `kind` → folders, mirroring ComfyUI's `extra_model_paths.yaml` keys. */
+export type ModelFolders = Record<string, string[]>;
+
+export type KeyBindings = Record<KeyAction, string[]>;
+
+export interface UiConfig {
+  /** Icon rail (56px) vs. labelled rail (196px). */
+  rail_expanded: boolean;
+  tile_size: Record<UiScreen, TileSize>;
+  sidebar_collapsed: Record<UiScreen, boolean>;
+  filmstrip_collapsed: Record<UiScreen, boolean>;
+}
+
+export interface Config {
+  server: ServerConfig;
+  comfy: ComfyConfig;
+  model_folders: ModelFolders;
+  keys: KeyBindings;
+  ui: UiConfig;
+}
+
+/** A `config.yaml` document, a CLI override layer, or a `PATCH` body. */
+export interface PartialConfig {
+  server?: Partial<ServerConfig>;
+  comfy?: Partial<ComfyConfig>;
+  model_folders?: ModelFolders;
+  keys?: Partial<KeyBindings>;
+  ui?: PartialUiConfig;
+}
+
+export interface PartialUiConfig {
+  rail_expanded?: boolean;
+  tile_size?: Partial<Record<UiScreen, TileSize>>;
+  sidebar_collapsed?: Partial<Record<UiScreen, boolean>>;
+  filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
+}

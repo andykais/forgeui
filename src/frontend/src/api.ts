@@ -1,0 +1,184 @@
+import type {
+  Config,
+  Job,
+  LiteralInput,
+  Manifest,
+  ModelEntry,
+  Output,
+  OutputDetail,
+  WorkflowDetail,
+  WorkflowSummary,
+} from "./types.ts";
+
+/** Every call the UI makes, in one place. */
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly body: unknown;
+
+  constructor(status: number, code: string, message: string, body: unknown) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.body = body;
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: init.body
+      ? { "content-type": "application/json", ...init.headers }
+      : init.headers,
+  });
+  const text = await response.text();
+  const body = text.length > 0 ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const error = (body as { error?: { code: string; message: string } })?.error;
+    throw new ApiError(
+      response.status,
+      error?.code ?? "error",
+      error?.message ?? `${init.method ?? "GET"} ${path} failed`,
+      body,
+    );
+  }
+  return body as T;
+}
+
+export interface OutputQuery {
+  workflow?: string;
+  kind?: string;
+  models?: string[];
+  q?: string;
+  sort?: "newest" | "oldest";
+  cursor?: string | null;
+  limit?: number;
+}
+
+export function outputQueryParams(query: OutputQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.workflow) params.set("workflow", query.workflow);
+  if (query.kind) params.set("kind", query.kind);
+  if (query.models?.length) params.set("models", query.models.join(","));
+  if (query.q) params.set("q", query.q);
+  if (query.sort && query.sort !== "newest") params.set("sort", query.sort);
+  return params;
+}
+
+export const api = {
+  config: () => request<Config>("/api/config"),
+  patchConfig: (patch: unknown) =>
+    request<Config>("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  workflows: () =>
+    request<{ workflows: WorkflowSummary[] }>("/api/workflows").then(
+      (body) => body.workflows,
+    ),
+  workflow: (id: string) => request<WorkflowDetail>(`/api/workflows/${id}`),
+  workflowInputs: (id: string) =>
+    request<{ inputs: LiteralInput[] }>(`/api/workflows/${id}/inputs`).then(
+      (body) => body.inputs,
+    ),
+  saveWorkflow: (
+    id: string,
+    body: { manifest?: Manifest; ui_json?: unknown; api_json?: unknown },
+  ) =>
+    request<WorkflowDetail>(`/api/workflows/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  createWorkflow: (body: { name?: string; ui_json?: unknown }) =>
+    request<WorkflowDetail>("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  duplicateWorkflow: (id: string) =>
+    request<WorkflowDetail>(`/api/workflows/${id}/duplicate`, {
+      method: "POST",
+    }),
+  resetWorkflow: (id: string) =>
+    request<WorkflowDetail>(`/api/workflows/${id}/reset`, { method: "POST" }),
+  deleteWorkflow: (id: string) =>
+    request<null>(`/api/workflows/${id}`, { method: "DELETE" }),
+
+  submit: (workflowId: string, params: Record<string, unknown>) =>
+    request<Job>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: workflowId, params }),
+    }),
+  rerun: (body: { output_id?: string; job_id?: string }) =>
+    request<Job>("/api/jobs/rerun", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  jobs: (query: { status?: string; workflow_id?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (query.status) params.set("status", query.status);
+    if (query.workflow_id) params.set("workflow_id", query.workflow_id);
+    if (query.limit) params.set("limit", String(query.limit));
+    return request<{ jobs: Job[] }>(`/api/jobs?${params}`).then((body) => body.jobs);
+  },
+  job: (id: string) => request<Job>(`/api/jobs/${id}`),
+  cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  clearQueue: () => request<{ cancelled: Job[] }>("/api/jobs/clear", { method: "POST" }),
+
+  outputs: (query: OutputQuery = {}) => {
+    const params = outputQueryParams(query);
+    if (query.cursor) params.set("cursor", query.cursor);
+    if (query.limit) params.set("limit", String(query.limit));
+    return request<{ outputs: Output[]; cursor: string | null }>(
+      `/api/outputs?${params}`,
+    );
+  },
+  outputCount: (query: OutputQuery = {}) =>
+    request<{ count: number }>(`/api/outputs/count?${outputQueryParams(query)}`).then(
+      (body) => body.count,
+    ),
+  outputDays: (dates: string[], query: OutputQuery = {}) => {
+    const params = outputQueryParams(query);
+    params.set("dates", dates.join(","));
+    params.set("tz_offset", String(new Date().getTimezoneOffset()));
+    return request<{ days: Record<string, number> }>(`/api/outputs/days?${params}`).then(
+      (body) => body.days,
+    );
+  },
+  output: (id: string) => request<OutputDetail>(`/api/outputs/${id}`),
+  deleteOutput: (id: string) =>
+    request<{ output: Output; undo_window_ms: number }>(`/api/outputs/${id}`, {
+      method: "DELETE",
+    }),
+  restoreOutput: (id: string) =>
+    request<{ output: Output }>(`/api/outputs/${id}/restore`, {
+      method: "POST",
+    }),
+
+  models: (kind: string) =>
+    request<{ models: ModelEntry[] }>(`/api/models?kind=${kind}`).then(
+      (body) => body.models,
+    ),
+
+  systemStatus: () =>
+    request<{ comfy: import("./types.ts").ComfyStatus; data_dir: string }>(
+      "/api/system/status",
+    ),
+  comfyLog: () =>
+    request<{ mode: string; lines: string[]; available: boolean }>(
+      "/api/system/comfy/log",
+    ),
+  restartComfy: () =>
+    request<{ comfy: import("./types.ts").ComfyStatus }>("/api/system/comfy/restart", {
+      method: "POST",
+    }),
+  reindex: () =>
+    request<{
+      sidecars: number;
+      outputs: number;
+      jobs_created: number;
+      removed: string[];
+      errors: { path: string; message: string }[];
+    }>("/api/maintenance/reindex", { method: "POST" }),
+};

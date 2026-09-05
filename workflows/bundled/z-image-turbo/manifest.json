@@ -1,0 +1,45 @@
+{
+  "id": "z-image-turbo",
+  "name": "Z-Image Turbo",
+  "family": "z-image",
+  "kind": "image",
+  "category": null,
+  "description": "Few-step text-to-image with Z-Image Turbo. Eight steps by default.",
+  "params": [
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "bind": "6.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1024,
+        1024
+      ],
+      "step": 16,
+      "bind": {
+        "w": "5.width",
+        "h": "5.height"
+      }
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "image"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "app_version": "0.1.0",
+  "job_id": "01J9SAMPLE7C3D5F7H9K1M3N5P7",
+  "created_at": "2026-08-14T09:31:00Z",
+  "workflow": null,
+  "params": {},
+  "models": [
+    {
+      "role": "lora",
+      "name": "film-grain.safetensors",
+      "hash": "sha256:aa11bb22cc33dd44ee55ff6607788990a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    }
+  ],
+  "api_graph": null,
+  "outputs": [{ "file": "01J9SAMPLE7C3D5F7H9K1M3N5P7-0.png", "kind": "image" }],
+  "raw": {
+    "source": "civitai",
+    "infotext": "figs on granite\nSteps: 28, Sampler: Euler, CFG scale: 3.5, Seed: 123456, Size: 1024x1024"
+  }
+}

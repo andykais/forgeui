@@ -98,8 +98,8 @@ in SQLite (which sits inside the data dir and is a rebuildable index).
 | Layer | Holds | Set by |
 |---|---|---|
 | Bootstrap | data dir only | `--data-dir` flag or `FORGEUI_DATA_DIR` env; default `~/.forgeui` |
-| `config.yaml` | ComfyUI mode (`managed` / `local_url`), ComfyUI install path, URL, model folders per kind, `keys` (§11.4), `ui` prefs (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
-| Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--models-dir kind=path`), applied for that process only, never written back |
+| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
+| Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--comfy-mode`, `--models-dir kind=path`, `--host`, `--port`), applied for that process only, never written back |
 
 First run: if `config.yaml` is absent the app writes one with defaults and
 empty model folders, starts, and Settings shows a first-run state (no ComfyUI
@@ -246,12 +246,21 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
    `filename_prefix` to `<jobid>/out` so all files land in `staging/<jobid>/`.
 4. **Persist job** (status `queued`) *before* submitting, so a crash or refresh
    never loses it.
-5. `POST /prompt` with the app's `client_id`; store `prompt_id`.
+5. `POST /prompt` with the app's `client_id` and a `prompt_id` the app chose
+   itself, recorded on the job row before the request goes out so the first
+   events cannot arrive before the app knows whose they are. A ComfyUI that
+   ignores the supplied id and answers with its own is accommodated.
 6. **Progress** via WebSocket: `execution_start`, `executing` (node), `progress`
    (step/max within node), `executed`, `execution_error`. Progress is stored on
    the job row so any client, after any refresh, sees the same state.
    ComfyUI's binary preview frames are relayed to clients as binary `/ws`
-   messages prefixed with the job id (push; never polled).
+   messages prefixed with the job id (push; never polled): `uint32` event (1 =
+   preview), `uint32` format (1 = JPEG, 2 = PNG, as ComfyUI tags it), `uint32`
+   job id length, the job id in UTF-8, then the image bytes.
+   Every (re)connection to ComfyUI is followed by a reconcile pass over the
+   jobs the app still thinks are in flight, resolving them from `/queue` and
+   `/history`; that is how a dropped socket or a ComfyUI that died before
+   `executed` ends up settled.
 7. On completion: `rename()` `staging/<jobid>/*` → `outputs/YYYY/MM/DD/`, write
    the sidecar, embed a copy of the sidecar in PNG `tEXt` as a convenience
    (videos are not embedded — the sidecar is canonical and MP4 metadata is
@@ -793,8 +802,13 @@ POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
+GET  /api/jobs/:id                      one job row with the ids of its outputs
 GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2; sort newest|oldest
-GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven)
+                                        rows carry the row of §7 plus media_url, the models chips
+                                        and generation_ms (the job's wall clock, for DURATION)
+GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);
+                                        `tz_offset` in minutes (as getTimezoneOffset() reports it)
+                                        so the counts match the dividers the client drew
 GET  /api/outputs/count?filters         total under the active filters (lazy)
 GET  /api/outputs/:id                   with sidecar contents
 GET  /api/outputs/:id/lineage           {parents[], children[]}; each node: id, family, deleted (→ "?" marker)
