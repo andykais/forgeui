@@ -10,7 +10,7 @@ import {
   launchFlagsForDisplay,
   pythonFor,
 } from "../../src/comfy/launch.ts";
-import { comfyTargetPath } from "../../src/comfy/proxy.ts";
+import { comfyTargetPath, proxyHttp } from "../../src/comfy/proxy.ts";
 import {
   decodePreviewFrame as decodeAppFrame,
   encodePreviewFrame,
@@ -245,4 +245,51 @@ Deno.test("the proxy strips its own prefix and keeps the query", () => {
     comfyTargetPath(new URL("http://app/comfy/scripts/app.js")),
     "/scripts/app.js",
   );
+});
+
+/**
+ * ComfyUI answers 403 when `Origin` does not match the host it serves on, and
+ * every `<script crossorigin>` in its index.html sends one. Forwarding the
+ * browser's origin verbatim left the embedded editor a blank page.
+ */
+Deno.test("the proxy presents ComfyUI's origin, not the browser's", async () => {
+  let sent: Headers | undefined;
+  const url = new URL("http://app.local:7777/comfy/assets/index.js");
+  const response = await proxyHttp(
+    new Request(url, {
+      headers: {
+        "origin": "http://app.local:7777",
+        "referer": "http://app.local:7777/comfy/",
+        "accept": "*/*",
+      },
+    }),
+    url,
+    {
+      target: () => "http://127.0.0.1:8188",
+      fetch: (_input, init) => {
+        sent = new Headers(init?.headers);
+        return Promise.resolve(new Response("ok"));
+      },
+    },
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(sent?.get("origin"), "http://127.0.0.1:8188");
+  assertEquals(sent?.get("referer"), "http://127.0.0.1:8188/");
+  // Everything else is forwarded untouched.
+  assertEquals(sent?.get("accept"), "*/*");
+});
+
+Deno.test("a request with no origin gets none invented for it", async () => {
+  let sent: Headers | undefined;
+  const url = new URL("http://app.local:7777/comfy/system_stats");
+  await proxyHttp(new Request(url), url, {
+    target: () => "http://127.0.0.1:8188",
+    fetch: (_input, init) => {
+      sent = new Headers(init?.headers);
+      return Promise.resolve(new Response("{}"));
+    },
+  });
+  assertEquals(sent?.has("origin"), false);
+  assertEquals(sent?.has("referer"), false);
 });

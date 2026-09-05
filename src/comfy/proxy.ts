@@ -33,11 +33,14 @@ function forwardHeaders(from: Headers): Headers {
   return headers;
 }
 
-/** `http://host/a/b` → `<origin>/a/b`, for headers that name a page. */
-function reorigin(value: string, origin: string): string | null {
+/** The referring page as ComfyUI would name it: its origin, its path. */
+function rerootReferer(value: string, origin: string): string | null {
   try {
     const url = new URL(value);
-    return `${origin}${url.pathname}${url.search}`;
+    const path = url.pathname.startsWith(COMFY_PREFIX)
+      ? comfyTargetPath(url)
+      : `${url.pathname}${url.search}`;
+    return `${origin}${path}`;
   } catch {
     return null;
   }
@@ -56,7 +59,7 @@ function forwardRequestHeaders(from: Headers, target: string): Headers {
   if (headers.has("origin")) headers.set("origin", origin);
   const referer = headers.get("referer");
   if (referer) {
-    const rewritten = reorigin(referer, origin);
+    const rewritten = rerootReferer(referer, origin);
     if (rewritten) headers.set("referer", rewritten);
     else headers.delete("referer");
   }
