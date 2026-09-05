@@ -3,6 +3,7 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   applyPragmas,
+  DATABASE_OPTIONS,
   migrate,
   openDatabase,
   SCHEMA_VERSION,
@@ -112,7 +113,7 @@ Deno.test("full-text search over prompts works", async () => {
 });
 
 Deno.test("a fresh in-memory database gets the same pragmas and schema", () => {
-  const db = new Database(":memory:");
+  const db = new Database(":memory:", DATABASE_OPTIONS);
   try {
     applyPragmas(db);
     migrate(db);
@@ -121,6 +122,34 @@ Deno.test("a fresh in-memory database gets the same pragmas and schema", () => {
   } finally {
     db.close();
   }
+});
+
+Deno.test("millisecond timestamps survive a round-trip", async () => {
+  await withDbDir((path) => {
+    const db = openDatabase(path);
+    try {
+      // The driver has a 32-bit bind path that silently truncates; every
+      // created_at in §7 is well past 2³¹, so this is worth pinning down.
+      const now = Date.now();
+      db.prepare(
+        `INSERT INTO jobs (id, status, params_json, api_graph_json, created_at,
+                           started_at, finished_at)
+         VALUES ('01JTIME', 'done', '{}', '{}', ?, ?, ?)`,
+      ).run(now, now + 1, now + 2);
+      assertEquals(
+        db.prepare(
+          `SELECT created_at, started_at, finished_at FROM jobs WHERE id = '01JTIME'`,
+        ).value<[number, number, number]>(),
+        [now, now + 1, now + 2],
+      );
+      assertEquals(
+        typeof db.prepare(`SELECT created_at FROM jobs`).value<[number]>()?.[0],
+        "number",
+      );
+    } finally {
+      db.close();
+    }
+  });
 });
 
 Deno.test("outputs survive a deleted workflow: no foreign keys point at one", async () => {

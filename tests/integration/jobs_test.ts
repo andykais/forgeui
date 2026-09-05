@@ -108,8 +108,21 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     assertEquals(done.progress?.pct, 100);
     assertEquals(done.outputs, [`${submitted.id}-0`]);
 
+    // Timestamps are epoch milliseconds, not something the driver mangled on
+    // the way into SQLite.
+    assert(
+      Math.abs(Date.now() - done.created_at) < 60_000,
+      `created_at ${done.created_at} is not a recent clock reading`,
+    );
+    assert(done.finished_at! >= done.started_at!);
+
     // The file moved out of staging into the day directory (§5 step 7).
     const created = new Date(submitted.created_at);
+    assertEquals(
+      created.getUTCFullYear(),
+      new Date().getUTCFullYear(),
+      "the output day directory follows the wall clock",
+    );
     const day = `${created.getUTCFullYear()}/${
       `${created.getUTCMonth() + 1}`.padStart(2, "0")
     }/${`${created.getUTCDate()}`.padStart(2, "0")}`;
