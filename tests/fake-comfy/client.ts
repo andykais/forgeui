@@ -16,6 +16,8 @@ export interface WsBinaryMessage {
   event: number;
   format: number;
   bytes: Uint8Array;
+  /** The frame as it arrived, header included, for the app's own decoder. */
+  raw: Uint8Array;
 }
 
 export type WsMessage = WsJsonMessage | WsBinaryMessage;
@@ -138,6 +140,7 @@ export class TestSocket {
       event: view.getUint32(0),
       format: view.getUint32(4),
       bytes: bytes.subarray(8),
+      raw: bytes,
     });
   }
 

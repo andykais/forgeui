@@ -4,6 +4,7 @@
     "start": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-run --allow-write src/main.ts",
     "reindex": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-write src/main.ts reindex",
     "test": "deno test --allow-run --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
+    "test:comfy": "deno test --allow-env --allow-net --allow-read --allow-write tests/contract/",
     "check": "deno check src tests",
     "fmt": "deno fmt",
     "lint": "deno lint",
