@@ -80,7 +80,7 @@ torch     $("$VENV_DIR/bin/python" -c 'import torch; print(torch.__version__)')
 model     $MODEL_DIR/$MODEL_FILE
 
   deno task test:comfy     the contract check, against this install
-  deno task comfy:serve    run it in the foreground on 127.0.0.1:8188
+  deno task comfy:serve    run it in the foreground and print its URL
 
 Both start ComfyUI themselves; set FORGEUI_COMFY_HOME if you moved the
 install, or FORGEUI_COMFY_URL to point the tests at a ComfyUI of your own.
