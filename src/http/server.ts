@@ -25,6 +25,7 @@ import {
   OutputNotFoundError,
   type OutputStore,
 } from "../outputs/store.ts";
+import type { ModelScanner } from "../models/scan.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -37,7 +38,9 @@ import { BodyError, error, methodNotAllowed, notFound } from "./json.ts";
 import { configRoutes } from "./routes/config.ts";
 import { jobRoutes } from "./routes/jobs.ts";
 import { maintenanceRoutes } from "./routes/maintenance.ts";
+import { modelRoutes } from "./routes/models.ts";
 import { outputRoutes } from "./routes/outputs.ts";
+import { serveFrontend } from "./static.ts";
 import { systemRoutes } from "./routes/system.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
 import type { WsHub } from "./ws.ts";
@@ -50,6 +53,7 @@ export interface AppContext {
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
+  models: ModelScanner;
   hub: WsHub;
 }
 
@@ -80,18 +84,11 @@ export function routeTable(ctx: AppContext): Route[] {
     ...workflowRoutes(ctx),
     ...jobRoutes(ctx),
     ...outputRoutes(ctx),
+    ...modelRoutes(ctx),
     ...systemRoutes(ctx),
     ...maintenanceRoutes(ctx),
   ];
 }
-
-const PLACEHOLDER_PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>ForgeUI</title></head>
-<body style="background:#0d0d0d;color:#ededed;font-family:system-ui;padding:3rem">
-<h1>ForgeUI</h1>
-<p>The API is running. The Svelte app is served from here once it is built.</p>
-</body></html>
-`;
 
 export function createHandler(
   ctx: AppContext,
@@ -146,10 +143,13 @@ export function createHandler(
     }
     if (methodsForPath.length > 0) return methodNotAllowed(methodsForPath);
     if (url.pathname.startsWith("/api/")) return notFound(url.pathname);
+    // Everything else is the Svelte app; its router owns the URL (§11.2).
     if (req.method === "GET" || req.method === "HEAD") {
-      return new Response(PLACEHOLDER_PAGE, {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      try {
+        return await serveFrontend(req, url);
+      } catch (cause) {
+        return handlerError(cause, req);
+      }
     }
     return notFound(url.pathname);
   };

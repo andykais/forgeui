@@ -6,7 +6,14 @@
     "test": "deno test --allow-run --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
     "check": "deno check src tests",
     "fmt": "deno fmt",
-    "lint": "deno lint"
+    "lint": "deno lint",
+    "ui:install": "cd src/frontend && npm install --no-audit --no-fund",
+    "ui:dev": "cd src/frontend && npm run dev",
+    "ui:build": "cd src/frontend && npm run build",
+    "ui:check": "cd src/frontend && npm run check",
+    "ui:fmt": "cd src/frontend && npm run fmt",
+    "test:ui": "cd src/frontend && npm run test",
+    "test:e2e": "cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
@@ -17,9 +24,9 @@
     "@std/fs": "jsr:@std/fs@^1.0.19",
     "@std/media-types": "jsr:@std/media-types@^1.1.0",
     "@std/path": "jsr:@std/path@^1.1.2",
+    "@std/streams": "jsr:@std/streams@^1.0.12",
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
-    "@std/yaml": "jsr:@std/yaml@^1.2.0",
-    "@std/streams": "jsr:@std/streams@^1.0.12"
+    "@std/yaml": "jsr:@std/yaml@^1.2.0"
   },
   "compilerOptions": {
     "strict": true,
@@ -30,6 +37,11 @@
   "exclude": [
     "docs/",
     "dist/",
-    "data/"
+    "data/",
+    "src/frontend/",
+    "tests/e2e/node_modules/",
+    "tests/e2e/.tmp-data/",
+    "tests/e2e/smoke.spec.ts",
+    "tests/e2e/playwright.config.ts"
   ]
 }

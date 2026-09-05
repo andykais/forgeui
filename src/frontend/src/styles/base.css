@@ -1,0 +1,151 @@
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--control);
+  border: 0;
+  border-radius: var(--radius-input);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--control-selected);
+}
+
+button:disabled {
+  color: var(--text-4);
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--raised);
+  border: 0;
+  border-radius: var(--radius-input);
+  padding: 6px 8px;
+  width: 100%;
+}
+
+input[type="number"],
+input.mono,
+textarea.mono,
+select.mono {
+  font-family: var(--font-mono);
+}
+
+input[type="range"] {
+  padding: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* Shared utilities the screens lean on. */
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+.dim {
+  color: var(--text-4);
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: var(--radius-control);
+  background: var(--raised-2);
+  color: var(--text-3);
+}
+
+.badge.accent {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.badge.running {
+  background: #2e2114;
+  color: var(--running);
+}
+
+.badge.error {
+  background: #2e1a18;
+  color: var(--error);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.scroll {
+  overflow-y: auto;
+  scrollbar-color: var(--control) transparent;
+  scrollbar-width: thin;
+}
+
+.empty {
+  color: var(--text-4);
+  padding: 24px;
+  text-align: center;
+}

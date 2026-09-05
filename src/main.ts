@@ -17,6 +17,7 @@ import { WsHub } from "./http/ws.ts";
 import { JobRunner } from "./jobs/pipeline.ts";
 import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
+import { ModelScanner } from "./models/scan.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -40,6 +41,7 @@ export interface App {
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
+  models: ModelScanner;
   hub: WsHub;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
@@ -81,6 +83,7 @@ async function startAppWith(
   });
   const jobs = new JobRunner({ db, paths, workflows, comfy, hub });
   const outputs = new OutputStore({ db, paths, hub });
+  const models = new ModelScanner(() => store.config);
   hub.onHello(() => [{ type: "system_status", data: comfy.status() }]);
 
   const ctx = {
@@ -91,6 +94,7 @@ async function startAppWith(
     comfy,
     jobs,
     outputs,
+    models,
     hub,
   };
   let server: HttpServer;
@@ -130,6 +134,7 @@ async function startAppWith(
     comfy,
     jobs,
     outputs,
+    models,
     hub,
     createdConfig: created,
     async shutdown() {

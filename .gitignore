@@ -3,3 +3,9 @@
 # Frontend build output (embedded into the binary).
 /src/frontend/dist/
 /dist/
+# Frontend and end-to-end tooling.
+/src/frontend/node_modules/
+/src/frontend/dist/
+/tests/e2e/node_modules/
+/tests/e2e/.tmp-data/
+/tests/e2e/test-results/
