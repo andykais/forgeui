@@ -130,3 +130,48 @@ test("the embedded editor loads and Save & return captures the graph", async ({ 
   expect(existsSync(join(user, "workflow.api.json"))).toBe(true);
   expect(existsSync(join(user, "workflow.ui.json"))).toBe(true);
 });
+
+/**
+ * The model library's screens against a real 2 GB checkpoint (§8.1, §8.3,
+ * M9): the card, the page, the sample promoted from a real generation, and
+ * the thumbnail that follows from it.
+ */
+test("the model library, from the card to the thumbnail", async ({ page }) => {
+  await page.goto("/models");
+
+  const card = page.locator("[data-model]").first();
+  await expect(card).toBeVisible();
+  // The boot scan hashes in the background; two gigabytes take a moment.
+  await expect(card).toHaveAttribute("data-hashing", "false", { timeout: 240_000 });
+  await expect(page.getByText(/1 output/).first()).toBeVisible();
+  await shot(page, "real-models.png");
+
+  await card.getByText("v1-5-pruned-emaonly-fp16").first().click();
+  await expect(page.getByLabel("Display name")).toHaveValue("v1-5-pruned-emaonly-fp16");
+  // The whole sha256, on its own line (§11.2).
+  await expect(page.locator(".hash .value")).toHaveText(/^[0-9a-f]{64}$/);
+  await expect(page.getByText("Samples")).toBeVisible();
+
+  // Rename it in place: blur commits, and it survives a reload.
+  const name = page.getByLabel("Display name");
+  await name.fill("Stable Diffusion 1.5");
+  await name.blur();
+  await page.reload();
+  await expect(page.getByLabel("Display name")).toHaveValue("Stable Diffusion 1.5");
+
+  // Promote the generation it made, from the viewer on this page.
+  await page.locator(".tile .surface").first().click();
+  await page.getByRole("button", { name: "Promote to sample" }).click();
+  await page.getByRole("button", { name: /Stable Diffusion 1\.5/ }).click();
+  await page.getByRole("button", { name: "Promote", exact: true }).click();
+  await expect(page.getByText(/Promoted to 1 sample/)).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await page.reload();
+  const sample = page.locator("figure").first();
+  await expect(sample).toBeVisible();
+  await sample.hover();
+  await page.getByLabel(/Set .* as thumbnail/).click();
+  await expect(page.getByText("thumbnail")).toBeVisible();
+  await shot(page, "real-model-page.png");
+});

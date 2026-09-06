@@ -18,7 +18,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 | `docs/DESIGN.md`             | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating. |
 | `docs/PHASE-1-HANDOFF.md`    | What is done, the non-obvious decisions, and where Phase 2 picks up.                                                                     |
 | `docs/IMPLEMENT-PHASE-1.md`  | The Phase 1 work plan and its conventions.                                                                                               |
-| `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan. M5–M8 are done; M9 (the frontend) is next.                                                                        |
+| `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                       |
 | `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                   |
 | `docs/MOCK-REVISIONS.md`     | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
 
@@ -82,6 +82,10 @@ those use the npm toolchain. Run both sides before you call something green.
 - Websocket payloads share the API's shapes — broadcast what `GET` returns.
 - UI: only the two keyboard bindings from `config.yaml` `keys`; no favorites, no
   batch count, no light theme.
+- A model is named by its display name everywhere it appears, and is a link to
+  its page wherever it has a hash (§8.1). Nothing Civitai exists yet: the URL
+  field and Fetch info are Phase 3, and the space for them is left empty rather
+  than stubbed.
 
 ## Testing
 

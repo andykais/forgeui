@@ -136,6 +136,10 @@ disabled; the LoRA and checkpoint pickers list filenames with no counts,
 families or thumbnails; `image` params render an explicit "arrives in a later
 phase" note, so `krea2-img2img` and `ltx` load and list but cannot generate.
 
+*Phase 2 has since delivered the model library, samples and the node-timing
+ETA, so the first two of those are no longer true; `image` params are still
+Phase 3.*
+
 ## Breadcrumbs left for Phase 2
 
 - `src/models/scan.ts` is the minimal scan; extend it rather than replace it.

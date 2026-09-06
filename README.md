@@ -21,7 +21,8 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 | `AGENTS.md`                  | How to navigate and build the repo, and the conventions a coding agent must follow.        |
 
 Phase 1 is complete and has been verified against a real ComfyUI; see the
-handoff and the hardware checklist. Phase 2 is under way at M5.
+handoff and the hardware checklist. Phase 2 — the model library, samples and the
+node-timing ETA — is complete. Phases 3–5 of DESIGN.md §13 are not started.
 
 ## Running it
 

@@ -250,13 +250,14 @@
               </Popover>
             </div>
           {/if}
+        </div>
 
-          <span class="spacer"></span>
-
-          <span class="mono dim">{bytes(model.size)}</span>
+        <div class="usage mono dim">
+          <span>{bytes(model.size)}</span>
+          <span>·</span>
           {#if model.output_count > 0}
             <a
-              class="mono outputs"
+              class="outputs"
               href={`/gallery?models=${model.hash}`}
               onclick={(event) => {
                 event.preventDefault();
@@ -265,9 +266,12 @@
             >
               {model.output_count} output{model.output_count === 1 ? "" : "s"}
             </a>
+          {:else}
+            <span>unused</span>
           {/if}
           {#if model.last_used_at}
-            <span class="mono dim">last used {relativeTime(model.last_used_at)}</span>
+            <span>·</span>
+            <span>last used {relativeTime(model.last_used_at)}</span>
           {/if}
         </div>
 
@@ -366,12 +370,8 @@
         {:else}
           <div class="grid">
             {#each outputs as output (output.id)}
-              <Tile
-                {output}
-                onopen={openOutput}
-                onedit={editInGenerate}
-                onrerun={rerun}
-              />
+              <!-- Open it; the viewer is where the actions live (§11.2). -->
+              <Tile {output} onopen={openOutput} />
             {/each}
           </div>
         {/if}
@@ -429,6 +429,7 @@
   .identity {
     flex: 1;
     min-width: 0;
+    max-width: 640px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -438,6 +439,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .usage {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
   }
 
   .name {
@@ -460,10 +468,6 @@
 
   .name:disabled {
     color: var(--text-3);
-  }
-
-  .spacer {
-    flex: 1;
   }
 
   .family {
@@ -526,7 +530,6 @@
   }
 
   .outputs {
-    font-size: 11px;
     color: var(--accent);
   }
 
