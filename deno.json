@@ -17,7 +17,8 @@
     "ui:fmt": "cd src/frontend && npm run fmt",
     "test:ui": "cd src/frontend && npm run test",
     "test:e2e": "cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.config.ts",
-    "test:e2e:comfy": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.comfy.config.ts\""
+    "test:e2e:comfy": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.comfy.config.ts\"",
+    "shots:phase2": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && FORGEUI_E2E_COMFY_APP_PORT=7897 FORGEUI_SHOTS_DIR=$PWD/docs/screenshots/phase-2 npx playwright test --config playwright.shots.config.ts\""
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
@@ -49,6 +50,7 @@
     "tests/e2e/test-results/",
     "tests/e2e/*.spec.ts",
     "tests/e2e/playwright.comfy.config.ts",
+    "tests/e2e/playwright.shots.config.ts",
     "tests/e2e/playwright.config.ts"
   ]
 }

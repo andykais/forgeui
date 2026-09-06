@@ -48,10 +48,29 @@
     untrack(() => void load());
   });
 
+  /**
+   * A page opened while the file was still being read has to notice when it
+   * stops being read: the badge goes, the fields come alive, and the URL
+   * becomes the hash the model is now known by (§8.1).
+   */
+  $effect(() => {
+    const running = app.hashing?.running ?? false;
+    const done = app.hashing?.done ?? 0;
+    void running;
+    void done;
+    untrack(() => {
+      if (model?.hashing) void load();
+    });
+  });
+
   async function load() {
     try {
       const detail = await api.model(id);
       model = detail;
+      // It was addressed by path because it had no hash; now it has one.
+      if (detail.hash && id.startsWith("path:")) {
+        navigate(`/models/${detail.hash}`, { replace: true });
+      }
       nameDraft = detail.display_name;
       notesDraft = detail.notes ?? "";
       error = null;
@@ -77,12 +96,16 @@
     }
   }
 
+  /**
+   * Only the field that was written gets its draft resynced: a reply that
+   * arrives while another field is being typed into must not overwrite it.
+   */
   async function patch(body: Parameters<typeof api.patchModel>[1]) {
     if (!model) return;
     try {
       model = await api.patchModel(model.id, body);
-      nameDraft = model.display_name;
-      notesDraft = model.notes ?? "";
+      if ("display_name" in body) nameDraft = model.display_name;
+      if ("notes" in body) notesDraft = model.notes ?? "";
       await app.refreshModels();
     } catch (cause) {
       // A 409 means the hasher has not got here yet, which the badge says.

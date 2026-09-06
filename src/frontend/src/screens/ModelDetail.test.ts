@@ -56,6 +56,7 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
 describe("the model page header", () => {
   beforeEach(() => {
     patchModel.mockReset();
+    patchModel.mockImplementation(() => Promise.resolve(detail()));
     model.mockReset();
   });
 
@@ -136,5 +137,37 @@ describe("the model page header", () => {
     await fireEvent.click(screen.getByLabelText("Remove the tag film"));
     await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(2));
     expect(patchModel.mock.calls[1]?.[1]).toEqual({ tags: ["grain"] });
+  });
+
+  test("a reply to one field does not overwrite another being typed into", async () => {
+    // The tag write returns the row as it was before the notes were typed;
+    // resyncing every draft from it would throw the notes away.
+    model.mockResolvedValue(detail());
+    let resolveTags: (value: unknown) => void = () => {};
+    patchModel.mockImplementation((_id: string, body: Record<string, unknown>) => {
+      if ("tags" in body) {
+        return new Promise((resolve) => {
+          resolveTags = resolve;
+        });
+      }
+      return Promise.resolve(detail({ notes: "typed while the tag was saving" }));
+    });
+    render(ModelDetail, { id: "a".repeat(64) });
+
+    const tags = await screen.findByLabelText("Add a tag");
+    await fireEvent.input(tags, { target: { value: "grain" } });
+    await fireEvent.keyDown(tags, { key: "Enter" });
+
+    const notes = screen.getByLabelText("Notes") as HTMLTextAreaElement;
+    await fireEvent.input(notes, { target: { value: "typed while the tag was saving" } });
+    resolveTags(detail({ tags: ["film", "grain"] }));
+    await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(1));
+
+    expect(notes.value).toBe("typed while the tag was saving");
+    await fireEvent.blur(notes);
+    await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(2));
+    expect(patchModel.mock.calls[1]?.[1]).toEqual({
+      notes: "typed while the tag was saving",
+    });
   });
 });

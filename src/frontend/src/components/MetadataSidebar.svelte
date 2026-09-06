@@ -275,11 +275,11 @@
   }
 
   .model-link {
-    color: var(--text-2);
+    color: var(--accent);
   }
 
   .model-link:hover {
-    color: var(--accent);
+    text-decoration: underline;
   }
 
   .sidebar {

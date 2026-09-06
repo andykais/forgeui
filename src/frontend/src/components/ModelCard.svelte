@@ -127,7 +127,7 @@
 
   .thumb {
     aspect-ratio: 1;
-    background: var(--canvas);
+    background: var(--control);
     display: flex;
     align-items: center;
     justify-content: center;

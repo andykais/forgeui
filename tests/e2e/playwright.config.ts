@@ -18,7 +18,7 @@ export default defineConfig({
    * documentation demos, run by name, and they leave state behind that the
    * smoke test would then trip over.
    */
-  testIgnore: /(comfy|shots|video)\.spec\.ts/,
+  testIgnore: /(comfy|shots|shots-phase2|video)\.spec\.ts/,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
