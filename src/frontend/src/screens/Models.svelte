@@ -20,6 +20,8 @@
    * and no bulk edits (MOCK-REVISIONS §8).
    */
   let models = $state<ModelEntry[]>([]);
+  /** Every model of every kind, for the counts on the tabs and the chips. */
+  let all = $state<ModelEntry[]>([]);
   let folders = $state<string[]>([]);
   let loading = $state(false);
   let searchDraft = $state("");
@@ -62,6 +64,7 @@
       models = body.models;
       folders = body.folders;
       searchDraft = q;
+      all = (await api.models({})).models;
     } catch (cause) {
       toasts.message(cause instanceof Error ? cause.message : "could not list models");
     } finally {
@@ -98,6 +101,21 @@
   }
 
   const hashingLeft = $derived(models.filter((model) => model.hashing).length);
+  const perKind = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const model of all) {
+      counts.set(model.kind, (counts.get(model.kind) ?? 0) + 1);
+    }
+    return counts;
+  });
+  const perFamily = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const model of all) {
+      if (model.kind !== kind) continue;
+      counts.set(model.family, (counts.get(model.family) ?? 0) + 1);
+    }
+    return counts;
+  });
 </script>
 
 <section class="models">
@@ -109,6 +127,7 @@
           onclick={() => setQuery({ kind: tab === "checkpoints" ? null : tab })}
         >
           {tab}
+          <span class="mono dim">{perKind.get(tab) ?? 0}</span>
         </button>
       {/each}
     </div>
@@ -141,6 +160,9 @@
           onclick={() => setQuery({ family: family === name ? null : name })}
         >
           {name}
+          {#if (perFamily.get(name) ?? 0) > 0}
+            <span class="mono dim count-chip">{perFamily.get(name)}</span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -281,6 +303,11 @@
 
   .tabs button {
     text-transform: capitalize;
+    gap: 6px;
+  }
+
+  .count-chip {
+    margin-left: 4px;
   }
 
   .families button {

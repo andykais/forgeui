@@ -235,8 +235,10 @@
             <span class="option-text">
               <span class="option-name">{model.display_name}</span>
               <span class="option-line mono dim">
-                {model.output_count > 0 ? `${model.output_count} used` : "unused"}
-                {#if model.last_used_at}· {relativeTime(model.last_used_at)}{/if}
+                {model.output_count > 0
+                  ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
+                  : "no outputs"}
+                {#if model.last_used_at}· used {relativeTime(model.last_used_at)}{/if}
                 {#if model.hashing}· hashing{/if}
               </span>
             </span>

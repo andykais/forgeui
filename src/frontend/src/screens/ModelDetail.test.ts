@@ -20,6 +20,7 @@ vi.mock("../api.ts", () => ({
     model: (...args: unknown[]) => model(...args),
     patchModel: (...args: unknown[]) => patchModel(...args),
     outputs: () => Promise.resolve({ outputs: [], cursor: null }),
+    models: () => Promise.resolve({ models: [] }),
     modelsOfKind: () => Promise.resolve([]),
     output: () => Promise.resolve({}),
   },

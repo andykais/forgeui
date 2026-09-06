@@ -37,6 +37,8 @@
   let nameDraft = $state("");
   let notesDraft = $state("");
   let tagDraft = $state("");
+  /** Family counts for the combo, as frame 05 draws them. */
+  let familyCounts = $state<Map<string, number>>(new Map());
 
   const hashing = $derived(model?.hashing ?? false);
   const selected = $derived(outputs.find((output) => output.id === selectedId) ?? null);
@@ -56,8 +58,22 @@
       outputs = detail.hash
         ? (await api.outputs({ models: [detail.hash], limit: 60 })).outputs
         : [];
+      void loadFamilyCounts(detail.kind);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  /** Decoration on the family combo: a failure here is not a failed page. */
+  async function loadFamilyCounts(kind: string) {
+    try {
+      const counts = new Map<string, number>();
+      for (const entry of (await api.models({ kind })).models) {
+        counts.set(entry.family, (counts.get(entry.family) ?? 0) + 1);
+      }
+      familyCounts = counts;
+    } catch {
+      familyCounts = new Map();
     }
   }
 
@@ -188,6 +204,16 @@
   </div>
 {:else if model}
   <section class="model">
+    <nav class="crumbs mono dim">
+      <button onclick={() => navigate("/models")}>Models</button>
+      <span>/</span>
+      <button onclick={() => navigate(`/models?kind=${model?.kind}`)}>
+        {model.kind}
+      </button>
+      <span>/</span>
+      <span class="here">{model.display_name}</span>
+    </nav>
+
     <header class="head">
       <button class="back" title="Back to models" onclick={() => navigate("/models")}>
         <ArrowLeft size={15} />
@@ -220,6 +246,17 @@
             }}
           />
 
+          {#if model.display_name !== model.filename.replace(/\.[^.]+$/, "")}
+            <!-- The name is editable; the filename it falls back to is not. -->
+            <button
+              class="reset mono"
+              disabled={hashing}
+              onclick={() => patch({ display_name: null })}
+            >
+              Reset to filename
+            </button>
+          {/if}
+
           {#if hashing}
             <span class="badge hashing mono" title="Reading the file to identify it">
               hashing
@@ -238,13 +275,14 @@
               >
                 {#each [...FAMILIES, "unset"] as family (family)}
                   <button
-                    class="option"
+                    class="option family-option"
                     onclick={() => {
                       familyOpen = false;
                       void patch({ family });
                     }}
                   >
-                    {family}
+                    <span>{family}</span>
+                    <span class="mono dim">{familyCounts.get(family) ?? 0}</span>
                   </button>
                 {/each}
               </Popover>
@@ -387,6 +425,49 @@
     display: flex;
     flex-direction: column;
     overflow: auto;
+  }
+
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px 0;
+    font-size: 11px;
+  }
+
+  .crumbs button {
+    background: transparent;
+    color: var(--text-3);
+    padding: 0;
+    font-size: 11px;
+    text-transform: capitalize;
+  }
+
+  .crumbs button:hover {
+    color: var(--accent);
+  }
+
+  .crumbs .here {
+    color: var(--text-2);
+  }
+
+  .reset {
+    background: transparent;
+    color: var(--text-4);
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .reset:hover:not(:disabled) {
+    color: var(--text-2);
+    background: var(--control);
+  }
+
+  .family-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
   }
 
   .head {

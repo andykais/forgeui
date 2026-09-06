@@ -82,6 +82,7 @@
         {#if sample.path === thumbPath}
           <figcaption class="mono">thumbnail</figcaption>
         {/if}
+        <span class="origin mono">{sample.reusable ? "promoted" : "dropped file"}</span>
       </figure>
     {/each}
 
@@ -200,6 +201,7 @@
 
   figcaption {
     position: absolute;
+    pointer-events: none;
     top: 4px;
     left: 4px;
     font-size: 9px;
@@ -207,6 +209,23 @@
     border-radius: var(--radius-control);
     background: var(--accent);
     color: #08191d;
+  }
+
+  .origin {
+    position: absolute;
+    /* A label, not a control: it must never take the menu's clicks. */
+    pointer-events: none;
+    bottom: 4px;
+    left: 4px;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: var(--radius-control);
+    background: rgb(0 0 0 / 55%);
+    color: var(--text-3);
+  }
+
+  .sample:hover .origin {
+    opacity: 0;
   }
 
   .drop {
