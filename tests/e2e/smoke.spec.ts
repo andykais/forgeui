@@ -174,3 +174,72 @@ test("the LoRA picker lists the scanned folder, and rows link their strengths", 
   await page.getByRole("button", { name: /Add/ }).click();
   await expect(page.getByText("added")).toBeVisible();
 });
+
+/**
+ * The model library, end to end (§8.1, §8.3): the folders are scanned and
+ * hashed at boot, a generation that used a LoRA is findable from that LoRA's
+ * page, and promoting it to a sample gives the model a thumbnail.
+ *
+ * It runs last because it leaves a job, a sample and a renamed model behind,
+ * and the tests above expect a quiet data dir.
+ */
+test("scan, hash, then find a generation from the model that made it", async ({
+  page,
+}) => {
+  // Generate with a LoRA, so there is something to attribute.
+  await page.goto("/generate");
+  await page.locator(".workflow-card").click();
+  await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
+
+  const promptText = `a heron in reeds, models take ${Date.now()}`;
+  await page.locator('[data-param="prompt"] textarea').fill(promptText);
+  await page.getByRole("button", { name: /Add/ }).click();
+  await page.getByRole("button", { name: /film-grain-35mm/ }).click();
+  await page.getByRole("button", { name: "Generate", exact: true }).click();
+  await expect(page.locator(".tile").first()).toContainText(promptText.slice(0, 20), {
+    timeout: 30_000,
+  });
+
+  // The Models screen lists what the scan found, hashed by now. The rail
+  // slot is live rather than the disabled placeholder Phase 1 shipped.
+  await page.getByRole("link", { name: "Models" }).click();
+  await expect(page).toHaveURL(/\/models$/);
+  await page.getByRole("button", { name: "loras" }).click();
+  const card = page.locator('[data-model]').filter({ hasText: "film-grain-35mm" });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-hashing", "false", { timeout: 30_000 });
+
+  // Its page: the header is editable in place, and the outputs are there.
+  await card.getByText("film-grain-35mm").first().click();
+  const name = page.getByLabel("Display name");
+  await expect(name).toHaveValue("film-grain-35mm");
+  await name.fill("Film grain 35mm");
+  await name.blur();
+  await expect(page.getByText("1 output")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".tile").first()).toBeVisible();
+
+  // The count is a link into the gallery filtered to this model (§11.2).
+  await page.getByText("1 output").click();
+  await expect(page).toHaveURL(/\/gallery\?models=[0-9a-f]{64}/);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator(".tile").first()).toContainText(promptText.slice(0, 20));
+
+  // Promote it to a sample of that LoRA, from the viewer.
+  await page.locator(".tile .surface").first().click();
+  await page.getByRole("button", { name: "Promote to sample" }).click();
+  await page.getByRole("button", { name: /Film grain 35mm/ }).click();
+  await page.getByRole("button", { name: "Promote", exact: true }).click();
+  await expect(page.getByText(/Promoted to 1 sample/)).toBeVisible();
+
+  // The sample is on the model page, and can become its thumbnail (§8.3).
+  await page.keyboard.press("Escape");
+  await page.goto("/models?kind=loras");
+  await page.getByText("Film grain 35mm").first().click();
+  await expect(page.getByText("Samples")).toBeVisible();
+  const sample = page.locator("figure").first();
+  await expect(sample).toBeVisible();
+  await sample.hover();
+  await page.getByLabel(/Set .* as thumbnail/).click();
+  await expect(page.getByText("thumbnail")).toBeVisible();
+});
