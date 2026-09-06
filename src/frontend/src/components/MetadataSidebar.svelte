@@ -3,6 +3,10 @@
   import type { OutputDetail } from "../types.ts";
   import { absoluteTime, duration, relativeTime } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
+  import { navigate } from "../router.svelte.ts";
+  import { api } from "../api.ts";
+  import { toasts } from "../stores/toasts.svelte.ts";
+  import Popover from "./Popover.svelte";
 
   /**
    * The metadata sidebar (§11.2), in its stated order: actions, created,
@@ -19,8 +23,58 @@
   let { output, onedit, onrerun, ondelete }: Props = $props();
 
   let copied = $state<string | null>(null);
+  let promoteOpen = $state(false);
+  let promoting = $state(false);
+  let checked = $state<Record<string, boolean>>({});
   const sidecar = $derived(output.sidecar);
-  const models = $derived(sidecar?.models ?? []);
+  /**
+   * A model row is a link to its page once the model has been hashed, and
+   * shift-click filters the grid to it instead (§11.2). Before hashing there
+   * is only a name, so the row is plain text.
+   */
+  const models = $derived(
+    (sidecar?.models ?? []).map((model) => {
+      const hash =
+        output.models.find((link) => link.role === model.role)?.model_hash ?? null;
+      return {
+        role: model.role,
+        name: model.name,
+        hash,
+        label: hash ? app.modelName(hash) : model.name,
+      };
+    }),
+  );
+
+  /**
+   * Promote to sample (§8.3): the models popover, restricted to the models
+   * this output actually used, each checkable, with a confirm
+   * (MOCK-REVISIONS §13).
+   */
+  const promotable = $derived(models.filter((model) => model.hash !== null));
+
+  async function promote() {
+    const hashes = promotable.map((model) => model.hash!).filter((hash) => checked[hash]);
+    if (hashes.length === 0) return;
+    promoting = true;
+    try {
+      const { samples } = await api.promote(output.id, hashes);
+      toasts.message(
+        `Promoted to ${samples.length} sample${samples.length === 1 ? "" : "s"}`,
+      );
+      promoteOpen = false;
+      checked = {};
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not promote it");
+    } finally {
+      promoting = false;
+    }
+  }
+
+  function openModel(event: MouseEvent, hash: string) {
+    event.preventDefault();
+    // Shift-click filters the grid rather than leaving it (§11.2).
+    navigate(event.shiftKey ? `/gallery?models=${hash}` : `/models/${hash}`);
+  }
   /** Absolute paths, as FILES shows them. */
   const dataDir = $derived(app.dataDir);
 
@@ -63,6 +117,36 @@
   <div class="actions">
     <button class="primary" onclick={onedit}>Edit in Generate →</button>
     <button onclick={onrerun}>Rerun now ⟳</button>
+    {#if promotable.length > 0}
+      <div class="chip-wrap">
+        <button onclick={() => (promoteOpen = !promoteOpen)}>Promote to sample</button>
+        <Popover
+          open={promoteOpen}
+          width={240}
+          title="Promote to sample"
+          onclose={() => (promoteOpen = false)}
+        >
+          {#each promotable as model (model.hash)}
+            <button
+              class="option check"
+              onclick={() =>
+                (checked = { ...checked, [model.hash!]: !checked[model.hash!] })}
+            >
+              <span class="mark mono">{checked[model.hash!] ? "✓" : ""}</span>
+              <span class="option-name">{model.label}</span>
+              <span class="mono dim">{model.role}</span>
+            </button>
+          {/each}
+          <button
+            class="confirm"
+            disabled={promoting || promotable.every((model) => !checked[model.hash!])}
+            onclick={promote}
+          >
+            {promoting ? "Promoting…" : "Promote"}
+          </button>
+        </Popover>
+      </div>
+    {/if}
     <button class="danger" onclick={ondelete}>Delete</button>
   </div>
 
@@ -87,7 +171,20 @@
       </dd>
       {#each models as model (model.role + model.name)}
         <dt>{model.role}</dt>
-        <dd class="mono">{model.name}</dd>
+        <dd class="mono">
+          {#if model.hash}
+            <a
+              class="model-link"
+              href={`/models/${model.hash}`}
+              title="Open the model page · shift-click to filter the grid"
+              onclick={(event) => openModel(event, model.hash!)}
+            >
+              {model.label}
+            </a>
+          {:else}
+            {model.label}
+          {/if}
+        </dd>
       {/each}
       {#each paramRows() as [key, value] (key)}
         <dt>{key}</dt>
@@ -131,6 +228,60 @@
 </aside>
 
 <style>
+  .chip-wrap {
+    position: relative;
+  }
+
+  .option.check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    background: transparent;
+    text-align: left;
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+
+  .option.check:hover {
+    background: var(--control);
+  }
+
+  .option.check .mark {
+    width: 10px;
+    color: var(--accent);
+    font-size: 11px;
+  }
+
+  .option-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .confirm {
+    margin: 6px 7px 2px;
+    width: calc(100% - 14px);
+    background: var(--accent);
+    color: #08191d;
+    font-size: 12px;
+  }
+
+  .confirm:disabled {
+    background: var(--control);
+    color: var(--text-4);
+  }
+
+  .model-link {
+    color: var(--accent);
+  }
+
+  .model-link:hover {
+    text-decoration: underline;
+  }
+
   .sidebar {
     width: 306px;
     flex: 0 0 auto;

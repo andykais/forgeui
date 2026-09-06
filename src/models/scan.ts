@@ -2,10 +2,10 @@ import { basename, extname, join } from "@std/path";
 import type { Config } from "../config/types.ts";
 
 /**
- * The minimal read-only model scan Phase 1 needs: enough for the LoRA picker
- * and the checkpoint picker to list something. No hashing, no metadata, no
- * writing anywhere near a model folder (§3, §8.1) — the model library proper
- * is Phase 2.
+ * The read-only walk of the configured model folders (§3, §8.1). Nothing here
+ * writes anywhere near a model folder, and nothing here hashes: a scan is
+ * what makes a model appear in the pickers, identified by its path, and
+ * `src/models/hasher.ts` gives it an identity afterwards.
  */
 
 export interface ScannedModel {
@@ -80,15 +80,55 @@ async function walk(
   return found;
 }
 
-/** Cached per kind: a picker opening should not re-walk the disk each time. */
+/** What a scan reports while it runs (§8.1's `rescan_progress`). */
+export interface RescanProgress {
+  running: boolean;
+  folders_done: number;
+  folders_total: number;
+  models: number;
+}
+
+export interface RescanResult {
+  models: ScannedModel[];
+  kinds: string[];
+  folders: number;
+  elapsed_ms: number;
+}
+
+/**
+ * Cached per kind so a picker opening does not re-walk the disk, and kept in
+ * a registry keyed by path so the rest of the library can resolve a model
+ * that has no hash yet.
+ */
 export class ModelScanner {
   #config: () => Config;
   #cache = new Map<string, { at: number; models: ScannedModel[] }>();
+  #registry = new Map<string, ScannedModel>();
   #ttlMs: number;
+  #progress: RescanProgress = {
+    running: false,
+    folders_done: 0,
+    folders_total: 0,
+    models: 0,
+  };
 
   constructor(config: () => Config, ttlMs = 30_000) {
     this.#config = config;
     this.#ttlMs = ttlMs;
+  }
+
+  /** Every model seen by the last scan of each kind, keyed by absolute path. */
+  get registry(): ReadonlyMap<string, ScannedModel> {
+    return this.#registry;
+  }
+
+  get progress(): RescanProgress {
+    return { ...this.#progress };
+  }
+
+  /** The kinds `config.yaml` names; a folder list may be empty. */
+  kinds(): string[] {
+    return Object.keys(this.#config().model_folders);
   }
 
   async list(kind: string, options: { refresh?: boolean } = {}): Promise<
@@ -110,7 +150,83 @@ export class ModelScanner {
     }
     models.sort((a, b) => a.display_name.localeCompare(b.display_name));
     this.#cache.set(kind, { at: Date.now(), models });
+    this.#remember(kind, models);
     return models;
+  }
+
+  /**
+   * Walk every configured kind and replace the registry with what is on disk
+   * now. Called at startup and by Rescan; the caller pushes the progress it
+   * reports on `/ws`.
+   */
+  async rescan(
+    onProgress?: (progress: RescanProgress) => void,
+  ): Promise<RescanResult> {
+    const startedAt = Date.now();
+    const folders = this.kinds().flatMap((kind) =>
+      (this.#config().model_folders[kind] ?? []).map((folder) => ({
+        kind,
+        folder,
+      }))
+    );
+    this.#progress = {
+      running: true,
+      folders_done: 0,
+      folders_total: folders.length,
+      models: 0,
+    };
+    onProgress?.(this.progress);
+
+    const byKind = new Map<string, ScannedModel[]>();
+    for (const kind of this.kinds()) byKind.set(kind, []);
+    for (const { kind, folder } of folders) {
+      const found = byKind.get(kind)!;
+      const seen = new Set(found.map((model) => model.name));
+      for (const model of await walk(folder, kind)) {
+        if (seen.has(model.name)) continue;
+        seen.add(model.name);
+        found.push(model);
+      }
+      this.#progress = {
+        running: true,
+        folders_done: this.#progress.folders_done + 1,
+        folders_total: folders.length,
+        models: [...byKind.values()].reduce(
+          (total, models) => total + models.length,
+          0,
+        ),
+      };
+      onProgress?.(this.progress);
+    }
+
+    this.#registry.clear();
+    const all: ScannedModel[] = [];
+    for (const [kind, models] of byKind) {
+      models.sort((a, b) => a.display_name.localeCompare(b.display_name));
+      this.#cache.set(kind, { at: Date.now(), models });
+      this.#remember(kind, models);
+      all.push(...models);
+    }
+    this.#progress = {
+      running: false,
+      folders_done: folders.length,
+      folders_total: folders.length,
+      models: all.length,
+    };
+    onProgress?.(this.progress);
+    return {
+      models: all,
+      kinds: [...byKind.keys()],
+      folders: folders.length,
+      elapsed_ms: Date.now() - startedAt,
+    };
+  }
+
+  #remember(kind: string, models: ScannedModel[]): void {
+    for (const [path, model] of [...this.#registry]) {
+      if (model.kind === kind) this.#registry.delete(path);
+    }
+    for (const model of models) this.#registry.set(model.path, model);
   }
 
   /** The same matcher §12 describes for `q`: substring, case-insensitive. */

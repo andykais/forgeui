@@ -1,11 +1,17 @@
 import type {
   Config,
+  FamilyCount,
+  HashingProgress,
   Job,
   LiteralInput,
   Manifest,
+  ModelDetail,
   ModelEntry,
   Output,
   OutputDetail,
+  RescanProgress,
+  Sample,
+  Storage,
   WorkflowDetail,
   WorkflowSummary,
 } from "./types.ts";
@@ -156,10 +162,74 @@ export const api = {
       method: "POST",
     }),
 
-  models: (kind: string) =>
+  models: (query: { kind?: string; family?: string; q?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (query.kind) params.set("kind", query.kind);
+    if (query.family) params.set("family", query.family);
+    if (query.q) params.set("q", query.q);
+    return request<{
+      kind: string | null;
+      folders: string[];
+      models: ModelEntry[];
+      progress: { rescan: RescanProgress; hashing: HashingProgress };
+    }>(`/api/models?${params}`);
+  },
+  modelsOfKind: (kind: string) =>
     request<{ models: ModelEntry[] }>(`/api/models?kind=${kind}`).then(
       (body) => body.models,
     ),
+  model: (id: string) => request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
+  patchModel: (
+    id: string,
+    patch: {
+      display_name?: string | null;
+      family?: string | null;
+      notes?: string | null;
+      tags?: string[];
+      thumb_sample_id?: string | null;
+    },
+  ) =>
+    request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  families: () =>
+    request<{ families: FamilyCount[] }>("/api/families").then((body) => body.families),
+  rescanModels: () =>
+    request<{ models: number; queued: number }>("/api/maintenance/rescan-models", {
+      method: "POST",
+    }),
+
+  /** The drop zone on the model page; multipart, never JSON (§8.3). */
+  uploadSample: async (hash: string, file: File) => {
+    const form = new FormData();
+    form.set("file", file);
+    const response = await fetch(`/api/models/${encodeURIComponent(hash)}/samples`, {
+      method: "POST",
+      body: form,
+    });
+    const text = await response.text();
+    const body = text.length > 0 ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const error = (body as { error?: { code: string; message: string } })?.error;
+      throw new ApiError(
+        response.status,
+        error?.code ?? "error",
+        error?.message ?? "the upload failed",
+        body,
+      );
+    }
+    return body as Sample;
+  },
+  deleteSample: (id: string) =>
+    request<{ sample: Sample }>(`/api/samples/${id}`, { method: "DELETE" }),
+  promote: (outputId: string, modelHashes: string[]) =>
+    request<{ samples: Sample[] }>(`/api/outputs/${outputId}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ model_hashes: modelHashes }),
+    }),
+
+  storage: () => request<Storage>("/api/system/storage"),
 
   systemStatus: () =>
     request<{ comfy: import("./types.ts").ComfyStatus; data_dir: string }>(

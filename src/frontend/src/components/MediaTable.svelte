@@ -2,6 +2,7 @@
   import type { Output } from "../types.ts";
   import { dimensions, duration } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
+  import { navigate } from "../router.svelte.ts";
 
   /**
    * The table half of the tiles / table toggle (§11.2): thumb, prompt,
@@ -22,10 +23,21 @@
   }
 
   /**
-   * Model names come from the params until the Phase 2 scanner gives
-   * `output_models` real hashes to join against.
+   * A chip per model the output used. `output_models` is the source once the
+   * models have been hashed; before that the params are all there is, so a
+   * chip without a hash is a label rather than a link (§8.1).
    */
-  function modelChips(output: Output): string[] {
+  function modelChips(output: Output): { label: string; hash: string | null }[] {
+    if (output.models.length > 0) {
+      // Checkpoint first, then the LoRAs (§11.2).
+      const order = ["checkpoint", "unet", "lora"];
+      return [...output.models]
+        .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role))
+        .map((model) => ({
+          label: app.modelName(model.model_hash),
+          hash: model.model_hash,
+        }));
+    }
     const loras = output.params.loras;
     const names: string[] = [];
     if (typeof output.params.checkpoint === "string" && output.params.checkpoint) {
@@ -37,11 +49,12 @@
         if (name) names.push(name);
       }
     }
-    return names.map(
-      (name) =>
+    return names.map((name) => ({
+      label:
         app.loras.find((model) => model.name === name)?.display_name ??
         name.replace(/\.[^.]+$/, ""),
-    );
+      hash: null,
+    }));
   }
 </script>
 
@@ -82,11 +95,32 @@
         <td><span class="badge">{output.workflow_id ?? "—"}</span></td>
         <td class="models">
           <span class="chips">
-            {#each chips.slice(0, 2) as chip (chip)}
-              <span class="badge" title={chip}>{chip}</span>
+            {#each chips.slice(0, 2) as chip (chip.label)}
+              {#if chip.hash}
+                <a
+                  class="badge link"
+                  href={`/models/${chip.hash}`}
+                  title={chip.label}
+                  onclick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    navigate(`/models/${chip.hash}`);
+                  }}
+                >
+                  {chip.label}
+                </a>
+              {:else}
+                <span class="badge" title={chip.label}>{chip.label}</span>
+              {/if}
             {/each}
             {#if chips.length > 2}
-              <span class="badge" title={chips.slice(2).join(", ")}>
+              <span
+                class="badge"
+                title={chips
+                  .slice(2)
+                  .map((chip) => chip.label)
+                  .join(", ")}
+              >
                 +{chips.length - 2}
               </span>
             {/if}
@@ -172,6 +206,10 @@
   }
 
   /* Checkpoint first, then LoRAs, with `+n` overflow — on one line (§11.2). */
+  .badge.link:hover {
+    color: var(--accent);
+  }
+
   .models {
     max-width: 190px;
   }

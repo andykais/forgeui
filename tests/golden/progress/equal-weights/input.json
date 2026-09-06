@@ -1,0 +1,105 @@
+{
+  "graph": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "_meta": {
+        "title": "Load Checkpoint"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "CLIP Text Encode (Prompt)"
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "KSampler"
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode"
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "_meta": {
+        "title": "Save Image"
+      }
+    }
+  },
+  "events": [
+    {
+      "kind": "start"
+    },
+    {
+      "kind": "executing",
+      "node": "1"
+    },
+    {
+      "kind": "advance",
+      "ms": 400
+    },
+    {
+      "kind": "executing",
+      "node": "6"
+    },
+    {
+      "kind": "advance",
+      "ms": 100
+    },
+    {
+      "kind": "executing",
+      "node": "3"
+    },
+    {
+      "kind": "progress",
+      "node": "3",
+      "value": 1,
+      "max": 4
+    },
+    {
+      "kind": "advance",
+      "ms": 2400
+    },
+    {
+      "kind": "progress",
+      "node": "3",
+      "value": 2,
+      "max": 4
+    },
+    {
+      "kind": "advance",
+      "ms": 2400
+    },
+    {
+      "kind": "progress",
+      "node": "3",
+      "value": 4,
+      "max": 4
+    },
+    {
+      "kind": "advance",
+      "ms": 4800
+    },
+    {
+      "kind": "executing",
+      "node": "8"
+    },
+    {
+      "kind": "advance",
+      "ms": 300
+    },
+    {
+      "kind": "executing",
+      "node": "9"
+    },
+    {
+      "kind": "advance",
+      "ms": 100
+    },
+    {
+      "kind": "finish"
+    }
+  ]
+}

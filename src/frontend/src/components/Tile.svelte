@@ -60,7 +60,7 @@
     {/if}
   {/if}
 
-  <div class="actions" class:visible={selected}>
+  <div class="actions" class:visible={selected} class:empty={!onedit && !onrerun}>
     {#if onedit}
       <button onclick={() => onedit?.(output)}>Edit in Generate →</button>
     {/if}
@@ -145,6 +145,10 @@
     border-radius: var(--radius-control);
     background: rgb(13 13 13 / 82%);
     color: var(--text-2);
+  }
+
+  .actions.empty {
+    display: none;
   }
 
   .actions {

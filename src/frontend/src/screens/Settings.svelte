@@ -3,7 +3,7 @@
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
-  import { relativeTime } from "../lib/format.ts";
+  import { bytes, relativeTime } from "../lib/format.ts";
 
   /**
    * Settings (§11.2, frame 08), read-only in Phase 1: the connection, the
@@ -14,6 +14,8 @@
    */
   let log = $state<string[] | null>(null);
   let reindexing = $state(false);
+  let rescanning = $state(false);
+  let storage = $state<import("../types.ts").Storage | null>(null);
   let reindexResult = $state<string | null>(null);
   let copied = $state(false);
 
@@ -32,6 +34,31 @@
       toasts.message("Restarting ComfyUI…");
     } catch (cause) {
       toasts.message(cause instanceof Error ? cause.message : "could not restart");
+    }
+  }
+
+  /** The storage cards of §11.2; the numbers come from the server (§12). */
+  $effect(() => {
+    void api
+      .storage()
+      .then((body) => (storage = body))
+      .catch(() => {});
+  });
+
+  async function rescanModels() {
+    rescanning = true;
+    try {
+      const result = await api.rescanModels();
+      await app.refreshModels();
+      toasts.message(
+        result.queued > 0
+          ? `${result.models} models · hashing ${result.queued}`
+          : `${result.models} models, nothing new to hash`,
+      );
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "the rescan failed");
+    } finally {
+      rescanning = false;
     }
   }
 
@@ -154,7 +181,14 @@
         <code class="mono">extra_model_paths.yaml</code> is regenerated from it each launch.
       </p>
       <div class="row card-actions">
-        <button onclick={() => app.refreshModels()}>Rescan</button>
+        <button disabled={rescanning} onclick={rescanModels}>
+          {rescanning ? "Rescanning…" : "Rescan"}
+        </button>
+        {#if app.hashing?.running}
+          <span class="mono dim">
+            hashing {app.hashing.done}/{app.hashing.total}
+          </span>
+        {/if}
       </div>
     </article>
 
@@ -171,6 +205,19 @@
         <code class="mono">FORGEUI_DATA_DIR</code>, else
         <code class="mono">~/.forgeui</code>.
       </p>
+      {#if storage}
+        <div class="storage">
+          {#each [["outputs", storage.outputs], ["samples", storage.samples], ["inputs", storage.inputs], ["staging", storage.staging], ["app.db", storage.db]] as const as [label, use] (label)}
+            <div class="use">
+              <span class="use-label mono dim">{label}</span>
+              <span class="use-bytes mono">{bytes(use.bytes)}</span>
+              <span class="use-files mono dim">
+                {use.files} file{use.files === 1 ? "" : "s"}
+              </span>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <div class="field">
         <span class="label">App server</span>
         <div class="value mono">
@@ -220,6 +267,37 @@
 </section>
 
 <style>
+  .storage {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .use {
+    background: var(--control);
+    border-radius: var(--radius-input);
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .use-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .use-bytes {
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .use-files {
+    font-size: 10px;
+  }
+
   .settings {
     flex: 1;
     padding: 10px 12px 16px;

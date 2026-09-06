@@ -1,0 +1,70 @@
+{
+  "graph": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "_meta": {
+        "title": "Load Checkpoint"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "_meta": {
+        "title": "CLIP Text Encode (Prompt)"
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "_meta": {
+        "title": "KSampler"
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode"
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "_meta": {
+        "title": "Save Image"
+      }
+    }
+  },
+  "weights": {
+    "1": 400,
+    "6": 100,
+    "3": 9600,
+    "9": 100
+  },
+  "events": [
+    {
+      "kind": "start"
+    },
+    {
+      "kind": "cached",
+      "nodes": [
+        "1",
+        "6"
+      ]
+    },
+    {
+      "kind": "executing",
+      "node": "3"
+    },
+    {
+      "kind": "progress",
+      "node": "3",
+      "value": 2,
+      "max": 4
+    },
+    {
+      "kind": "advance",
+      "ms": 5000
+    },
+    {
+      "kind": "executing",
+      "node": "9"
+    },
+    {
+      "kind": "finish"
+    }
+  ]
+}

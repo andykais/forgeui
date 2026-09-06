@@ -1,0 +1,481 @@
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { join } from "@std/path";
+import { startTestApp, type TestApp, withTestApp } from "../fixtures/app.ts";
+import { sha256Of, writeFakeSafetensors } from "../fixtures/models.ts";
+import type { ModelView } from "../../src/models/library.ts";
+import type { JobRow } from "../../src/db/queries.ts";
+
+/**
+ * The model library through its routes (§12): scan, hash, edit, and the
+ * `output_models` rows that make an output findable from the model that made
+ * it (§8.1). Every assertion goes through HTTP; the database is only read
+ * afterwards to check what the routes did.
+ */
+
+const CHECKPOINT = "v1-5-pruned-emaonly-fp16.safetensors";
+
+interface ModelsResponse {
+  kind: string | null;
+  folders: string[];
+  models: ModelView[];
+  progress: {
+    rescan: { running: boolean; models: number };
+    hashing: { running: boolean; done: number; total: number };
+  };
+}
+
+interface Fixtures {
+  dir: string;
+  checkpoints: string;
+  loras: string;
+  argv: string[];
+}
+
+/** A model folder per kind, with the checkpoint `sd15` names. */
+async function modelFixtures(): Promise<Fixtures> {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-model-folders-" });
+  const checkpoints = join(dir, "checkpoints");
+  const loras = join(dir, "loras");
+  await writeFakeSafetensors(join(checkpoints, CHECKPOINT), { name: "sd15" });
+  await writeFakeSafetensors(join(loras, "film-grain-35mm.safetensors"), {
+    name: "grain",
+  });
+  await writeFakeSafetensors(join(loras, "soft-studio-light.safetensors"), {
+    name: "soft",
+    bytes: 2048,
+  });
+  return {
+    dir,
+    checkpoints,
+    loras,
+    argv: [
+      "--models-dir",
+      `checkpoints=${checkpoints}`,
+      "--models-dir",
+      `loras=${loras}`,
+    ],
+  };
+}
+
+async function withModels(
+  body: (app: TestApp, fixtures: Fixtures) => Promise<void>,
+  options: { comfy?: boolean } = {},
+): Promise<void> {
+  const fixtures = await modelFixtures();
+  try {
+    await withTestApp(
+      (app) => body(app, fixtures),
+      { argv: fixtures.argv, comfy: options.comfy },
+    );
+  } finally {
+    await Deno.remove(fixtures.dir, { recursive: true });
+  }
+}
+
+/** Scan and hash the way the boot and the Rescan button do. */
+async function scanAndHash(app: TestApp): Promise<void> {
+  await app.json("/api/maintenance/rescan-models", { method: "POST" });
+  await app.models.idle();
+}
+
+/**
+ * ComfyUI's events reach the app over a websocket, so a returned job row does
+ * not mean a finished one: wait for the row to settle.
+ */
+async function awaitJob(app: TestApp, id: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  let status = "";
+  while (!["done", "failed", "cancelled"].includes(status)) {
+    if (Date.now() > deadline) {
+      throw new Error(`job ${id} was still "${status}" after 5s`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    status = (await app.json<JobRow>(`/api/jobs/${id}`)).status;
+  }
+  await app.jobs.idle();
+}
+
+async function models(
+  app: TestApp,
+  query = "",
+): Promise<ModelsResponse> {
+  return await app.json<ModelsResponse>(`/api/models${query}`);
+}
+
+Deno.test("scanned models are listed before they are hashed", async () => {
+  await withModels(async (app) => {
+    // The route scans on demand when the background pass has not run.
+    const before = await models(app, "?kind=loras");
+    assertEquals(before.models.length, 2);
+    assert(before.models.every((model) => model.hashing));
+    assert(before.models.every((model) => model.hash === null));
+    assert(
+      before.models.every((model) => model.id.startsWith("path:")),
+      "an unhashed model is addressed by its path",
+    );
+    assertEquals(before.models[0]?.display_name, "film-grain-35mm");
+    assertEquals(before.models[0]?.family, "unset");
+    assertEquals(before.models[0]?.output_count, 0);
+    assertEquals(before.folders.length, 1);
+
+    // Editing has to wait for the hash (§8.1).
+    const rejected = await app.fetch(`/api/models/${before.models[0]!.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Film grain" }),
+    });
+    assertEquals(rejected.status, 409);
+    const body = await rejected.json() as { error: { code: string } };
+    assertEquals(body.error.code, "hashing");
+  });
+});
+
+Deno.test("hashing fills in identity, and only re-reads what changed", async () => {
+  await withModels(async (app, fixtures) => {
+    await scanAndHash(app);
+
+    const listed = await models(app);
+    assertEquals(listed.models.length, 3);
+    assert(listed.models.every((model) => !model.hashing));
+    assertEquals(listed.progress.hashing.running, false);
+    assertEquals(listed.progress.hashing.done, 3);
+
+    const checkpoint = listed.models.find((model) =>
+      model.filename === CHECKPOINT
+    )!;
+    assert(checkpoint, "the checkpoint is listed");
+    assertEquals(
+      checkpoint.hash,
+      await sha256Of(
+        await Deno.readFile(join(fixtures.checkpoints, CHECKPOINT)),
+      ),
+    );
+    assertEquals(checkpoint.id, checkpoint.hash);
+    assertEquals(checkpoint.kind, "checkpoints");
+    assertEquals(checkpoint.present, true);
+
+    // A second pass has nothing to do.
+    await scanAndHash(app);
+    assertEquals((await models(app)).progress.hashing.done, 3);
+
+    // …until a file changes, which is decided on size and mtime.
+    await writeFakeSafetensors(join(fixtures.checkpoints, CHECKPOINT), {
+      name: "sd15-v2",
+      bytes: 4096,
+    });
+    await scanAndHash(app);
+    const rehashed = (await models(app, "?kind=checkpoints")).models[0]!;
+    assert(
+      rehashed.hash !== checkpoint.hash,
+      "the rewritten file has a new hash",
+    );
+    assertEquals(
+      app.db.prepare("SELECT count(*) FROM models").value<[number]>()?.[0],
+      3,
+      "the row for that path was replaced, not duplicated",
+    );
+  });
+});
+
+Deno.test("a hashed model can be named, filed and tagged", async () => {
+  await withModels(async (app) => {
+    await scanAndHash(app);
+    const lora = (await models(app, "?kind=loras")).models[0]!;
+
+    const patched = await app.json<ModelView>(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        display_name: "  Film grain 35mm  ",
+        family: "sd15",
+        notes: "Subtle at 0.4",
+        tags: ["film", "grain", "film", "  "],
+      }),
+    });
+    assertEquals(patched.display_name, "Film grain 35mm");
+    assertEquals(patched.family, "sd15");
+    assertEquals(patched.notes, "Subtle at 0.4");
+    assertEquals(patched.tags, ["film", "grain"]);
+    // The filename is immutable and keeps naming the file (§8.1).
+    assertEquals(patched.filename, lora.filename);
+    assertEquals(patched.name, lora.name);
+
+    // It survives a fetch by hash, and a rescan.
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${lora.hash}`)).display_name,
+      "Film grain 35mm",
+    );
+    await scanAndHash(app);
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${lora.hash}`)).display_name,
+      "Film grain 35mm",
+    );
+
+    // Clearing the display name falls back to the filename (§8.1).
+    const cleared = await app.json<ModelView>(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "" }),
+    });
+    assertEquals(cleared.display_name, "film-grain-35mm");
+
+    // `q` searches display name, filename and tags; family filters.
+    assertEquals((await models(app, "?q=grain")).models.length, 1);
+    assertEquals((await models(app, "?q=FILM")).models.length, 1);
+    assertEquals((await models(app, "?family=sd15")).models.length, 1);
+    assertEquals((await models(app, "?family=unset")).models.length, 2);
+    assertEquals((await models(app, "?q=nothing")).models.length, 0);
+  });
+});
+
+Deno.test("a bad family or an unknown model is refused", async () => {
+  await withModels(async (app) => {
+    await scanAndHash(app);
+    const lora = (await models(app, "?kind=loras")).models[0]!;
+
+    const badFamily = await app.fetch(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ family: "sdxl-turbo" }),
+    });
+    assertEquals(badFamily.status, 400);
+    assertStringIncludes(
+      (await badFamily.json() as { error: { message: string } }).error.message,
+      "expected one of",
+    );
+
+    const empty = await app.fetch(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({}),
+    });
+    assertEquals(empty.status, 400);
+    await empty.body?.cancel();
+
+    const missing = await app.fetch(`/api/models/${"f".repeat(64)}`);
+    assertEquals(missing.status, 404);
+    await missing.body?.cancel();
+  });
+});
+
+Deno.test("families come back with model and workflow counts", async () => {
+  await withModels(async (app) => {
+    await scanAndHash(app);
+    const lora = (await models(app, "?kind=loras")).models[0]!;
+    await app.json(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ family: "flux" }),
+    });
+
+    const { families } = await app.json<{
+      families: { family: string; models: number; workflows: number }[];
+    }>("/api/families");
+    const byName = new Map(families.map((entry) => [entry.family, entry]));
+    // The hardcoded list of §8.1, plus `unset`.
+    assertEquals(
+      families.map((entry) => entry.family).sort(),
+      ["anima", "flux", "ltx", "sd15", "sdxl", "unset", "z-image"],
+    );
+    assertEquals(byName.get("flux")?.models, 1);
+    assertEquals(byName.get("unset")?.models, 2);
+    // Three bundled workflows are flux, one is sd15 (§4.6).
+    assertEquals(byName.get("flux")?.workflows, 3);
+    assertEquals(byName.get("sd15")?.workflows, 1);
+    assertEquals(byName.get("sd15")?.models, 0);
+  });
+});
+
+Deno.test("storage reports what the data dir holds", async () => {
+  await withModels(async (app) => {
+    const storage = await app.json<{
+      data_dir: string;
+      outputs: { files: number; bytes: number };
+      inputs: { files: number; bytes: number };
+      samples: { files: number; bytes: number };
+      db: { files: number; bytes: number };
+      total: { files: number; bytes: number };
+    }>("/api/system/storage");
+
+    assertEquals(storage.data_dir, app.paths.root);
+    assertEquals(storage.outputs, { files: 0, bytes: 0 });
+    assertEquals(storage.samples, { files: 0, bytes: 0 });
+    assert(storage.db.bytes > 0, "app.db is on disk");
+    assertEquals(storage.total.files, storage.db.files);
+
+    await Deno.writeFile(
+      join(app.paths.outputs, "2026", "09", "05", "one.png"),
+      new Uint8Array(1234),
+    ).catch(async () => {
+      await Deno.mkdir(join(app.paths.outputs, "2026", "09", "05"), {
+        recursive: true,
+      });
+      await Deno.writeFile(
+        join(app.paths.outputs, "2026", "09", "05", "one.png"),
+        new Uint8Array(1234),
+      );
+    });
+    const after = await app.json<{ outputs: { files: number; bytes: number } }>(
+      "/api/system/storage",
+    );
+    assertEquals(after.outputs, { files: 1, bytes: 1234 });
+  });
+});
+
+Deno.test("rescan and hashing progress are pushed on /ws", async () => {
+  await withModels(async (app) => {
+    const socket = await app.socket();
+    await scanAndHash(app);
+
+    const rescan = socket.json("rescan_progress");
+    assert(rescan.length > 0, "a rescan pushes progress");
+    assertEquals(rescan.at(-1)?.data.running, false);
+    assertEquals(rescan.at(-1)?.data.models, 3);
+
+    // The events are pushed, so the client sees the end of the pass a moment
+    // after the library does.
+    const finished = await socket.waitFor((message) =>
+      message.kind === "json" && message.type === "hashing_progress" &&
+      (message.data as { running: boolean; done: number }).running === false &&
+      (message.data as { done: number }).done === 3
+    );
+    assert(finished.kind === "json");
+    const hashing = socket.json("hashing_progress");
+    assert(hashing.length > 1, "hashing pushes progress as it goes");
+    const last = finished.data as {
+      running: boolean;
+      done: number;
+      total: number;
+      bytes_total: number;
+    };
+    assertEquals(last.running, false);
+    assertEquals(last.done, 3);
+    assertEquals(last.total, 3);
+    assert(last.bytes_total > 0);
+    // A client that connects late is told where things stand.
+    const late = await app.socket();
+    const hello = await late.waitFor("hashing_progress");
+    assert(hello.kind === "json");
+    assertEquals((hello.data as { done: number }).done, 3);
+  });
+});
+
+/**
+ * The §8.1 backfill: an output generated before its checkpoint was hashed has
+ * `hash: null` in its sidecar and no `output_models` row, and gets one when
+ * the hash lands — without the sidecar being rewritten.
+ */
+Deno.test("hashing backfills the outputs that named the model", async () => {
+  await withModels(async (app) => {
+    const first = await app.json<JobRow & { outputs: string[] }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "sd15",
+        params: { prompt: "a granite bowl of figs", seed: 7 },
+      }),
+    });
+    await awaitJob(app, first.id);
+    const outputId = `${first.id}-0`;
+
+    // Nothing linked it yet: the library had not hashed anything.
+    assertEquals(
+      app.db.prepare("SELECT count(*) FROM output_models WHERE output_id = ?")
+        .value<[number]>(outputId)?.[0],
+      0,
+    );
+
+    await scanAndHash(app);
+
+    const checkpoint = (await models(app, "?kind=checkpoints")).models[0]!;
+    assertEquals(checkpoint.output_count, 1);
+    assert(checkpoint.last_used_at !== null);
+    assertEquals(
+      app.db.prepare(
+        "SELECT model_hash, role FROM output_models WHERE output_id = ?",
+      ).value<[string, string]>(outputId),
+      [checkpoint.hash, "checkpoint"],
+    );
+
+    // The sidecar still says what the graph knew (§8.1).
+    const sidecar = JSON.parse(
+      await Deno.readTextFile(
+        join(
+          app.paths.root,
+          `outputs/${dayOf(first.created_at)}/${first.id}.json`,
+        ),
+      ),
+    ) as { models: { name: string; hash: string | null }[] };
+    assertEquals(sidecar.models[0]?.hash, null);
+
+    // The gallery can now filter by that model, which is the point.
+    const filtered = await app.json<{ outputs: { id: string }[] }>(
+      `/api/outputs?models=${checkpoint.hash}`,
+    );
+    assertEquals(filtered.outputs.map((output) => output.id), [outputId]);
+
+    // A job run after the hash lands is linked at completion instead.
+    const second = await app.json<JobRow>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "sd15",
+        params: { prompt: "a second run", seed: 8 },
+      }),
+    });
+    await awaitJob(app, second.id);
+    assertEquals(
+      app.db.prepare("SELECT count(*) FROM output_models WHERE output_id = ?")
+        .value<[number]>(`${second.id}-0`)?.[0],
+      1,
+    );
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${checkpoint.hash}`))
+        .output_count,
+      2,
+    );
+
+    // Deleting an output takes it out of the count; undo puts it back.
+    await app.fetch(`/api/outputs/${outputId}`, { method: "DELETE" });
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${checkpoint.hash}`))
+        .output_count,
+      1,
+    );
+    await app.fetch(`/api/outputs/${outputId}/restore`, { method: "POST" });
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${checkpoint.hash}`))
+        .output_count,
+      2,
+    );
+
+    // And a reindex rebuilds exactly the same rows from the sidecars.
+    const before = outputModelRows(app);
+    await app.json("/api/maintenance/reindex", { method: "POST" });
+    assertEquals(outputModelRows(app), before);
+    assertEquals(
+      (await app.json<ModelView>(`/api/models/${checkpoint.hash}`))
+        .output_count,
+      2,
+    );
+  }, { comfy: true });
+});
+
+Deno.test("the boot scan runs on its own", async () => {
+  const fixtures = await modelFixtures();
+  const app = await startTestApp({ argv: fixtures.argv, scanModels: true });
+  try {
+    await app.models.idle();
+    const listed = await app.json<ModelsResponse>("/api/models");
+    assertEquals(listed.models.length, 3);
+    assert(listed.models.every((model) => !model.hashing));
+  } finally {
+    await app.dispose();
+    await Deno.remove(fixtures.dir, { recursive: true });
+  }
+});
+
+function outputModelRows(app: TestApp): [string, string, string][] {
+  return app.db.prepare(
+    "SELECT output_id, model_hash, role FROM output_models ORDER BY output_id, model_hash, role",
+  ).values<[string, string, string]>();
+}
+
+function dayOf(createdAt: number): string {
+  const date = new Date(createdAt);
+  return `${date.getUTCFullYear()}/${
+    `${date.getUTCMonth() + 1}`.padStart(2, "0")
+  }/${`${date.getUTCDate()}`.padStart(2, "0")}`;
+}

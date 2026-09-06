@@ -53,8 +53,7 @@ export function fillValues(
   const values: Record<string, unknown> = {};
   for (const param of manifest.params) {
     const provided = params[param.key];
-    values[param.key] =
-      provided === undefined ? defaultFor(param) : plain(provided);
+    values[param.key] = provided === undefined ? defaultFor(param) : plain(provided);
   }
   const known = new Set(manifest.params.map((param) => param.key));
   return {

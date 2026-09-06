@@ -3,7 +3,14 @@
  * filters to be links), so navigation is pushState plus a popstate listener.
  */
 export type ScreenName =
-  "generate" | "gallery" | "workflows" | "workflow" | "comfy" | "settings";
+  | "generate"
+  | "gallery"
+  | "models"
+  | "model"
+  | "workflows"
+  | "workflow"
+  | "comfy"
+  | "settings";
 
 export interface Route {
   screen: ScreenName;
@@ -13,14 +20,30 @@ export interface Route {
   query: URLSearchParams;
 }
 
-function parse(path: string, search: string): Route {
-  const segments = path.split("/").filter((segment) => segment.length > 0);
+export function parseRoute(path: string, search: string): Route {
+  // Decoded, because an id can carry characters that had to be escaped to
+  // survive a path segment — a model with no hash is `path:<base64url>`.
+  const segments = path
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
   const query = new URLSearchParams(search);
   const [first, second] = segments;
   if (!first || first === "generate") {
     return { screen: "generate", id: null, path, query };
   }
   if (first === "gallery") return { screen: "gallery", id: null, path, query };
+  if (first === "models") {
+    return second
+      ? { screen: "model", id: second, path, query }
+      : { screen: "models", id: null, path, query };
+  }
   if (first === "workflows") {
     return second
       ? { screen: "workflow", id: second, path, query }
@@ -32,13 +55,13 @@ function parse(path: string, search: string): Route {
 }
 
 export const router = $state<{ current: Route }>({
-  current: parse(location.pathname, location.search),
+  current: parseRoute(location.pathname, location.search),
 });
 
 function apply(url: string, replace: boolean): void {
   if (replace) history.replaceState(null, "", url);
   else history.pushState(null, "", url);
-  router.current = parse(location.pathname, location.search);
+  router.current = parseRoute(location.pathname, location.search);
 }
 
 export function navigate(url: string, options: { replace?: boolean } = {}): void {
@@ -68,6 +91,6 @@ export function href(screen: ScreenName, query?: Record<string, string>): string
 
 if (typeof window !== "undefined") {
   addEventListener("popstate", () => {
-    router.current = parse(location.pathname, location.search);
+    router.current = parseRoute(location.pathname, location.search);
   });
 }

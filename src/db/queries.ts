@@ -313,10 +313,20 @@ export function insertOutputModels(
   let inserted = 0;
   for (const model of models) {
     if (!model.hash) continue;
-    statement.run(outputId, model.hash, model.role);
+    statement.run(outputId, normalizeModelHash(model.hash), model.role);
     inserted++;
   }
   return inserted;
+}
+
+/**
+ * A model hash is the bare lowercase hex sha256 of the file, which is what
+ * `models.hash` and every URL use. A sidecar written by hand (or by a future
+ * version) may spell it `sha256:…`, so it is stripped on the way in (§8.1).
+ */
+export function normalizeModelHash(hash: string): string {
+  const bare = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
+  return bare.toLowerCase();
 }
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
@@ -675,6 +685,407 @@ export function listOutputsForJob(db: Database, jobId: string): OutputRow[] {
     `SELECT ${OUTPUT_COLUMNS} FROM outputs WHERE job_id = ? AND deleted_at IS NULL
       ORDER BY id ASC`,
   ).values<OutputRecord>(jobId).map(toOutput);
+}
+
+/**
+ * A hashed model (§7). The row exists only once the background hasher has
+ * finished the file; until then a model is known by its path alone (§8.1).
+ */
+export interface ModelRow {
+  hash: string;
+  path: string;
+  kind: string;
+  size: number;
+  mtime: number;
+  display_name: string | null;
+  family: string | null;
+  notes: string | null;
+  tags: string[];
+  thumb_path: string | null;
+  output_count: number;
+  last_used_at: number | null;
+  last_seen_at: number;
+}
+
+const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
+  notes, tags_json, thumb_path, output_count, last_used_at, last_seen_at`;
+
+type ModelRecord = [
+  string,
+  string,
+  string,
+  number,
+  number,
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+  number,
+  number | null,
+  number,
+];
+
+function toModel(record: ModelRecord): ModelRow {
+  return {
+    hash: record[0],
+    path: record[1],
+    kind: record[2],
+    size: record[3],
+    mtime: record[4],
+    display_name: record[5],
+    family: record[6],
+    notes: record[7],
+    tags: parse<string[]>(record[8], []),
+    thumb_path: record[9],
+    output_count: record[10],
+    last_used_at: record[11],
+    last_seen_at: record[12],
+  };
+}
+
+export interface NewModel {
+  hash: string;
+  path: string;
+  kind: string;
+  size: number;
+  mtime: number;
+  last_seen_at: number;
+}
+
+/**
+ * Record a file the hasher finished. Editable metadata is left alone, so a
+ * re-hash of the same file never loses a display name. `path` is unique: a
+ * file whose bytes changed gets a new hash, and the row that used to hold
+ * that path goes.
+ */
+export function upsertModel(db: Database, model: NewModel): void {
+  db.prepare(`DELETE FROM models WHERE path = ? AND hash != ?`).run(
+    model.path,
+    model.hash,
+  );
+  db.prepare(
+    `INSERT INTO models (hash, path, kind, size, mtime, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(hash) DO UPDATE SET
+       path = excluded.path, kind = excluded.kind, size = excluded.size,
+       mtime = excluded.mtime, last_seen_at = excluded.last_seen_at`,
+  ).run(
+    model.hash,
+    model.path,
+    model.kind,
+    model.size,
+    model.mtime,
+    model.last_seen_at,
+  );
+}
+
+export function getModel(db: Database, hash: string): ModelRow | null {
+  const record = db.prepare(
+    `SELECT ${MODEL_COLUMNS} FROM models WHERE hash = ?`,
+  ).value<ModelRecord>(hash);
+  return record ? toModel(record) : null;
+}
+
+export function getModelByPath(db: Database, path: string): ModelRow | null {
+  const record = db.prepare(
+    `SELECT ${MODEL_COLUMNS} FROM models WHERE path = ?`,
+  ).value<ModelRecord>(path);
+  return record ? toModel(record) : null;
+}
+
+export function listModels(db: Database, kind?: string): ModelRow[] {
+  return kind === undefined
+    ? db.prepare(`SELECT ${MODEL_COLUMNS} FROM models ORDER BY path`)
+      .values<ModelRecord>().map(toModel)
+    : db.prepare(
+      `SELECT ${MODEL_COLUMNS} FROM models WHERE kind = ? ORDER BY path`,
+    ).values<ModelRecord>(kind).map(toModel);
+}
+
+/** The file is still where it was; only the sighting is news. */
+export function markModelSeen(db: Database, hash: string, at: number): void {
+  db.prepare(`UPDATE models SET last_seen_at = ? WHERE hash = ?`).run(at, hash);
+}
+
+export interface ModelMetaPatch {
+  display_name?: string | null;
+  family?: string | null;
+  notes?: string | null;
+  tags?: string[];
+  thumb_path?: string | null;
+}
+
+/** The edit-in-place header of §8.1. Nothing here touches the file. */
+export function updateModelMeta(
+  db: Database,
+  hash: string,
+  patch: ModelMetaPatch,
+): boolean {
+  const sets: string[] = [];
+  const values: (string | null)[] = [];
+  if (patch.display_name !== undefined) {
+    sets.push("display_name = ?");
+    values.push(patch.display_name);
+  }
+  if (patch.family !== undefined) {
+    sets.push("family = ?");
+    values.push(patch.family);
+  }
+  if (patch.notes !== undefined) {
+    sets.push("notes = ?");
+    values.push(patch.notes);
+  }
+  if (patch.tags !== undefined) {
+    sets.push("tags_json = ?");
+    values.push(JSON.stringify(patch.tags));
+  }
+  if (patch.thumb_path !== undefined) {
+    sets.push("thumb_path = ?");
+    values.push(patch.thumb_path);
+  }
+  if (sets.length === 0) return false;
+  return db.prepare(`UPDATE models SET ${sets.join(", ")} WHERE hash = ?`)
+    .run(...values, hash) > 0;
+}
+
+/**
+ * `output_count` and `last_used_at` are derived from `output_models` (§7).
+ * Recomputing them is cheaper to keep right than incrementing them, and it is
+ * what makes soft delete, restore and reindex agree without extra bookkeeping.
+ */
+export function refreshModelUsage(db: Database, hashes?: string[]): void {
+  const where = hashes === undefined
+    ? ""
+    : `WHERE hash IN (${hashes.map(() => "?").join(", ")})`;
+  if (hashes !== undefined && hashes.length === 0) return;
+  db.prepare(
+    `UPDATE models SET
+       output_count = (
+         SELECT count(*) FROM output_models om
+           JOIN outputs o ON o.id = om.output_id
+          WHERE om.model_hash = models.hash AND o.deleted_at IS NULL),
+       last_used_at = (
+         SELECT max(o.created_at) FROM output_models om
+           JOIN outputs o ON o.id = om.output_id
+          WHERE om.model_hash = models.hash AND o.deleted_at IS NULL)
+     ${where}`,
+  ).run(...(hashes ?? []));
+}
+
+/** Which models an output used, for the usage figures it affects. */
+export function modelHashesForOutput(db: Database, outputId: string): string[] {
+  return db.prepare(
+    `SELECT model_hash FROM output_models WHERE output_id = ?`,
+  ).values<[string]>(outputId).map(([hash]) => hash);
+}
+
+/** Model counts per family, for `GET /api/families`; null → `unset`. */
+export function modelCountsByFamily(db: Database): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (
+    const [family, count] of db.prepare(
+      `SELECT family, count(*) FROM models GROUP BY family`,
+    ).values<[string | null, number]>()
+  ) {
+    counts.set(family ?? "unset", count);
+  }
+  return counts;
+}
+
+/**
+ * Sample media for a model (§8.3): dropped on the model page, or promoted
+ * from an output. Stored in `samples/<model_hash>/` with a sidecar in the
+ * same schema as an output's, so Reuse Parameters works on both.
+ */
+export interface SampleRow {
+  id: string;
+  model_hash: string;
+  /** Relative to `<appdata>`, like every other path in the index. */
+  path: string;
+  sidecar_path: string;
+  kind: string;
+  source_url: string | null;
+  params: Record<string, unknown> | null;
+  created_at: number;
+}
+
+const SAMPLE_COLUMNS =
+  `id, model_hash, path, sidecar_path, kind, source_url, params_json,
+  created_at`;
+
+type SampleRecord = [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string | null,
+  string | null,
+  number,
+];
+
+function toSample(record: SampleRecord): SampleRow {
+  return {
+    id: record[0],
+    model_hash: record[1],
+    path: record[2],
+    sidecar_path: record[3],
+    kind: record[4],
+    source_url: record[5],
+    params: record[6] === null
+      ? null
+      : parse<Record<string, unknown>>(record[6], {}),
+    created_at: record[7],
+  };
+}
+
+export function insertSample(db: Database, sample: SampleRow): void {
+  db.prepare(
+    `INSERT INTO samples (id, model_hash, path, sidecar_path, kind,
+                          source_url, params_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sample.id,
+    sample.model_hash,
+    sample.path,
+    sample.sidecar_path,
+    sample.kind,
+    sample.source_url,
+    sample.params === null ? null : JSON.stringify(sample.params),
+    sample.created_at,
+  );
+}
+
+export function getSample(db: Database, id: string): SampleRow | null {
+  const record = db.prepare(
+    `SELECT ${SAMPLE_COLUMNS} FROM samples WHERE id = ?`,
+  )
+    .value<SampleRecord>(id);
+  return record ? toSample(record) : null;
+}
+
+/** The Samples strip of the model page, newest first. */
+export function listSamples(db: Database, modelHash: string): SampleRow[] {
+  return db.prepare(
+    `SELECT ${SAMPLE_COLUMNS} FROM samples WHERE model_hash = ?
+      ORDER BY created_at DESC, id DESC`,
+  ).values<SampleRecord>(modelHash).map(toSample);
+}
+
+export function deleteSampleRow(db: Database, id: string): boolean {
+  return db.prepare(`DELETE FROM samples WHERE id = ?`).run(id) > 0;
+}
+
+/** A thumbnail that pointed at a sample cannot outlive it. */
+export function clearThumbPath(db: Database, path: string): void {
+  db.prepare(`UPDATE models SET thumb_path = NULL WHERE thumb_path = ?`)
+    .run(path);
+}
+
+/** Most recent surviving output per model, for the thumbnail fallback (§8.1). */
+export function latestOutputPathByModel(db: Database): Map<string, string> {
+  const rows = db.prepare(
+    `SELECT om.model_hash, o.path, max(o.created_at)
+       FROM output_models om
+       JOIN outputs o ON o.id = om.output_id
+      WHERE o.deleted_at IS NULL AND o.kind = 'image'
+      GROUP BY om.model_hash`,
+  ).values<[string, string, number]>();
+  return new Map(rows.map(([hash, path]) => [hash, path]));
+}
+
+/**
+ * Per-node durations per workflow (§5.1), the weights the ETA is built from.
+ * `ewma_ms` is an exponentially weighted moving average so a machine that got
+ * faster is believed within a few runs.
+ */
+export const NODE_TIMING_ALPHA = 0.3;
+
+export interface NodeTiming {
+  node_id: string;
+  ewma_ms: number;
+  samples: number;
+}
+
+export function nodeTimingsFor(
+  db: Database,
+  workflowHash: string | null,
+): Map<string, number> {
+  if (!workflowHash) return new Map();
+  const rows = db.prepare(
+    `SELECT node_id, ewma_ms FROM node_timings WHERE workflow_hash = ?`,
+  ).values<[string, number]>(workflowHash);
+  return new Map(rows);
+}
+
+export function listNodeTimings(
+  db: Database,
+  workflowHash: string,
+): NodeTiming[] {
+  return db.prepare(
+    `SELECT node_id, ewma_ms, samples FROM node_timings
+      WHERE workflow_hash = ? ORDER BY node_id`,
+  ).values<[string, number, number]>(workflowHash).map((
+    [node_id, ewma_ms, samples],
+  ) => ({ node_id, ewma_ms, samples }));
+}
+
+export function countNodeTimings(db: Database): number {
+  return db.prepare(`SELECT count(*) FROM node_timings`).value<[number]>()
+    ?.[0] ?? 0;
+}
+
+/** Fold one run's measurements into the average (§5.1). */
+export function updateNodeTimings(
+  db: Database,
+  workflowHash: string | null,
+  nodes: Record<string, number>,
+  alpha = NODE_TIMING_ALPHA,
+): number {
+  if (!workflowHash) return 0;
+  const statement = db.prepare(
+    `INSERT INTO node_timings (workflow_hash, node_id, ewma_ms, samples)
+     VALUES (?, ?, ?, 1)
+     ON CONFLICT(workflow_hash, node_id) DO UPDATE SET
+       ewma_ms = ? * excluded.ewma_ms + (1 - ?) * node_timings.ewma_ms,
+       samples = node_timings.samples + 1`,
+  );
+  let updated = 0;
+  for (const [nodeId, ms] of Object.entries(nodes)) {
+    if (!Number.isFinite(ms) || ms < 0) continue;
+    statement.run(workflowHash, nodeId, ms, alpha, alpha);
+    updated++;
+  }
+  return updated;
+}
+
+/**
+ * Replace the whole table with what a seeding pass computed. Seeding is a
+ * rebuild from the sidecars, so running it twice has to leave the same rows.
+ */
+export function replaceNodeTimings(
+  db: Database,
+  timings: Iterable<
+    { workflow_hash: string; node_id: string; ewma_ms: number; samples: number }
+  >,
+): number {
+  db.exec(`DELETE FROM node_timings`);
+  const statement = db.prepare(
+    `INSERT INTO node_timings (workflow_hash, node_id, ewma_ms, samples)
+     VALUES (?, ?, ?, ?)`,
+  );
+  let inserted = 0;
+  for (const timing of timings) {
+    statement.run(
+      timing.workflow_hash,
+      timing.node_id,
+      timing.ewma_ms,
+      timing.samples,
+    );
+    inserted++;
+  }
+  return inserted;
 }
 
 export interface WorkflowUsage {

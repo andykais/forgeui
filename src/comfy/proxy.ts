@@ -33,6 +33,39 @@ function forwardHeaders(from: Headers): Headers {
   return headers;
 }
 
+/** The referring page as ComfyUI would name it: its origin, its path. */
+function rerootReferer(value: string, origin: string): string | null {
+  try {
+    const url = new URL(value);
+    const path = url.pathname.startsWith(COMFY_PREFIX)
+      ? comfyTargetPath(url)
+      : `${url.pathname}${url.search}`;
+    return `${origin}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Requests the browser makes in CORS mode — every `<script crossorigin>` in
+ * ComfyUI's own index.html — carry this app's origin. ComfyUI answers 403
+ * when `Origin` does not match the host it is serving on, so a proxy that
+ * forwards it verbatim serves an editor whose scripts all fail. Present
+ * ComfyUI's own origin instead, as a reverse proxy is expected to.
+ */
+function forwardRequestHeaders(from: Headers, target: string): Headers {
+  const headers = forwardHeaders(from);
+  const origin = new URL(target).origin;
+  if (headers.has("origin")) headers.set("origin", origin);
+  const referer = headers.get("referer");
+  if (referer) {
+    const rewritten = rerootReferer(referer, origin);
+    if (rewritten) headers.set("referer", rewritten);
+    else headers.delete("referer");
+  }
+  return headers;
+}
+
 export interface ProxyOptions {
   /** Origin of the running ComfyUI, e.g. `http://127.0.0.1:8188`. */
   target: () => string;
@@ -47,7 +80,7 @@ export async function proxyHttp(
   const target = new URL(comfyTargetPath(url), options.target());
   const init: RequestInit = {
     method: req.method,
-    headers: forwardHeaders(req.headers),
+    headers: forwardRequestHeaders(req.headers, target.href),
     redirect: "manual",
   };
   if (req.method !== "GET" && req.method !== "HEAD") {

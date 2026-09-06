@@ -22,6 +22,26 @@
   const comfy = $derived(app.comfy);
   const running = $derived(app.runningJob);
   const queued = $derived(app.activeJobs.filter((job) => job.status === "queued"));
+
+  /** Scanning and hashing say so here, and say nothing when idle (§8.1). */
+  const library = $derived.by(() => {
+    const rescan = app.rescan;
+    if (rescan?.running) {
+      return {
+        text: `scanning ${rescan.folders_done}/${rescan.folders_total}`,
+        title: "Walking the model folders",
+      };
+    }
+    const hashing = app.hashing;
+    if (hashing?.running) {
+      const left = Math.max(0, hashing.total - hashing.done);
+      return {
+        text: `hashing ${hashing.done}/${hashing.total}`,
+        title: hashing.current ? `${hashing.current} · ${left} to go` : `${left} to go`,
+      };
+    }
+    return null;
+  });
   const hidden = $derived(
     comfy === null || comfy.state === "disconnected" || comfy.state === "failed",
   );
@@ -96,6 +116,10 @@
 
       {#if queued.length > 0}
         <button class="clear" onclick={() => api.clearQueue()}>Clear queue</button>
+      {/if}
+      <!-- The model library's background passes, in the status area (§8.1). -->
+      {#if library}
+        <span class="chip library mono" title={library.title}>{library.text}</span>
       {/if}
       <span class="status row">
         <span class="dot" class:ok={comfy?.state === "running"}></span>
@@ -247,6 +271,11 @@
     font-size: 12px;
     background: transparent;
     color: var(--text-3);
+  }
+
+  .chip.library {
+    background: var(--accent-tint);
+    color: var(--accent);
   }
 
   .status {

@@ -15,8 +15,10 @@ import {
   type JobRow,
   jobsInFlight,
   listOutputsForJob,
+  nodeTimingsFor,
   type Progress,
   setJobPromptId,
+  type SidecarModelRef,
   updateJobProgress,
   updateJobStatus,
 } from "../db/queries.ts";
@@ -112,6 +114,8 @@ export interface JobRunnerOptions {
   hub: WsHub;
   /** Used to broadcast outputs in the shape the API returns them. */
   outputs: OutputStore;
+  /** Fills in the hashes of models the library has already hashed (§8.1). */
+  resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   now?: () => number;
 }
 
@@ -122,6 +126,7 @@ export class JobRunner {
   #comfy: ComfyManager;
   #hub: WsHub;
   #outputs: OutputStore;
+  #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #now: () => number;
   #live = new Map<string, LiveJob>();
   #byPrompt = new Map<string, string>();
@@ -136,6 +141,7 @@ export class JobRunner {
     this.#comfy = options.comfy;
     this.#hub = options.hub;
     this.#outputs = options.outputs;
+    this.#resolveModels = options.resolveModels;
     this.#now = options.now ?? Date.now;
   }
 
@@ -281,7 +287,10 @@ export class JobRunner {
     this.#live.set(input.jobId, {
       jobId: input.jobId,
       promptId,
-      tracker: new ProgressTracker(input.graph, this.#now),
+      tracker: new ProgressTracker(input.graph, {
+        now: this.#now,
+        weights: nodeTimingsFor(this.#db, input.workflowHash),
+      }),
       images: new Map(),
       lastWriteAt: 0,
       finalized: false,
@@ -490,6 +499,7 @@ export class JobRunner {
           nodes: live?.tracker.timings() ?? {},
         },
         createdAt: new Date(job.created_at),
+        resolveModels: this.#resolveModels,
       });
       updateJobStatus(this.#db, jobId, {
         status: "done",
@@ -678,7 +688,10 @@ export class JobRunner {
     const live: LiveJob = {
       jobId,
       promptId: job?.prompt_id ?? null,
-      tracker: new ProgressTracker(job?.api_graph ?? {}, this.#now),
+      tracker: new ProgressTracker(job?.api_graph ?? {}, {
+        now: this.#now,
+        weights: nodeTimingsFor(this.#db, job?.workflow_hash ?? null),
+      }),
       images: new Map(),
       lastWriteAt: 0,
       finalized: false,

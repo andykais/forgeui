@@ -20,11 +20,10 @@
     label: string;
     icon: typeof Images;
     href: string;
-    phase2?: boolean;
   }[] = [
     { screen: "generate", label: "Generate", icon: WandSparkles, href: "/generate" },
     { screen: "gallery", label: "Gallery", icon: Images, href: "/gallery" },
-    { screen: "workflows", label: "Models", icon: Brain, href: "/models", phase2: true },
+    { screen: "models", label: "Models", icon: Brain, href: "/models" },
     { screen: "workflows", label: "Workflows", icon: Workflow, href: "/workflows" },
     { screen: "comfy", label: "ComfyUI", icon: Server, href: "/comfy" },
     { screen: "settings", label: "Settings", icon: Settings, href: "/settings" },
@@ -37,6 +36,14 @@
     event.preventDefault();
     navigate(href);
   }
+
+  /** A detail page keeps its list's rail item lit. */
+  function isActive(item: { screen: ScreenName; href: string }): boolean {
+    if (current === item.screen) return true;
+    if (item.screen === "models") return current === "model";
+    if (item.screen === "workflows") return current === "workflow";
+    return false;
+  }
 </script>
 
 <nav class="rail" class:expanded aria-label="Screens">
@@ -46,25 +53,16 @@
 
   <div class="items">
     {#each items as item (item.label)}
-      {#if item.phase2}
-        <!-- The model library is Phase 2; the rail slot is kept, disabled. -->
-        <span class="item disabled" title="Models — Phase 2">
-          <item.icon size={18} />
-          {#if expanded}<span class="label-text">{item.label}</span>{/if}
-        </span>
-      {:else}
-        <a
-          class="item"
-          class:active={current === item.screen &&
-            (item.screen !== "workflows" || router.current.path.startsWith("/workflows"))}
-          href={item.href}
-          title={item.label}
-          onclick={(event) => go(event, item.href)}
-        >
-          <item.icon size={18} />
-          {#if expanded}<span class="label-text">{item.label}</span>{/if}
-        </a>
-      {/if}
+      <a
+        class="item"
+        class:active={isActive(item)}
+        href={item.href}
+        title={item.label}
+        onclick={(event) => go(event, item.href)}
+      >
+        <item.icon size={18} />
+        {#if expanded}<span class="label-text">{item.label}</span>{/if}
+      </a>
     {/each}
   </div>
 
@@ -136,16 +134,6 @@
   .item.active {
     background: var(--control-selected);
     color: var(--text);
-  }
-
-  .item.disabled {
-    color: var(--mark);
-    cursor: default;
-  }
-
-  .item.disabled:hover {
-    background: transparent;
-    color: var(--mark);
   }
 
   .label-text {

@@ -201,8 +201,9 @@ Deno.test("the models filter ANDs over output_models", async () => {
       { prompt: "with both loras", at: NOON },
       { prompt: "with one lora", at: NOON + 1000 },
     ]);
-    // Phase 1 has no model hashes yet (the scanner is Phase 2), so the rows
-    // that back this filter are written here directly.
+    // Seeded directly because this is about the SQL: one output using two
+    // models. `tests/integration/models_test.ts` covers the same filter with
+    // rows the hasher and the backfill wrote for real.
     const insert = app.db.prepare(
       `INSERT INTO output_models (output_id, model_hash, role) VALUES (?, ?, ?)`,
     );

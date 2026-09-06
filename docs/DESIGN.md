@@ -215,10 +215,17 @@ Initial set:
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux | image | prompt, seed, size, loras |
 | `z-image-turbo` | z-image | image | prompt, seed, size; few steps by default |
+| `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
-Anima, Flux Klein, Z-Image Turbo. This list is final for v1 and must match
-the Workflows screen and the use-in-workflow popover in the mocks. Editing
+Anima, Flux Klein, Z-Image Turbo, Stable Diffusion 1.5. This list is final for
+v1 and must match the Workflows screen and the use-in-workflow popover in the
+mocks.
+
+`sd15` earns its place by being runnable: its weights are a two-gigabyte
+download and it produces an image on a CPU in seconds, so it is the workflow
+the contract check (§14.1) generates with. The other seven need a GPU and
+hand-picked model files. Editing
 workflows (Kontext-style), inpainting and dedicated upscalers are not bundled;
 they are ordinary user workflows added later.
 
@@ -269,6 +276,9 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
 
 ### 5.1 Progress estimation
 Per-node durations are recorded per `workflow_hash` after each successful run.
+`node_timings` is seeded from the `timing.nodes` block of every existing
+sidecar on first launch after this phase and updated after every successful
+job (EWMA, α = 0.3).
 Overall progress = elapsed weight of finished nodes + fractional weight of the
 current node (from `progress` step/max). First run of a workflow falls back to
 equal weights. Displays: percent, ETA, current node label, step x/y.
@@ -429,13 +439,26 @@ Model hashing runs in a background worker; a model is re-hashed only if
 ### 8.1 Model library
 - Scans configured folders (read-only) on startup and on demand (Rescan).
   Scan and background-hash progress are pushed on `/ws` as `rescan_progress`
-  and `hashing_progress` events and shown in the queue strip's status area.
+  and `hashing_progress` events and shown in the queue strip's status area:
+  `{running, folders_done, folders_total, models}` and
+  `{running, done, total, current, bytes_done, bytes_total}`, where `done` and
+  `total` count the files queued for this pass and `current` is the model's
+  name. Both are pushed, never polled.
+- A model appears in pickers as soon as it is scanned, identified by `path`.
+  Its `models` row (keyed by `hash`) exists only once the background hasher
+  has finished it; until then display name, family, notes, tags and thumbnail
+  cannot be edited and the UI shows a `hashing` state. At job completion,
+  `output_models` rows are written for every model whose hash is known. When a
+  model finishes hashing, a backfill pass inserts `output_models` rows for
+  existing outputs whose sidecar `models[].name` matches and whose `hash` is
+  `null`; the sidecar is not rewritten. `reindex` applies the same name-based
+  resolution for sidecars with `hash: null`.
 - Each model has: thumbnail (chosen sample or first output), family, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
 - **Families are a hardcoded list** in the app — `flux`, `sdxl`, `anima`,
-  `ltx`, `z-image` — served by `GET /api/families` with counts; there is no
+  `ltx`, `z-image`, `sd15` — served by `GET /api/families` with counts; there is no
   family CRUD and the app attaches no behaviour to a family, it is only the
   matching key between a workflow's `family` and a model's. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the
@@ -820,8 +843,9 @@ GET  /api/config                        contents of config.yaml (effective, afte
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
 GET  /api/models?kind&family&q          q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+                                        hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail")
+PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
@@ -851,12 +875,13 @@ not after it.
 
 **Phase 2 — models & discoverability**
 Read-only model scan, background hashing, model/LoRA pages with filtered
-gallery, family filtering in pickers, samples import (file drop + Civitai
-URL), promote-to-sample, node-timing-based ETA.
+gallery, family filtering in pickers, samples import (file drop),
+promote-to-sample, node-timing-based ETA.
 
 **Phase 3 — inputs & video polish**
 Content-addressed inputs, `image`/`video` params, "Use in workflow" + "Upscale image", provenance,
-orphan sweeps, LTX bundled workflow verified end-to-end, video previews.
+orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
+Civitai fetch-info and URL import (raw only).
 
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows, lineage view.
