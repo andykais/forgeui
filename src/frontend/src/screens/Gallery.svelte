@@ -28,6 +28,7 @@
   let exhausted = $state(false);
   let total = $state<number | null>(null);
   let dayCounts = $state<Record<string, number>>({});
+  let workflowOpen = $state(false);
   let modelsOpen = $state(false);
   let sortOpen = $state(false);
   let searchDraft = $state("");
@@ -218,12 +219,25 @@
     { size: "table", icon: List, title: "Table" },
   ];
 
-  const modelNames = $derived(
-    (filters.models ?? []).map(
-      (hash) =>
-        app.loras.find((model) => model.path === hash)?.display_name ?? hash.slice(0, 10),
-    ),
-  );
+  const selectedModels = $derived(filters.models ?? []);
+  const modelNames = $derived(selectedModels.map((hash) => app.modelName(hash)));
+
+  /** Checkpoints then LoRAs, each with the count behind it (§11.2). */
+  const modelGroups = $derived([
+    {
+      label: "checkpoints",
+      models: app.checkpoints.filter((model) => model.hash !== null),
+    },
+    { label: "loras", models: app.loras.filter((model) => model.hash !== null) },
+  ]);
+
+  /** Selections always AND, so toggling one adds a condition (§11.2). */
+  function toggleModel(hash: string) {
+    const next = selectedModels.includes(hash)
+      ? selectedModels.filter((entry) => entry !== hash)
+      : [...selectedModels, hash];
+    setQuery({ models: next.length > 0 ? next.join(",") : null });
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -262,16 +276,20 @@
       </label>
 
       <div class="chip-wrap">
-        <button class="chip" onclick={() => (modelsOpen = !modelsOpen)}>
+        <button class="chip" onclick={() => (workflowOpen = !workflowOpen)}>
           Workflow: <strong>{filters.workflow ?? "All"}</strong>
           <ChevronDown size={12} />
         </button>
-        <Popover open={modelsOpen} title="Workflow" onclose={() => (modelsOpen = false)}>
+        <Popover
+          open={workflowOpen}
+          title="Workflow"
+          onclose={() => (workflowOpen = false)}
+        >
           <button
             class="option"
             onclick={() => {
               setQuery({ workflow: null });
-              modelsOpen = false;
+              workflowOpen = false;
             }}
           >
             All workflows
@@ -281,7 +299,7 @@
               class="option"
               onclick={() => {
                 setQuery({ workflow: workflow.id });
-                modelsOpen = false;
+                workflowOpen = false;
               }}
             >
               {workflow.name}
@@ -301,16 +319,44 @@
         {/each}
       </div>
 
-      {#if modelNames.length > 0}
-        <span class="chip mono">
-          Models: {modelNames.join(", ")}
-          <button
-            class="clear-chip"
-            aria-label="Clear the model filter"
-            onclick={() => setQuery({ models: null })}>×</button
-          >
-        </span>
-      {/if}
+      <div class="chip-wrap">
+        <button class="chip" onclick={() => (modelsOpen = !modelsOpen)}>
+          Models: <strong>{modelNames.length > 0 ? modelNames.join(", ") : "All"}</strong>
+          <ChevronDown size={12} />
+        </button>
+        <Popover
+          open={modelsOpen}
+          width={260}
+          title="Models"
+          onclose={() => (modelsOpen = false)}
+        >
+          {#if selectedModels.length > 0}
+            <button class="option" onclick={() => setQuery({ models: null })}>
+              Clear the model filter
+            </button>
+          {/if}
+          {#each modelGroups as group (group.label)}
+            {#if group.models.length > 0}
+              <div class="group mono dim">{group.label}</div>
+              {#each group.models as model (model.id)}
+                <button class="option check" onclick={() => toggleModel(model.hash!)}>
+                  <span class="mark mono">
+                    {selectedModels.includes(model.hash!) ? "✓" : ""}
+                  </span>
+                  <span class="option-name">{model.display_name}</span>
+                  <span class="mono dim">{model.output_count}</span>
+                </button>
+              {/each}
+            {/if}
+          {/each}
+          {#if modelGroups.every((group) => group.models.length === 0)}
+            <p class="empty">
+              Nothing has been hashed yet, so no output can be attributed to a model
+              (§8.1).
+            </p>
+          {/if}
+        </Popover>
+      </div>
 
       <span class="spacer"></span>
 
@@ -456,10 +502,38 @@
     font-weight: 400;
   }
 
-  .clear-chip {
-    background: transparent;
-    padding: 0 2px;
+  .group {
+    font-size: 10px;
+    padding: 6px 7px 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .option.check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .option.check .mark {
+    width: 10px;
+    color: var(--accent);
+    font-size: 11px;
+  }
+
+  .option-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .empty {
+    font-size: 11px;
     color: var(--text-4);
+    padding: 6px 8px;
+    margin: 0;
   }
 
   .kinds button,

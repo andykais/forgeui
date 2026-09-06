@@ -1,0 +1,233 @@
+<script lang="ts">
+  import Brain from "@lucide/svelte/icons/brain";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { FAMILIES } from "../types.ts";
+  import type { ModelEntry } from "../types.ts";
+  import { bytes, relativeTime } from "../lib/format.ts";
+  import { navigate } from "../router.svelte.ts";
+  import Popover from "./Popover.svelte";
+
+  /**
+   * One card of the Models grid (§11.2, frame 04): thumbnail, display name,
+   * family badge or an inline SET FAMILY control when it has none, and the
+   * count of outputs as a link into the gallery filtered to this model.
+   * There is no multi-select and no bulk edit (MOCK-REVISIONS §8).
+   */
+  let {
+    model,
+    onfamily,
+  }: {
+    model: ModelEntry;
+    onfamily: (model: ModelEntry, family: string) => void;
+  } = $props();
+
+  let familyOpen = $state(false);
+
+  const href = $derived(`/models/${encodeURIComponent(model.id)}`);
+  const galleryHref = $derived(model.hash ? `/gallery?models=${model.hash}` : "/gallery");
+</script>
+
+<article class="card" data-model={model.id} data-hashing={model.hashing}>
+  <a
+    class="thumb"
+    {href}
+    onclick={(event) => {
+      event.preventDefault();
+      navigate(href);
+    }}
+  >
+    {#if model.thumb_url}
+      <img src={model.thumb_url} alt="" loading="lazy" />
+    {:else}
+      <span class="plate"><Brain size={18} /></span>
+    {/if}
+  </a>
+
+  <div class="body">
+    <a
+      class="name"
+      {href}
+      onclick={(event) => {
+        event.preventDefault();
+        navigate(href);
+      }}
+    >
+      {model.display_name}
+    </a>
+
+    <div class="meta">
+      {#if model.hashing}
+        <!-- No hash yet, so nothing about it can be edited (§8.1). -->
+        <span class="badge hashing mono" title="Reading the file to identify it">
+          hashing
+        </span>
+      {:else if model.family === "unset"}
+        <div class="chip-wrap">
+          <button class="set-family mono" onclick={() => (familyOpen = !familyOpen)}>
+            SET FAMILY <ChevronDown size={11} />
+          </button>
+          <Popover
+            open={familyOpen}
+            width={150}
+            title="Family"
+            onclose={() => (familyOpen = false)}
+          >
+            {#each FAMILIES as family (family)}
+              <button
+                class="option"
+                onclick={() => {
+                  familyOpen = false;
+                  onfamily(model, family);
+                }}
+              >
+                {family}
+              </button>
+            {/each}
+          </Popover>
+        </div>
+      {:else}
+        <span class="badge mono">{model.family}</span>
+      {/if}
+
+      <span class="spacer"></span>
+
+      {#if model.output_count > 0}
+        <a
+          class="count mono"
+          href={galleryHref}
+          title="Show these in the gallery"
+          onclick={(event) => {
+            event.preventDefault();
+            navigate(galleryHref);
+          }}
+        >
+          {model.output_count} output{model.output_count === 1 ? "" : "s"}
+        </a>
+      {:else}
+        <span class="count mono dim">unused</span>
+      {/if}
+    </div>
+
+    <div class="line mono dim">
+      {bytes(model.size)}{model.last_used_at
+        ? ` · ${relativeTime(model.last_used_at)}`
+        : ""}
+    </div>
+  </div>
+</article>
+
+<style>
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: var(--raised);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+
+  .thumb {
+    aspect-ratio: 1;
+    background: var(--canvas);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--mark);
+  }
+
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .body {
+    padding: 8px 9px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .name:hover {
+    color: var(--accent);
+  }
+
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: var(--radius-control);
+    background: var(--control);
+    color: var(--text-3);
+  }
+
+  .badge.hashing {
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+
+  .set-family {
+    font-size: 10px;
+    padding: 1px 6px;
+    background: transparent;
+    border: 1px dashed var(--edge-2);
+    color: var(--text-4);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .set-family:hover {
+    color: var(--text-2);
+    border-color: var(--edge);
+  }
+
+  .chip-wrap {
+    position: relative;
+  }
+
+  .count {
+    font-size: 11px;
+    color: var(--text-3);
+  }
+
+  a.count:hover {
+    color: var(--accent);
+  }
+
+  .line {
+    font-size: 11px;
+  }
+
+  .option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    padding: 5px 8px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+
+  .option:hover {
+    background: var(--control);
+    color: var(--text);
+  }
+</style>

@@ -6,6 +6,8 @@
   import ToastHost from "./components/ToastHost.svelte";
   import Generate from "./screens/Generate.svelte";
   import Gallery from "./screens/Gallery.svelte";
+  import Models from "./screens/Models.svelte";
+  import ModelDetail from "./screens/ModelDetail.svelte";
   import Workflows from "./screens/Workflows.svelte";
   import WorkflowDetail from "./screens/WorkflowDetail.svelte";
   import Comfy from "./screens/Comfy.svelte";
@@ -38,6 +40,10 @@
       <Generate />
     {:else if screen === "gallery"}
       <Gallery />
+    {:else if screen === "models"}
+      <Models />
+    {:else if screen === "model" && router.current.id}
+      <ModelDetail id={router.current.id} />
     {:else if screen === "workflows"}
       <Workflows />
     {:else if screen === "workflow" && router.current.id}

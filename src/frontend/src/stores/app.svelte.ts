@@ -2,9 +2,11 @@ import { api } from "../api.ts";
 import type {
   ComfyStatus,
   Config,
+  HashingProgress,
   Job,
   ModelEntry,
   Output,
+  RescanProgress,
   TileSize,
   UiScreen,
   WorkflowSummary,
@@ -26,6 +28,9 @@ class AppState {
   workflows = $state<WorkflowSummary[]>([]);
   loras = $state<ModelEntry[]>([]);
   checkpoints = $state<ModelEntry[]>([]);
+  /** The model library's two background passes (§8.1), pushed on `/ws`. */
+  rescan = $state<RescanProgress | null>(null);
+  hashing = $state<HashingProgress | null>(null);
 
   /** Recent jobs, newest first: the session grid and the queue strip (§11.1). */
   jobs = $state<Job[]>([]);
@@ -92,11 +97,28 @@ class AppState {
 
   async refreshModels(): Promise<void> {
     const [loras, checkpoints] = await Promise.all([
-      api.models("loras").catch(() => []),
-      api.models("checkpoints").catch(() => []),
+      api.modelsOfKind("loras").catch(() => []),
+      api.modelsOfKind("checkpoints").catch(() => []),
     ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
+  }
+
+  /** Everything the pickers and the models filter name, by hash. */
+  model(hash: string | null | undefined): ModelEntry | null {
+    if (!hash) return null;
+    return (
+      [...this.checkpoints, ...this.loras].find(
+        (model) => model.hash === hash || model.id === hash,
+      ) ?? null
+    );
+  }
+
+  /** A model's display name, wherever one is named (§8.1). */
+  modelName(hash: string | null | undefined): string {
+    const model = this.model(hash);
+    if (model) return model.display_name;
+    return hash ? `${hash.slice(0, 8)}…` : "unknown";
   }
 
   async refreshWorkflows(): Promise<void> {
@@ -147,6 +169,17 @@ class AppState {
       case "system_status":
         this.comfy = message.data as ComfyStatus;
         break;
+      case "rescan_progress":
+        this.rescan = message.data as RescanProgress;
+        break;
+      case "hashing_progress": {
+        const progress = message.data as HashingProgress;
+        const finished = this.hashing?.running === true && !progress.running;
+        this.hashing = progress;
+        // New hashes mean new identities, counts and thumbnails.
+        if (finished) void this.refreshModels();
+        break;
+      }
       case "job":
         this.#mergeJob(message.data as Job);
         break;

@@ -212,6 +212,9 @@ export interface Config {
 }
 
 export interface ModelEntry {
+  /** The hash, or `path:<base64url>` while the file has none (§8.1). */
+  id: string;
+  hash: string | null;
   path: string;
   /** What a workflow binds to: the path relative to its model folder. */
   name: string;
@@ -221,6 +224,75 @@ export interface ModelEntry {
   kind: string;
   size: number;
   mtime: number | null;
+  notes: string | null;
+  tags: string[];
+  thumb_path: string | null;
+  thumb_url: string | null;
+  output_count: number;
+  last_used_at: number | null;
+  /** True until the background hasher has read the file (§8.1). */
+  hashing: boolean;
+  present: boolean;
+}
+
+/** The model page: the header, plus its Samples strip (§8.1, §8.3). */
+export interface ModelDetail extends ModelEntry {
+  samples: Sample[];
+}
+
+export interface Sample {
+  id: string;
+  model_hash: string;
+  path: string;
+  sidecar_path: string;
+  kind: string;
+  source_url: string | null;
+  params: Record<string, unknown> | null;
+  created_at: number;
+  media_url: string;
+  /** Promoted from an output, so Reuse Parameters works on it (§8.3). */
+  reusable: boolean;
+}
+
+/** The hardcoded list of §8.1; the app attaches no behaviour to a family. */
+export const FAMILIES = ["flux", "sdxl", "anima", "ltx", "z-image", "sd15"] as const;
+
+export interface FamilyCount {
+  family: string;
+  models: number;
+  workflows: number;
+}
+
+/** §8.1's two background passes, as they arrive on `/ws`. */
+export interface RescanProgress {
+  running: boolean;
+  folders_done: number;
+  folders_total: number;
+  models: number;
+}
+
+export interface HashingProgress {
+  running: boolean;
+  done: number;
+  total: number;
+  current: string | null;
+  bytes_done: number;
+  bytes_total: number;
+}
+
+export interface StorageUse {
+  files: number;
+  bytes: number;
+}
+
+export interface Storage {
+  data_dir: string;
+  outputs: StorageUse;
+  inputs: StorageUse;
+  samples: StorageUse;
+  staging: StorageUse;
+  db: StorageUse;
+  total: StorageUse;
 }
 
 export interface LoraRow {

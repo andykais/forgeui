@@ -6,6 +6,7 @@
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Popover from "../Popover.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
+  import { relativeTime } from "../../lib/format.ts";
 
   /**
    * §11.3: repeatable rows, drag to reorder, and linked strengths by default
@@ -35,7 +36,8 @@
   const listed = $derived.by(() => {
     const needle = search.trim().toLowerCase();
     return models.filter((model) => {
-      // Phase 1's scan has no families yet, so an unset family always shows.
+      // A model nobody has filed yet is not hidden by a family filter: it
+      // has no family because the user has not said, not because it is wrong.
       const familyOk =
         showAll || !family || model.family === family || model.family === "unset";
       const searchOk =
@@ -223,9 +225,23 @@
         {#each listed as model (model.name)}
           {@const added = value.some((row) => row.name === model.name)}
           <button class="option" disabled={added} onclick={() => add(model)}>
-            <span class="option-name">{model.display_name}</span>
+            <span class="option-thumb">
+              {#if model.thumb_url}
+                <img src={model.thumb_url} alt="" loading="lazy" />
+              {:else}
+                <span class="plate"></span>
+              {/if}
+            </span>
+            <span class="option-text">
+              <span class="option-name">{model.display_name}</span>
+              <span class="option-line mono dim">
+                {model.output_count > 0 ? `${model.output_count} used` : "unused"}
+                {#if model.last_used_at}· {relativeTime(model.last_used_at)}{/if}
+                {#if model.hashing}· hashing{/if}
+              </span>
+            </span>
             {#if added}
-              <span class="dim">added</span>
+              <span class="dim added">added</span>
             {:else}
               <span class="badge">{model.family}</span>
             {/if}
@@ -344,6 +360,38 @@
 
   .option:hover:not(:disabled) {
     background: var(--control);
+  }
+
+  .option-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-control);
+    overflow: hidden;
+    background: var(--control);
+    flex: 0 0 auto;
+  }
+
+  .option-thumb img,
+  .option-thumb .plate {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .option-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .option-line {
+    font-size: 10px;
+  }
+
+  .added {
+    font-size: 10px;
   }
 
   .option-name {

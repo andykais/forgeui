@@ -3,7 +3,14 @@
  * filters to be links), so navigation is pushState plus a popstate listener.
  */
 export type ScreenName =
-  "generate" | "gallery" | "workflows" | "workflow" | "comfy" | "settings";
+  | "generate"
+  | "gallery"
+  | "models"
+  | "model"
+  | "workflows"
+  | "workflow"
+  | "comfy"
+  | "settings";
 
 export interface Route {
   screen: ScreenName;
@@ -21,6 +28,11 @@ function parse(path: string, search: string): Route {
     return { screen: "generate", id: null, path, query };
   }
   if (first === "gallery") return { screen: "gallery", id: null, path, query };
+  if (first === "models") {
+    return second
+      ? { screen: "model", id: second, path, query }
+      : { screen: "models", id: null, path, query };
+  }
   if (first === "workflows") {
     return second
       ? { screen: "workflow", id: second, path, query }
