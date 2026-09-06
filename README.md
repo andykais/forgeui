@@ -15,7 +15,8 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 | `docs/MOCK-REVISIONS.md`     | Changes to the UI mocks that have been decided but may not yet be drawn.                   |
 | `docs/MOCK-REVIEW.md`        | Review log of the mocks against the spec; every item carries its decision. Reference only. |
 | `docs/mocks/`                | Frame PNGs (numbered) and the source `.dc.html` of the mocks.                              |
-| `docs/PHASE-1-HANDOFF.md`    | What Phase 1 delivered, the decisions worth knowing, and where Phase 2 picks up.           |
+| `docs/PHASE-1-HANDOFF.md`    | What Phase 1 delivered and the decisions worth knowing.                                    |
+| `docs/PHASE-2-HANDOFF.md`    | What Phase 2 delivered, the screens it added, and where Phase 3 picks up.                  |
 | `docs/IMPLEMENT-PHASE-2.md`  | Work plan for the model library, samples and node-timing ETA (M5–M9).                      |
 | `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, and what it still does not.                    |
 | `AGENTS.md`                  | How to navigate and build the repo, and the conventions a coding agent must follow.        |
