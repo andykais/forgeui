@@ -15,6 +15,7 @@ import { openDatabase } from "./db/db.ts";
 import { type HttpServer, startHttpServer } from "./http/server.ts";
 import { WsHub } from "./http/ws.ts";
 import { JobRunner } from "./jobs/pipeline.ts";
+import { seedNodeTimings, seedNodeTimingsIfEmpty } from "./jobs/timings.ts";
 import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
 import { ModelLibrary } from "./models/library.ts";
@@ -130,6 +131,11 @@ async function startAppWith(
   // The library scans and hashes in the background: the UI must come up
   // whether or not somebody pointed it at a terabyte of models (§8.1).
   if (!options.skipModels) models.startBackground();
+  // First launch after §5.1: every sidecar already carries the per-node
+  // durations the ETA wants, so read them rather than start from nothing.
+  seedNodeTimingsIfEmpty({ db, paths }).catch((error) => {
+    console.error("could not seed the node timings:", error);
+  });
 
   if (!options.quiet) {
     console.log(`ForgeUI ${APP_VERSION} — ${server.url}`);
@@ -224,9 +230,16 @@ async function main(argv: string[]): Promise<number> {
           paths,
           resolveModels: (refs) => models.resolveModels(refs),
         });
+        // Node timings are derived from the same sidecars (§5.1).
+        const timings = await seedNodeTimings({ db, paths });
         console.log(
           `reindexed ${result.outputs} outputs from ${result.sidecars} sidecars`,
         );
+        if (timings.nodes > 0) {
+          console.log(
+            `seeded ${timings.nodes} node timings from ${timings.sidecars} sidecars`,
+          );
+        }
         if (result.jobs_created > 0) {
           console.log(`recreated ${result.jobs_created} job rows`);
         }

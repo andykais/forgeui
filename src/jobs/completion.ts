@@ -8,6 +8,7 @@ import {
   type OutputRow,
   refreshModelUsage,
   type SidecarModelRef,
+  updateNodeTimings,
 } from "../db/queries.ts";
 import type { ComfyImageRef } from "../comfy/events.ts";
 import { sha256Hex } from "../workflows/hash.ts";
@@ -261,6 +262,9 @@ export async function completeJob(
       hash !== null
     ),
   );
+
+  // A finished run is one more sample for the next run's ETA (§5.1).
+  updateNodeTimings(db, job.workflow_hash, input.timing.nodes);
 
   await removeStagingDir(paths, job.id);
   return { outputs: rows, sidecar, sidecarPath };

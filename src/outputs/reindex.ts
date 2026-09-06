@@ -48,7 +48,9 @@ export interface ReindexOptions {
   onProgress?: (done: number) => void;
 }
 
-async function* sidecarFiles(root: string): AsyncGenerator<string> {
+export async function* sidecarFiles(
+  root: string,
+): AsyncGenerator<string> {
   let entries: Deno.DirEntry[];
   try {
     entries = [];

@@ -15,6 +15,7 @@ import {
   type JobRow,
   jobsInFlight,
   listOutputsForJob,
+  nodeTimingsFor,
   type Progress,
   setJobPromptId,
   type SidecarModelRef,
@@ -286,7 +287,10 @@ export class JobRunner {
     this.#live.set(input.jobId, {
       jobId: input.jobId,
       promptId,
-      tracker: new ProgressTracker(input.graph, this.#now),
+      tracker: new ProgressTracker(input.graph, {
+        now: this.#now,
+        weights: nodeTimingsFor(this.#db, input.workflowHash),
+      }),
       images: new Map(),
       lastWriteAt: 0,
       finalized: false,
@@ -684,7 +688,10 @@ export class JobRunner {
     const live: LiveJob = {
       jobId,
       promptId: job?.prompt_id ?? null,
-      tracker: new ProgressTracker(job?.api_graph ?? {}, this.#now),
+      tracker: new ProgressTracker(job?.api_graph ?? {}, {
+        now: this.#now,
+        weights: nodeTimingsFor(this.#db, job?.workflow_hash ?? null),
+      }),
       images: new Map(),
       lastWriteAt: 0,
       finalized: false,

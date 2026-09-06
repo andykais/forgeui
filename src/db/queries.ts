@@ -995,6 +995,99 @@ export function latestOutputPathByModel(db: Database): Map<string, string> {
   return new Map(rows.map(([hash, path]) => [hash, path]));
 }
 
+/**
+ * Per-node durations per workflow (§5.1), the weights the ETA is built from.
+ * `ewma_ms` is an exponentially weighted moving average so a machine that got
+ * faster is believed within a few runs.
+ */
+export const NODE_TIMING_ALPHA = 0.3;
+
+export interface NodeTiming {
+  node_id: string;
+  ewma_ms: number;
+  samples: number;
+}
+
+export function nodeTimingsFor(
+  db: Database,
+  workflowHash: string | null,
+): Map<string, number> {
+  if (!workflowHash) return new Map();
+  const rows = db.prepare(
+    `SELECT node_id, ewma_ms FROM node_timings WHERE workflow_hash = ?`,
+  ).values<[string, number]>(workflowHash);
+  return new Map(rows);
+}
+
+export function listNodeTimings(
+  db: Database,
+  workflowHash: string,
+): NodeTiming[] {
+  return db.prepare(
+    `SELECT node_id, ewma_ms, samples FROM node_timings
+      WHERE workflow_hash = ? ORDER BY node_id`,
+  ).values<[string, number, number]>(workflowHash).map((
+    [node_id, ewma_ms, samples],
+  ) => ({ node_id, ewma_ms, samples }));
+}
+
+export function countNodeTimings(db: Database): number {
+  return db.prepare(`SELECT count(*) FROM node_timings`).value<[number]>()
+    ?.[0] ?? 0;
+}
+
+/** Fold one run's measurements into the average (§5.1). */
+export function updateNodeTimings(
+  db: Database,
+  workflowHash: string | null,
+  nodes: Record<string, number>,
+  alpha = NODE_TIMING_ALPHA,
+): number {
+  if (!workflowHash) return 0;
+  const statement = db.prepare(
+    `INSERT INTO node_timings (workflow_hash, node_id, ewma_ms, samples)
+     VALUES (?, ?, ?, 1)
+     ON CONFLICT(workflow_hash, node_id) DO UPDATE SET
+       ewma_ms = ? * excluded.ewma_ms + (1 - ?) * node_timings.ewma_ms,
+       samples = node_timings.samples + 1`,
+  );
+  let updated = 0;
+  for (const [nodeId, ms] of Object.entries(nodes)) {
+    if (!Number.isFinite(ms) || ms < 0) continue;
+    statement.run(workflowHash, nodeId, ms, alpha, alpha);
+    updated++;
+  }
+  return updated;
+}
+
+/**
+ * Replace the whole table with what a seeding pass computed. Seeding is a
+ * rebuild from the sidecars, so running it twice has to leave the same rows.
+ */
+export function replaceNodeTimings(
+  db: Database,
+  timings: Iterable<
+    { workflow_hash: string; node_id: string; ewma_ms: number; samples: number }
+  >,
+): number {
+  db.exec(`DELETE FROM node_timings`);
+  const statement = db.prepare(
+    `INSERT INTO node_timings (workflow_hash, node_id, ewma_ms, samples)
+     VALUES (?, ?, ?, ?)`,
+  );
+  let inserted = 0;
+  for (const timing of timings) {
+    statement.run(
+      timing.workflow_hash,
+      timing.node_id,
+      timing.ewma_ms,
+      timing.samples,
+    );
+    inserted++;
+  }
+  return inserted;
+}
+
 export interface WorkflowUsage {
   /** When the workflow was last submitted, ms since epoch. */
   last_job_at: number | null;

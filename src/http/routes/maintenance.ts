@@ -1,3 +1,4 @@
+import { seedNodeTimings } from "../../jobs/timings.ts";
 import { reindex } from "../../outputs/reindex.ts";
 import { json } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
@@ -19,7 +20,9 @@ export function maintenanceRoutes(ctx: AppContext): Route[] {
         });
         // Deleted rows may have gone; drop any timers that pointed at them.
         await ctx.outputs.resumeDeletions();
-        return json(result);
+        // `node_timings` is derived from the same sidecars (§5.1).
+        const timings = await seedNodeTimings({ db: ctx.db, paths: ctx.paths });
+        return json({ ...result, node_timings: timings.nodes });
       },
     },
     {
