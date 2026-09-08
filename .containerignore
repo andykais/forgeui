@@ -1,0 +1,9 @@
+.git/
+data/
+src/frontend/node_modules/
+src/frontend/dist/
+tests/
+docs/
+scripts/
+tests/e2e/node_modules/
+tests/e2e/test-results/

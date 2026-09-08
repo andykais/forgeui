@@ -98,6 +98,53 @@ deno task ui:check     # svelte-check
 deno task ui:fmt       # prettier
 ```
 
+## Running in a container (podman, NVIDIA GPU)
+
+`Containerfile` builds a self-contained image: Deno, the pre-built frontend,
+and a pinned ComfyUI (`docs/HARDWARE-CHECKLIST.md`'s verified version) with
+CUDA 12.8 torch wheels (Blackwell/RTX 50-series support, e.g. an RTX 5090).
+Everything needed to launch the app is baked in at build time; only your
+data is expected to come from volumes.
+
+Build:
+
+```sh
+podman build -t forgeui -f Containerfile .
+```
+
+Run, with a data directory and a models directory mounted in:
+
+```sh
+podman volume create forgeui-data
+podman volume create forgeui-models
+
+podman run -d --name forgeui \
+  --device nvidia.com/gpu=all \
+  -p 7777:7777 \
+  -v forgeui-data:/data \
+  -v forgeui-models:/models \
+  forgeui
+```
+
+`--device nvidia.com/gpu=all` uses the CDI integration from the NVIDIA
+Container Toolkit; generate the CDI spec once on the host with
+`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (see the toolkit's
+podman docs). Older toolkit setups can instead pass `--gpus all`.
+
+`/models` is expected to hold one subfolder per model kind — `checkpoints`,
+`loras`, `vae`, `controlnet` — matching how the container's entrypoint wires
+up `--models-dir` (see `Containerfile`'s `CMD`). `/data` is ForgeUI's data
+directory (`--data-dir`/`FORGEUI_DATA_DIR`, §3): `config.yaml`, `app.db`,
+`workflows/user`, `outputs`, `samples`, and everything else the app owns. On
+first startup, if `/data/config.yaml` doesn't exist yet, ForgeUI writes a
+default one there — the same first-run behavior as running it bare-metal —
+so a fresh `forgeui-data` volume just works, and you can then hand-edit
+`config.yaml` in the volume (or use Settings) for anything beyond what the
+container's launch flags cover. If you want the generated output media on
+its own volume rather than bundled with the rest of `/data`, mount one at
+`/data/outputs` instead — it's a plain subdirectory, so a separate volume
+there works the same way.
+
 ## Starting the build
 
 Open `docs/IMPLEMENT-PHASE-1.md` and begin at M0. Replace the mock PNGs in
