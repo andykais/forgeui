@@ -22,6 +22,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 | `docs/IMPLEMENT-PHASE-2.md`  | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                       |
 | `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                   |
 | `docs/MOCK-REVISIONS.md`     | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
+| `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.       |
 
 ## Layout
 
