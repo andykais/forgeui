@@ -6,6 +6,11 @@
 # (config, database, outputs, models) is expected to come from volumes.
 # See the README for build/run instructions.
 
+# CUDA 12.8 for Blackwell/sm_120 (RTX 50-series) support; bump with
+# --build-arg CUDA_IMAGE=... if you're on different hardware or drivers.
+# Declared before the first FROM so it's in scope for both stages.
+ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
 # ---- stage 1: build the Svelte frontend -----------------------------------
 FROM node:22-bookworm-slim AS frontend
 
@@ -16,9 +21,6 @@ COPY src/frontend/ ./
 RUN npm run build
 
 # ---- stage 2: runtime -------------------------------------------------------
-# CUDA 12.8 for Blackwell/sm_120 (RTX 50-series) support; bump with
-# --build-arg CUDA_IMAGE=... if you're on different hardware or drivers.
-ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 FROM ${CUDA_IMAGE}
 
 # Pinned to the ComfyUI version this repo is verified against
