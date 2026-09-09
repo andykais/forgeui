@@ -30,8 +30,7 @@ ARG COMFY_HOME=/opt/ComfyUI
 
 ENV DEBIAN_FRONTEND=noninteractive \
     DENO_INSTALL=/usr/local \
-    PATH="/usr/local/bin:${PATH}" \
-    FORGEUI_DATA_DIR=/data
+    PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip python3-dev \
@@ -69,18 +68,22 @@ RUN deno cache src/main.ts && \
     deno eval --allow-ffi --allow-net --allow-read --allow-write --allow-env \
       "import { Database } from 'jsr:@db/sqlite@^0.12.0'; new Database(':memory:').close();"
 
-# App data (config.yaml, app.db, workflows/user, outputs, samples, ...) and
-# models are the only things meant to be mounted in.
-VOLUME ["/data", "/models"]
+# /workspace is the data dir (config.yaml, app.db, workflows/user, samples,
+# ...); outputs always lives at <data-dir>/outputs, i.e. /workspace/outputs,
+# so it can be mounted on its own too (see the README) without needing a
+# separate flag for it. /models is the model library.
+VOLUME ["/workspace", "/models"]
 EXPOSE 7777
 
 ENTRYPOINT ["deno", "task", "start"]
+# --data-dir is the /workspace mount (config.yaml, app.db, outputs, ...);
 # --host 0.0.0.0 so the app is reachable from outside the container;
 # --comfy-path points at the ComfyUI baked into this image;
 # --models-dir wires up the /models layout the README describes.
 # These are per-run overrides (never written to config.yaml), so editing
 # config.yaml for anything else is still safe across restarts.
-CMD ["--host", "0.0.0.0", \
+CMD ["--data-dir", "/workspace", \
+     "--host", "0.0.0.0", \
      "--comfy-path", "/opt/ComfyUI", \
      "--models-dir", "checkpoints=/models/checkpoints", \
      "--models-dir", "loras=/models/loras", \

@@ -112,16 +112,16 @@ Build:
 podman build -t forgeui -f Containerfile .
 ```
 
-Run, with a data directory and a models directory mounted in:
+Run, with a workspace directory and a models directory mounted in:
 
 ```sh
-podman volume create forgeui-data
+podman volume create forgeui-workspace
 podman volume create forgeui-models
 
 podman run -d --name forgeui \
   --device nvidia.com/gpu=all \
   -p 7777:7777 \
-  -v forgeui-data:/data \
+  -v forgeui-workspace:/workspace \
   -v forgeui-models:/models \
   forgeui
 ```
@@ -133,17 +133,35 @@ podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
 `loras`, `vae`, `controlnet` — matching how the container's entrypoint wires
-up `--models-dir` (see `Containerfile`'s `CMD`). `/data` is ForgeUI's data
-directory (`--data-dir`/`FORGEUI_DATA_DIR`, §3): `config.yaml`, `app.db`,
-`workflows/user`, `outputs`, `samples`, and everything else the app owns. On
-first startup, if `/data/config.yaml` doesn't exist yet, ForgeUI writes a
-default one there — the same first-run behavior as running it bare-metal —
-so a fresh `forgeui-data` volume just works, and you can then hand-edit
+up `--models-dir` (see `Containerfile`'s `CMD`).
+
+`/workspace` is ForgeUI's data directory (`--data-dir`, §3): `config.yaml`,
+`app.db`, `workflows/user`, `outputs`, `samples`, and everything else the app
+owns — the container's `CMD` passes `--data-dir /workspace` explicitly. On
+first startup, if `/workspace/config.yaml` doesn't exist yet, ForgeUI writes
+a default one there — the same first-run behavior as running it bare-metal —
+so a fresh `forgeui-workspace` volume just works, and you can then hand-edit
 `config.yaml` in the volume (or use Settings) for anything beyond what the
-container's launch flags cover. If you want the generated output media on
-its own volume rather than bundled with the rest of `/data`, mount one at
-`/data/outputs` instead — it's a plain subdirectory, so a separate volume
-there works the same way.
+container's launch flags cover.
+
+Output media always lives at `/workspace/outputs`; there's no separate flag
+for it, since ForgeUI treats it as a fixed part of the data directory rather
+than an independently configurable path. If you want it on its own volume —
+bigger or faster storage, say — mount one directly at `/workspace/outputs`
+instead of bundling it with the rest of `/workspace`; it's a plain
+subdirectory, so a nested volume mount works the same way:
+
+```sh
+podman volume create forgeui-outputs
+
+podman run -d --name forgeui \
+  --device nvidia.com/gpu=all \
+  -p 7777:7777 \
+  -v forgeui-workspace:/workspace \
+  -v forgeui-outputs:/workspace/outputs \
+  -v forgeui-models:/models \
+  forgeui
+```
 
 ## Starting the build
 
