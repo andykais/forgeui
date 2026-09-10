@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   ManifestError,
+  resolveDefaults,
   serializeManifest,
   validateManifest,
 } from "../../src/workflows/manifest.ts";
@@ -372,4 +373,77 @@ Deno.test("checkpoint is the old spelling of model, and widens to the class", ()
     outputs: [{ node: "1", kind: "image" }],
   }, { graph });
   assertEquals(current.params[0]!.type, "model");
+});
+
+Deno.test("the graph supplies the defaults it already holds", () => {
+  const graph: ApiGraph = {
+    "1": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: "mine.safetensors" },
+    },
+    "3": {
+      class_type: "KSampler",
+      inputs: { seed: 12345, steps: 28, cfg: 5, denoise: 1 },
+    },
+    "6": { class_type: "CLIPTextEncode", inputs: { text: "a cat" } },
+    "9": { class_type: "SaveImage", inputs: { filename_prefix: "out" } },
+  };
+  const manifest = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [
+      { key: "model", type: "model", bind: "1.ckpt_name" },
+      { key: "prompt", type: "text", bind: "6.text" },
+      { key: "steps", type: "int", bind: "3.steps" },
+      { key: "seed", type: "seed", bind: "3.seed" },
+      { key: "cfg", type: "float", default: 7, bind: "3.cfg" },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph });
+
+  const resolved = resolveDefaults(manifest, graph);
+  const byKey = new Map(resolved.params.map((param) => [param.key, param]));
+  const defaultOf = (key: string) =>
+    (byKey.get(key) as { default?: unknown }).default;
+
+  // What the graph loads is what the panel starts from, so editing the
+  // loader in ComfyUI is visible instead of being overwritten at submit.
+  assertEquals(defaultOf("model"), "mine.safetensors");
+  assertEquals(defaultOf("prompt"), "a cat");
+  assertEquals(defaultOf("steps"), 28);
+  // A seed's -1 means "randomise at submit"; the graph's concrete number
+  // would pin every generation to it.
+  assertEquals(defaultOf("seed"), undefined);
+  // An explicit default is the author saying the two differ on purpose.
+  assertEquals(defaultOf("cfg"), 7);
+});
+
+Deno.test("a default the graph cannot supply is left alone", () => {
+  const graph: ApiGraph = {
+    "1": { class_type: "LoadImage", inputs: { image: "sample.png" } },
+    "3": { class_type: "KSampler", inputs: { steps: 20, model: ["1", 0] } },
+    "9": { class_type: "SaveImage", inputs: { filename_prefix: "out" } },
+  };
+  const manifest = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [
+      // A filename left in a bundled LoadImage is not a default anyone chose.
+      { key: "image", type: "image", bind: "1.image" },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph });
+
+  const resolved = resolveDefaults(manifest, graph);
+  for (const param of resolved.params) {
+    assertEquals(
+      (param as { default?: unknown }).default,
+      undefined,
+      param.key,
+    );
+  }
 });

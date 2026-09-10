@@ -289,6 +289,38 @@ Deno.test("GET /api/workflows/:id/inputs lists literal inputs for the editor", a
   });
 });
 
+Deno.test("a loader changed in the editor becomes the panel's default", async () => {
+  await withTestApp(async (app) => {
+    const before = await detail(app, "illustrious");
+    const modelOf = (w: WorkflowDetail) =>
+      (w.manifest!.params.find((param) => param.key === "model") as
+        | { default?: unknown }
+        | undefined)?.default;
+    assertEquals(modelOf(before), "illustriousXL.safetensors");
+
+    // What "Save & return" writes after picking a real file in ComfyUI.
+    const graph = structuredClone(before.api_json);
+    graph["1"]!.inputs.ckpt_name = "mine/theOne.safetensors";
+    const saved = await app.fetch("/api/workflows/illustrious", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+    assertEquals(saved.status, 200);
+
+    // The panel follows the graph: no second copy of the filename to go
+    // stale, and nothing to overwrite the edit at submit.
+    const after = await detail(app, "illustrious");
+    assertEquals(modelOf(after), "mine/theOne.safetensors");
+    // The seed keeps its sentinel; the graph's number would pin it.
+    assertEquals(
+      (after.manifest!.params.find((param) => param.key === "seed") as
+        | { default?: unknown }
+        | undefined)?.default,
+      -1,
+    );
+  });
+});
+
 Deno.test("saving a bundled workflow creates a user copy that shadows it", async () => {
   await withTestApp(async (app) => {
     const before = await detail(app, "krea2");

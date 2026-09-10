@@ -11,7 +11,6 @@
       "label": "Prompt",
       "type": "text",
       "required": true,
-      "default": "",
       "bind": "4.text"
     },
     {
@@ -22,7 +21,6 @@
         "class": "diffusion",
         "family": "krea2"
       },
-      "default": "krea2_turbo_fp8_scaled.safetensors",
       "bind": "1.unet_name"
     },
     {
@@ -68,7 +66,6 @@
       "key": "steps",
       "label": "Steps",
       "type": "int",
-      "default": 8,
       "min": 1,
       "max": 50,
       "advanced": true,
@@ -78,7 +75,6 @@
       "key": "cfg",
       "label": "CFG",
       "type": "float",
-      "default": 1,
       "min": 0,
       "max": 20,
       "step": 0.1,
@@ -89,7 +85,6 @@
       "key": "clip",
       "label": "Text encoder",
       "type": "text_encoder",
-      "default": "qwen3vl_4b_fp8_scaled.safetensors",
       "advanced": true,
       "bind": "2.clip_name"
     },
@@ -97,7 +92,6 @@
       "key": "vae",
       "label": "VAE",
       "type": "vae",
-      "default": "qwen_image_vae.safetensors",
       "advanced": true,
       "bind": "3.vae_name"
     }

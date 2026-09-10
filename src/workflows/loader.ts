@@ -5,6 +5,7 @@ import { workflowHash } from "./hash.ts";
 import { apiGraphToLiteGraph, emptyLiteGraph } from "./litegraph.ts";
 import {
   ManifestError,
+  resolveDefaults,
   serializeManifest,
   validateManifest,
 } from "./manifest.ts";
@@ -84,7 +85,13 @@ export async function loadWorkflowDir(
     if (raw === null) {
       error = `${MANIFEST_FILE} is missing`;
     } else {
-      manifest = validateManifest(raw, { id, graph: apiGraph });
+      // The graph supplies the defaults it already holds, so a loader edited
+      // in ComfyUI shows up in the panel instead of being overwritten by a
+      // stale copy in the manifest.
+      manifest = resolveDefaults(
+        validateManifest(raw, { id, graph: apiGraph }),
+        apiGraph,
+      );
     }
   } catch (cause) {
     if (!(cause instanceof ManifestError)) throw cause;

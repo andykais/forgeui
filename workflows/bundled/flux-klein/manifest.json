@@ -11,7 +11,6 @@
       "label": "Prompt",
       "type": "text",
       "required": true,
-      "default": "",
       "bind": "13.text"
     },
     {
@@ -22,7 +21,6 @@
         "class": "diffusion",
         "family": "flux2"
       },
-      "default": "flux-2-klein-4b.safetensors",
       "bind": "9.unet_name"
     },
     {
@@ -50,7 +48,6 @@
       "key": "steps",
       "label": "Steps",
       "type": "int",
-      "default": 4,
       "min": 1,
       "max": 50,
       "advanced": true,
@@ -60,7 +57,6 @@
       "key": "cfg",
       "label": "CFG",
       "type": "float",
-      "default": 1,
       "min": 0,
       "max": 20,
       "step": 0.1,
@@ -74,7 +70,6 @@
       "filter": {
         "class": "clip"
       },
-      "default": "qwen_3_4b.safetensors",
       "advanced": true,
       "bind": "10.clip_name"
     },
@@ -85,7 +80,6 @@
       "filter": {
         "class": "vae"
       },
-      "default": "flux2-vae.safetensors",
       "advanced": true,
       "bind": "11.vae_name"
     }

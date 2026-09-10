@@ -11,7 +11,6 @@
       "label": "Prompt",
       "type": "text",
       "required": true,
-      "default": "",
       "bind": "5.text"
     },
     {
@@ -22,7 +21,6 @@
         "class": "diffusion",
         "family": "z-image"
       },
-      "default": "z_image_turbo_bf16.safetensors",
       "bind": "6.unet_name"
     },
     {
@@ -50,7 +48,6 @@
       "key": "steps",
       "label": "Steps",
       "type": "int",
-      "default": 8,
       "min": 1,
       "max": 50,
       "advanced": true,
@@ -60,7 +57,6 @@
       "key": "shift",
       "label": "Shift",
       "type": "float",
-      "default": 3,
       "min": 0,
       "max": 10,
       "step": 0.1,
@@ -74,7 +70,6 @@
       "filter": {
         "class": "clip"
       },
-      "default": "qwen_3_4b.safetensors",
       "advanced": true,
       "bind": "8.clip_name"
     },
@@ -85,7 +80,6 @@
       "filter": {
         "class": "vae"
       },
-      "default": "ae.safetensors",
       "advanced": true,
       "bind": "7.vae_name"
     }

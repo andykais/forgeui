@@ -551,3 +551,83 @@ export function serializeManifest(manifest: Manifest): string {
   };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
+
+/**
+ * Param types whose `default` is a value the graph also holds. Everything
+ * else states something the graph cannot:
+ *
+ * - `seed`'s `-1` means "randomise at submit" (§4.3); the graph holds a
+ *   concrete number, and taking it would silently pin every generation to
+ *   that seed.
+ * - `size`'s default is the workflow's *base* resolution, which the ratio
+ *   presets resolve against — a different thing from the current width and
+ *   height (§4.3), and its bind is not scalar anyway.
+ * - `image` / `mask` / `video` default to nothing; a filename left in a
+ *   bundled `LoadImage` is not a default anyone chose.
+ * - `lora_list` has no scalar bind.
+ */
+const GRAPH_BACKED_TYPES: readonly ParamType[] = [
+  "text",
+  "int",
+  "float",
+  "bool",
+  "enum",
+  "model",
+  "text_encoder",
+  "vae",
+];
+
+function matchesType(type: ParamType, value: unknown): boolean {
+  switch (type) {
+    case "text":
+    case "enum":
+    case "model":
+    case "text_encoder":
+    case "vae":
+      return typeof value === "string";
+    case "int":
+    case "float":
+      return typeof value === "number";
+    case "bool":
+      return typeof value === "boolean";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Fill in the defaults the graph already carries.
+ *
+ * A scalar-bound param and the input it binds are the same fact written
+ * twice, and two copies drift: changing a loader in the ComfyUI editor left
+ * the panel showing the old filename, and the panel then overwrote the edit
+ * at submit. So the manifest states a `default` only where it means something
+ * the graph cannot, and otherwise the graph is the default.
+ *
+ * This runs on load, not on save: the file on disk keeps what its author
+ * wrote, and the resolved copy is what the app hands to the panel and to
+ * {@link coerceParams} so both agree.
+ */
+export function resolveDefaults(manifest: Manifest, graph: ApiGraph): Manifest {
+  const params = manifest.params.map((param): Param => {
+    // Narrow first: only these types have both a scalar bind and a default
+    // the graph could supply.
+    if (!GRAPH_BACKED_TYPES.includes(param.type)) return param;
+    const scalar = param as Extract<Param, { bind: string }> & {
+      default?: unknown;
+    };
+    if (scalar.default !== undefined) return param;
+    if (typeof scalar.bind !== "string") return param;
+    let node: string, input: string;
+    try {
+      ({ node, input } = parseBind(scalar.bind, param.key));
+    } catch {
+      return param;
+    }
+    const value = graph[node]?.inputs?.[input];
+    if (value === undefined || isLink(value)) return param;
+    if (!matchesType(param.type, value)) return param;
+    return { ...param, default: value } as Param;
+  });
+  return { ...manifest, params };
+}
