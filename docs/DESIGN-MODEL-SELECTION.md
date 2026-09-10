@@ -37,9 +37,8 @@ Four things.
    whichever loader node the workflow uses. Without this the picker offers
    names ComfyUI cannot find (§4).
 3. **The bundled workflows are rebuilt from the official ComfyUI workflows**
-   for each model, rather than hand-authored from assumption. Four of them are
-   wrong today — two have the wrong loader topology and two target a different
-   model than their name claims (§7).
+   for each model. What ships today is a placeholder set, authored without
+   the weights and never run (§7).
 4. **Every bundled workflow exposes a `model` param** so the base model can be
    swapped without editing the graph, defaulting to the file its graph already
    names.
@@ -227,48 +226,40 @@ Two consequences for §8.1 as written:
 
 ## 7. Rebuilding the bundled workflows from the official sources
 
-`workflows/bundled/README.md` already says seven of the eight have never been
-run and carry placeholder filenames. Checking four against docs.comfy.org
-shows the problem is worse than placeholder names — the graphs themselves are
-wrong, in two different ways.
+The eight bundled workflows were authored without their weights and, except
+`sd15`, have never been run — `workflows/bundled/README.md` says as much and
+calls their model filenames placeholders. They are placeholders in shape as
+well as in name, so this is the moment to replace them with the real thing:
+each one derived from the official ComfyUI workflow for its model.
 
-| workflow | repo has | official | problem |
-|---|---|---|---|
-| `krea2` | `flux1-krea-dev.safetensors`, `DualCLIPLoader` t5xxl + clip_l, Flux-shaped | Krea 2: `krea2_turbo_fp8_scaled` (diffusion_models), `qwen3vl_4b_fp8_scaled` (text_encoders), `qwen_image_vae` (vae), 8 steps | **different model** |
-| `ltx` | `ltx-video-2b-v0.9.5`, `CLIPLoader` t5xxl `type: ltxv` | LTX-2.3: `ltx-2.3-22b-dev-fp8` (checkpoints), `gemma_3_12B_it_fp4_mixed` (text_encoders), a required distilled LoRA, a spatial upscaler | **different model** |
-| `anima` | one `CheckpointLoaderSimple` | `anima-base-v1.0` (diffusion_models) + `qwen_3_06b_base` (text_encoders) + `qwen_image_vae` (vae) | **wrong topology** |
-| `z-image-turbo` | one `CheckpointLoaderSimple` | `z_image_turbo_bf16` (diffusion_models) + `qwen_3_4b` (text_encoders) + `ae.safetensors` (vae) | **wrong topology** |
+| workflow | source |
+|---|---|
+| `krea2` | https://docs.comfy.org/tutorials/image/krea/krea-2 |
+| `ltx` | https://docs.comfy.org/tutorials/video/ltx/ltx-2-3 |
+| `anima` | https://docs.comfy.org/tutorials/image/anima/anima |
+| `z-image-turbo` | https://docs.comfy.org/tutorials/image/z-image/z-image-turbo |
+| `flux-klein` | https://docs.comfy.org/tutorials/flux/flux-2-klein |
+| `krea2-img2img` | https://docs.comfy.org/tutorials/basic/image-to-image, applied to the `krea2` graph above |
+| `sd15` | https://docs.comfy.org/tutorials/basic/text-to-image — already matches; leave the graph alone |
+| `illustrious` | no official page: an SDXL community finetune. Keep the current SDXL graph and only add the `model` param |
 
-`anima` and `z-image-turbo` cannot load their models at all: a
-`CheckpointLoaderSimple` has no way to read a split-file model, and no
-filename will fix that.
-
-`krea2` is a naming collision. The repo's workflow is **Flux.1 Krea [dev]** —
-a Flux-family model, which its filename, its family tag and its T5 + CLIP-L
-pair all confirm. **Krea 2** is a separate later model on a Qwen3-VL text
-encoder and a Qwen image VAE. ComfyUI v0.34.0 lists `krea2` as its own
-`CLIPLoader` type alongside `flux2`, so the two are distinct to ComfyUI as
-well. The repo needs to decide whether it ships one, the other, or both under
-honest names (`flux-krea` and `krea2`).
+Rebuilding `krea2` from that page also settles a naming collision: the graph
+in the repo today is **Flux.1 Krea [dev]**, a Flux-family model, while the
+page covers **Krea 2**, a later model on a Qwen3-VL text encoder. Deriving
+from the source makes the workflow match its name.
 
 ### How to rebuild
 
-Author these from the workflow JSON each docs page links, not by hand. That
+Author from the workflow JSON each page links rather than by hand — that
 gets the real node graph, the real filenames and the real sampler settings in
-one step, and it is the only way to be sure. Note that the current-generation
-templates use ComfyUI **Subgraph** nodes, which `CORE_NODES`
-(`src/workflows/nodes.ts`) does not model — worth checking what
-`app.graphToPrompt()` produces for one before assuming the api graph round-trips.
+one step, and it is the only way to be sure. Then add a `model` param per §5,
+bound to whatever input that workflow's own loader uses.
 
-Then add a `model` param per §5 to each, bound to the input its loader
-actually uses.
-
-`sd15` is exempt: it is the one workflow that runs, it is what the contract
-check generates with, and it is correct as shipped. It gains a `model` param
-and nothing else.
-
-Four workflows were not checked and still need the same pass:
-`illustrious`, `flux-klein`, `krea2-img2img`, and whatever replaces `ltx`.
+Two things to watch. The current-generation templates use ComfyUI **Subgraph**
+nodes, which `CORE_NODES` (`src/workflows/nodes.ts`) does not model — check
+what `app.graphToPrompt()` produces for one before assuming the api graph
+round-trips. And several of these need folder kinds the four-key default does
+not have (`text_encoders`, `latent_upscale_models`), which §3 adds.
 
 ## 8. What this explicitly does not do
 
