@@ -211,6 +211,15 @@
     flex: 1;
     display: flex;
     min-height: 0;
+    /*
+     * Load-bearing. Without it this is a flex item at `min-width: auto`, so
+     * its min-content width wins over the flex basis — and its min-content is
+     * the filmstrip laid out in full, which grows with every result. The row
+     * then overflows, the filmstrip's `scrollIntoView` scrolls the whole
+     * screen sideways to follow the selection, and the sidebar walks off the
+     * right edge until it is gone.
+     */
+    min-width: 0;
     background: var(--canvas);
   }
 

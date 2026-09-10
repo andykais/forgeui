@@ -2,7 +2,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import SeedParam from "./SeedParam.svelte";
   import SizeParam from "./SizeParam.svelte";
   import LoraListParam from "./LoraListParam.svelte";
@@ -56,6 +56,14 @@
 
   let advancedOpen = $state(false);
   let paramsEl = $state<HTMLDivElement | undefined>(undefined);
+
+  /**
+   * What a picker's popover covers: the panel that scrolls, so the list is
+   * the same size wherever in the panel its trigger happens to be (§11.3).
+   */
+  const pickerFill = $derived(
+    paramsEl?.closest<HTMLElement>(".scroll") ?? paramsEl ?? null,
+  );
 
   const main = $derived(manifest.params.filter((param) => !param.advanced));
   const advanced = $derived(manifest.params.filter((param) => param.advanced));
@@ -136,18 +144,76 @@
     )?.key ?? null,
   );
 
-  function focusPrompt(): void {
+  function promptField(): HTMLTextAreaElement | null {
     const key = promptKey;
-    if (!key) return;
-    // The picker closes on the same click; take the caret once it has gone.
-    queueMicrotask(() => {
-      const field = [...(paramsEl?.querySelectorAll("[data-param]") ?? [])]
+    if (!key) return null;
+    return (
+      [...(paramsEl?.querySelectorAll("[data-param]") ?? [])]
         .find((element) => (element as HTMLElement).dataset.param === key)
-        ?.querySelector("textarea");
-      if (!field) return;
-      field.focus();
+        ?.querySelector("textarea") ?? null
+    );
+  }
+
+  /**
+   * Picking a model or a LoRA also changes a value, so the panel re-renders
+   * on the same turn: wait for that to settle before taking the caret, then
+   * again on the next frame, because whichever of the two lands last is the
+   * one that decides where the focus ends up.
+   */
+  async function focusPrompt(): Promise<void> {
+    if (!promptKey) return;
+    const take = () => {
+      const field = promptField();
+      if (!field || document.activeElement === field) return;
+      field.focus({ preventScroll: true });
       field.setSelectionRange(field.value.length, field.value.length);
-    });
+      field.scrollIntoView({ block: "nearest" });
+    };
+    await tick();
+    take();
+    requestAnimationFrame(take);
+  }
+
+  /**
+   * Grow with the text. `field-sizing: content` does exactly this where it
+   * exists — including leaving the box alone once it has been dragged — and
+   * this is the same behaviour for browsers that do not have it yet: fit to
+   * the content on every keystroke, and stop as soon as a height arrives that
+   * we did not set, because that one came from the resize handle.
+   */
+  function autogrow(node: HTMLTextAreaElement, _value: unknown) {
+    const native =
+      typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content");
+    if (native) return;
+    let ours = 0;
+    let manual = false;
+    const fit = () => {
+      if (manual) return;
+      node.style.height = "auto";
+      node.style.height = `${node.scrollHeight}px`;
+      ours = node.offsetHeight;
+    };
+    fit();
+    // Absent under jsdom, where there is no layout to observe anyway.
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            if (!manual && ours > 0 && Math.abs(node.offsetHeight - ours) > 1) {
+              manual = true;
+            }
+          });
+    observer?.observe(node);
+    node.addEventListener("input", fit);
+    return {
+      // The value can also change from outside, when the panel is filled
+      // from a job or reset to defaults.
+      update: () => fit(),
+      destroy: () => {
+        observer?.disconnect();
+        node.removeEventListener("input", fit);
+      },
+    };
   }
 
   /** Enter runs the workflow, Shift+Enter is a newline (§11.4). */
@@ -200,6 +266,7 @@
           rows="3"
           value={(values[param.key] as string) ?? ""}
           aria-label={label(param)}
+          use:autogrow={values[param.key]}
           onkeydown={onPromptKeydown}
           oninput={(event) =>
             onchange(param.key, (event.currentTarget as HTMLTextAreaElement).value)}
@@ -273,6 +340,7 @@
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
           onpicked={focusPrompt}
+          fill={pickerFill}
         />
       {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}
         <ModelParam
@@ -281,6 +349,7 @@
           models={modelsOfClass(param.filter?.class)}
           onchange={(name) => onchange(param.key, name)}
           onpicked={focusPrompt}
+          fill={pickerFill}
         />
       {:else}
         <!--

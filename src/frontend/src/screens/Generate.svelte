@@ -421,6 +421,8 @@
     flex: 1;
     display: flex;
     min-height: 0;
+    /* The panel and the results share the width; neither may claim more. */
+    min-width: 0;
   }
 
   .panel {

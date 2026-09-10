@@ -631,6 +631,32 @@ describe("the LoRA search box", () => {
     },
   };
 
+  test("the list covers the panel rather than hanging off its row", async () => {
+    // A row low in the panel would otherwise put half its list below the
+    // bottom of the screen (§11.3).
+    mount([loraParam], { loras: [] });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+
+    const popover = screen.getByRole("dialog", { name: "LoRAs" });
+    expect(popover.className).toContain("filled");
+    expect(popover.style.top).not.toBe("");
+    expect(popover.style.left).not.toBe("");
+    expect(popover.style.height).not.toBe("");
+  });
+
+  test("adding one hands the caret to the prompt", async () => {
+    mount([{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }, loraParam], {
+      prompt: "figs",
+      loras: [],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
+    // A tick for the panel's own re-render, then a frame.
+    await tick();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));
+  });
+
   test("a regular expression narrows the list to what it matches", async () => {
     mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));

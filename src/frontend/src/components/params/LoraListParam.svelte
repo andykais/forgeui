@@ -27,9 +27,11 @@
     onchange: (rows: LoraRow[]) => void;
     /** Called once a LoRA has been added, so the panel can move the caret. */
     onpicked?: () => void;
+    /** The panel this picker's list covers, rather than hanging off the row. */
+    fill?: HTMLElement | null;
   }
 
-  let { param, value, models, onchange, onpicked }: Props = $props();
+  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
 
   let pickerOpen = $state(false);
   let showAll = $state(false);
@@ -199,7 +201,7 @@
     <button class="add" onclick={() => (pickerOpen = !pickerOpen)}>
       <Plus size={12} /> Add
     </button>
-    <Popover open={pickerOpen} title="LoRAs" onclose={() => (pickerOpen = false)}>
+    <Popover open={pickerOpen} {fill} title="LoRAs" onclose={() => (pickerOpen = false)}>
       <input
         class="search"
         placeholder="Search LoRAs… (regex ok)"

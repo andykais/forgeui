@@ -21,9 +21,11 @@
     onchange: (name: string) => void;
     /** Called once a model has been chosen, so the panel can move the caret. */
     onpicked?: () => void;
+    /** The panel this picker's list covers, rather than hanging off the row. */
+    fill?: HTMLElement | null;
   }
 
-  let { param, value, models, onchange, onpicked }: Props = $props();
+  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
 
   let open = $state(false);
   let search = $state("");
@@ -72,7 +74,7 @@
     {/if}
   </button>
 
-  <Popover {open} title="Models" onclose={() => (open = false)}>
+  <Popover {open} {fill} title="Models" onclose={() => (open = false)}>
     <input
       class="search"
       placeholder="Search models… (regex ok)"

@@ -95,6 +95,8 @@
 
   .strip {
     flex: 1;
+    /* It scrolls; it does not push its container wider than the screen. */
+    min-width: 0;
     display: flex;
     gap: 6px;
     overflow-x: auto;
