@@ -87,7 +87,7 @@ Deno.test("migrations are idempotent across reopens", async () => {
   });
 });
 
-Deno.test("a database from before the probes table gains it, keeping its rows", async () => {
+Deno.test("a database from before the probes table gains it", async () => {
   await withDbDir((path) => {
     // A version-1 database: the schema as it shipped, with no model_probes.
     const old = new Database(path, DATABASE_OPTIONS);
@@ -104,10 +104,11 @@ Deno.test("a database from before the probes table gains it, keeping its rows", 
     try {
       assertEquals(schemaVersion(migrated), SCHEMA_VERSION);
       assert(names(migrated, "table").includes("model_probes"));
-      // The upgrade adds a table; it does not rebuild the library.
+      // The library itself is re-keyed on the way past version 3; what this
+      // upgrade is responsible for is the table being there to write into.
       assertEquals(
         migrated.prepare("SELECT count(*) FROM models").value<[number]>(),
-        [1],
+        [0],
       );
       migrated.exec(
         `INSERT INTO model_probes (path, size, mtime, arch, probed_at)
@@ -116,6 +117,63 @@ Deno.test("a database from before the probes table gains it, keeping its rows", 
       assertEquals(
         migrated.prepare("SELECT arch FROM model_probes").value<[string]>(),
         ["flux"],
+      );
+    } finally {
+      migrated.close();
+    }
+  });
+});
+
+Deno.test("a library keyed by sha256 is dropped so md5 can rebuild it", async () => {
+  await withDbDir((path) => {
+    // A version-2 database: the model library as it was, keyed by sha256.
+    const old = new Database(path, DATABASE_OPTIONS);
+    old.exec(MIGRATIONS[0]!.sql);
+    old.exec("PRAGMA user_version = 2");
+    const sha = "a".repeat(64);
+    old.exec(
+      `INSERT INTO models (hash, path, kind, size, mtime, display_name, last_seen_at)
+       VALUES ('${sha}', '/models/a.safetensors', 'checkpoints', 1, 1, 'A', 1)`,
+    );
+    old.exec(
+      `INSERT INTO jobs (id, status, params_json, api_graph_json, created_at)
+       VALUES ('job1', 'done', '{}', '{}', 1)`,
+    );
+    old.exec(
+      `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, params_json, created_at)
+       VALUES ('out1', 'job1', 'outputs/a.png', 'outputs/a.json', 'image', '{}', 1)`,
+    );
+    old.exec(
+      `INSERT INTO output_models (output_id, model_hash, role)
+       VALUES ('out1', '${sha}', 'checkpoint')`,
+    );
+    old.exec(
+      `INSERT INTO samples (id, model_hash, path, sidecar_path, kind, created_at)
+       VALUES ('s1', '${sha}', 'samples/${sha}/s1.png', 'samples/${sha}/s1.json', 'image', 1)`,
+    );
+    old.close();
+
+    const migrated = openDatabase(path);
+    try {
+      assertEquals(schemaVersion(migrated), SCHEMA_VERSION);
+      // Everything keyed by the old hash goes; the scan and the sidecar
+      // backfill put `models` and `output_models` back.
+      for (const table of ["models", "output_models", "samples"]) {
+        assertEquals(
+          migrated.prepare(`SELECT count(*) FROM ${table}`).value<[number]>(),
+          [0],
+          `${table} still holds rows keyed by a sha256`,
+        );
+      }
+      // What is not keyed by a model hash is untouched: the outputs are the
+      // record, and their sidecars are what the backfill reads.
+      assertEquals(
+        migrated.prepare("SELECT count(*) FROM outputs").value<[number]>(),
+        [1],
+      );
+      assertEquals(
+        migrated.prepare("SELECT count(*) FROM jobs").value<[number]>(),
+        [1],
       );
     } finally {
       migrated.close();

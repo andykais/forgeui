@@ -313,10 +313,10 @@ or replacing any workflow must never affect the ability to rerun an old output.
   "workflow": { "id": "krea2", "name": "Flux Krea 2", "hash": "sha256:…", "family": "flux", "kind": "image" },
   "params": {
     "prompt": "…", "seed": 123456, "steps": 28, "cfg": 3.5, "size": [1024, 1024],
-    "loras": [ { "name": "foo.safetensors", "hash": "sha256:…", "strength_model": 0.8, "strength_clip": 0.8 } ],
+    "loras": [ { "name": "foo.safetensors", "hash": "md5:…", "strength_model": 0.8, "strength_clip": 0.8 } ],
     "image": { "sha256": "…", "ext": "png", "original_name": "ref.png", "derived_from": "01J…" }
   },
-  "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
+  "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "md5:…" } ],
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
   "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024 } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
@@ -381,7 +381,7 @@ CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
-  hash TEXT PRIMARY KEY,          -- sha256 of file
+  hash TEXT PRIMARY KEY,          -- md5 of file (identity, not a signature)
   path TEXT NOT NULL UNIQUE,
   kind TEXT NOT NULL,             -- checkpoint|lora|vae|controlnet|…
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,
@@ -445,11 +445,15 @@ Model hashing runs in a background worker; a model is re-hashed only if
   `total` count the files queued for this pass and `current` is the model's
   name. Both are pushed, never polled.
 - A model appears in pickers as soon as it is scanned, identified by `path`.
-  The hash is a streamed sha256 of the whole file, so the pass is bounded by
-  read speed and a folder of multi-gigabyte checkpoints takes minutes. The
-  queue is therefore **smallest first**: a hundred LoRAs behind ten
-  checkpoints would otherwise gain no identity until the checkpoints were
-  done, and nothing about a model needs its hash to be usable.
+  The hash is a streamed **md5** of the whole file. It is an identity, not a
+  signature — it answers "which file is this" so a model keeps its history
+  across a rename, and nothing trusts it against an adversary who chooses the
+  bytes — and what it costs is the whole library read end to end, which md5
+  does at about 415 MiB/s against sha256's 190. The pass is still bounded by
+  read speed, so a folder of multi-gigabyte checkpoints takes minutes and the
+  queue is **smallest first**: a hundred LoRAs behind ten checkpoints would
+  otherwise gain no identity until the checkpoints were done, and nothing
+  about a model needs its hash to be usable.
   Its `models` row (keyed by `hash`) exists only once the background hasher
   has finished it; until then display name, family, notes, tags and thumbnail
   cannot be edited and the UI shows a `hashing` state. At job completion,
@@ -476,7 +480,7 @@ Model hashing runs in a background worker; a model is re-hashed only if
   The **filename is immutable** and appears only on the model page metadata
   line. Sidecars keep recording filename + hash, so renames never affect
   reproduction. Display names may collide; the hash is the identity.
-- Model page = header (thumb, display name, family, size, full sha256, tags,
+- Model page = header (thumb, display name, family, size, full md5, tags,
   notes, Civitai link, filename + folder with Copy path) + **Samples** strip +
   the standard gallery filtered to `output_models.model_hash = ?`. Header
   fields are edit-in-place (blur commits, esc reverts).
@@ -682,8 +686,8 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   (a link into the Gallery filtered to that hash). Search (same matcher as
   the API `q`) + family filter including an "unset" chip. No multi-select or
   bulk edits in v1; family is set per card or via "Fetch info".
-- Model detail page as described in §8.1: header with Copy path, full sha256
-  on its own line (`user-select: all`, no truncation, no button), edit-in-place
+- Model detail page as described in §8.1: header with Copy path, the full
+  hash on its own line (`user-select: all`, no truncation, no button), edit-in-place
   display name / family combo / tags / notes; Samples strip (with import drop
   zone and Civitai URL field; "Set as thumbnail" on a sample's hover menu);
   filtered gallery beneath.

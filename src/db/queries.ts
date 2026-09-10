@@ -320,13 +320,18 @@ export function insertOutputModels(
 }
 
 /**
- * A model hash is the bare lowercase hex sha256 of the file, which is what
- * `models.hash` and every URL use. A sidecar written by hand (or by a future
- * version) may spell it `sha256:…`, so it is stripped on the way in (§8.1).
+ * A model hash is the bare lowercase hex md5 of the file, which is what
+ * `models.hash` and every URL use. A sidecar written by hand (or by an older
+ * version, when this was sha256) may spell it `md5:…` or `sha256:…`, so an
+ * algorithm prefix is stripped on the way in (§8.1). A sidecar carrying an
+ * old sha256 simply matches nothing, and the name-based backfill resolves it.
  */
+const HASH_PREFIXES = ["md5:", "sha256:"];
+
 export function normalizeModelHash(hash: string): string {
-  const bare = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
-  return bare.toLowerCase();
+  const lower = hash.toLowerCase();
+  const prefix = HASH_PREFIXES.find((each) => lower.startsWith(each));
+  return prefix ? lower.slice(prefix.length) : lower;
 }
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,

@@ -12,8 +12,8 @@ import type { ModelEntry, Sample } from "../types.ts";
 
 function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
   return {
-    id: "a".repeat(64),
-    hash: "a".repeat(64),
+    id: "a".repeat(32),
+    hash: "a".repeat(32),
     path: "/models/loras/film-grain-35mm.safetensors",
     name: "film-grain-35mm.safetensors",
     filename: "film-grain-35mm.safetensors",
@@ -42,7 +42,7 @@ describe("the model card", () => {
     expect(screen.getByText("Film grain 35mm")).toBeTruthy();
     expect(screen.getByText("sd15")).toBeTruthy();
     const outputs = screen.getByText("12 outputs") as HTMLAnchorElement;
-    expect(outputs.getAttribute("href")).toBe(`/gallery?models=${"a".repeat(64)}`);
+    expect(outputs.getAttribute("href")).toBe(`/gallery?models=${"a".repeat(32)}`);
   });
 
   test("a model with no hash yet says so and offers no family control", () => {
@@ -71,14 +71,14 @@ describe("the model card", () => {
 function sample(overrides: Partial<Sample> = {}): Sample {
   return {
     id: "01JSAMPLE",
-    model_hash: "a".repeat(64),
-    path: `samples/${"a".repeat(64)}/01JSAMPLE.png`,
-    sidecar_path: `samples/${"a".repeat(64)}/01JSAMPLE.json`,
+    model_hash: "a".repeat(32),
+    path: `samples/${"a".repeat(32)}/01JSAMPLE.png`,
+    sidecar_path: `samples/${"a".repeat(32)}/01JSAMPLE.json`,
     kind: "image",
     source_url: null,
     params: null,
     created_at: 1_780_000_000_000,
-    media_url: `/api/media/samples/${"a".repeat(64)}/01JSAMPLE.png`,
+    media_url: `/api/media/samples/${"a".repeat(32)}/01JSAMPLE.png`,
     reusable: false,
     ...overrides,
   };

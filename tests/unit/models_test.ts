@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
-  hashFileStreaming,
+  hashModelFile,
   ModelHasher,
   unchanged,
 } from "../../src/models/hasher.ts";
@@ -11,7 +11,7 @@ import type { ModelRow } from "../../src/db/queries.ts";
 import { openDatabase } from "../../src/db/db.ts";
 import { classOf, DIFFUSION_KINDS } from "../../src/config/defaults.ts";
 import { defaultConfig } from "../../src/config/defaults.ts";
-import { sha256Of, writeFakeSafetensors } from "../fixtures/models.ts";
+import { md5Of, writeFakeSafetensors } from "../fixtures/models.ts";
 
 /** A model folder with two checkpoints and a LoRA in a subdirectory. */
 async function modelFolders(): Promise<
@@ -39,7 +39,7 @@ function scannerFor(folders: Record<string, string[]>): ModelScanner {
   return new ModelScanner(() => config, 0);
 }
 
-Deno.test("the streaming hash matches the whole file's sha256", async () => {
+Deno.test("the streaming hash matches the whole file's md5", async () => {
   const dir = await Deno.makeTempDir({ prefix: "forgeui-hash-" });
   try {
     const path = join(dir, "big.safetensors");
@@ -49,8 +49,9 @@ Deno.test("the streaming hash matches the whole file's sha256", async () => {
       bytes: 2 * 1024 * 1024,
     });
     const seen: number[] = [];
-    const hash = await hashFileStreaming(path, (read) => seen.push(read));
-    assertEquals(hash, await sha256Of(bytes));
+    const hash = await hashModelFile(path, (read) => seen.push(read));
+    assertEquals(hash, await md5Of(bytes));
+    assertEquals(hash.length, 32, "md5 is 16 bytes of hex");
     assert(seen.length > 1, `expected several reads, saw ${seen.length}`);
     assertEquals(seen.at(-1), bytes.length);
   } finally {

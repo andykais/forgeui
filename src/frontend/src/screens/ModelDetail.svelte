@@ -19,7 +19,7 @@
 
   /**
    * The model page (§8.1, §11.2, frame 05): an edit-in-place header — blur
-   * commits, Esc reverts — the full sha256 on its own line, the Samples
+   * commits, Esc reverts — the full md5 on its own line, the Samples
    * strip, and the gallery filtered to this model beneath.
    *
    * A model with no hash yet cannot be edited at all: the fields are
@@ -353,9 +353,9 @@
 
         <div class="hash mono dim">
           {#if model.hash}
-            sha256 <span class="value">{model.hash}</span>
+            md5 <span class="value">{model.hash}</span>
           {:else}
-            sha256 <span class="value pending">still being read</span>
+            md5 <span class="value pending">still being read</span>
           {/if}
         </div>
 
@@ -612,7 +612,7 @@
     font-size: 11px;
   }
 
-  /* Full sha256 on its own line: selectable, never truncated (§11.2). */
+  /* The full hash on its own line: selectable, never truncated (§11.2). */
   .hash .value {
     user-select: all;
     color: var(--text-3);
