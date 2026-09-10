@@ -644,6 +644,14 @@ describe("the LoRA search box", () => {
     expect(popover.style.height).not.toBe("");
   });
 
+  test("opening the picker puts the caret in its search box", async () => {
+    mount([loraParam], { loras: [] });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    // One click opens it and starts the search; there is no second one.
+    expect(document.activeElement).toBe(screen.getByLabelText("Search LoRAs"));
+  });
+
   test("adding one hands the caret to the prompt", async () => {
     mount([{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }, loraParam], {
       prompt: "figs",

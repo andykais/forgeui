@@ -6,6 +6,7 @@
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
+  import { focusOnMount } from "../../lib/focus.ts";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
 
@@ -207,6 +208,7 @@
         placeholder="Search LoRAs… (regex ok)"
         bind:value={search}
         aria-label="Search LoRAs"
+        use:focusOnMount
       />
       {#if family}
         <button class="show-all" onclick={() => (showAll = !showAll)}>

@@ -2,7 +2,9 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   detectFamily,
+  detectLoraFamily,
   headerOf,
+  isLora,
   ProbeError,
   probeFamily,
 } from "../../src/models/probe.ts";
@@ -115,6 +117,137 @@ Deno.test("an all-in-one checkpoint is read through its nested prefix", () => {
 Deno.test("anything unrecognised is unfiled, never guessed at", () => {
   assertEquals(detectFamily(header(["lora_unet_x.lora_up.weight"])), null);
   assertEquals(detectFamily(header([])), null);
+});
+
+function loraHeader(
+  names: string[],
+  metadata: Record<string, string> = {},
+) {
+  return headerOf({
+    __metadata__: metadata,
+    ...Object.fromEntries(
+      names.map((
+        key,
+      ) => [key, { dtype: "F16", shape: [8, 8], data_offsets: [0, 4] }]),
+    ),
+  });
+}
+
+/** sd-scripts names every patched module `lora_unet_<path with _ for .>`. */
+const KOHYA_FLUX = [
+  "lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight",
+  "lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight",
+  "lora_unet_single_blocks_0_linear1.alpha",
+];
+const KOHYA_SD15 = [
+  "lora_unet_input_blocks_1_1_transformer_blocks_0_attn1_to_q.lora_up.weight",
+  "lora_unet_output_blocks_5_1_transformer_blocks_0_attn2_to_k.lora_down.weight",
+  "lora_te_text_model_encoder_layers_0_self_attn_q_proj.lora_up.weight",
+];
+const KOHYA_SDXL = [
+  "lora_unet_input_blocks_4_1_transformer_blocks_0_attn1_to_q.lora_up.weight",
+  "lora_unet_output_blocks_2_1_transformer_blocks_5_attn2_to_k.lora_down.weight",
+  "lora_te2_text_model_encoder_layers_0_self_attn_q_proj.lora_up.weight",
+];
+
+Deno.test("a LoRA is told apart from the model it patches", () => {
+  assertEquals(isLora(loraHeader(KOHYA_FLUX)), true);
+  assertEquals(isLora(header(FLUX)), false);
+  // The diffusers/PEFT spelling of the same thing.
+  assertEquals(
+    isLora(
+      loraHeader(["transformer.transformer_blocks.0.attn.to_q.lora_A.weight"]),
+    ),
+    true,
+  );
+});
+
+Deno.test("a LoRA's family comes from the modules it patches", () => {
+  assertEquals(detectLoraFamily(loraHeader(KOHYA_FLUX)), "flux");
+  assertEquals(
+    detectLoraFamily(
+      loraHeader([
+        "transformer.single_transformer_blocks.0.attn.to_q.lora_A.weight",
+      ]),
+    ),
+    "flux",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(["lora_unet_txtfusion_projector.lora_up.weight"]),
+    ),
+    "krea2",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader([
+        "lora_unet_adaln_single_emb_timestep_embedder.lora_up.weight",
+      ]),
+    ),
+    "ltx",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader([
+        "lora_unet_adaln_single_emb.lora_up.weight",
+        "lora_unet_audio_adaln_single_linear.lora_up.weight",
+      ]),
+    ),
+    "ltx-2",
+  );
+});
+
+Deno.test("SDXL is told from SD 1.5 by its second encoder and its depth", () => {
+  assertEquals(detectLoraFamily(loraHeader(KOHYA_SD15)), "sd15");
+  assertEquals(detectLoraFamily(loraHeader(KOHYA_SDXL)), "sdxl");
+  // No text encoder trained at all: the deeper attention still gives it away.
+  assertEquals(
+    detectLoraFamily(loraHeader(KOHYA_SDXL.slice(0, 2))),
+    "sdxl",
+  );
+  assertEquals(
+    detectLoraFamily(loraHeader(KOHYA_SD15.slice(0, 2))),
+    "sd15",
+  );
+});
+
+Deno.test("what the file declares about itself is trusted first", () => {
+  // A LoRA whose keys look like nothing in particular, but which says so.
+  const vague = ["lora_unet_blah_blah.lora_up.weight"];
+  assertEquals(detectLoraFamily(loraHeader(vague)), null);
+  assertEquals(
+    detectLoraFamily(loraHeader(vague, {
+      "modelspec.architecture": "flux-1-dev/lora",
+    })),
+    "flux",
+  );
+  assertEquals(
+    detectLoraFamily(loraHeader(vague, {
+      "modelspec.architecture": "stable-diffusion-xl-v1-base/lora",
+    })),
+    "sdxl",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(vague, { ss_base_model_version: "sdxl_base_v1-0" }),
+    ),
+    "sdxl",
+  );
+  assertEquals(
+    detectLoraFamily(loraHeader(vague, { ss_base_model_version: "sd_v1" })),
+    "sd15",
+  );
+  // And it outranks the keys, which is the point of trusting it.
+  assertEquals(
+    detectLoraFamily(loraHeader(KOHYA_SD15, {
+      "modelspec.architecture": "flux-1-dev/lora",
+    })),
+    "flux",
+  );
+});
+
+Deno.test("a LoRA that matches nothing is unfiled, never guessed at", () => {
+  assertEquals(detectLoraFamily(loraHeader(["thing.lora_up.weight"])), null);
 });
 
 Deno.test("a real file is probed from its header alone", async () => {

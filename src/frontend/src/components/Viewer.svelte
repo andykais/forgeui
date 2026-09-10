@@ -56,16 +56,23 @@
   const index = $derived(outputs.findIndex((output) => output.id === selected.id));
   const isNewest = $derived(index === 0);
 
-  /** The sidecar comes from the detail route (§12). */
+  /**
+   * The sidecar comes from the detail route (§12). The sidebar that is up
+   * stays up while the next one loads: clearing it first swaps in a
+   * placeholder, which unmounts and remounts the whole sidebar and reads as a
+   * flicker on every step through the strip. Only a failed load empties it,
+   * so a stale panel is never left standing for an output that has none.
+   */
   $effect(() => {
     const id = selected.id;
-    detail = null;
     api
       .output(id)
       .then((loaded) => {
         if (selected.id === id) detail = loaded;
       })
-      .catch(() => {});
+      .catch(() => {
+        if (selected.id === id) detail = null;
+      });
   });
 
   $effect(() => {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
+  import { focusOnMount } from "../../lib/focus.ts";
   import type { ModelEntry, Param } from "../../types.ts";
 
   /**
@@ -80,6 +81,7 @@
       placeholder="Search models… (regex ok)"
       bind:value={search}
       aria-label="Search models"
+      use:focusOnMount
     />
     {#if models.length === 0}
       <p class="note">

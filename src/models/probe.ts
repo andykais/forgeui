@@ -13,10 +13,12 @@
  * something it depends on.
  */
 
-/** Tensor names, and the shape of each, as the header records them. */
+/** Tensor names, the shape of each, and what the file says about itself. */
 export interface Header {
   names: Set<string>;
   shape: (name: string) => number[] | null;
+  /** `__metadata__`, string values only; empty when the file carries none. */
+  metadata: Record<string, string>;
 }
 
 /** A header is JSON describing tensors; anything gigantic is not one. */
@@ -68,8 +70,16 @@ export function headerOf(parsed: Record<string, unknown>): Header {
   for (const key of Object.keys(parsed)) {
     if (key !== "__metadata__") names.add(key);
   }
+  const metadata: Record<string, string> = {};
+  const raw = parsed.__metadata__;
+  if (typeof raw === "object" && raw !== null) {
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof value === "string") metadata[key] = value;
+    }
+  }
   return {
     names,
+    metadata,
     shape: (name) => {
       const entry = parsed[name];
       if (typeof entry !== "object" || entry === null) return null;
@@ -163,7 +173,101 @@ export function detectFamily(header: Header): string | null {
   return null;
 }
 
+/**
+ * A LoRA holds no model, only deltas, so none of the discriminators above
+ * appear in one. What it does carry is the name of every base-model module
+ * it patches, which is the same information wearing a different hat.
+ */
+export function isLora(header: Header): boolean {
+  for (const name of header.names) {
+    if (
+      name.includes("lora_up.") || name.includes("lora_down.") ||
+      name.includes(".lora_A.") || name.includes(".lora_B.") ||
+      name.startsWith("lora_unet_") || name.startsWith("lora_te")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * What a LoRA says it was trained against. `modelspec.architecture` is the
+ * ModelSpec field the common trainers write, `ss_base_model_version` is
+ * sd-scripts' own; both are declarations rather than names, so they are
+ * trusted ahead of anything read off the keys. Ordered so that the narrower
+ * generation wins — `flux2` before `flux`, `ltx-2` before `ltx`.
+ */
+const DECLARED_ARCHITECTURES: readonly [RegExp, string][] = [
+  [/flux[\W_]?2|flux2/, "flux2"],
+  [/chroma/, "chroma"],
+  [/krea/, "krea2"],
+  [/flux/, "flux"],
+  [/ltx[\W_]?(video[\W_]?)?2/, "ltx-2"],
+  [/ltx/, "ltx"],
+  [/z[\W_]?image/, "z-image"],
+  [/anima|cosmos/, "anima"],
+  [/(stable[\W_]?diffusion[\W_]?xl)|sdxl/, "sdxl"],
+  [/(stable[\W_]?diffusion[\W_]?v?1)|sd[\W_]?1[\W_]?5|sd_v1/, "sd15"],
+];
+
+function declaredFamily(metadata: Record<string, string>): string | null {
+  for (const key of ["modelspec.architecture", "ss_base_model_version"]) {
+    const declared = metadata[key]?.toLowerCase();
+    if (!declared) continue;
+    for (const [pattern, family] of DECLARED_ARCHITECTURES) {
+      if (pattern.test(declared)) return family;
+    }
+  }
+  return null;
+}
+
+/**
+ * The family a LoRA patches, or `null`. The file's own declaration first;
+ * failing that, the module names its keys are built from — a trainer writes
+ * the base model's module path into every key, with `.` flattened to `_`, so
+ * a substring is the safe way to read them either way round.
+ */
+export function detectLoraFamily(header: Header): string | null {
+  const declared = declaredFamily(header.metadata);
+  if (declared) return declared;
+
+  const keys = [...header.names];
+  const some = (...needles: string[]) =>
+    keys.some((key) => needles.some((needle) => key.includes(needle)));
+
+  if (some("txtfusion")) return "krea2";
+  if (some("double_stream_modulation")) return "flux2";
+  if (some("distilled_guidance_layer")) return "chroma";
+  // Flux names its blocks `double_blocks` / `single_blocks`; the diffusers
+  // conversion calls the second half `single_transformer_blocks`.
+  if (some("double_blocks", "single_blocks", "single_transformer_blocks")) {
+    return "flux";
+  }
+  if (some("llm_adapter")) return "anima";
+  if (some("adaln_single")) {
+    return some("audio_adaln_single") ? "ltx-2" : "ltx";
+  }
+  if (some("cap_embedder", "noise_refiner")) return "z-image";
+
+  // The UNet line. Both generations name their blocks the same way, so the
+  // tell is elsewhere: SDXL has two text encoders where SD 1.5 has one, and
+  // its attention blocks are deeper than one transformer block.
+  if (some("input_blocks", "output_blocks", "down_blocks", "up_blocks")) {
+    const twoEncoders = keys.some((key) =>
+      key.startsWith("lora_te2_") || key.includes("text_encoder_2")
+    );
+    const deepAttention = keys.some((key) =>
+      /transformer_blocks[._](?!0[^0-9])\d+/.test(key)
+    );
+    return twoEncoders || deepAttention || some("label_emb") ? "sdxl" : "sd15";
+  }
+
+  return null;
+}
+
 /** Read a file and say what it is; `null` for anything unrecognised. */
 export async function probeFamily(path: string): Promise<string | null> {
-  return detectFamily(await readHeader(path));
+  const header = await readHeader(path);
+  return isLora(header) ? detectLoraFamily(header) : detectFamily(header);
 }

@@ -392,15 +392,21 @@ export class ModelLibrary {
   }
 
   /**
-   * Read the header of every diffusion-class file whose size or mtime has
-   * moved since the last pass, and remember what it says. A file that cannot
-   * be read or is not recognised is recorded with a null arch, so a bad file
-   * is attempted once per change rather than on every scan.
+   * Read the header of every file whose size or mtime has moved since the
+   * last pass, and remember what it says. A file that cannot be read or is
+   * not recognised is recorded with a null arch, so a bad file is attempted
+   * once per change rather than on every scan.
+   *
+   * LoRAs are read as well as the models themselves. A LoRA's family is the
+   * one thing that decides whether a workflow can use it, and without this
+   * every one of them sat at `unset` forever — there is nothing else to
+   * infer it from, and nobody is going to file a hundred of them by hand.
    */
   async #probe(models: readonly ScannedModel[]): Promise<void> {
     const overrides = this.#config.config.model_classes;
     for (const model of models) {
-      if (classOf(model.kind, overrides) !== "diffusion") continue;
+      const modelClass = classOf(model.kind, overrides);
+      if (modelClass !== "diffusion" && modelClass !== "lora") continue;
       const seen = this.#probes.get(model.path);
       if (
         seen && seen.size === model.size && seen.mtime === model.mtime
