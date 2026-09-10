@@ -31,6 +31,7 @@ const loras: ModelEntry[] = [
     display_name: "Film grain",
     family: "unset",
     kind: "loras",
+    class: "lora",
     size: 1024,
     mtime: null,
     id: "hash-placeholder",
@@ -51,6 +52,7 @@ const loras: ModelEntry[] = [
     display_name: "Detail",
     family: "unset",
     kind: "loras",
+    class: "lora",
     size: 1024,
     mtime: null,
     id: "hash-placeholder",
@@ -74,6 +76,30 @@ interface Handlers {
   onseedlock: ReturnType<typeof vi.fn>;
 }
 
+function diffusionModel(name: string, family: string, kind = "checkpoints"): ModelEntry {
+  return {
+    path: `/models/${kind}/${name}`,
+    name,
+    filename: name,
+    display_name: name.replace(/\.safetensors$/, ""),
+    family,
+    kind,
+    class: "diffusion",
+    size: 1024,
+    mtime: null,
+    id: `id-${name}`,
+    hash: null,
+    notes: null,
+    tags: [],
+    thumb_path: null,
+    thumb_url: null,
+    output_count: 0,
+    last_used_at: null,
+    hashing: false,
+    present: true,
+  };
+}
+
 function mount(
   params: Param[],
   values: Record<string, unknown> = {},
@@ -81,6 +107,7 @@ function mount(
     seedLocked: boolean;
     lastSeed: number | null;
     warnings: string[];
+    checkpoints: ModelEntry[];
   }> = {},
 ) {
   const handlers: Handlers = {
@@ -97,7 +124,7 @@ function mount(
       seedLocked: extra.seedLocked ?? false,
       lastSeed: extra.lastSeed ?? null,
       loras,
-      checkpoints: [],
+      checkpoints: extra.checkpoints ?? [],
       warnings: extra.warnings ?? [],
       ...handlers,
     },
@@ -199,14 +226,72 @@ describe("each param type renders from the manifest", () => {
       [
         {
           key: "checkpoint",
-          label: "Checkpoint",
-          type: "checkpoint",
+          label: "Model",
+          type: "model",
           bind: "1.ckpt_name",
         },
       ],
       { checkpoint: "krea2.safetensors" },
     );
     expect(screen.getByText("krea2.safetensors")).toBeTruthy();
+  });
+
+  test("the model picker lists every diffusion folder, family first", async () => {
+    const { handlers } = mount(
+      [
+        {
+          key: "model",
+          label: "Model",
+          type: "model",
+          bind: "1.unet_name",
+          filter: { class: "diffusion", family: "flux" },
+        },
+      ],
+      { model: "flux1-dev.safetensors" },
+      {
+        checkpoints: [
+          diffusionModel("flux1-dev.safetensors", "flux", "diffusion_models"),
+          diffusionModel("illustriousXL.safetensors", "sdxl"),
+          diffusionModel("untagged.safetensors", "unset"),
+        ],
+      },
+    );
+
+    await fireEvent.click(screen.getByText("flux1-dev"));
+
+    // Same family first, then anything nobody has filed, then the divider:
+    // a different family is ordered down, never hidden (§13).
+    const options = screen
+      .getAllByRole("button")
+      .filter((node) => node.classList.contains("option"))
+      .map((node) => node.textContent?.trim().split(/\s+/)[0]);
+    expect(options).toEqual(["flux1-dev", "untagged", "illustriousXL"]);
+    expect(screen.getByText("Other models")).toBeTruthy();
+
+    // A model from checkpoints/ is selectable in a workflow whose loader is
+    // a UNETLoader: one class, one list (§3).
+    await fireEvent.click(screen.getByText("illustriousXL"));
+    expect(handlers.onchange).toHaveBeenCalledWith("model", "illustriousXL.safetensors");
+  });
+
+  test("the model picker searches across folders", async () => {
+    mount(
+      [{ key: "model", label: "Model", type: "model", bind: "1.ckpt_name" }],
+      { model: "" },
+      {
+        checkpoints: [
+          diffusionModel("flux1-dev.safetensors", "flux", "diffusion_models"),
+          diffusionModel("illustriousXL.safetensors", "sdxl"),
+        ],
+      },
+    );
+
+    await fireEvent.click(screen.getByText("choose a model…"));
+    await fireEvent.input(screen.getByLabelText("Search models"), {
+      target: { value: "illus" },
+    });
+    expect(screen.queryByText("flux1-dev")).toBeNull();
+    expect(screen.getByText("illustriousXL")).toBeTruthy();
   });
 
   test("image says why it cannot run yet, rather than faking an upload", () => {

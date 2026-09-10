@@ -178,6 +178,11 @@ export const api = {
     request<{ models: ModelEntry[] }>(`/api/models?kind=${kind}`).then(
       (body) => body.models,
     ),
+  /** Every kind in a class at once — what a model picker lists (§3). */
+  modelsOfClass: (modelClass: string) =>
+    request<{ models: ModelEntry[] }>(`/api/models?class=${modelClass}`).then(
+      (body) => body.models,
+    ),
   model: (id: string) => request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
   patchModel: (
     id: string,

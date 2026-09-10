@@ -46,7 +46,7 @@
     "enum",
     "seed",
     "size",
-    "checkpoint",
+    "model",
   ];
 
   $effect(() => {

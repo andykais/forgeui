@@ -1,6 +1,6 @@
 /** Manifest and workflow shapes (DESIGN.md §4.2–§4.3). */
 
-import { MODEL_CLASSES } from "../config/types.ts";
+import { MODEL_CLASSES, type ModelClass } from "../config/types.ts";
 
 /** A prompt-format graph: the thing that gets queued. */
 export interface ApiNode {
@@ -33,6 +33,8 @@ export const PARAM_TYPES = [
   "enum",
   "seed",
   "size",
+  "model",
+  /** Superseded by `model`; accepted and normalised to it (§5). */
   "checkpoint",
   "lora_list",
   "image",
@@ -121,10 +123,18 @@ export interface SizeParam extends ParamCommon {
 
 export interface ModelFilter {
   family?: Family;
+  /** Which model class the picker lists; defaults to `diffusion` (§5). */
+  class?: ModelClass;
 }
 
-export interface CheckpointParam extends ParamCommon {
-  type: "checkpoint";
+/**
+ * A base model, picked from a class rather than from one folder. `bind` is a
+ * scalar naming whatever input the workflow's own loader uses — `ckpt_name`
+ * for a checkpoint-shaped graph, `unet_name` for a split-file one — so the
+ * pick is a filename substitution, not a change of graph shape (§2).
+ */
+export interface ModelParam extends ParamCommon {
+  type: "model";
   bind: string;
   filter?: ModelFilter;
   default?: string;
@@ -165,7 +175,7 @@ export type Param =
   | EnumParam
   | SeedParam
   | SizeParam
-  | CheckpointParam
+  | ModelParam
   | LoraListParam
   | MediaParam;
 

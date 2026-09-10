@@ -27,6 +27,7 @@ class AppState {
   dataDir = $state<string>("");
   workflows = $state<WorkflowSummary[]>([]);
   loras = $state<ModelEntry[]>([]);
+  /** Everything that can drive a generation, from every diffusion folder. */
   checkpoints = $state<ModelEntry[]>([]);
   /** The model library's two background passes (§8.1), pushed on `/ws`. */
   rescan = $state<RescanProgress | null>(null);
@@ -98,7 +99,7 @@ class AppState {
   async refreshModels(): Promise<void> {
     const [loras, checkpoints] = await Promise.all([
       api.modelsOfKind("loras").catch(() => []),
-      api.modelsOfKind("checkpoints").catch(() => []),
+      api.modelsOfClass("diffusion").catch(() => []),
     ]);
     this.loras = loras;
     this.checkpoints = checkpoints;

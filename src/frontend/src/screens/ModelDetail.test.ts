@@ -38,6 +38,7 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     display_name: "Film grain 35mm",
     family: "sd15",
     kind: "loras",
+    class: "lora",
     size: 145_000_000,
     mtime: 1_780_000_000_000,
     notes: null,

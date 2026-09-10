@@ -330,3 +330,46 @@ Deno.test("canonical JSON sorts keys but keeps array order", () => {
     '{"a":[3,1,2],"b":1,"c":{"y":"x","z":null}}',
   );
 });
+
+Deno.test("checkpoint is the old spelling of model, and widens to the class", () => {
+  const graph: ApiGraph = {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: "x" } },
+  };
+  const legacy = validateManifest({
+    id: "w",
+    name: "W",
+    family: "flux",
+    kind: "image",
+    params: [{
+      key: "model",
+      type: "checkpoint",
+      filter: { family: "flux" },
+      bind: "1.unet_name",
+    }],
+    outputs: [{ node: "1", kind: "image" }],
+  }, { graph });
+  const param = legacy.params[0]!;
+  assertEquals(param.type, "model");
+  // The old spelling could only reach checkpoints/; a model param reaches
+  // every folder that can drive a generation (§5, §14).
+  assertEquals(
+    (param as { filter?: { class?: string; family?: string } }).filter,
+    { class: "diffusion", family: "flux" },
+  );
+
+  // The new spelling parses the same, and its class can be named outright.
+  const current = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [{
+      key: "model",
+      type: "model",
+      filter: { class: "diffusion" },
+      bind: "1.unet_name",
+    }],
+    outputs: [{ node: "1", kind: "image" }],
+  }, { graph });
+  assertEquals(current.params[0]!.type, "model");
+});
