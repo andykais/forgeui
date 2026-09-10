@@ -175,44 +175,29 @@
   }
 
   /**
-   * Grow with the text. `field-sizing: content` does exactly this where it
-   * exists — including leaving the box alone once it has been dragged — and
-   * this is the same behaviour for browsers that do not have it yet: fit to
-   * the content on every keystroke, and stop as soon as a height arrives that
-   * we did not set, because that one came from the resize handle.
+   * Grow with the text, on every keystroke and whenever the value arrives
+   * from outside — a workflow being selected, a panel filled from the last
+   * job, Reset to defaults.
+   *
+   * `field-sizing: content` does grow the box, but only until someone drags
+   * the resize handle: that writes an inline height, which outranks it for
+   * good. There is no way back from that in the UI, and the same textarea is
+   * reused when the next workflow also has a `prompt`, so one drag follows
+   * you from workflow to workflow. Setting the height here on every input is
+   * what makes it unstickable — the handle is off, so nothing else writes to
+   * it, and every keystroke reasserts the fit.
    */
   function autogrow(node: HTMLTextAreaElement, _value: unknown) {
-    const native =
-      typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content");
-    if (native) return;
-    let ours = 0;
-    let manual = false;
     const fit = () => {
-      if (manual) return;
+      // `auto` first, so shrinking works too; `rows` is the floor.
       node.style.height = "auto";
       node.style.height = `${node.scrollHeight}px`;
-      ours = node.offsetHeight;
     };
     fit();
-    // Absent under jsdom, where there is no layout to observe anyway.
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            if (!manual && ours > 0 && Math.abs(node.offsetHeight - ours) > 1) {
-              manual = true;
-            }
-          });
-    observer?.observe(node);
     node.addEventListener("input", fit);
     return {
-      // The value can also change from outside, when the panel is filled
-      // from a job or reset to defaults.
       update: () => fit(),
-      destroy: () => {
-        observer?.disconnect();
-        node.removeEventListener("input", fit);
-      },
+      destroy: () => node.removeEventListener("input", fit),
     };
   }
 
@@ -454,11 +439,16 @@
     color: var(--accent);
   }
 
+  /*
+   * The height is set from the content by `autogrow`, so the box always fits
+   * what is in it. `resize` is off: a dragged height would be overwritten by
+   * the next keystroke, which is worse than not offering the handle.
+   */
   textarea.text {
-    resize: vertical;
+    resize: none;
     min-height: 62px;
     line-height: 1.45;
-    field-sizing: content;
+    overflow-y: hidden;
   }
 
   .number {
