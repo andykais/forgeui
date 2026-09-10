@@ -276,7 +276,7 @@ contractTest("a real generation runs end to end through the app", async () => {
     );
     assert(checkpoint, `${CHECKPOINT} is not in the library`);
     assertEquals(checkpoint.hashing, false);
-    assertMatch(checkpoint.hash ?? "", /^[0-9a-f]{32}$/);
+    assertMatch(checkpoint.hash ?? "", /^[0-9a-f]{64}$/);
     assertEquals(checkpoint.output_count, 1, "the backfill linked the output");
     assert(checkpoint.last_used_at !== null);
 

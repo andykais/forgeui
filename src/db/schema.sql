@@ -33,7 +33,7 @@ CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
-  hash TEXT PRIMARY KEY,          -- md5 of file (identity, not a signature)
+  hash TEXT PRIMARY KEY,          -- sha256 of file
   path TEXT NOT NULL UNIQUE,
   kind TEXT NOT NULL,             -- checkpoint|lora|vae|controlnet|…
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,

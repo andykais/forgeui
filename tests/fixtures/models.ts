@@ -1,4 +1,3 @@
-import { crypto as stdCrypto } from "@std/crypto";
 import { dirname } from "@std/path";
 
 /**
@@ -53,14 +52,10 @@ export async function writeFakeSafetensors(
   return file;
 }
 
-/**
- * The md5 the hasher should arrive at, for the same bytes. Computed here from
- * `@std/crypto` directly rather than through the app's own function, so the
- * test compares two implementations rather than one against itself.
- */
-export async function md5Of(bytes: Uint8Array): Promise<string> {
-  const digest = await stdCrypto.subtle.digest(
-    "MD5",
+/** The sha256 the hasher should arrive at, for the same bytes. */
+export async function sha256Of(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
     bytes as unknown as BufferSource,
   );
   return [...new Uint8Array(digest)]

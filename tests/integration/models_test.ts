@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { startTestApp, type TestApp, withTestApp } from "../fixtures/app.ts";
-import { md5Of, writeFakeSafetensors } from "../fixtures/models.ts";
+import { sha256Of, writeFakeSafetensors } from "../fixtures/models.ts";
 import type { ModelView } from "../../src/models/library.ts";
 import type { JobRow } from "../../src/db/queries.ts";
 
@@ -335,7 +335,7 @@ Deno.test("hashing fills in identity, and only re-reads what changed", async () 
     assert(checkpoint, "the checkpoint is listed");
     assertEquals(
       checkpoint.hash,
-      await md5Of(
+      await sha256Of(
         await Deno.readFile(join(fixtures.checkpoints, CHECKPOINT)),
       ),
     );
@@ -437,7 +437,7 @@ Deno.test("a bad family or an unknown model is refused", async () => {
     assertEquals(empty.status, 400);
     await empty.body?.cancel();
 
-    const missing = await app.fetch(`/api/models/${"f".repeat(32)}`);
+    const missing = await app.fetch(`/api/models/${"f".repeat(64)}`);
     assertEquals(missing.status, 404);
     await missing.body?.cancel();
   });

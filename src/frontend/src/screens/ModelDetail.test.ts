@@ -30,8 +30,8 @@ const { default: ModelDetail } = await import("./ModelDetail.svelte");
 
 function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
   return {
-    id: "a".repeat(32),
-    hash: "a".repeat(32),
+    id: "a".repeat(64),
+    hash: "a".repeat(64),
     path: "/models/loras/film-grain-35mm.safetensors",
     name: "film-grain-35mm.safetensors",
     filename: "film-grain-35mm.safetensors",
@@ -64,7 +64,7 @@ describe("the model page header", () => {
   test("blur commits a new display name", async () => {
     model.mockResolvedValue(detail());
     patchModel.mockResolvedValue(detail({ display_name: "Grain" }));
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.value).toBe("Film grain 35mm");
@@ -77,7 +77,7 @@ describe("the model page header", () => {
 
   test("esc reverts instead of committing", async () => {
     model.mockResolvedValue(detail());
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "Something else" } });
@@ -90,7 +90,7 @@ describe("the model page header", () => {
 
   test("an unchanged name is not written back", async () => {
     model.mockResolvedValue(detail());
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     const input = await screen.findByLabelText("Display name");
     await fireEvent.blur(input);
@@ -113,13 +113,13 @@ describe("the model page header", () => {
     expect(screen.queryByText("Samples")).toBeNull();
   });
 
-  test("the full hash is shown whole, with no button beside it", async () => {
+  test("the full sha256 is shown whole, with no button beside it", async () => {
     model.mockResolvedValue(detail());
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     // §11.2: on its own line, `user-select: all`, no truncation, no button.
-    const hash = await screen.findByText("a".repeat(32));
-    expect(hash.textContent).toHaveLength(32);
+    const hash = await screen.findByText("a".repeat(64));
+    expect(hash.textContent).toHaveLength(64);
     expect(hash.className).toContain("value");
     expect(hash.closest("button")).toBeNull();
   });
@@ -127,7 +127,7 @@ describe("the model page header", () => {
   test("a tag is added on Enter and removed from its chip", async () => {
     model.mockResolvedValue(detail());
     patchModel.mockResolvedValue(detail({ tags: ["film", "grain"] }));
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     const tags = await screen.findByLabelText("Add a tag");
     await fireEvent.input(tags, { target: { value: "grain" } });
@@ -153,7 +153,7 @@ describe("the model page header", () => {
       }
       return Promise.resolve(detail({ notes: "typed while the tag was saving" }));
     });
-    render(ModelDetail, { id: "a".repeat(32) });
+    render(ModelDetail, { id: "a".repeat(64) });
 
     const tags = await screen.findByLabelText("Add a tag");
     await fireEvent.input(tags, { target: { value: "grain" } });

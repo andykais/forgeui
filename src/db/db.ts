@@ -27,22 +27,6 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
-  {
-    version: 3,
-    name: "re-key the model library from sha256 to md5",
-    // The hash is the identity, so changing the algorithm invalidates every
-    // row keyed by one. `models` and `output_models` are derived and rebuild
-    // themselves: the next scan re-hashes every file, and the backfill puts
-    // the output links back from the sidecars, which record a model by name
-    // as well as by hash. `samples` are not derived — the rows go, and the
-    // files they point at are left untouched under `samples/` for the owner
-    // to drop onto the model again.
-    sql: `
-      DELETE FROM output_models;
-      DELETE FROM samples;
-      DELETE FROM models;
-    `,
-  },
 ];
 
 export const SCHEMA_VERSION: number =
