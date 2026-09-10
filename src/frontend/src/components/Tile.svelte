@@ -10,6 +10,10 @@
    * Selection is a highlight and nothing else: no overlay, no dimming and no
    * buttons. Opening a tile is what offers the actions, in the viewer's
    * sidebar, so nothing here depends on a tile being "current".
+   *
+   * Hover and selection both read from outside the tile as well as in: a
+   * square image fills the cell edge to edge and leaves no letterbox to tint,
+   * so a tint alone is invisible on exactly the pictures people generate.
    */
   interface Props {
     output: Output;
@@ -71,6 +75,14 @@
     border-radius: var(--radius-input);
     overflow: hidden;
     background: var(--raised);
+    transition: box-shadow 110ms var(--ease);
+  }
+
+  /* Outside the tile's own edge, where a full-bleed image cannot cover it. */
+  .tile:hover {
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 22%),
+      0 2px 14px rgb(0 0 0 / 45%);
   }
 
   /* A soft highlight, so a selected tile reads as chosen without hiding it. */
@@ -78,8 +90,8 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
     box-shadow:
-      0 0 0 1px var(--accent-tint),
-      0 0 14px rgb(0 0 0 / 45%);
+      0 0 0 1px var(--accent),
+      0 2px 16px rgb(0 0 0 / 55%);
   }
 
   .surface {
@@ -88,6 +100,12 @@
     width: 100%;
     height: 100%;
     cursor: pointer;
+    background: transparent;
+  }
+
+  /* The letterbox behind a fitted image; the ring above carries the rest. */
+  .tile:hover .surface {
+    background: var(--control-selected);
   }
 
   /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */

@@ -163,27 +163,36 @@
     const action = app.keyAction(event);
     if (!action) return;
     const columns = tileSize === "large" ? 2 : 3;
-    const index = focused
-      ? sessionOutputs.findIndex((output) => output.id === focused.id)
+    // What the arrows are moving from: the open viewer's output, or the
+    // selected tile when the grid is what is on screen.
+    const current = isFocused
+      ? focused
+      : (sessionOutputs.find((output) => output.id === selectedId) ?? null);
+    const index = current
+      ? sessionOutputs.findIndex((output) => output.id === current.id)
       : -1;
+    /**
+     * The list is newest first and reads left to right, so a step of -1 is
+     * the tile to the left and +1 the one to the right. Arrows move the
+     * selection and nothing else: only a viewer that is already open follows
+     * along, so an arrow key never enlarges anything by itself.
+     */
     const move = (delta: number) => {
-      const next = sessionOutputs[index + delta];
-      if (next) {
-        selectedId = next.id;
-        following = sessionOutputs[0]?.id === next.id;
-        focusRequested = true;
-      } else if (delta < 0 && index === 0) {
-        following = true;
-      }
+      // Nothing chosen yet: the first arrow key takes the newest rather than
+      // jumping into the middle of the grid.
+      const next = index < 0 ? sessionOutputs[0] : sessionOutputs[index + delta];
+      if (!next) return;
+      selectedId = next.id;
+      following = sessionOutputs[0]?.id === next.id;
     };
     switch (action) {
       case "select_prev":
         event.preventDefault();
-        move(1);
+        move(-1);
         break;
       case "select_next":
         event.preventDefault();
-        move(-1);
+        move(1);
         break;
       case "select_down":
         event.preventDefault();
@@ -205,6 +214,19 @@
         break;
     }
   }
+
+  /** Keep the selected tile on screen while the arrows walk the grid. */
+  let gridEl = $state<HTMLDivElement | undefined>(undefined);
+  $effect(() => {
+    const id = selectedId;
+    const grid = gridEl;
+    if (!id || !grid) return;
+    untrack(() => {
+      grid
+        .querySelector(`[data-output-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  });
 
   const sizes: { size: TileSize; icon: typeof List; title: string }[] = [
     { size: "small", icon: Grid3x3, title: "Small tiles" },
@@ -368,7 +390,7 @@
           <MediaTable outputs={sessionOutputs} {selectedId} onopen={open} />
         </div>
       {:else}
-        <div class="grid scroll" class:large={tileSize === "large"}>
+        <div class="grid scroll" class:large={tileSize === "large"} bind:this={gridEl}>
           {#each sessionJobs as job (job.id)}
             {#if job.status === "done"}
               {#each app.jobOutputs(job) as output (output.id)}

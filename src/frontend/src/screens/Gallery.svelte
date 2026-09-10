@@ -184,13 +184,14 @@
       if (index + delta >= outputs.length - 2) void loadMore();
     };
     switch (action) {
+      // The list reads left to right, so left is a step back through it.
       case "select_prev":
         event.preventDefault();
-        move(1);
+        move(-1);
         break;
       case "select_next":
         event.preventDefault();
-        move(-1);
+        move(1);
         break;
       case "select_down":
         event.preventDefault();
