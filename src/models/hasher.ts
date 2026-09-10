@@ -19,6 +19,11 @@ import type { ScannedModel } from "./scan.ts";
  *
  * Re-hashing is decided on `path + size + mtime`: an untouched file keeps the
  * hash it already has, which is what makes a restart cheap.
+ *
+ * The queue is smallest first. Reading is what costs, so folder order put a
+ * hundred LoRAs behind ten multi-gigabyte checkpoints and none of them gained
+ * an identity for minutes; by size, the many small files are done in seconds
+ * and the few large ones finish while everything else already works.
  */
 
 /** §8.1's `hashing_progress`. */
@@ -145,7 +150,14 @@ export class ModelHasher {
       this.#total++;
       queued++;
     }
-    if (queued > 0) this.#publish();
+    if (queued > 0) {
+      // Smallest first, over whatever is still waiting — a rescan mid-pass
+      // sorts its additions in with the rest rather than after them.
+      this.#queue.sort((a, b) =>
+        a.size - b.size || a.path.localeCompare(b.path)
+      );
+      this.#publish();
+    }
     return queued;
   }
 

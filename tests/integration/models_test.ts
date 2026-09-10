@@ -17,6 +17,7 @@ const CHECKPOINT = "v1-5-pruned-emaonly-fp16.safetensors";
 interface ModelsResponse {
   kind: string | null;
   class: string | null;
+  classes: Record<string, string>;
   folders: string[];
   models: ModelView[];
   progress: {
@@ -102,6 +103,26 @@ async function models(
 ): Promise<ModelsResponse> {
   return await app.json<ModelsResponse>(`/api/models${query}`);
 }
+
+Deno.test("the response says what class each configured folder holds", async () => {
+  await withModels(async (app) => {
+    const listed = await models(app);
+    // The Models screen groups its tabs by this rather than by folder: the
+    // four folders a generatable model can sit in are one tab (§8.2).
+    assertEquals(listed.classes.checkpoints, "diffusion");
+    assertEquals(listed.classes.unet, "diffusion");
+    assertEquals(listed.classes.diffusion_models, "diffusion");
+    assertEquals(listed.classes["Stable-Diffusion"], "diffusion");
+    assertEquals(listed.classes.loras, "lora");
+    assertEquals(listed.classes.vae, "vae");
+    assertEquals(listed.classes.text_encoders, "clip");
+    // Every configured folder is in the map, even one with nothing in it.
+    assertEquals(
+      Object.keys(listed.classes).sort(),
+      Object.keys(app.config.config.model_folders).sort(),
+    );
+  });
+});
 
 Deno.test("scanned models are listed before they are hashed", async () => {
   await withModels(async (app) => {

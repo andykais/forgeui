@@ -491,6 +491,20 @@ export class ModelLibrary {
       classOf(kind, overrides) === modelClass
     );
   }
+
+  /**
+   * The class of every configured folder kind, in `config.yaml` order. The
+   * Models screen groups its tabs by class — `checkpoints`, `unet`,
+   * `diffusion_models` and `Stable-Diffusion` are one tab, because they hold
+   * one kind of thing (§8.2) — and only the server knows the mapping, so it
+   * is served rather than copied into the UI.
+   */
+  classes(): Record<string, ModelClass> {
+    const overrides = this.#config.config.model_classes;
+    return Object.fromEntries(
+      this.scanner.kinds().map((kind) => [kind, classOf(kind, overrides)]),
+    );
+  }
 }
 
 /** Usage figures after outputs changed under a set of models. */

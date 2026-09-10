@@ -573,8 +573,11 @@
     padding: 0 12px 16px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    /* The same row-collapse guard the Models grid needs. */
+    grid-auto-rows: max-content;
     gap: 8px;
     align-content: start;
+    align-items: start;
   }
 
   /* Day dividers span the grid and stick while scrolling (§11.2). */

@@ -125,6 +125,9 @@ export function modelRoutes(ctx: AppContext): Route[] {
         return json({
           kind: kind ?? null,
           class: modelClass ?? null,
+          // Which folder kinds exist and what each one holds, so the screen
+          // can group its tabs by class without a second copy of the table.
+          classes: ctx.models.classes(),
           folders: ctx.models.folders({ kind, class: modelClass }),
           models: ctx.models.list({
             kind,

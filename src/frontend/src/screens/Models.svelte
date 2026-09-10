@@ -14,28 +14,74 @@
   import ModelCard from "../components/ModelCard.svelte";
 
   /**
-   * Models (§11.2, frame 04): tabs per kind, tiles or table, search over the
-   * same fields the API's `q` searches, and a family filter with an `unset`
-   * chip. Every filter is a URL param, so a view is a link. No multi-select
-   * and no bulk edits (MOCK-REVISIONS §8).
+   * Models (§11.2, frame 04): a tab per model class, tiles or table, search
+   * over the same fields the API's `q` searches, and a family filter with an
+   * `unset` chip. Every filter is a URL param, so a view is a link. No
+   * multi-select and no bulk edits (MOCK-REVISIONS §8).
+   *
+   * The tabs are classes, not folders: `checkpoints`, `Stable-Diffusion`,
+   * `diffusion_models` and `unet` all hold things that can drive a generation
+   * (§8.2), and looking through four tabs for one of them is four times the
+   * work. Which folder a file sits in is a filter under the tab, for when it
+   * is the question.
    */
   let models = $state<ModelEntry[]>([]);
   /** Every model of every kind, for the counts on the tabs and the chips. */
   let all = $state<ModelEntry[]>([]);
   let folders = $state<string[]>([]);
+  /** Which class each configured folder holds; the server owns the table. */
+  let classes = $state<Record<string, string>>({});
   let loading = $state(false);
   let searchDraft = $state("");
   let rescanning = $state(false);
 
   const query = $derived(router.current.query);
-  const kind = $derived(query.get("kind") ?? "checkpoints");
+  const modelClass = $derived(query.get("class") ?? "diffusion");
+  /** The folder within the class, or "" for all of them. */
+  const kind = $derived(query.get("kind") ?? "");
   const family = $derived(query.get("family") ?? "");
   const q = $derived(query.get("q") ?? "");
   const view = $derived(query.get("view") === "table" ? "table" : "tiles");
-  const filterKey = $derived(`${kind}\u0000${family}\u0000${q}`);
+  const filterKey = $derived(`${modelClass}\u0000${kind}\u0000${family}\u0000${q}`);
 
-  /** Kinds come from `config.model_folders`, so a folder set is a tab set. */
-  const kinds = $derived(Object.keys(app.config?.model_folders ?? {}));
+  /** What a class is called on a tab; anything else is shown as it is named. */
+  const CLASS_LABELS: Record<string, string> = {
+    diffusion: "Diffusion models",
+    lora: "LoRAs",
+    clip: "Text encoders",
+    vae: "VAEs",
+    controlnet: "ControlNet",
+    upscale: "Upscalers",
+    embedding: "Embeddings",
+    other: "Other",
+  };
+
+  function classLabel(name: string): string {
+    return CLASS_LABELS[name] ?? name;
+  }
+
+  /**
+   * A tab per class the config declares a folder for, in `config.yaml` order.
+   * Falling back to the models themselves keeps the tabs from vanishing while
+   * the first request is still out.
+   */
+  const classTabs = $derived.by(() => {
+    const names: string[] = [];
+    for (const name of Object.values(classes)) {
+      if (!names.includes(name)) names.push(name);
+    }
+    for (const model of all) {
+      if (!names.includes(model.class)) names.push(model.class);
+    }
+    return names;
+  });
+
+  /** The folders that make up the current tab, when there is a choice. */
+  const classKinds = $derived(
+    Object.entries(classes)
+      .filter(([, name]) => name === modelClass)
+      .map(([folder]) => folder),
+  );
 
   $effect(() => {
     filterKey;
@@ -79,13 +125,16 @@
     loading = true;
     try {
       const body = await api.models({
-        kind,
+        // A chosen folder narrows the class it belongs to.
+        kind: kind || undefined,
+        class: kind ? undefined : modelClass,
         family: family || undefined,
         q: q || undefined,
       });
       if (mine !== request) return;
       models = body.models;
       folders = body.folders;
+      classes = body.classes;
       searchDraft = q;
       const everything = await api.models({});
       if (mine !== request) return;
@@ -146,10 +195,18 @@
     }
     return counts;
   });
+  const perClass = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const model of all) {
+      counts.set(model.class, (counts.get(model.class) ?? 0) + 1);
+    }
+    return counts;
+  });
+  /** Families of what this tab is showing, not of the whole library. */
   const perFamily = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const model of all) {
-      if (model.kind !== kind) continue;
+      if (kind ? model.kind !== kind : model.class !== modelClass) continue;
       counts.set(model.family, (counts.get(model.family) ?? 0) + 1);
     }
     return counts;
@@ -159,13 +216,14 @@
 <section class="models">
   <header class="filters">
     <div class="row tabs">
-      {#each kinds as tab (tab)}
+      {#each classTabs as tab (tab)}
         <button
-          class:active={kind === tab}
-          onclick={() => setQuery({ kind: tab === "checkpoints" ? null : tab })}
+          class:active={modelClass === tab}
+          onclick={() =>
+            setQuery({ class: tab === "diffusion" ? null : tab, kind: null })}
         >
-          {tab}
-          <span class="mono dim">{perKind.get(tab) ?? 0}</span>
+          {classLabel(tab)}
+          <span class="mono dim">{perClass.get(tab) ?? 0}</span>
         </button>
       {/each}
     </div>
@@ -187,23 +245,6 @@
         onblur={() => setQuery({ q: searchDraft || null })}
       />
     </label>
-
-    <div class="row families">
-      <button class:active={family === ""} onclick={() => setQuery({ family: null })}>
-        All
-      </button>
-      {#each [...families, "unset"] as name (name)}
-        <button
-          class:active={family === name}
-          onclick={() => setQuery({ family: family === name ? null : name })}
-        >
-          {name}
-          {#if (perFamily.get(name) ?? 0) > 0}
-            <span class="mono dim count-chip">{perFamily.get(name)}</span>
-          {/if}
-        </button>
-      {/each}
-    </div>
 
     <span class="spacer"></span>
 
@@ -230,19 +271,76 @@
     </button>
   </header>
 
+  <!-- Which folder, then which family: narrower with each row down. -->
+  {#if classKinds.length > 1}
+    <div class="band">
+      <div class="row folders">
+        <button class:active={kind === ""} onclick={() => setQuery({ kind: null })}>
+          All
+        </button>
+        {#each classKinds as folder (folder)}
+          <button
+            class:active={kind === folder}
+            onclick={() => setQuery({ kind: kind === folder ? null : folder })}
+          >
+            {folder}
+            {#if (perKind.get(folder) ?? 0) > 0}
+              <span class="mono dim count-chip">{perKind.get(folder)}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <div class="band">
+    <div class="row families">
+      <button class:active={family === ""} onclick={() => setQuery({ family: null })}>
+        All
+      </button>
+      {#each [...families, "unset"] as name (name)}
+        <button
+          class:active={family === name}
+          onclick={() => setQuery({ family: family === name ? null : name })}
+        >
+          {name}
+          {#if (perFamily.get(name) ?? 0) > 0}
+            <span class="mono dim count-chip">{perFamily.get(name)}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+  </div>
+
   <div class="count mono dim">
     {models.length} model{models.length === 1 ? "" : "s"}{hashingLeft > 0
       ? ` · ${hashingLeft} still hashing`
       : ""}
     {#if folders.length > 0}
-      · {folders.join(" · ")}
+      <!-- One or two paths are worth reading; four is a paragraph. -->
+      <span title={folders.join("\n")}>
+        · {folders.length > 2 ? `${folders.length} folders` : folders.join(" · ")}
+      </span>
+    {/if}
+    <!--
+      What the hasher is doing right now, so a folder that says "still
+      hashing" also says whether anything is happening about it. Reading a
+      whole file is what takes the time, so the bytes are the honest measure
+      of progress, not the file count.
+    -->
+    {#if app.hashing?.running}
+      <span class="hashing-now">
+        · hashing {app.hashing.done}/{app.hashing.total}
+        ({bytes(app.hashing.bytes_done)} of {bytes(app.hashing.bytes_total)})
+        {#if app.hashing.current}· {app.hashing.current}{/if}
+      </span>
     {/if}
   </div>
 
   {#if models.length === 0 && !loading}
     <div class="empty">
       <Brain size={22} />
-      <p>No {kind} here.</p>
+      <p>No {kind || classLabel(modelClass).toLowerCase()} here.</p>
       <p class="dim">
         Model folders are set in <span class="mono">config.yaml</span> and read at launch (§3.1).
       </p>
@@ -341,8 +439,23 @@
   }
 
   .tabs button {
-    text-transform: capitalize;
     gap: 6px;
+  }
+
+  /* The two narrowing rows under the tabs, each on its own line. */
+  .band {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 8px;
+    flex-wrap: wrap;
+  }
+
+  /* Folder keys are `config.yaml` keys, so they are shown as they are typed. */
+  .folders button {
+    font-family: var(--mono);
+    font-size: 11px;
   }
 
   .count-chip {
@@ -390,15 +503,27 @@
     font-size: 11px;
   }
 
+  .hashing-now {
+    color: var(--accent);
+  }
+
   .grid {
     flex: 1;
     min-height: 0;
     overflow: auto;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    /* Rows are pinned to their content. A grid with a definite height and
+       `auto` rows shares that height out among however many rows there are,
+       so past a screenful the cards are squeezed — to 40px at a hundred of
+       them — and `overflow: hidden` clips everything but the top of each.
+       `align-content: start` does not prevent it: the rows themselves shrink,
+       they are not merely packed. */
+    grid-auto-rows: max-content;
     gap: 10px;
     padding: 0 12px 16px;
     align-content: start;
+    align-items: start;
   }
 
   .table-wrap {

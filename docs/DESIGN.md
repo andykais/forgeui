@@ -445,6 +445,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   `total` count the files queued for this pass and `current` is the model's
   name. Both are pushed, never polled.
 - A model appears in pickers as soon as it is scanned, identified by `path`.
+  The hash is a streamed sha256 of the whole file, so the pass is bounded by
+  read speed and a folder of multi-gigabyte checkpoints takes minutes. The
+  queue is therefore **smallest first**: a hundred LoRAs behind ten
+  checkpoints would otherwise gain no identity until the checkpoints were
+  done, and nothing about a model needs its hash to be usable.
   Its `models` row (keyed by `hash`) exists only once the background hasher
   has finished it; until then display name, family, notes, tags and thumbnail
   cannot be edited and the UI shows a `hashing` state. At job completion,
@@ -663,7 +668,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   `direction: rtl`).
 
 **Models**
-- Tabs: Checkpoints / LoRAs / other kinds. Tiles or table of cards with
+- Tabs: one per model **class** — Diffusion models / LoRAs / Text encoders /
+  VAEs / other classes — not one per folder. The four folders that hold a
+  model you can generate with (`checkpoints`, `Stable-Diffusion`,
+  `diffusion_models`, `unet`, §8.2) are one tab, because looking through four
+  of them for one model is four times the work. Under the tabs, when a class
+  pools more than one folder, a row of folder chips (`All` + each folder key)
+  narrows to one of them; the family chips sit below that, so each row down
+  narrows further. Both are URL params (`?class=`, `?kind=`). Tiles or table
+  of cards with
   thumbnail (chosen sample → most recent output → empty plate), display name,
   family badge (or an inline SET FAMILY control when unset), count of outputs
   (a link into the Gallery filtered to that hash). Search (same matcher as
@@ -842,7 +855,8 @@ GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&family&q          q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+GET  /api/models?kind&class&family&q     q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+                                        also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
 PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed

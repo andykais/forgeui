@@ -149,6 +149,57 @@ Deno.test("re-hashing is skipped unless path, size or mtime changed", async () =
   }
 });
 
+Deno.test("the queue is smallest first, so small files gain an identity", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-order-" });
+  const dbDir = await Deno.makeTempDir({ prefix: "forgeui-hasher-" });
+  const db = openDatabase(join(dbDir, "app.db"));
+  try {
+    // Folder order would hash the checkpoints first and leave the LoRAs
+    // without an identity for as long as that took; size order does not.
+    await writeFakeSafetensors(join(dir, "checkpoints", "big-a.safetensors"), {
+      name: "big-a",
+      bytes: 64 * 1024,
+    });
+    await writeFakeSafetensors(join(dir, "checkpoints", "big-b.safetensors"), {
+      name: "big-b",
+      bytes: 32 * 1024,
+    });
+    await writeFakeSafetensors(join(dir, "loras", "small-a.safetensors"), {
+      name: "small-a",
+      bytes: 1024,
+    });
+    await writeFakeSafetensors(join(dir, "loras", "small-b.safetensors"), {
+      name: "small-b",
+      bytes: 2048,
+    });
+    const scanner = scannerFor({
+      checkpoints: [join(dir, "checkpoints")],
+      loras: [join(dir, "loras")],
+    });
+    const order: string[] = [];
+    const hasher = new ModelHasher({
+      db,
+      onHashed: ({ model }) => {
+        order.push(model.name);
+      },
+    });
+    hasher.enqueue((await scanner.rescan()).models);
+    hasher.start();
+    await hasher.idle();
+
+    assertEquals(order, [
+      "small-a.safetensors",
+      "small-b.safetensors",
+      "big-b.safetensors",
+      "big-a.safetensors",
+    ]);
+  } finally {
+    db.close();
+    await Deno.remove(dir, { recursive: true });
+    await Deno.remove(dbDir, { recursive: true });
+  }
+});
+
 Deno.test("a file that cannot be read is recorded, not fatal", async () => {
   const { dir, checkpoints } = await modelFolders();
   const dbDir = await Deno.makeTempDir({ prefix: "forgeui-hasher-" });
