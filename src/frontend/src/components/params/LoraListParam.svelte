@@ -5,6 +5,7 @@
   import Unlink from "@lucide/svelte/icons/unlink";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Popover from "../Popover.svelte";
+  import { matcher } from "../../lib/search.ts";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
 
@@ -14,15 +15,21 @@
    * sidecar records both values either way. The picker is family-filtered to
    * the workflow by default; "Show all" is one click and does not persist,
    * and already-added LoRAs stay listed, marked "added".
+   *
+   * A LoRA is named here by the path it has under its folder — `krea/glow`,
+   * not `glow` — because a folder tree is how people file these, and the
+   * search box takes a regular expression so `krea.*glow` finds it.
    */
   interface Props {
     param: Param;
     value: LoraRow[];
     models: ModelEntry[];
     onchange: (rows: LoraRow[]) => void;
+    /** Called once a LoRA has been added, so the panel can move the caret. */
+    onpicked?: () => void;
   }
 
-  let { param, value, models, onchange }: Props = $props();
+  let { param, value, models, onchange, onpicked }: Props = $props();
 
   let pickerOpen = $state(false);
   let showAll = $state(false);
@@ -34,17 +41,13 @@
   const family = $derived(param.filter?.family ?? null);
 
   const listed = $derived.by(() => {
-    const needle = search.trim().toLowerCase();
+    const matches = matcher(search);
     return models.filter((model) => {
       // A model nobody has filed yet is not hidden by a family filter: it
       // has no family because the user has not said, not because it is wrong.
       const familyOk =
         showAll || !family || model.family === family || model.family === "unset";
-      const searchOk =
-        needle === "" ||
-        model.display_name.toLowerCase().includes(needle) ||
-        model.name.toLowerCase().includes(needle);
-      return familyOk && searchOk;
+      return familyOk && matches(model.name, model.display_name);
     });
   });
 
@@ -52,6 +55,7 @@
     onchange([...value, { name: model.name, strength_model: 0.8, strength_clip: 0.8 }]);
     pickerOpen = false;
     search = "";
+    onpicked?.();
   }
 
   function remove(index: number) {
@@ -77,13 +81,6 @@
     rows.splice(to, 0, row!);
     onchange(rows);
   }
-
-  function displayName(name: string): string {
-    return (
-      models.find((model) => model.name === name)?.display_name ??
-      name.replace(/\.[^.]+$/, "")
-    );
-  }
 </script>
 
 <div class="lora-list">
@@ -104,13 +101,13 @@
     >
       <div class="row head">
         <span class="grip" title="Drag to reorder"><GripVertical size={13} /></span>
-        <span class="name" title={row.name}>{displayName(row.name)}</span>
+        <span class="name" title={row.name}>{row.name}</span>
         <span class="spacer"></span>
         {#if family}<span class="badge accent">{family}</span>{/if}
         <button
           class="icon"
           title="Remove"
-          aria-label={`Remove ${displayName(row.name)}`}
+          aria-label={`Remove ${row.name}`}
           onclick={() => remove(index)}
         >
           <X size={12} />
@@ -126,7 +123,7 @@
             max="2"
             step="0.05"
             value={row.strength_model}
-            aria-label={`${displayName(row.name)} strength`}
+            aria-label={`${row.name} strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -153,7 +150,7 @@
             max="2"
             step="0.05"
             value={row.strength_model}
-            aria-label={`${displayName(row.name)} model strength`}
+            aria-label={`${row.name} model strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -183,7 +180,7 @@
             max="2"
             step="0.05"
             value={row.strength_clip}
-            aria-label={`${displayName(row.name)} clip strength`}
+            aria-label={`${row.name} clip strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -205,7 +202,7 @@
     <Popover open={pickerOpen} title="LoRAs" onclose={() => (pickerOpen = false)}>
       <input
         class="search"
-        placeholder="Search LoRAs…"
+        placeholder="Search LoRAs… (regex ok)"
         bind:value={search}
         aria-label="Search LoRAs"
       />
@@ -233,7 +230,7 @@
               {/if}
             </span>
             <span class="option-text">
-              <span class="option-name">{model.display_name}</span>
+              <span class="option-name" title={model.name}>{model.name}</span>
               <span class="option-line mono dim">
                 {model.output_count > 0
                   ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
@@ -277,12 +274,14 @@
     display: flex;
   }
 
+  /* A path needs the width, so the name takes the row and ellipsises. */
   .name {
+    flex: 1;
+    min-width: 0;
     font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 170px;
   }
 
   .strength {

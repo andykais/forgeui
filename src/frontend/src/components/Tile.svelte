@@ -3,23 +3,21 @@
   import { clock } from "../lib/format.ts";
 
   /**
-   * One media tile (§11.5): always square, cropped to fill, with a 24–26px
-   * metadata strip. Video and image are the same component — the kind only
-   * changes the badge and hover playback (§11.3). The action overlay appears
-   * on hover and stays on the selected tile, and its buttons are focusable.
+   * One media tile (§11.5): always a square cell with the whole image fitted
+   * inside it, and a 24–26px metadata strip. Video and image are the same
+   * component — the kind only changes the badge and hover playback (§11.3).
    *
-   * Phase 1 ships only the two actions that exist: Use in workflow and
-   * Upscale image belong to Phase 3 and are deliberately absent.
+   * Selection is a highlight and nothing else: no overlay, no dimming and no
+   * buttons. Opening a tile is what offers the actions, in the viewer's
+   * sidebar, so nothing here depends on a tile being "current".
    */
   interface Props {
     output: Output;
     selected?: boolean;
     onopen?: (output: Output) => void;
-    onedit?: (output: Output) => void;
-    onrerun?: (output: Output) => void;
   }
 
-  let { output, selected = false, onopen, onedit, onrerun }: Props = $props();
+  let { output, selected = false, onopen }: Props = $props();
 
   let video = $state<HTMLVideoElement | undefined>(undefined);
   const isVideo = $derived(output.kind === "video");
@@ -60,15 +58,6 @@
     {/if}
   {/if}
 
-  <div class="actions" class:visible={selected} class:empty={!onedit && !onrerun}>
-    {#if onedit}
-      <button onclick={() => onedit?.(output)}>Edit in Generate →</button>
-    {/if}
-    {#if onrerun}
-      <button onclick={() => onrerun?.(output)}>Rerun now ⟳</button>
-    {/if}
-  </div>
-
   <div class="strip">
     <span class="prompt">{output.prompt ?? output.id}</span>
     <span class="meta mono dim">{output.family ?? output.workflow_id ?? ""}</span>
@@ -84,9 +73,13 @@
     background: var(--raised);
   }
 
+  /* A soft highlight, so a selected tile reads as chosen without hiding it. */
   .tile.selected {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    box-shadow:
+      0 0 0 1px var(--accent-tint),
+      0 0 14px rgb(0 0 0 / 45%);
   }
 
   .surface {
@@ -97,11 +90,12 @@
     cursor: pointer;
   }
 
+  /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */
   img,
   video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
   }
 
@@ -145,42 +139,5 @@
     border-radius: var(--radius-control);
     background: rgb(13 13 13 / 82%);
     color: var(--text-2);
-  }
-
-  .actions.empty {
-    display: none;
-  }
-
-  .actions {
-    position: absolute;
-    inset: 0 0 25px 0;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 5px;
-    padding: 0 8px;
-    background: rgb(13 13 13 / 62%);
-    opacity: 0;
-    transition: opacity 90ms var(--ease);
-    /* Clicking the tile opens it; only the buttons take the pointer. */
-    pointer-events: none;
-  }
-
-  .tile:hover .actions,
-  .actions.visible,
-  .actions:focus-within {
-    opacity: 1;
-  }
-
-  .actions button {
-    font-size: 11px;
-    padding: 3px 7px;
-    background: var(--raised-2);
-    pointer-events: auto;
-  }
-
-  .actions button:hover {
-    background: var(--control-selected);
   }
 </style>

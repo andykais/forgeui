@@ -2,6 +2,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { untrack } from "svelte";
   import SeedParam from "./SeedParam.svelte";
   import SizeParam from "./SizeParam.svelte";
   import LoraListParam from "./LoraListParam.svelte";
@@ -11,7 +12,7 @@
   /**
    * The param panel is rendered from the manifest alone (§4.2, §11.2):
    * required params first, then optional, then a collapsed Advanced section,
-   * under a PARAMETERS header that carries Reset to defaults.
+   * under a PARAMETERS header that carries Edit and Reset to defaults.
    */
   interface Props {
     manifest: Manifest;
@@ -26,6 +27,10 @@
     warnings?: string[];
     onchange: (key: string, value: unknown) => void;
     onreset: () => void;
+    /** Open this workflow's inputs for editing; absent hides the button. */
+    onedit?: () => void;
+    /** Enter in a text param runs the workflow; absent leaves Enter alone. */
+    onsubmit?: () => void;
     onseededit: (value: number) => void;
     onseedroll: () => void;
     onseedlock: () => void;
@@ -42,12 +47,15 @@
     warnings = [],
     onchange,
     onreset,
+    onedit,
+    onsubmit,
     onseededit,
     onseedroll,
     onseedlock,
   }: Props = $props();
 
   let advancedOpen = $state(false);
+  let paramsEl = $state<HTMLDivElement | undefined>(undefined);
 
   const main = $derived(manifest.params.filter((param) => !param.advanced));
   const advanced = $derived(manifest.params.filter((param) => param.advanced));
@@ -64,13 +72,104 @@
   function number(event: Event): number {
     return Number((event.currentTarget as HTMLInputElement).value);
   }
+
+  function isModelParam(param: Param): boolean {
+    return (
+      param.type === "model" || param.type === "text_encoder" || param.type === "vae"
+    );
+  }
+
+  /**
+   * What would stop this param from running, in the terms the server refuses
+   * the job in (§5.1): a required field left empty, or a model that is not in
+   * the model folders. A collapsed Advanced section hides both, so the panel
+   * has to say that they are down there.
+   */
+  function problemOf(param: Param): string | null {
+    const value = values[param.key];
+    if (isModelParam(param)) {
+      const name = typeof value === "string" ? value : "";
+      const models = modelsOfClass(param.filter?.class);
+      if (name !== "" && models.length > 0) {
+        if (!models.some((model) => model.name === name)) return "not found";
+      }
+    }
+    if (!param.required || param.type === "seed") return null;
+    const empty =
+      value === null ||
+      value === undefined ||
+      (typeof value === "string" && value.trim().length === 0) ||
+      (Array.isArray(value) && value.length === 0);
+    return empty ? "required" : null;
+  }
+
+  const advancedProblems = $derived(
+    advanced.filter((param) => problemOf(param) !== null).map((param) => param.key),
+  );
+
+  /**
+   * A problem the user cannot see is a problem they cannot fix, so Advanced
+   * opens itself when one appears. It opens once per distinct set, so closing
+   * it again sticks.
+   */
+  let announced = $state("");
+  $effect(() => {
+    const signature = advancedProblems.join(" ");
+    untrack(() => {
+      if (signature.length === 0) {
+        announced = "";
+      } else if (signature !== announced) {
+        announced = signature;
+        advancedOpen = true;
+      }
+    });
+  });
+
+  /**
+   * Where a picked model or LoRA hands the caret back: the prompt, so the
+   * next thing typed lands in it without a second click.
+   */
+  const promptKey = $derived(
+    (
+      manifest.params.find((param) => param.type === "text" && param.required) ??
+      manifest.params.find((param) => param.type === "text")
+    )?.key ?? null,
+  );
+
+  function focusPrompt(): void {
+    const key = promptKey;
+    if (!key) return;
+    // The picker closes on the same click; take the caret once it has gone.
+    queueMicrotask(() => {
+      const field = [...(paramsEl?.querySelectorAll("[data-param]") ?? [])]
+        .find((element) => (element as HTMLElement).dataset.param === key)
+        ?.querySelector("textarea");
+      if (!field) return;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    });
+  }
+
+  /** Enter runs the workflow, Shift+Enter is a newline (§11.4). */
+  function onPromptKeydown(event: KeyboardEvent): void {
+    if (!onsubmit) return;
+    if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
+    if (event.ctrlKey || event.metaKey || event.isComposing) return;
+    event.preventDefault();
+    onsubmit();
+  }
 </script>
 
 <div class="panel-head row">
   <span class="label">Parameters</span>
   <span class="mono dim count">{manifest.params.length}</span>
   <span class="spacer"></span>
-  <button class="reset" onclick={onreset}>Reset to defaults</button>
+  {#if onedit}
+    <button class="link" onclick={onedit} title="Edit this workflow's inputs">
+      Edit
+    </button>
+  {/if}
+  <button class="link" onclick={onreset}>Reset to defaults</button>
 </div>
 
 {#if warnings.length > 0}
@@ -81,9 +180,15 @@
   </p>
 {/if}
 
-<div class="params">
+<div class="params" bind:this={paramsEl}>
   {#snippet field(param: Param)}
-    <div class="param" data-param={param.key} data-type={param.type}>
+    {@const problem = problemOf(param)}
+    <div
+      class="param"
+      class:problem={problem === "not found"}
+      data-param={param.key}
+      data-type={param.type}
+    >
       <div class="param-label row">
         <span class="name">{label(param)}</span>
         {#if param.required}<span class="required label">required</span>{/if}
@@ -95,6 +200,7 @@
           rows="3"
           value={(values[param.key] as string) ?? ""}
           aria-label={label(param)}
+          onkeydown={onPromptKeydown}
           oninput={(event) =>
             onchange(param.key, (event.currentTarget as HTMLTextAreaElement).value)}
         ></textarea>
@@ -166,6 +272,7 @@
           value={(values[param.key] as LoraRow[]) ?? []}
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
+          onpicked={focusPrompt}
         />
       {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}
         <ModelParam
@@ -173,6 +280,7 @@
           value={(values[param.key] as string) ?? ""}
           models={modelsOfClass(param.filter?.class)}
           onchange={(name) => onchange(param.key, name)}
+          onpicked={focusPrompt}
         />
       {:else}
         <!--
@@ -200,6 +308,12 @@
         <span class="mono dim keys">
           {advanced.map((param) => param.key).join(" · ")}
         </span>
+        {#if advancedProblems.length > 0}
+          <span class="badge error problems" title="Something down here needs fixing">
+            <TriangleAlert size={11} />
+            {advancedProblems.length}
+          </span>
+        {/if}
         <span class="mono dim count">{advanced.length}</span>
       </button>
       {#if advancedOpen}
@@ -216,13 +330,14 @@
 <style>
   .panel-head {
     padding: 10px 12px 6px;
+    gap: 6px;
   }
 
   .count {
     font-size: 11px;
   }
 
-  .reset {
+  .link {
     background: transparent;
     color: var(--accent);
     font-size: 11px;
@@ -256,6 +371,14 @@
   .name {
     font-size: 12px;
     color: var(--text);
+  }
+
+  /*
+   * Only a value that is wrong is marked, not one that has not been typed
+   * yet: `required` already says what an empty field needs.
+   */
+  .param.problem .name {
+    color: var(--error);
   }
 
   .required {
@@ -323,6 +446,12 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .problems {
+    display: flex;
+    align-items: center;
+    gap: 3px;
   }
 
   .advanced-body {

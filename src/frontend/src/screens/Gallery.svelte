@@ -429,9 +429,8 @@
             <div class="cell" class:large={tileSize === "large"}>
               <Tile
                 output={row.output}
+                selected={selectedId === row.output.id}
                 onopen={select}
-                onedit={editInGenerate}
-                onrerun={rerun}
               />
             </div>
           {/if}
@@ -567,6 +566,9 @@
 
   .body {
     flex: 1;
+    /* The same guard the Generate grid needs: a scrolling grid that cannot
+       shrink below its content overflows its row instead of scrolling. */
+    min-height: 0;
     padding: 0 12px 16px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));

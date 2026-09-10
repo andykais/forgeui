@@ -10,7 +10,7 @@
   import { navigate, router, setQuery } from "../router.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
-  import { FAMILIES, type ModelEntry } from "../types.ts";
+  import type { ModelEntry } from "../types.ts";
   import ModelCard from "../components/ModelCard.svelte";
 
   /**
@@ -42,18 +42,40 @@
     untrack(() => void load());
   });
 
-  // A finished hashing pass changes identities and counts under our feet.
+  /**
+   * Hashing changes identities, counts and thumbnails under our feet, but the
+   * hasher reports twice per file: reloading on each of those would put the
+   * list through two fetches per model in the folder, and the answers would
+   * land out of order. They are coalesced, and `load` ignores everything but
+   * the newest request.
+   */
+  let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let hashingSeen = "";
   $effect(() => {
-    const running = app.hashing?.running ?? false;
-    const done = app.hashing?.done ?? 0;
-    void running;
-    void done;
+    const signature = `${app.hashing?.running ?? false}:${app.hashing?.done ?? 0}`;
     untrack(() => {
-      if (!loading) void load();
+      if (signature === hashingSeen) return;
+      const first = hashingSeen === "";
+      hashingSeen = signature;
+      // The filter effect owns the first load; this one only follows changes.
+      if (first) return;
+      if (reloadTimer !== null) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        reloadTimer = null;
+        void load();
+      }, 400);
     });
+    return () => {
+      if (reloadTimer !== null) clearTimeout(reloadTimer);
+      reloadTimer = null;
+    };
   });
 
+  /** Only the newest request may write to the screen. */
+  let request = 0;
+
   async function load() {
+    const mine = ++request;
     loading = true;
     try {
       const body = await api.models({
@@ -61,14 +83,20 @@
         family: family || undefined,
         q: q || undefined,
       });
+      if (mine !== request) return;
       models = body.models;
       folders = body.folders;
       searchDraft = q;
-      all = (await api.models({})).models;
+      const everything = await api.models({});
+      if (mine !== request) return;
+      all = everything.models;
     } catch (cause) {
-      toasts.message(cause instanceof Error ? cause.message : "could not list models");
+      // The list that is up stays up: a failed refresh is not an empty folder.
+      if (mine === request) {
+        toasts.message(cause instanceof Error ? cause.message : "could not list models");
+      }
     } finally {
-      loading = false;
+      if (mine === request) loading = false;
     }
   }
 
@@ -101,6 +129,16 @@
   }
 
   const hashingLeft = $derived(models.filter((model) => model.hashing).length);
+  /**
+   * The chips are reconciled rather than hardcoded: a family the server
+   * accepts, or that a model on disk is already filed as, has to be filterable
+   * even when this build's constant has not caught up (§8.1).
+   */
+  const families = $derived(
+    [...new Set([...app.families, ...all.map((model) => model.family)])].filter(
+      (name) => name !== "unset",
+    ),
+  );
   const perKind = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const model of all) {
@@ -154,7 +192,7 @@
       <button class:active={family === ""} onclick={() => setQuery({ family: null })}>
         All
       </button>
-      {#each [...FAMILIES, "unset"] as name (name)}
+      {#each [...families, "unset"] as name (name)}
         <button
           class:active={family === name}
           onclick={() => setQuery({ family: family === name ? null : name })}
@@ -223,7 +261,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each models as model (model.id)}
+          {#each models as model (model.path)}
             <tr
               data-model={model.id}
               onclick={() => navigate(`/models/${encodeURIComponent(model.id)}`)}
@@ -255,7 +293,7 @@
     </div>
   {:else}
     <div class="grid">
-      {#each models as model (model.id)}
+      {#each models as model (model.path)}
         <ModelCard {model} onfamily={setFamily} />
       {/each}
     </div>
@@ -271,6 +309,7 @@
   }
 
   .filters {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -346,6 +385,7 @@
   }
 
   .count {
+    flex: 0 0 auto;
     padding: 0 12px 8px;
     font-size: 11px;
   }

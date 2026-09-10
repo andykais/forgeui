@@ -258,8 +258,25 @@ export interface Sample {
   reusable: boolean;
 }
 
-/** The hardcoded list of §8.1; the app attaches no behaviour to a family. */
-export const FAMILIES = ["flux", "sdxl", "anima", "ltx", "z-image", "sd15"] as const;
+/**
+ * §8.1's list, kept in step with `src/workflows/types.ts` — the server
+ * validates a family against that one, so a name missing here is a family the
+ * UI cannot offer. It is only the fallback: `app.families` reconciles it with
+ * what `/api/families` reports and with what the models on disk are already
+ * filed as.
+ */
+export const FAMILIES = [
+  "flux",
+  "flux2",
+  "krea2",
+  "chroma",
+  "sdxl",
+  "anima",
+  "ltx",
+  "ltx-2",
+  "z-image",
+  "sd15",
+] as const;
 
 export interface FamilyCount {
   family: string;

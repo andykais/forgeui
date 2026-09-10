@@ -27,6 +27,7 @@ import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
 import { probeFamily } from "./probe.ts";
+import { log, seconds } from "../log.ts";
 import {
   ModelScanner,
   type RescanProgress,
@@ -151,6 +152,8 @@ export class ModelLibrary {
   #scanning: Promise<void> | null = null;
   #probes = new Map<string, ModelProbeRow>();
   #now: () => number;
+  /** Whether the last progress said the hasher was still going. */
+  #hashingWas = false;
 
   constructor(options: ModelLibraryOptions) {
     this.#db = options.db;
@@ -192,6 +195,11 @@ export class ModelLibrary {
       this.#index = null;
       const queued = this.hasher.enqueue(result.models);
       this.hasher.start();
+      log(
+        `models: ${result.models.length} files across ${result.folders} folders in ${
+          seconds(result.elapsed_ms)
+        }${queued > 0 ? ` — hashing ${queued}` : ""}`,
+      );
       return { models: result.models.length, queued };
     } finally {
       finish();
@@ -428,6 +436,12 @@ export class ModelLibrary {
   }
 
   #broadcastHashing(progress: HashingProgress): void {
+    // One line at the end of the pass, never one per file: the per-file
+    // detail is what `/ws` carries.
+    if (this.#hashingWas && !progress.running) {
+      log(`models: hashed ${progress.done} of ${progress.total}`);
+    }
+    this.#hashingWas = progress.running;
     this.#hub.broadcast({ type: "hashing_progress", data: progress });
   }
 

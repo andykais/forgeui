@@ -1,7 +1,7 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import { FAMILIES } from "../types.ts";
+  import { app } from "../stores/app.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { navigate } from "../router.svelte.ts";
@@ -72,7 +72,7 @@
             title="Family"
             onclose={() => (familyOpen = false)}
           >
-            {#each FAMILIES as family (family)}
+            {#each app.families as family (family)}
               <button
                 class="option"
                 onclick={() => {

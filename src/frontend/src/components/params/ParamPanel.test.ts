@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
+import { tick } from "svelte";
 import ParamPanel from "./ParamPanel.svelte";
 import type { Manifest, ModelEntry, Param } from "../../types.ts";
 import { fillValues } from "../../stores/panel.svelte.ts";
@@ -25,8 +26,8 @@ function manifestWith(params: Param[]): Manifest {
 
 const loras: ModelEntry[] = [
   {
-    path: "/models/loras/film-grain.safetensors",
-    name: "film-grain.safetensors",
+    path: "/models/loras/krea/film-grain.safetensors",
+    name: "krea/film-grain.safetensors",
     filename: "film-grain.safetensors",
     display_name: "Film grain",
     family: "unset",
@@ -71,6 +72,8 @@ const loras: ModelEntry[] = [
 interface Handlers {
   onchange: ReturnType<typeof vi.fn>;
   onreset: ReturnType<typeof vi.fn>;
+  onedit: ReturnType<typeof vi.fn>;
+  onsubmit: ReturnType<typeof vi.fn>;
   onseededit: ReturnType<typeof vi.fn>;
   onseedroll: ReturnType<typeof vi.fn>;
   onseedlock: ReturnType<typeof vi.fn>;
@@ -114,6 +117,8 @@ function mount(
   const handlers: Handlers = {
     onchange: vi.fn(),
     onreset: vi.fn(),
+    onedit: vi.fn(),
+    onsubmit: vi.fn(),
     onseededit: vi.fn(),
     onseedroll: vi.fn(),
     onseedlock: vi.fn(),
@@ -128,7 +133,8 @@ function mount(
       checkpoints: extra.checkpoints ?? [],
       modelsOfClass: (modelClass: string | undefined) =>
         (modelClass === undefined ? undefined : extra.byClass?.[modelClass]) ??
-          extra.checkpoints ?? [],
+        extra.checkpoints ??
+        [],
       warnings: extra.warnings ?? [],
       ...handlers,
     },
@@ -293,13 +299,15 @@ describe("each param type renders from the manifest", () => {
     const encoder = diffusionModel("qwen3vl_4b.safetensors", "unset", "text_encoders");
     encoder.class = "clip";
     const { handlers } = mount(
-      [{
-        key: "clip",
-        label: "Text encoder",
-        type: "text_encoder",
-        bind: "2.clip_name",
-        filter: { class: "clip" },
-      }],
+      [
+        {
+          key: "clip",
+          label: "Text encoder",
+          type: "text_encoder",
+          bind: "2.clip_name",
+          filter: { class: "clip" },
+        },
+      ],
       { clip: "" },
       {
         checkpoints: [diffusionModel("flux1-dev.safetensors", "flux")],
@@ -311,10 +319,7 @@ describe("each param type renders from the manifest", () => {
     // The diffusion model is not offered for a text encoder slot.
     expect(screen.queryByText("flux1-dev")).toBeNull();
     await fireEvent.click(screen.getByText("qwen3vl_4b"));
-    expect(handlers.onchange).toHaveBeenCalledWith(
-      "clip",
-      "qwen3vl_4b.safetensors",
-    );
+    expect(handlers.onchange).toHaveBeenCalledWith("clip", "qwen3vl_4b.safetensors");
   });
 
   test("the model picker searches across folders", async () => {
@@ -444,16 +449,16 @@ describe("the LoRA list", () => {
   test("a row is added from the picker with linked strengths", async () => {
     const { handlers } = mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-    await fireEvent.click(screen.getByRole("button", { name: /Film grain/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
-      { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+      { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
     ]);
   });
 
   test("an added LoRA is marked rather than offered twice", async () => {
     mount([loraParam], {
       loras: [
-        { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
       ],
     });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
@@ -463,28 +468,32 @@ describe("the LoRA list", () => {
   test("one slider drives both strengths until they are unlinked", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
       ],
     });
-    const slider = screen.getByLabelText("Film grain strength");
+    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
     await fireEvent.input(slider, { target: { value: "0.5" } });
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
-      { name: "film-grain.safetensors", strength_model: 0.5, strength_clip: 0.5 },
+      { name: "krea/film-grain.safetensors", strength_model: 0.5, strength_clip: 0.5 },
     ]);
 
     await fireEvent.click(screen.getByLabelText("Unlink strengths"));
-    expect(screen.getByLabelText("Film grain model strength")).toBeTruthy();
-    expect(screen.getByLabelText("Film grain clip strength")).toBeTruthy();
+    expect(
+      screen.getByLabelText("krea/film-grain.safetensors model strength"),
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText("krea/film-grain.safetensors clip strength"),
+    ).toBeTruthy();
   });
 
   test("a row can be removed", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
         { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
       ],
     });
-    await fireEvent.click(screen.getByLabelText("Remove Film grain"));
+    await fireEvent.click(screen.getByLabelText("Remove krea/film-grain.safetensors"));
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
     ]);
@@ -493,7 +502,7 @@ describe("the LoRA list", () => {
   test("rows can be dragged into a new order, because order is chain order", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
         { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
       ],
     });
@@ -502,7 +511,7 @@ describe("the LoRA list", () => {
     await fireEvent.drop(rows[0]!);
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
-      { name: "film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+      { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
     ]);
   });
 });
@@ -528,5 +537,111 @@ describe("Reuse Parameters maps by key", () => {
     });
     expect(warnings).toEqual(["refiner_steps", "clip_skip"]);
     expect("refiner_steps" in values).toBe(false);
+  });
+});
+
+describe("the panel header and the prompt", () => {
+  test("Edit is offered beside Reset to defaults", async () => {
+    const { handlers } = mount([{ key: "prompt", type: "text", bind: "6.text" }]);
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(handlers.onedit).toHaveBeenCalled();
+  });
+
+  test("Enter in the prompt runs the workflow, Shift+Enter does not", async () => {
+    const { handlers } = mount(
+      [{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }],
+      { prompt: "figs" },
+    );
+    const field = screen.getByLabelText("Prompt");
+
+    await fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+    expect(handlers.onsubmit).not.toHaveBeenCalled();
+
+    await fireEvent.keyDown(field, { key: "Enter" });
+    expect(handlers.onsubmit).toHaveBeenCalledTimes(1);
+  });
+
+  test("picking a model hands the caret to the prompt", async () => {
+    mount(
+      [
+        { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
+        { key: "model", label: "Model", type: "model", bind: "4.ckpt_name" },
+      ],
+      { prompt: "figs", model: "" },
+      { checkpoints: [diffusionModel("flux-dev.safetensors", "flux")] },
+    );
+    await fireEvent.click(screen.getByRole("button", { name: /choose a model/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /flux-dev/ }));
+    // The focus is taken on the microtask after the picker closes.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));
+  });
+});
+
+describe("Advanced says when the problem is inside it", () => {
+  const params: Param[] = [
+    { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
+    {
+      key: "vae",
+      label: "VAE",
+      type: "vae",
+      advanced: true,
+      filter: { class: "vae" },
+      bind: "10.vae_name",
+    },
+  ];
+
+  test("a model that is not on disk opens the section and is marked", async () => {
+    mount(
+      params,
+      { prompt: "figs", vae: "ae.safetensors" },
+      { byClass: { vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")] } },
+    );
+    await tick();
+    // Open, so the field that has to be fixed is the one on screen.
+    expect(screen.getByText("VAE")).toBeTruthy();
+    expect(screen.getByText("not found")).toBeTruthy();
+    // And said on the header, so a section closed again still reads as wrong.
+    expect(screen.getByRole("button", { name: /Advanced/ }).textContent).toContain("1");
+  });
+
+  test("a section with nothing wrong in it stays collapsed", async () => {
+    mount(
+      params,
+      { prompt: "figs", vae: "flux-vae.safetensors" },
+      { byClass: { vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")] } },
+    );
+    await tick();
+    expect(screen.queryByText("VAE")).toBeNull();
+  });
+});
+
+describe("the LoRA search box", () => {
+  const loraParam: Param = {
+    key: "loras",
+    type: "lora_list",
+    bind: {
+      chain: {
+        model_from: "1.MODEL",
+        clip_from: null,
+        model_to: ["3.model"],
+        clip_to: null,
+      },
+    },
+  };
+
+  test("a regular expression narrows the list to what it matches", async () => {
+    mount([loraParam], { loras: [] });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+
+    const search = screen.getByLabelText("Search LoRAs");
+    await fireEvent.input(search, { target: { value: "krea.*grain" } });
+    expect(screen.getByRole("button", { name: /krea\/film-grain/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /detail\.safetensors/ })).toBeNull();
+
+    // A half-typed pattern falls back to a substring rather than emptying it.
+    await fireEvent.input(search, { target: { value: "detail(" } });
+    expect(screen.queryByRole("button", { name: /krea\/film-grain/ })).toBeNull();
   });
 });

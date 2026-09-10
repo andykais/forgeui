@@ -1,6 +1,5 @@
 <script lang="ts">
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
   import Grid2x2 from "@lucide/svelte/icons/grid-2x2";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
@@ -84,6 +83,17 @@
     setQuery({ workflow: id });
   }
 
+  /** The workflow's inputs are edited here, not in ComfyUI (§4.7). */
+  function editWorkflow() {
+    if (selectedWorkflow) navigate(`/workflows/${selectedWorkflow.id}`);
+  }
+
+  /** One path for the button and for Enter in the prompt: one click is one job. */
+  function generate() {
+    if (!panel.canSubmit) return;
+    void panel.submit();
+  }
+
   /** Grouped by family and kind, with the last output as the thumbnail. */
   const grouped = $derived.by(() => {
     const groups = new Map<string, typeof workflows>();
@@ -105,8 +115,12 @@
     following = sessionOutputs[0]?.id === output.id;
   }
 
+  /**
+   * Back to the grid. The tile stays selected — a soft highlight is all that
+   * means now, and it is where the eye was — but nothing is selected until a
+   * tile has been opened in the first place.
+   */
   function closeFocused() {
-    selectedId = null;
     focusRequested = false;
   }
 
@@ -127,7 +141,10 @@
 
   async function remove(output: Output) {
     const { undo_window_ms } = await api.deleteOutput(output.id);
-    if (selectedId === output.id) closeFocused();
+    if (selectedId === output.id) {
+      selectedId = null;
+      closeFocused();
+    }
     toasts.undo(output, undo_window_ms);
   }
 
@@ -261,6 +278,8 @@
         checkpoints={app.checkpoints}
         modelsOfClass={(c) => app.modelsOfClass(c)}
         warnings={panel.warnings}
+        onedit={selectedWorkflow ? editWorkflow : undefined}
+        onsubmit={generate}
         onchange={(key, value) => panel.set(key, value)}
         onreset={() => panel.resetToDefaults()}
         onseededit={(value) => panel.editSeed(value)}
@@ -287,7 +306,7 @@
             : panel.missingRequired.length > 0
               ? `${panel.missingRequired.join(", ")} required`
               : "Not ready"}
-        onclick={() => panel.submit()}
+        onclick={generate}
       >
         Generate
       </button>
@@ -342,40 +361,18 @@
             </button>
           {/each}
         </div>
-        {#if selectedWorkflow}
-          <a
-            class="edit-workflow"
-            href={`/comfy?workflow=${selectedWorkflow.id}`}
-            onclick={(event) => {
-              event.preventDefault();
-              navigate(`/comfy?workflow=${selectedWorkflow.id}`);
-            }}
-          >
-            Edit this workflow in ComfyUI <ExternalLink size={12} />
-          </a>
-        {/if}
       </header>
 
       {#if tileSize === "table"}
         <div class="table-wrap scroll">
-          <MediaTable
-            outputs={sessionOutputs}
-            selectedId={focused?.id ?? null}
-            onopen={open}
-          />
+          <MediaTable outputs={sessionOutputs} {selectedId} onopen={open} />
         </div>
       {:else}
         <div class="grid scroll" class:large={tileSize === "large"}>
           {#each sessionJobs as job (job.id)}
             {#if job.status === "done"}
               {#each app.jobOutputs(job) as output (output.id)}
-                <Tile
-                  {output}
-                  selected={focused?.id === output.id}
-                  onopen={open}
-                  onedit={editInGenerate}
-                  onrerun={rerun}
-                />
+                <Tile {output} selected={selectedId === output.id} onopen={open} />
               {/each}
             {:else}
               <JobCard
@@ -527,8 +524,16 @@
     color: var(--text-4);
   }
 
+  /*
+   * Solid, because the bar is sticky over a scrolling panel and the gradient
+   * behind it is transparent at the top: a refusal has to be readable over
+   * whatever param it happens to be sitting on.
+   */
   .submit-error {
     margin: 0 0 6px;
+    padding: 6px 8px;
+    border-radius: var(--radius-control);
+    background: #2e1a18;
     font-size: 11px;
     color: var(--error);
   }
@@ -541,6 +546,7 @@
   }
 
   .results-head {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -566,28 +572,18 @@
     color: var(--text);
   }
 
-  .edit-workflow {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    color: var(--text-3);
-    background: var(--raised-2);
-    padding: 4px 8px;
-    border-radius: var(--radius-input);
-  }
-
-  .edit-workflow:hover {
-    color: var(--text);
-  }
-
   .grid {
     flex: 1;
+    /* Without this the grid cannot shrink below its content and the rows
+       spill over each other once the results fill the page. */
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: max-content;
     gap: 8px;
     padding: 0 12px 12px;
     align-content: start;
+    align-items: start;
   }
 
   .grid.large {

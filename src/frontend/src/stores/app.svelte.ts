@@ -1,15 +1,16 @@
 import { api } from "../api.ts";
-import type {
-  ComfyStatus,
-  Config,
-  HashingProgress,
-  Job,
-  ModelEntry,
-  Output,
-  RescanProgress,
-  TileSize,
-  UiScreen,
-  WorkflowSummary,
+import {
+  type ComfyStatus,
+  type Config,
+  FAMILIES,
+  type HashingProgress,
+  type Job,
+  type ModelEntry,
+  type Output,
+  type RescanProgress,
+  type TileSize,
+  type UiScreen,
+  type WorkflowSummary,
 } from "../types.ts";
 import { decodePreviewFrame } from "../lib/preview.ts";
 import { plain } from "../lib/state.svelte.ts";
@@ -39,6 +40,12 @@ class AppState {
   /** The model library's two background passes (§8.1), pushed on `/ws`. */
   rescan = $state<RescanProgress | null>(null);
   hashing = $state<HashingProgress | null>(null);
+  /**
+   * The families the server knows, from `/api/families`. The constant is only
+   * a fallback: the filters and the family pickers must not go stale when the
+   * server's list grows (§8.1).
+   */
+  serverFamilies = $state<string[]>([]);
 
   /** Recent jobs, newest first: the session grid and the queue strip (§11.1). */
   jobs = $state<Job[]>([]);
@@ -104,16 +111,39 @@ class AppState {
   }
 
   async refreshModels(): Promise<void> {
-    const [loras, checkpoints, clips, vaes] = await Promise.all([
+    const [loras, checkpoints, clips, vaes, families] = await Promise.all([
       api.modelsOfKind("loras").catch(() => []),
       api.modelsOfClass("diffusion").catch(() => []),
       api.modelsOfClass("clip").catch(() => []),
       api.modelsOfClass("vae").catch(() => []),
+      api.families().catch(() => []),
     ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
     this.clips = clips;
     this.vaes = vaes;
+    this.serverFamilies = families
+      .map((count) => count.family)
+      .filter((family) => family !== "unset");
+  }
+
+  /**
+   * Every family a chip or a picker should offer: what the server validates
+   * against, plus anything the models on disk are already filed as, so a
+   * family that only exists in the library is still selectable. `unset` is
+   * not one of these — it is how the UI spells "no family".
+   */
+  get families(): string[] {
+    const names = new Set<string>([...this.serverFamilies, ...FAMILIES]);
+    for (const model of [
+      ...this.checkpoints,
+      ...this.loras,
+      ...this.clips,
+      ...this.vaes,
+    ]) {
+      if (model.family && model.family !== "unset") names.add(model.family);
+    }
+    return [...names];
   }
 
   /** The list a `model` param of this class picks from. */
@@ -219,6 +249,12 @@ class AppState {
             media_url: output.media_url ?? `/api/media/${output.path}`,
           },
         };
+        if (message.type === "output" && output.deleted_at === null) {
+          this.#touchWorkflow(output.workflow_id, {
+            lastJobAt: output.created_at,
+            lastOutputId: output.id,
+          });
+        }
         break;
       }
     }
@@ -233,11 +269,41 @@ class AppState {
       next[index] = job;
       this.jobs = next;
     }
+    // `last run` is on the workflow summary, which `/ws` does not resend; a
+    // job is the news that it moved, so patch it here rather than making the
+    // panel wait for a reload (§11.2).
+    this.#touchWorkflow(job.workflow_id, { lastJobAt: job.created_at });
     if (job.status !== "running" && this.previews[job.id]) {
       const { [job.id]: done, ...rest } = this.previews;
       URL.revokeObjectURL(done);
       this.previews = rest;
     }
+  }
+
+  /** Move a workflow summary forward in place; never backward in time. */
+  #touchWorkflow(
+    id: string | null,
+    at: { lastJobAt?: number; lastOutputId?: string },
+  ): void {
+    if (!id) return;
+    const index = this.workflows.findIndex((workflow) => workflow.id === id);
+    if (index < 0) return;
+    const current = this.workflows[index]!;
+    const lastJobAt = Math.max(current.last_job_at ?? 0, at.lastJobAt ?? 0);
+    const lastOutputId = at.lastOutputId ?? current.last_output_id;
+    if (
+      lastJobAt === (current.last_job_at ?? 0) &&
+      lastOutputId === current.last_output_id
+    ) {
+      return;
+    }
+    const next = [...this.workflows];
+    next[index] = {
+      ...current,
+      last_job_at: lastJobAt === 0 ? null : lastJobAt,
+      last_output_id: lastOutputId,
+    };
+    this.workflows = next;
   }
 
   // ------------------------------------------------- ui preferences (§3.1)

@@ -11,7 +11,7 @@
   import { panel } from "../stores/panel.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
-  import { FAMILIES, type ModelDetail, type Output, type Sample } from "../types.ts";
+  import type { ModelDetail, Output, Sample } from "../types.ts";
   import Popover from "../components/Popover.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
   import Tile from "../components/Tile.svelte";
@@ -296,7 +296,7 @@
                 title="Family"
                 onclose={() => (familyOpen = false)}
               >
-                {#each [...FAMILIES, "unset"] as family (family)}
+                {#each [...app.families, "unset"] as family (family)}
                   <button
                     class="option family-option"
                     onclick={() => {
