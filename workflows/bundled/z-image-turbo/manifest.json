@@ -66,6 +66,28 @@
       "step": 0.1,
       "advanced": true,
       "bind": "3.shift"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "model",
+      "filter": {
+        "class": "clip"
+      },
+      "default": "qwen_3_4b.safetensors",
+      "advanced": true,
+      "bind": "8.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "model",
+      "filter": {
+        "class": "vae"
+      },
+      "default": "ae.safetensors",
+      "advanced": true,
+      "bind": "7.vae_name"
     }
   ],
   "outputs": [

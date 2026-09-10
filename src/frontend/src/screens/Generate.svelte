@@ -259,6 +259,7 @@
         lastSeed={panel.lastSeed}
         loras={app.loras}
         checkpoints={app.checkpoints}
+        modelsOfClass={(c) => app.modelsOfClass(c)}
         warnings={panel.warnings}
         onchange={(key, value) => panel.set(key, value)}
         onreset={() => panel.resetToDefaults()}

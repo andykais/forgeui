@@ -20,6 +20,8 @@
     lastSeed: number | null;
     loras?: ModelEntry[];
     checkpoints?: ModelEntry[];
+    /** A `model` param picks from its own class, not always `diffusion`. */
+    modelsOfClass?: (modelClass: string | undefined) => ModelEntry[];
     /** Keys the panel was filled from that this manifest no longer has (§6.4). */
     warnings?: string[];
     onchange: (key: string, value: unknown) => void;
@@ -36,6 +38,7 @@
     lastSeed,
     loras = [],
     checkpoints = [],
+    modelsOfClass = () => checkpoints,
     warnings = [],
     onchange,
     onreset,
@@ -168,7 +171,7 @@
         <ModelParam
           {param}
           value={(values[param.key] as string) ?? ""}
-          models={checkpoints}
+          models={modelsOfClass(param.filter?.class)}
           onchange={(name) => onchange(param.key, name)}
         />
       {:else}

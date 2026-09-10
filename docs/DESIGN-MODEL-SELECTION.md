@@ -253,6 +253,51 @@ in the repo today is **Flux.1 Krea [dev]**, a Flux-family model, while the
 page covers **Krea 2**, a later model on a Qwen3-VL text encoder. Deriving
 from the source makes the workflow match its name.
 
+### 7.1 Where we deviate from the recommended workflow
+
+Derived, not copied. A template is written for someone sitting in the ComfyUI
+editor; a bundled ForgeUI workflow is driven from the param panel, and the two
+want different things. Every deviation is listed here as it is made, so the
+next person can tell an adjustment from a mistake.
+
+**Every model file the graph loads is a param.** A template hardcodes its
+text encoder and VAE filenames, and those filenames are wrong on anyone
+else's disk. Each `CLIPLoader` / `VAELoader` gets a `model` param of the
+matching class, marked `advanced` so the panel leads with the base model and
+keeps the rest one click away. The base model itself is not advanced.
+
+**Sample LoRAs become the `lora_list` param.** Templates ship a LoRA wired in
+to demonstrate one — `krea2_darkbrush`, and Anima's turbo LoRA. A fixed LoRA
+in the graph is a file the user has to own and cannot change; ForgeUI already
+has a repeatable picker for exactly this (§4.4), so the chain replaces it.
+Anima's turbo LoRA is the exception: it is kept behind the template's own
+switch, because it is a different set of sampler defaults rather than a style.
+
+**The prompt-enhancer chain is removed.** Krea 2 and LTX-2.3 pipe the prompt
+through a `TextGenerate` node — a language model that rewrites it before
+encoding. Two reasons it does not survive:
+
+- ForgeUI's prompt param is the prompt. A node that rewrites it silently
+  means the sidecar records one thing and the image was made from another,
+  which §6.1 does not allow.
+- `TextGenerate`'s `sampling_mode` is a `DynamicCombo`: one declared input
+  that expands into as many widgets as the selected option carries. The
+  LiteGraph rebuild (`src/workflows/litegraph.ts`), the manifest editor's
+  literal-input list (§4.7) and the widget mapping all assume a static widget
+  list, so the node cannot round-trip through the app. It renders with a NaN
+  widget and a stray input slot, and fails at queue time.
+
+Supporting `DynamicCombo` properly is a change to all three of those, for a
+feature ForgeUI has no way to express. If it is wanted later, it should
+arrive as its own param type, not as a node the app cannot see into.
+
+**Sample prompts are cleared.** A template ships a demo prompt; the manifest's
+default owns it, and it defaults to empty.
+
+**Output nodes are renamed to `ForgeUI/out`.** The rewrite stamps
+`<jobid>/out` at submit time (§5 step 3); the template's own prefix would
+never be used.
+
 ### How to rebuild
 
 Author from the workflow JSON each page links rather than by hand — that

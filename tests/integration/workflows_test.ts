@@ -38,8 +38,8 @@ interface WorkflowDetail extends WorkflowSummary {
  * Node ids in the bundled `krea2` graph, which came from the official
  * ComfyUI template (§7) rather than being hand-numbered.
  */
-const KREA2_SAMPLER = "1";
-const KREA2_SAVE = "21";
+const KREA2_SAMPLER = "7";
+const KREA2_SAVE = "9";
 
 /** Listed by display name, which is how `GET /api/workflows` orders them. */
 const BUNDLED = [
@@ -106,10 +106,10 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "model",
       "size",
       "seed",
-      "enhance",
-      "style",
+      "loras",
     ]);
-    assertEquals(byId.get("krea2")!.params.advanced, 2); // steps, cfg
+    // steps, cfg, and the text encoder and VAE the workflow loads (§7.1).
+    assertEquals(byId.get("krea2")!.params.advanced, 4);
     assertEquals(keys("krea2-img2img"), [
       "image",
       "prompt",
@@ -140,7 +140,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     // Rebuilt from the official template (§7): the distilled 4B variant,
     // through the custom sampler chain rather than KSampler.
     assertEquals(keys("flux-klein"), ["prompt", "model", "size", "seed"]);
-    assertEquals(byId.get("flux-klein")!.params.advanced, 2); // steps, cfg
+    // steps, cfg, and the text encoder and VAE it loads (§7.1).
+    assertEquals(byId.get("flux-klein")!.params.advanced, 4);
     // Anima keeps the template's own Turbo LoRA switch as a bool param.
     assertEquals(keys("anima"), [
       "prompt",
@@ -150,11 +151,12 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "turbo",
     ]);
-    assertEquals(byId.get("anima")!.params.advanced, 2); // steps, cfg
+    assertEquals(byId.get("anima")!.params.advanced, 4); // steps, cfg, clip, vae
     // Rebuilt from the official ComfyUI template (§7): three loaders for a
     // split-file model, and a model param to swap it.
     assertEquals(keys("z-image-turbo"), ["prompt", "model", "size", "seed"]);
-    assertEquals(byId.get("z-image-turbo")!.params.advanced, 2); // steps, shift
+    // steps, shift, clip, vae (§7.1).
+    assertEquals(byId.get("z-image-turbo")!.params.advanced, 4);
     assertEquals(keys("sd15"), [
       "prompt",
       "negative",
@@ -259,10 +261,8 @@ Deno.test("GET /api/workflows/:id/inputs lists literal inputs for the editor", a
       "scheduler",
       "denoise",
     ]);
-    // krea2's prompt is a PrimitiveStringMultiline the template feeds into
-    // the encoder, so `text` is a link now and `value` is the literal.
     assertEquals(
-      inputs.find((input) => input.node_id === "13")?.exposed_by,
+      inputs.find((input) => input.input === "text")?.exposed_by,
       "prompt",
     );
     // A model param binds one literal input, like any scalar (§5).
@@ -279,7 +279,7 @@ Deno.test("saving a bundled workflow creates a user copy that shadows it", async
   await withTestApp(async (app) => {
     const before = await detail(app, "krea2");
     const manifest = structuredClone(before.manifest!);
-    manifest.name = "Flux Krea 2 (mine)";
+    manifest.name = "Krea 2 Turbo (mine)";
     manifest.params = manifest.params.filter((param) => param.key !== "cfg");
 
     const saved = await app.fetch("/api/workflows/krea2", {
@@ -291,8 +291,9 @@ Deno.test("saving a bundled workflow creates a user copy that shadows it", async
     assertEquals(after.source, "user");
     assertEquals(after.has_user_copy, true);
     assertEquals(after.has_bundled, true);
-    assertEquals(after.name, "Flux Krea 2 (mine)");
-    assertEquals(after.params.advanced, 1);
+    assertEquals(after.name, "Krea 2 Turbo (mine)");
+    // steps, clip and vae are left; cfg was the one removed.
+    assertEquals(after.params.advanced, 3);
     // Editing the manifest changes the workflow hash (§4.7).
     assert(after.hash !== before.hash);
 

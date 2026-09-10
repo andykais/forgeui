@@ -4,7 +4,7 @@
   "family": "krea2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1. Enhance prompt runs the prompt through the same Qwen3-VL encoder the workflow already loads, so it costs no extra download.",
+  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1, Qwen3-VL encoding the prompt.",
   "params": [
     {
       "key": "prompt",
@@ -12,7 +12,7 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "13.value"
+      "bind": "4.text"
     },
     {
       "key": "model",
@@ -23,7 +23,7 @@
         "family": "krea2"
       },
       "default": "krea2_turbo_fp8_scaled.safetensors",
-      "bind": "5.unet_name"
+      "bind": "1.unet_name"
     },
     {
       "key": "size",
@@ -35,8 +35,8 @@
       ],
       "step": 16,
       "bind": {
-        "w": "2.width",
-        "h": "2.height"
+        "w": "6.width",
+        "h": "6.height"
       }
     },
     {
@@ -44,21 +44,25 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "1.seed"
+      "bind": "7.seed"
     },
     {
-      "key": "enhance",
-      "label": "Enhance prompt",
-      "type": "bool",
-      "default": true,
-      "bind": "18.value"
-    },
-    {
-      "key": "style",
-      "label": "Darkbrush style",
-      "type": "bool",
-      "default": false,
-      "bind": "17.value"
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "krea2"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": null,
+          "model_to": [
+            "7.model"
+          ],
+          "clip_to": null
+        }
+      }
     },
     {
       "key": "steps",
@@ -68,7 +72,7 @@
       "min": 1,
       "max": 50,
       "advanced": true,
-      "bind": "1.steps"
+      "bind": "7.steps"
     },
     {
       "key": "cfg",
@@ -79,12 +83,34 @@
       "max": 20,
       "step": 0.1,
       "advanced": true,
-      "bind": "1.cfg"
+      "bind": "7.cfg"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "model",
+      "filter": {
+        "class": "clip"
+      },
+      "default": "qwen3vl_4b_fp8_scaled.safetensors",
+      "advanced": true,
+      "bind": "2.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "model",
+      "filter": {
+        "class": "vae"
+      },
+      "default": "qwen_image_vae.safetensors",
+      "advanced": true,
+      "bind": "3.vae_name"
     }
   ],
   "outputs": [
     {
-      "node": "21",
+      "node": "9",
       "kind": "image"
     }
   ]

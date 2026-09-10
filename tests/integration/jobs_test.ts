@@ -79,8 +79,8 @@ async function listDir(path: string): Promise<string[]> {
  * ComfyUI template (§7) rather than being hand-numbered. Naming them here
  * keeps the next rebuild to one edit.
  */
-const KREA2_SAMPLER = "1";
-const KREA2_SAVE = "21";
+const KREA2_SAMPLER = "7";
+const KREA2_SAVE = "9";
 
 Deno.test("a job runs end to end: submit, progress, files, sidecar, index", async () => {
   await withTestApp(async (app) => {
@@ -163,12 +163,11 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     }]);
     assertEquals(
       sidecar.models.map((model) => `${model.role}:${model.name}`),
-      // Every model the graph names, in role order (§6.2). The style LoRA is
-      // in the graph behind the template's switch, so it is recorded even
-      // with the switch off — the graph references it either way.
+      // Every model the graph names, in role order (§6.2). No LoRA: the
+      // template's sample style LoRA is gone, and the lora_list param
+      // splices one in only when a row is added (§7.1).
       [
         "unet:krea2_turbo_fp8_scaled.safetensors",
-        "lora:krea2_darkbrush.safetensors",
         "clip:qwen3vl_4b_fp8_scaled.safetensors",
         "vae:qwen_image_vae.safetensors",
       ],

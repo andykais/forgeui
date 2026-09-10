@@ -463,6 +463,7 @@
               lastSeed={null}
               loras={app.loras}
               checkpoints={app.checkpoints}
+              modelsOfClass={(c) => app.modelsOfClass(c)}
               onchange={(key, value) =>
                 (previewValues = { ...previewValues, [key]: value })}
               onreset={resetPreview}
