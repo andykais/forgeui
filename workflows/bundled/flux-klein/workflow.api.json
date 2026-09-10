@@ -1,127 +1,169 @@
 {
   "1": {
-    "class_type": "UNETLoader",
+    "class_type": "KSamplerSelect",
     "inputs": {
-      "unet_name": "flux-klein.safetensors",
-      "weight_dtype": "default"
-    },
-    "_meta": {
-      "title": "Load Diffusion Model"
+      "sampler_name": "euler"
     }
   },
   "2": {
-    "class_type": "DualCLIPLoader",
+    "class_type": "Flux2Scheduler",
     "inputs": {
-      "clip_name1": "t5xxl_fp16.safetensors",
-      "clip_name2": "clip_l.safetensors",
-      "type": "flux"
-    },
-    "_meta": {
-      "title": "DualCLIPLoader"
-    }
-  },
-  "3": {
-    "class_type": "KSampler",
-    "inputs": {
-      "seed": 0,
-      "steps": 20,
-      "cfg": 1.0,
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1.0,
-      "model": [
-        "1",
-        0
-      ],
-      "positive": [
-        "6",
-        0
-      ],
-      "negative": [
+      "steps": 4,
+      "width": [
         "7",
         0
       ],
-      "latent_image": [
-        "5",
+      "height": [
+        "8",
         0
       ]
-    },
-    "_meta": {
-      "title": "KSampler"
+    }
+  },
+  "3": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "9",
+        0
+      ],
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "14",
+        0
+      ]
     }
   },
   "4": {
-    "class_type": "VAELoader",
+    "class_type": "SamplerCustomAdvanced",
     "inputs": {
-      "vae_name": "ae.safetensors"
-    },
-    "_meta": {
-      "title": "Load VAE"
+      "noise": [
+        "12",
+        0
+      ],
+      "guider": [
+        "3",
+        0
+      ],
+      "sampler": [
+        "1",
+        0
+      ],
+      "sigmas": [
+        "2",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ]
     }
   },
   "5": {
-    "class_type": "EmptySD3LatentImage",
+    "class_type": "VAEDecode",
     "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "batch_size": 1
-    },
-    "_meta": {
-      "title": "EmptySD3LatentImage"
+      "samples": [
+        "4",
+        0
+      ],
+      "vae": [
+        "11",
+        0
+      ]
     }
   },
   "6": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": [
+        "7",
+        0
+      ],
+      "height": [
+        "8",
+        0
+      ],
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1024
+    },
+    "_meta": {
+      "title": "Width"
+    }
+  },
+  "8": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1024
+    },
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "9": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-4b.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "10": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    }
+  },
+  "11": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "12": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 432262096973490
+    }
+  },
+  "13": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "",
       "clip": [
-        "2",
+        "10",
         0
       ]
     },
     "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
+      "title": "CLIP Text Encode (Positive Prompt)"
     }
   },
-  "7": {
+  "14": {
     "class_type": "ConditioningZeroOut",
     "inputs": {
       "conditioning": [
-        "6",
+        "13",
         0
       ]
-    },
-    "_meta": {
-      "title": "ConditioningZeroOut"
     }
   },
-  "8": {
-    "class_type": "VAEDecode",
-    "inputs": {
-      "samples": [
-        "3",
-        0
-      ],
-      "vae": [
-        "4",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "9": {
+  "15": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "ForgeUI/out",
       "images": [
-        "8",
+        "5",
         0
       ]
-    },
-    "_meta": {
-      "title": "Save Image"
     }
   }
 }

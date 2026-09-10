@@ -1,107 +1,217 @@
 {
   "1": {
-    "class_type": "CheckpointLoaderSimple",
+    "class_type": "CLIPLoader",
     "inputs": {
-      "ckpt_name": "anima.safetensors"
-    },
-    "_meta": {
-      "title": "Load Checkpoint"
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    }
+  },
+  "2": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
     }
   },
   "3": {
-    "class_type": "KSampler",
+    "class_type": "VAEDecode",
     "inputs": {
-      "seed": 0,
-      "steps": 28,
-      "cfg": 5.0,
-      "sampler_name": "euler_ancestral",
-      "scheduler": "normal",
-      "denoise": 1.0,
-      "model": [
-        "1",
-        0
-      ],
-      "positive": [
+      "samples": [
         "6",
         0
       ],
-      "negative": [
-        "7",
-        0
-      ],
-      "latent_image": [
-        "5",
+      "vae": [
+        "2",
         0
       ]
-    },
-    "_meta": {
-      "title": "KSampler"
     }
   },
-  "5": {
+  "4": {
     "class_type": "EmptyLatentImage",
     "inputs": {
       "width": 1024,
       "height": 1024,
       "batch_size": 1
-    },
-    "_meta": {
-      "title": "Empty Latent Image"
     }
   },
-  "6": {
+  "5": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "",
+      "text": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia",
       "clip": [
         "1",
-        1
+        0
       ]
     },
     "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 755918130909406,
+      "steps": [
+        "13",
+        0
+      ],
+      "cfg": [
+        "15",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "12",
+        0
+      ],
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "4",
+        0
+      ]
     }
   },
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "worst quality, low quality",
+      "text": "",
       "clip": [
         "1",
-        1
+        0
       ]
     },
     "_meta": {
-      "title": "CLIP Text Encode (Negative)"
+      "title": "CLIP Text Encode (Positive Prompt)"
     }
   },
   "8": {
-    "class_type": "VAEDecode",
+    "class_type": "UNETLoader",
     "inputs": {
-      "samples": [
-        "3",
-        0
-      ],
-      "vae": [
-        "1",
-        2
-      ]
-    },
-    "_meta": {
-      "title": "VAE Decode"
+      "unet_name": "anima-base-v1.0.safetensors",
+      "weight_dtype": "default"
     }
   },
   "9": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 30
+    },
+    "_meta": {
+      "title": "Int (Steps)"
+    }
+  },
+  "10": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 8
+    },
+    "_meta": {
+      "title": "Int (Steps)"
+    }
+  },
+  "11": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "anima-turbo-lora-v0.2.safetensors",
+      "strength_model": 1,
+      "model": [
+        "8",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "17",
+        0
+      ],
+      "on_false": [
+        "8",
+        0
+      ],
+      "on_true": [
+        "11",
+        0
+      ]
+    }
+  },
+  "13": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "17",
+        0
+      ],
+      "on_false": [
+        "9",
+        0
+      ],
+      "on_true": [
+        "10",
+        0
+      ]
+    }
+  },
+  "14": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 4
+    },
+    "_meta": {
+      "title": "Float (CFG)"
+    }
+  },
+  "15": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "17",
+        0
+      ],
+      "on_false": [
+        "14",
+        0
+      ],
+      "on_true": [
+        "16",
+        0
+      ]
+    }
+  },
+  "16": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 1
+    },
+    "_meta": {
+      "title": "Float (CFG)"
+    }
+  },
+  "17": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": false
+    }
+  },
+  "18": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "ForgeUI/out",
       "images": [
-        "8",
+        "3",
         0
       ]
-    },
-    "_meta": {
-      "title": "Save Image"
     }
   }
 }

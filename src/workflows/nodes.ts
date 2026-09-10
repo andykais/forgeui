@@ -85,6 +85,62 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["shift"],
     outputs: ["MODEL"],
   },
+  // ---- utility nodes the official templates wire in (§7) -----------------
+  // `PrimitiveInt` and `RandomNoise` carry the same `control_after_generate`
+  // combo a seed does, which the editor writes into `widgets_values` too.
+  PrimitiveInt: {
+    widgets: ["value"],
+    after: { value: "fixed" },
+    outputs: ["INT"],
+  },
+  PrimitiveFloat: {
+    widgets: ["value"],
+    outputs: ["FLOAT"],
+  },
+  PrimitiveBoolean: {
+    widgets: ["value"],
+    outputs: ["BOOLEAN"],
+  },
+  PrimitiveStringMultiline: {
+    widgets: ["value"],
+    outputs: ["STRING"],
+  },
+  ComfySwitchNode: {
+    inputs: ["on_false", "on_true"],
+    widgets: ["switch"],
+    outputs: ["output"],
+  },
+  ResolutionSelector: {
+    widgets: ["aspect_ratio", "megapixels", "multiple"],
+    outputs: ["INT", "INT"],
+  },
+  // ---- the Flux.2 custom sampler chain -----------------------------------
+  KSamplerSelect: {
+    widgets: ["sampler_name"],
+    outputs: ["SAMPLER"],
+  },
+  Flux2Scheduler: {
+    widgets: ["steps", "width", "height"],
+    outputs: ["SIGMAS"],
+  },
+  CFGGuider: {
+    inputs: ["model", "positive", "negative"],
+    widgets: ["cfg"],
+    outputs: ["GUIDER"],
+  },
+  RandomNoise: {
+    widgets: ["noise_seed"],
+    after: { noise_seed: "randomize" },
+    outputs: ["NOISE"],
+  },
+  SamplerCustomAdvanced: {
+    inputs: ["noise", "guider", "sampler", "sigmas", "latent_image"],
+    outputs: ["output", "denoised_output"],
+  },
+  EmptyFlux2LatentImage: {
+    widgets: ["width", "height", "batch_size"],
+    outputs: ["LATENT"],
+  },
   EmptyLatentImage: {
     widgets: ["width", "height", "batch_size"],
     outputs: ["LATENT"],

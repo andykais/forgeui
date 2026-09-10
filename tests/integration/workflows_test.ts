@@ -34,11 +34,12 @@ interface WorkflowDetail extends WorkflowSummary {
 }
 
 /** The eight of §4.6, in the order the Workflows screen shows them (by name). */
+/** Listed by display name, which is how `GET /api/workflows` orders them. */
 const BUNDLED = [
   ["anima", "Anima"],
-  ["flux-klein", "Flux Klein"],
   ["krea2", "Flux Krea 2"],
   ["krea2-img2img", "Flux Krea 2 (img2img)"],
+  ["flux-klein", "Flux.2 Klein 4B"],
   ["illustrious", "Illustrious XL"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
@@ -116,7 +117,20 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "loras",
     ]);
-    assertEquals(keys("flux-klein"), ["prompt", "size", "seed", "loras"]);
+    // Rebuilt from the official template (§7): the distilled 4B variant,
+    // through the custom sampler chain rather than KSampler.
+    assertEquals(keys("flux-klein"), ["prompt", "model", "size", "seed"]);
+    assertEquals(byId.get("flux-klein")!.params.advanced, 2); // steps, cfg
+    // Anima keeps the template's own Turbo LoRA switch as a bool param.
+    assertEquals(keys("anima"), [
+      "prompt",
+      "negative",
+      "model",
+      "size",
+      "seed",
+      "turbo",
+    ]);
+    assertEquals(byId.get("anima")!.params.advanced, 2); // steps, cfg
     // Rebuilt from the official ComfyUI template (§7): three loaders for a
     // split-file model, and a model param to swap it.
     assertEquals(keys("z-image-turbo"), ["prompt", "model", "size", "seed"]);
@@ -133,7 +147,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(byId.get("ltx")!.kind, "video");
     assertEquals(
       [...byId.values()].map((w) => w.family),
-      ["anima", "flux", "flux", "flux", "sdxl", "ltx", "sd15", "z-image"],
+      // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
+      ["anima", "flux", "flux", "flux2", "sdxl", "ltx", "sd15", "z-image"],
     );
   });
 });

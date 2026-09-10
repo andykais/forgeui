@@ -119,6 +119,18 @@ function widgetsOf(node: UiNode): Record<string, unknown> {
     // A UI-only widget sits directly after the one it decorates.
     if (schema.after && name in schema.after) at++;
   }
+  // Values left over mean the widget list is short, and every name after the
+  // gap would take the wrong value — steps reading what cfg meant. A node
+  // with a `DynamicCombo` input does this: one declared input expands into
+  // however many widgets the selected option carries, so its width cannot be
+  // known from the schema. Refuse rather than write a plausible wrong graph.
+  if (at < values.length) {
+    throw new ImportError(
+      `${node.type}: ${values.length} widget values but ` +
+        `src/workflows/nodes.ts accounts for ${at}. ` +
+        `Left over: ${JSON.stringify(values.slice(at)).slice(0, 120)}`,
+    );
+  }
   return out;
 }
 
@@ -217,7 +229,11 @@ function appendOutputs(
 
   for (const node of document.nodes ?? []) {
     if (!CORE_NODES[node.type]?.output) continue;
-    if (node.mode === 2 || node.mode === 4) continue;
+    // A template holding several variants ships all but one bypassed, the
+    // instance and its save node together. Which variant this is came from
+    // `--subgraph`, and the wiring below is what selects the matching save
+    // node, so a bypassed one is not skipped here — asking for variant 1 is
+    // asking for the variant the template left switched off.
     const api: ApiNode = {
       class_type: node.type,
       inputs: { ...widgetsOf(node) },
