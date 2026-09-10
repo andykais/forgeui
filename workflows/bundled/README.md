@@ -5,16 +5,17 @@ The eight workflows of DESIGN §4.6, shipped with the app and copied into
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
 
-| id              | name                  | family  | kind  | exposed params                                                              |
-| --------------- | --------------------- | ------- | ----- | --------------------------------------------------------------------------- |
-| `krea2`         | Krea 2 Turbo          | krea2   | image | prompt, model, size, seed, loras · steps, cfg, clip, vae advanced           |
-| `krea2-img2img` | Flux Krea 2 (img2img) | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced             |
-| `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced            |
-| `anima`         | Anima                 | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced |
-| `flux-klein`    | Flux.2 Klein 4B       | flux2   | image | prompt, model, size, seed · steps, cfg, clip, vae advanced                  |
-| `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, model, size, seed · steps, shift, clip, vae advanced                |
-| `ltx`           | LTX Video             | ltx     | video | prompt, size, frames, fps, seed, loras                                      |
-| `sd15`          | Stable Diffusion 1.5  | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                   |
+| id               | name                    | family  | kind  | exposed params                                                              |
+| ---------------- | ----------------------- | ------- | ----- | --------------------------------------------------------------------------- |
+| `krea2`          | Krea 2 Turbo            | krea2   | image | prompt, model, size, seed, loras · steps, cfg, clip, vae advanced           |
+| `krea2-enhanced` | Krea 2 Turbo (enhanced) | krea2   | image | as `krea2`, plus the template's prompt enhancer · enhancer length advanced  |
+| `krea2-img2img`  | Flux Krea 2 (img2img)   | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced             |
+| `illustrious`    | Illustrious XL          | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced            |
+| `anima`          | Anima                   | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced |
+| `flux-klein`     | Flux.2 Klein 4B         | flux2   | image | prompt, model, size, seed · steps, cfg, clip, vae advanced                  |
+| `z-image-turbo`  | Z-Image Turbo           | z-image | image | prompt, model, size, seed · steps, shift, clip, vae advanced                |
+| `ltx`            | LTX Video               | ltx     | video | prompt, size, frames, fps, seed, loras                                      |
+| `sd15`           | Stable Diffusion 1.5    | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                   |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see

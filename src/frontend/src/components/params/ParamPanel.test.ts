@@ -108,6 +108,7 @@ function mount(
     lastSeed: number | null;
     warnings: string[];
     checkpoints: ModelEntry[];
+    byClass: Record<string, ModelEntry[]>;
   }> = {},
 ) {
   const handlers: Handlers = {
@@ -125,6 +126,9 @@ function mount(
       lastSeed: extra.lastSeed ?? null,
       loras,
       checkpoints: extra.checkpoints ?? [],
+      modelsOfClass: (modelClass: string | undefined) =>
+        (modelClass === undefined ? undefined : extra.byClass?.[modelClass]) ??
+          extra.checkpoints ?? [],
       warnings: extra.warnings ?? [],
       ...handlers,
     },
@@ -272,6 +276,45 @@ describe("each param type renders from the manifest", () => {
     // a UNETLoader: one class, one list (§3).
     await fireEvent.click(screen.getByText("illustriousXL"));
     expect(handlers.onchange).toHaveBeenCalledWith("model", "illustriousXL.safetensors");
+  });
+
+  test("a model that is not on disk is flagged in the panel", async () => {
+    mount(
+      [{ key: "model", label: "Model", type: "model", bind: "1.unet_name" }],
+      // What a bundled workflow ships: the template's filename, which is not
+      // the filename on this machine.
+      { model: "krea2_turbo_fp8_scaled.safetensors" },
+      { checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")] },
+    );
+    expect(screen.getByText("not found")).toBeTruthy();
+  });
+
+  test("a text_encoder param picks from the clip class, not diffusion", async () => {
+    const encoder = diffusionModel("qwen3vl_4b.safetensors", "unset", "text_encoders");
+    encoder.class = "clip";
+    const { handlers } = mount(
+      [{
+        key: "clip",
+        label: "Text encoder",
+        type: "text_encoder",
+        bind: "2.clip_name",
+        filter: { class: "clip" },
+      }],
+      { clip: "" },
+      {
+        checkpoints: [diffusionModel("flux1-dev.safetensors", "flux")],
+        byClass: { clip: [encoder] },
+      },
+    );
+
+    await fireEvent.click(screen.getByText("choose a model…"));
+    // The diffusion model is not offered for a text encoder slot.
+    expect(screen.queryByText("flux1-dev")).toBeNull();
+    await fireEvent.click(screen.getByText("qwen3vl_4b"));
+    expect(handlers.onchange).toHaveBeenCalledWith(
+      "clip",
+      "qwen3vl_4b.safetensors",
+    );
   });
 
   test("the model picker searches across folders", async () => {

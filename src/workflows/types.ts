@@ -48,6 +48,8 @@ export const PARAM_TYPES = [
   "seed",
   "size",
   "model",
+  "text_encoder",
+  "vae",
   /** Superseded by `model`; accepted and normalised to it (§5). */
   "checkpoint",
   "lora_list",
@@ -142,13 +144,27 @@ export interface ModelFilter {
 }
 
 /**
- * A base model, picked from a class rather than from one folder. `bind` is a
+ * A model file, picked from a class rather than from one folder. `bind` is a
  * scalar naming whatever input the workflow's own loader uses — `ckpt_name`
  * for a checkpoint-shaped graph, `unet_name` for a split-file one — so the
  * pick is a filename substitution, not a change of graph shape (§2).
+ *
+ * The three types differ only in which class they pick from, which is what
+ * makes each picker list the right files: a workflow names a text encoder and
+ * a VAE as well as a base model, and offering all of `diffusion` for a VAE
+ * slot is not a choice anybody wants.
  */
+export type ModelParamType = "model" | "text_encoder" | "vae";
+
+/** The class each type picks from when the manifest does not say. */
+export const MODEL_PARAM_CLASS: Record<ModelParamType, ModelClass> = {
+  model: "diffusion",
+  text_encoder: "clip",
+  vae: "vae",
+};
+
 export interface ModelParam extends ParamCommon {
-  type: "model";
+  type: ModelParamType;
   bind: string;
   filter?: ModelFilter;
   default?: string;

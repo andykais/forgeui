@@ -32,7 +32,8 @@ import {
   type WorkflowStore,
 } from "../workflows/loader.ts";
 import type { ApiGraph, Manifest } from "../workflows/types.ts";
-import { isRunnable } from "../workflows/types.ts";
+import { isRunnable, MODEL_PARAM_CLASS } from "../workflows/types.ts";
+import type { ModelClass } from "../config/types.ts";
 import {
   completeJob,
   type JobOutputImages,
@@ -116,6 +117,8 @@ export interface JobRunnerOptions {
   outputs: OutputStore;
   /** Fills in the hashes of models the library has already hashed (§8.1). */
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
+  /** Whether a model of this class is on disk under this name (§5.1). */
+  modelExists?: (name: string, modelClass: ModelClass) => boolean;
   now?: () => number;
 }
 
@@ -127,6 +130,7 @@ export class JobRunner {
   #hub: WsHub;
   #outputs: OutputStore;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
+  #modelExists?: (name: string, modelClass: ModelClass) => boolean;
   #now: () => number;
   #live = new Map<string, LiveJob>();
   #byPrompt = new Map<string, string>();
@@ -142,6 +146,7 @@ export class JobRunner {
     this.#hub = options.hub;
     this.#outputs = options.outputs;
     this.#resolveModels = options.resolveModels;
+    this.#modelExists = options.modelExists;
     this.#now = options.now ?? Date.now;
   }
 
@@ -177,12 +182,15 @@ export class JobRunner {
         `workflow "${workflowId}" has no output node yet; open it in ComfyUI and save`,
       );
     }
-    this.#assertConnected();
-
     const params = typeof body.params === "object" && body.params !== null
       ? body.params as Record<string, unknown>
       : {};
+    // Params are checked before the connection: what is wrong with the panel
+    // is wrong whether or not ComfyUI happens to be up, and saying so is more
+    // use than "not connected".
     const { values } = coerceParams(workflow.manifest, params);
+    this.#assertModelsPresent(workflow.manifest, values);
+    this.#assertConnected();
     const jobId = ulid();
     const { graph } = rewriteGraph({
       manifest: workflow.manifest,
@@ -659,6 +667,40 @@ export class JobRunner {
   #inFlight(id: string): boolean {
     const status = getJob(this.#db, id)?.status;
     return status === "queued" || status === "running";
+  }
+
+  /**
+   * Refuse a job whose model, text encoder or VAE is not on disk. The bundled
+   * workflows ship the filenames their source template used, which are not
+   * the filenames on anyone else's machine, and without this the job is
+   * queued and ComfyUI fails somewhere the user has to go digging for. Naming
+   * the param and the value is enough to fix it in the panel.
+   */
+  #assertModelsPresent(
+    manifest: Manifest,
+    values: Record<string, unknown>,
+  ): void {
+    if (!this.#modelExists) return;
+    const missing: string[] = [];
+    for (const param of manifest.params) {
+      if (
+        param.type !== "model" && param.type !== "text_encoder" &&
+        param.type !== "vae"
+      ) {
+        continue;
+      }
+      const name = values[param.key];
+      if (typeof name !== "string" || name.length === 0) continue;
+      const modelClass = param.filter?.class ?? MODEL_PARAM_CLASS[param.type];
+      if (this.#modelExists(name, modelClass)) continue;
+      missing.push(`${param.label ?? param.key} ("${name}")`);
+    }
+    if (missing.length > 0) {
+      throw new JobRequestError(
+        `not in your model folders: ${missing.join(", ")}. ` +
+          `Pick one that is, or add the file and rescan.`,
+      );
+    }
   }
 
   #assertConnected(): void {

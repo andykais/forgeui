@@ -167,7 +167,7 @@
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
         />
-      {:else if param.type === "model"}
+      {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}
         <ModelParam
           {param}
           value={(values[param.key] as string) ?? ""}

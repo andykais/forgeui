@@ -9,6 +9,8 @@ export type ParamType =
   | "seed"
   | "size"
   | "model"
+  | "text_encoder"
+  | "vae"
   | "lora_list"
   | "image"
   | "mask"

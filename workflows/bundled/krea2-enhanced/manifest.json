@@ -1,10 +1,10 @@
 {
-  "id": "krea2",
-  "name": "Krea 2 Turbo",
+  "id": "krea2-enhanced",
+  "name": "Krea 2 Turbo (enhanced)",
   "family": "krea2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1, Qwen3-VL encoding the prompt.",
+  "description": "Krea 2 Turbo with the template's prompt enhancer: the prompt is rewritten by the same Qwen3-VL encoder the workflow already loads, then encoded. Same inputs as Krea 2 Turbo, so the two can be compared on one prompt.",
   "params": [
     {
       "key": "prompt",
@@ -12,7 +12,7 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "4.text"
+      "bind": "10.value"
     },
     {
       "key": "model",
@@ -100,6 +100,16 @@
       "default": "qwen_image_vae.safetensors",
       "advanced": true,
       "bind": "3.vae_name"
+    },
+    {
+      "key": "max_length",
+      "label": "Enhancer length",
+      "type": "int",
+      "default": 512,
+      "min": 32,
+      "max": 4096,
+      "advanced": true,
+      "bind": "13.max_length"
     }
   ],
   "outputs": [

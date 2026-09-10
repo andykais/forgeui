@@ -259,6 +259,45 @@ Deno.test("a model's family is read from its header, and the user overrides it",
   }
 });
 
+Deno.test("a model a workflow names but the folders do not hold is refused", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-missing-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    await writeFakeSafetensors(join(checkpoints, "real.safetensors"), {
+      name: "real",
+    });
+    await withTestApp(async (app) => {
+      await scanAndHash(app);
+      const response = await app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: "illustrious",
+          params: { prompt: "figs", model: "not-on-disk.safetensors" },
+        }),
+      });
+      // Refused before anything is queued, naming the param and the value so
+      // it can be fixed in the panel rather than in a ComfyUI log.
+      assertEquals(response.status, 400);
+      const body = await response.json() as { error: { message: string } };
+      assertStringIncludes(body.error.message, "not in your model folders");
+      assertStringIncludes(body.error.message, "not-on-disk.safetensors");
+
+      // One that is there passes the check.
+      const ok = await app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: "illustrious",
+          params: { prompt: "figs", model: "real.safetensors" },
+        }),
+      });
+      // No ComfyUI in this app, so it stops later — but not as a bad param.
+      assertEquals(ok.status, 503);
+    }, { argv: ["--models-dir", `checkpoints=${checkpoints}`] });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("hashing fills in identity, and only re-reads what changed", async () => {
   await withModels(async (app, fixtures) => {
     await scanAndHash(app);
@@ -419,7 +458,7 @@ Deno.test("families come back with model and workflow counts", async () => {
     // One bundled workflow is Flux.1, one FLUX.2, one Krea 2, one sd15 (§4.6).
     assertEquals(byName.get("flux")?.workflows, 1);
     assertEquals(byName.get("flux2")?.workflows, 1);
-    assertEquals(byName.get("krea2")?.workflows, 1);
+    assertEquals(byName.get("krea2")?.workflows, 2); // plain and enhanced
     assertEquals(byName.get("sd15")?.workflows, 1);
     assertEquals(byName.get("sd15")?.models, 0);
   });

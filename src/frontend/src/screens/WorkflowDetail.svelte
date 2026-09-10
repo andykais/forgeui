@@ -47,6 +47,8 @@
     "seed",
     "size",
     "model",
+    "text_encoder",
+    "vae",
   ];
 
   $effect(() => {

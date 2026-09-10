@@ -45,6 +45,14 @@
   const others = $derived(matched.filter((model) => !fits(model)));
 
   const selected = $derived(models.find((model) => model.name === value) ?? null);
+  /**
+   * A bundled workflow ships the filenames its source template used, which
+   * are not the filenames on this machine. Saying so in the panel is the
+   * whole warning a user gets before the server refuses the job.
+   */
+  const missing = $derived(
+    value !== "" && selected === null && models.length > 0,
+  );
 
   function pick(model: ModelEntry) {
     onchange(model.name);
@@ -54,11 +62,14 @@
 </script>
 
 <div class="picker-wrap">
-  <button class="picker" onclick={() => (open = !open)}>
+  <button class="picker" class:missing onclick={() => (open = !open)}>
     <span class="name">
       {selected?.display_name ?? value ?? ""}
       {#if !value}<span class="dim">choose a model…</span>{/if}
     </span>
+    {#if missing}
+      <span class="warn" title="Not in your model folders">not found</span>
+    {/if}
     {#if selected && selected.family !== "unset"}
       <span class="badge">{selected.family}</span>
     {/if}
@@ -114,6 +125,7 @@
 
   .picker {
     display: flex;
+    border: 1px solid transparent;
     align-items: center;
     gap: 8px;
     width: 100%;
@@ -131,6 +143,17 @@
 
   .dim {
     color: var(--text-4);
+  }
+
+  .picker.missing {
+    border: 1px solid var(--error);
+  }
+
+  .warn {
+    flex: none;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: var(--error);
   }
 
   .badge {

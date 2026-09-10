@@ -273,23 +273,30 @@ has a repeatable picker for exactly this (§4.4), so the chain replaces it.
 Anima's turbo LoRA is the exception: it is kept behind the template's own
 switch, because it is a different set of sampler defaults rather than a style.
 
-**The prompt-enhancer chain is removed.** Krea 2 and LTX-2.3 pipe the prompt
-through a `TextGenerate` node — a language model that rewrites it before
-encoding. Two reasons it does not survive:
+**The prompt enhancer gets its own workflow rather than a switch.** Krea 2
+pipes the prompt through a `TextGenerate` node — a language model that
+rewrites it before encoding, using the same Qwen3-VL encoder the workflow
+already loads, so it costs no extra download. Whether it earns its place is a
+question about output, not architecture, so both exist: `krea2` without it
+and `krea2-enhanced` with it, sharing every input so one prompt can be run
+through each. Two workflows rather than one toggle because a workflow is how
+this app already expresses "the same recipe, wired differently", and because
+the enhanced one records a different graph in its sidecar.
 
-- ForgeUI's prompt param is the prompt. A node that rewrites it silently
-  means the sidecar records one thing and the image was made from another,
-  which §6.1 does not allow.
-- `TextGenerate`'s `sampling_mode` is a `DynamicCombo`: one declared input
-  that expands into as many widgets as the selected option carries. The
-  LiteGraph rebuild (`src/workflows/litegraph.ts`), the manifest editor's
-  literal-input list (§4.7) and the widget mapping all assume a static widget
-  list, so the node cannot round-trip through the app. It renders with a NaN
-  widget and a stray input slot, and fails at queue time.
+`TextGenerate`'s `sampling_mode` is a `DynamicCombo`: one declared input that
+expands into as many widgets as the selected option carries, named
+`<parent>.<child>` in the prompt. The LiteGraph rebuild
+(`src/workflows/litegraph.ts`) now expands those in place, and emits a
+placeholder for a widget that has been promoted to a link — without either,
+every value after the first link shifts by one, which is what produced a NaN
+`max_length` and a stray `sampling_mode` slot in the editor.
 
-Supporting `DynamicCombo` properly is a change to all three of those, for a
-feature ForgeUI has no way to express. If it is wanted later, it should
-arrive as its own param type, not as a node the app cannot see into.
+**A model file a workflow names is checked before the job is queued.** The
+bundled workflows ship their source template's filenames, which are nobody
+else's filenames. The panel marks a value that is not in the scanned library,
+and `POST /api/jobs` refuses it, naming the param and the value. A class the
+library has scanned nothing for is not judged: there is no difference there
+between a missing file and a folder the user never configured.
 
 **Sample prompts are cleared.** A template ships a demo prompt; the manifest's
 default owns it, and it defaults to empty.

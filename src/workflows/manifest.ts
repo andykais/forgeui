@@ -9,7 +9,9 @@ import {
   type LoraRow,
   type Manifest,
   type ManifestOutput,
+  MODEL_PARAM_CLASS,
   type ModelFilter,
+  type ModelParamType,
   type Param,
   PARAM_TYPES,
   type ParamType,
@@ -375,16 +377,19 @@ function validateParam(
       };
     }
     case "model":
+    case "text_encoder":
+    case "vae":
     case "checkpoint": {
       // `checkpoint` is the old spelling from when a model could only come
       // from the checkpoints folder; it parses to a `model` param whose class
       // defaults to `diffusion`, which is the same set widened (§5, §14).
+      const kind: ModelParamType = type === "checkpoint" ? "model" : type;
       const parsed = filter(raw.filter, `${at}.filter`) ?? {};
       return {
         ...common,
-        type: "model",
+        type: kind,
         bind: scalarBind(),
-        filter: { class: "diffusion", ...parsed },
+        filter: { class: MODEL_PARAM_CLASS[kind], ...parsed },
         ...(raw.default !== undefined
           ? { default: str(raw.default, `${at}.default`) }
           : {}),

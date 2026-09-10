@@ -449,6 +449,27 @@ export class ModelLibrary {
     return Object.values(configured).flat();
   }
 
+  /**
+   * Whether a file of this class is on disk under this name. A workflow binds
+   * the folder-relative name ComfyUI resolves, so this is the same question
+   * ComfyUI will ask when the graph is queued — asked early enough to say so
+   * before anything is submitted.
+   */
+  hasModelNamed(name: string, modelClass: ModelClass): boolean {
+    const overrides = this.#config.config.model_classes;
+    let any = false;
+    for (const model of this.scanner.registry.values()) {
+      if (classOf(model.kind, overrides) !== modelClass) continue;
+      any = true;
+      if (model.name === name) return true;
+    }
+    // Nothing of this class has been scanned, so there is no difference here
+    // between a name that is missing and a folder that was never configured.
+    // Answering "yes" keeps the app usable for someone whose library the app
+    // cannot see; the only cost is that ComfyUI reports the failure instead.
+    return !any;
+  }
+
   /** Kinds belonging to a class, for the scan a class-filtered list needs. */
   kindsOfClass(modelClass: ModelClass): string[] {
     const overrides = this.#config.config.model_classes;

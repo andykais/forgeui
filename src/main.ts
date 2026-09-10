@@ -97,6 +97,7 @@ async function startAppWith(
     hub,
     outputs,
     resolveModels: (refs) => models.resolveModels(refs),
+    modelExists: (name, cls) => models.hasModelNamed(name, cls),
   });
   hub.onHello(() => [
     { type: "system_status", data: comfy.status() },

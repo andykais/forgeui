@@ -48,6 +48,7 @@ const BUNDLED = [
   ["flux-klein", "Flux.2 Klein 4B"],
   ["illustrious", "Illustrious XL"],
   ["krea2", "Krea 2 Turbo"],
+  ["krea2-enhanced", "Krea 2 Turbo (enhanced)"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["z-image-turbo", "Z-Image Turbo"],
@@ -108,6 +109,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "loras",
     ]);
+    // The enhanced variant exists to be compared against the plain one, so
+    // its inputs match but for the enhancer's own length (§7.1).
+    assertEquals(keys("krea2-enhanced"), keys("krea2"));
     // steps, cfg, and the text encoder and VAE the workflow loads (§7.1).
     assertEquals(byId.get("krea2")!.params.advanced, 4);
     assertEquals(keys("krea2-img2img"), [
@@ -170,7 +174,17 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
-      ["anima", "flux", "flux2", "sdxl", "krea2", "ltx", "sd15", "z-image"],
+      [
+        "anima",
+        "flux",
+        "flux2",
+        "sdxl",
+        "krea2",
+        "krea2",
+        "ltx",
+        "sd15",
+        "z-image",
+      ],
     );
   });
 });
