@@ -7,9 +7,9 @@ from then on (§4.6).
 
 | id              | name                  | family  | kind  | exposed params                                                   |
 | --------------- | --------------------- | ------- | ----- | ---------------------------------------------------------------- |
-| `krea2`         | Flux Krea 2           | flux    | image | prompt, size, seed, loras · steps, cfg advanced                  |
+| `krea2`         | Krea 2 Turbo          | krea2   | image | prompt, model, size, seed, enhance, style · steps, cfg advanced  |
 | `krea2-img2img` | Flux Krea 2 (img2img) | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced  |
-| `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, size, seed, loras · steps, cfg advanced        |
+| `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced |
 | `anima`         | Anima                 | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg advanced |
 | `flux-klein`    | Flux.2 Klein 4B       | flux2   | image | prompt, model, size, seed · steps, cfg advanced                  |
 | `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, model, size, seed · steps, shift advanced                |
