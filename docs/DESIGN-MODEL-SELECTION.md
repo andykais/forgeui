@@ -7,6 +7,23 @@ choosing a model = choosing a workflow").
 
 ---
 
+## The problem
+
+ForgeUI bakes a model into its workflow. A `checkpoint` param reads one
+folder — `checkpoints` — so `diffusion_models`, `unet` and `Stable-Diffusion`
+are four unrelated kinds of thing to the app, and no bundled workflow exposes
+a model param at all. Keeping several variants of one family therefore means
+editing the graph in ComfyUI or maintaining near-identical copies of the same
+workflow, for what is the same recipe with different weights. SwarmUI has one
+*Model* dropdown over all of it, because it owns the graph and generates the
+right loader per pick; ForgeUI is workflow-first and will not do that. This
+proposal takes the part of SwarmUI's flexibility that transfers — one search
+box over every diffusion folder, with the pick applied to a workflow authored
+in its architecture's native shape — and leaves graph authoring in ComfyUI
+where it belongs.
+
+---
+
 ## 1. What this does
 
 Four things.
