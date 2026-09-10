@@ -119,9 +119,12 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
     ]);
     assertEquals(byId.get("krea2-img2img")!.category, "img2img");
+    // No official ComfyUI page for this SDXL finetune, so its graph is
+    // unchanged (§7); it gains the model param like the rest.
     assertEquals(keys("illustrious"), [
       "prompt",
       "negative",
+      "model",
       "size",
       "seed",
       "loras",

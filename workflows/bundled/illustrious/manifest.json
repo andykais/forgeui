@@ -22,6 +22,17 @@
       "bind": "7.text"
     },
     {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "sdxl"
+      },
+      "default": "illustriousXL.safetensors",
+      "bind": "1.ckpt_name"
+    },
+    {
       "key": "size",
       "label": "Size",
       "type": "size",
