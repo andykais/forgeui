@@ -1,486 +1,326 @@
-# Design proposal — one model picker for every kind of model
+# Design — one model picker across every diffusion folder
 
 **Status:** proposal. Nothing here is implemented.
-**Touches:** DESIGN.md §3.1, §4.2, §4.3, §4.4, §4.7, §6.2, §7, §8.1, §8.2, §11.2, §12.
-**Premise being revised:** §8.2 ("Model switching — solved by construction ...
+**Touches:** DESIGN.md §3.1, §4.2, §4.3, §4.6, §8.1, §8.2, §11.2, §12.
+**Premise being revised:** §8.2 ("Model switching — solved by construction …
 choosing a model = choosing a workflow").
 
-Part I is *what this does* and is the part to argue with. Part II is *how it
-works* and only matters once Part I is agreed.
-
 ---
 
-# Part I — What
+## 1. What this does
 
-## 1. The problem
+Four things.
 
-SwarmUI has one *Model* dropdown. Everything that can drive a generation —
-whatever sits in `checkpoints/`, `Stable-Diffusion/`, `diffusion_models/`,
-`unet/` — appears in it, and picking one is all the user does.
+1. **ForgeUI treats `diffusion_models` and `checkpoints` identically.** Both,
+   plus `unet` and `Stable-Diffusion`, become one class — `diffusion` — and one
+   search box lists all of them together. The folder a file happens to sit in
+   stops being a type.
+2. **The generated `extra_model_paths.yaml` lists every diffusion folder under
+   both keys by default**, so any file the picker offers is resolvable by
+   whichever loader node the workflow uses. Without this the picker offers
+   names ComfyUI cannot find (§4).
+3. **The bundled workflows are rebuilt from the official ComfyUI workflows**
+   for each model, rather than hand-authored from assumption. Four of them are
+   wrong today — two have the wrong loader topology and two target a different
+   model than their name claims (§7).
+4. **Every bundled workflow exposes a `model` param** so the base model can be
+   swapped without editing the graph, defaulting to the file its graph already
+   names.
 
-In ForgeUI those are four unrelated things, and no bundled workflow lets you
-pick a model at all. The everyday case this blocks: **you keep several
-variants of the same family and want to switch between them.** For Flux you
-might have `krea2_turbo_bf16.safetensors` (a bare diffusion model) sitting
-next to a full Flux checkpoint someone published. Today, using either one
-means editing the `krea2` workflow in ComfyUI, or keeping two near-identical
-workflows around. Neither is what you want: it is the same recipe, a different
-set of weights.
+That is the whole design. It is deliberately much smaller than the first draft
+of this document, for the reason in §2.
 
-Two things in the code stand in the way.
+## 2. Why it is this small
 
-**The folder is the type.** `ModelScanner` stamps a model's `kind` with the
-`config.yaml` key its folder was listed under (`src/models/scan.ts`), and
-`DEFAULT_MODEL_KINDS` is `checkpoints | loras | vae | controlnet`
-(`src/config/defaults.ts`). The picker asks for one kind
-(`api.modelsOfKind("checkpoints")`) and gets one folder's worth.
+The first draft assumed a workflow would have to change its *loader topology*
+at generate time. An all-in-one checkpoint carries MODEL + CLIP + VAE and loads
+with one `CheckpointLoaderSimple`; a split-file diffusion model carries MODEL
+only and needs `UNETLoader` + `CLIPLoader` + `VAELoader` beside it. Swapping
+across that line is a change of graph shape, not of a string, so the draft
+grew a slot-rewrite engine, companion resolution, node remapping and a prune
+pass.
 
-**A model param can only rewrite text inside a node.**
-`{ "type": "checkpoint", "bind": "1.ckpt_name" }` writes a filename into node
-`1`, which holds only while node `1` stays a `CheckpointLoaderSimple`. But
-the two file layouts need *different loader nodes*: a full checkpoint carries
-MODEL + CLIP + VAE and loads with one node, a bare diffusion model carries
-MODEL only and needs separate text encoders and a VAE beside it. That is a
-change of graph shape, not of a string — which is why every bundled workflow
-hardcodes its loaders and exposes no model param.
+All of that is only needed to swap **between the two packagings inside one
+architecture**. `scripts/classify-models.ts` was written to find out whether
+that case exists in a real library: it reads each safetensors header — never
+the weights — and reports whether a file holds MODEL, CLIP and VAE or MODEL
+alone.
 
-## 2. What you get
+**The answer was no.** Packaging does not vary within a family. Every
+architecture ships one way or the other:
 
-**Every bundled workflow grows a Model row at the top of the param panel.**
-Clicking it opens a search box listing every model from every diffusion
-folder at once — `checkpoints`, `Stable-Diffusion`, `diffusion_models`,
-`unet`, together. Models of the workflow's own family come first; everything
-else sits under an "Other models" divider, still selectable, flagged.
+| shipped as | architectures |
+|---|---|
+| all-in-one checkpoint | sd15, sdxl (and its finetunes — Illustrious, Pony, NoobAI) |
+| split-file | flux, krea2, z-image, anima, ltx-2 |
 
-Each workflow's Model defaults to the file its graph already names, so a
-fresh install behaves exactly as it does today until you touch it.
+So a workflow authored in its architecture's native shape never needs to
+change that shape. Swapping models inside a family is a **pure filename
+substitution into the loader that is already there** — the same operation
+`bind: "1.ckpt_name"` performs today.
 
-Then, for `krea2`, whose graph loads a bare Flux diffusion model plus a
-`DualCLIPLoader` and a `VAELoader`:
+The consequence is that a `model` param is an ordinary scalar param. It
+behaves exactly like `steps` or `cfg`: the editor shows the authored value,
+the param panel holds your override, and the queued graph is a clone with one
+string replaced. No new machinery, and none of the questions the first draft
+spent its length on.
 
-| you pick | what happens | asks you anything? |
-|---|---|---|
-| `krea2_turbo_bf16.safetensors` — another bare Flux diffusion model | its filename replaces the one in the `UNETLoader`; the text encoders and VAE in the graph are kept as-is | no |
-| a **full Flux checkpoint** | one `CheckpointLoaderSimple` replaces all three loaders; the checkpoint's own CLIP and VAE are used | no |
-| a **full SDXL checkpoint** | same single-loader substitution; flagged as a different family than the workflow, but it runs | no |
-| a bare diffusion model in a family ForgeUI has no text encoder for | not selectable; the row reads *"needs a text encoder"* | it tells you before you queue |
+## 3. `diffusion_models` and `checkpoints` are the same thing
 
-The first two rows are the case you described, and neither needs any setup:
-one keeps the companions the workflow already has, the other needs no
-companions at all.
+`kind` stays what it is — the `config.yaml` key, which is also the
+`extra_model_paths.yaml` key ComfyUI resolves against. A derived `class` sits
+above it:
 
-The sampler, prompt encoders, decode and save nodes are untouched in every
-case. **You are swapping the weights, not the recipe** — `krea2` is still 28
-steps at cfg 1.0 on euler/simple whatever you load into it.
-
-## 3. What you see when you edit a workflow in ComfyUI
-
-**A complete, ordinary workflow.** Nothing is missing and nothing is
-generated on the fly in the file.
-
-The loaders stay authored in `workflow.api.json` exactly as they are today,
-with real filenames in them. Open `krea2` in the editor and you see
-`UNETLoader → flux1-krea-dev.safetensors`, `DualCLIPLoader`, `VAELoader`, all
-wired up; ComfyUI's own Run button works on it standalone.
-
-Substitution happens on a **throwaway copy** made at submit time. This is not
-new machinery: `rewriteGraph` already starts with
-`structuredClone(options.graph)` (`src/workflows/rewrite.ts:176`), and
-`lora_list` already splices `LoraLoader` nodes into a graph that has none
-saved in it (§4.4). The model swap is the same trick applied to the head of
-the graph. The files on disk are never touched by a generate.
-
-So the authored loaders keep two real jobs:
-
-1. **They are the default.** Pick nothing, or pick the file already named
-   there, and no substitution happens at all.
-2. **They are the companion source.** Swapping one Flux diffusion model for
-   another keeps the authored `DualCLIPLoader` and `VAELoader` verbatim. The
-   graph you wrote is where the text encoders come from.
-
-### The recipe and the run are different things
-
-There is one discontinuity worth being explicit about. Pick a full SDXL
-checkpoint in Generate, hit Generate, then click "Open in ComfyUI" — you see
-the *authored* three-loader Flux graph, not the single-loader graph that just
-ran. That is intended, and the split is:
-
-- **The editor edits the recipe.** It always loads the authored graph, and
-  Save & return writes the authored graph. If it loaded the rewritten one,
-  saving would silently bake your last model pick in as the workflow's
-  permanent default — which is the opposite of what a model param is for.
-- **The output's frozen graph is the record of the run.** The sidecar already
-  stores the exact submitted graph and `POST /api/jobs/rerun` already
-  resubmits it (§6). "Show me the graph that made this image" is an *output*
-  action, not a workflow action.
-
-That second half is currently only reachable as a rerun, so this proposal
-adds a **View graph** entry to the output metadata sidebar (§11.2) to make it
-visible. Without it the discontinuity has no explanation available to the
-user, which is what makes it feel like a bug rather than a design.
-
-### Editing the graph does not break the model param
-
-The manifest names the *consumers* of the model — "node 3 needs MODEL, node 6
-needs CLIP, node 8 needs VAE" — not the loaders that produce them. Rearrange,
-replace or rewire the loaders in ComfyUI however you like: as long as node 3
-still takes a MODEL, the Model param still works. This is strictly more
-robust than today's `1.ckpt_name` binds, which break the moment that node
-stops being a `CheckpointLoaderSimple`.
-
-## 4. What changes in the bundled workflows
-
-All eight gain a `model` param, defaulting to the filename already in their
-graph. No graph changes. Three shapes are already represented, and the third
-is the one that proves the design has to be partial:
-
-| workflow | authored loaders | what the Model param owns |
-|---|---|---|
-| `sd15`, `illustrious`, `anima`, `z-image-turbo` | one `CheckpointLoaderSimple` | MODEL, CLIP and VAE |
-| `krea2`, `krea2-img2img`, `flux-klein` | `UNETLoader` + `DualCLIPLoader` + `VAELoader` | MODEL, CLIP and VAE |
-| `ltx` | `CheckpointLoaderSimple` **+ a separate `CLIPLoader`** | MODEL and VAE only — **not** CLIP |
-
-`ltx` loads a full checkpoint but deliberately drives its text encoding from
-an external T5 (`CLIPLoader`, `type: ltxv`) rather than the checkpoint's own
-CLIP. So a model slot cannot be all-or-nothing: `ltx`'s says
-`clip_to: null`, meaning *"swap the model and the VAE, leave the text encoder
-alone."* Any of the three outputs can be disclaimed this way.
-
-## 5. What does not change
-
-- Graphs are still authored in ComfyUI and committed as files. ForgeUI does
-  not generate graphs the way SwarmUI does.
-- The manifest is still the only thing the Generate panel reads (§4).
-- Pickers still work with **zero hashed models** (the standing rule in
-  AGENTS.md); every mechanism below has an answer available at scan time.
-- Nothing is ever written inside a model folder, and nothing is downloaded at
-  runtime.
-- A workflow still bakes in its pipeline and its defaults. The narrow reading
-  of §8.2 survives; the sentence "choosing a model = choosing a workflow"
-  does not.
-
----
-
-# Part II — How
-
-Three layers. Each is independently shippable and independently useful.
-
-## 6. Layer 1 — model class
-
-`kind` stays exactly what it is: the `config.yaml` key, which is also the
-`extra_model_paths.yaml` key ComfyUI resolves names against
-(`src/config/extra_model_paths.ts`). It must not change.
-
-A derived field `class` sits above it:
-
-| class | default kinds |
+| class | kinds |
 |---|---|
 | `diffusion` | `checkpoints`, `Stable-Diffusion`, `diffusion_models`, `unet` |
 | `lora` | `loras`, `lycoris` |
 | `vae` | `vae`, `vae_approx` |
 | `clip` | `clip`, `text_encoders`, `clip_vision` |
 | `controlnet` | `controlnet` |
-| `upscale` | `upscale_models` |
+| `upscale` | `upscale_models`, `latent_upscale_models` |
 | `embedding` | `embeddings` |
 | `other` | anything else |
 
-`config.yaml` gains an override map so a custom folder key lands correctly:
+Overridable for custom folder keys:
+
+```yaml
+model_classes:
+  my_weird_folder: diffusion
+```
+
+`DEFAULT_MODEL_KINDS` grows to cover the table — including `text_encoders` and
+`latent_upscale_models`, which the current-generation models need and the
+four-key default does not have. All new keys default to empty, so no existing
+install changes behaviour.
+
+`GET /api/models` gains `?class=`, beside `?kind=`. `ENUM_SOURCES` widens from
+four hardcoded kinds to any class name or any configured kind.
+
+## 4. Folder aliasing — the part that makes it work
+
+Unifying the picker does not unify how ComfyUI *resolves* a filename. Each
+loader searches exactly one folder key:
+
+```python
+CheckpointLoaderSimple   get_filename_list("checkpoints")
+UNETLoader               get_full_path_or_raise("diffusion_models", unet_name)   nodes.py:1003
+CLIPLoader               get_full_path_or_raise("text_encoders", clip_name)      nodes.py:1030
+VAELoader                get_filename_list("vae") + vae_approx                   nodes.py:776
+```
+
+So a unified picker on its own produces broken jobs: it offers
+`foo.safetensors` from `checkpoints/`, the manifest writes it into
+`1.unet_name`, and ComfyUI looks under `diffusion_models/` and fails.
+
+ForgeUI generates that config file (`src/config/extra_model_paths.ts`), so the
+fix is entirely ours: **write every `diffusion`-class folder under both the
+`checkpoints` and `diffusion_models` keys.** Given
 
 ```yaml
 model_folders:
-  checkpoints:       [/models/checkpoints]
-  Stable-Diffusion:  [/models/Stable-Diffusion]
-  diffusion_models:  [/models/diffusion_models]
-  unet:              [/models/unet]
-  text_encoders:     [/models/text_encoders]
-  vae:               [/models/vae]
-model_classes:
-  my_weird_folder: diffusion     # kind → class; overrides the table above
+  checkpoints:      [/models/checkpoints]
+  diffusion_models: [/models/diffusion_models]
 ```
 
-`DEFAULT_MODEL_KINDS` grows to cover the table, all empty by default, so no
-existing install changes behaviour. `ENUM_SOURCES` widens from four hardcoded
-kinds to *any class name or any configured kind*, so a manifest can say
-`"source": "diffusion"` or `"source": "text_encoders"`.
+the generated file becomes
 
-`GET /api/models` gains `?class=`, beside the existing `?kind=`. That one
-endpoint is the grab bag: `GET /api/models?class=diffusion&q=flux` returns
-every match from all four folders, ranked by the substring match §12 already
-specifies.
-
-## 7. Layer 2 — packaging and architecture
-
-For a `diffusion` model we need to know which loader it wants. Three sources,
-best answer wins:
-
-1. **User override.** A `packaging` field on the model page, next to
-   `family`. Always wins — the escape hatch that makes the other two tiers
-   safe to get wrong.
-2. **Header probe.** A `.safetensors` file starts with a u64 little-endian
-   header length followed by a JSON blob of tensor names and shapes. Reading
-   it costs one `open` and one short read — nothing next to the full-file
-   sha256 the hasher already does. The tensor names classify the file:
-   - `first_stage_model.*` and `cond_stage_model.*` present → `full`
-   - only `model.diffusion_model.*`, or Flux's `double_blocks.*` /
-     `single_blocks.*` → `diffusion_only`
-
-   The same names give the **architecture** (`sd15`, `sdxl`, `flux`, `ltx`,
-   `z-image`, …), which maps onto the existing hardcoded `FAMILIES` list.
-   Worth having on its own: §8.1 infers family only from Civitai today, so
-   every scanned model starts `unset`. This is an offline answer with no
-   network and no "Fetch info" click.
-3. **Folder heuristic.** `diffusion_models` / `unet` → `diffusion_only`;
-   `checkpoints` / `Stable-Diffusion` → `full`. Available the instant a file
-   is scanned, which is what keeps the picker honest before any probe or hash
-   has run.
-
-`.ckpt` is a pickle and cannot be probed cheaply — folder heuristic only.
-`.gguf` has its own header format and is in practice always diffusion-only,
-but loading one needs a custom node (`UnetLoaderGGUF`); until custom-node
-support exists a `.gguf` is listed but marked unswappable, with the reason
-shown in the picker rather than as a ComfyUI failure later.
-
-**Where it is stored.** Detection is derived and path-shaped; user metadata is
-editable and hash-shaped. They go in different places, matching the existing
-split:
-
-```sql
--- derived, rebuildable, keyed by path, invalidated on size/mtime change
-CREATE TABLE model_probes (
-  path TEXT PRIMARY KEY,
-  size INTEGER NOT NULL, mtime INTEGER NOT NULL,
-  packaging TEXT,          -- full | diffusion_only | unknown
-  arch TEXT,               -- flux | sdxl | sd15 | ... | NULL
-  probed_at INTEGER NOT NULL
-);
-
--- models: user metadata, keyed by hash, as today
-ALTER TABLE models ADD COLUMN packaging TEXT;       -- user override, NULL → detected
-ALTER TABLE models ADD COLUMN companions_json TEXT; -- §9
+```yaml
+forgeui:
+  checkpoints: |-
+    /models/checkpoints
+    /models/diffusion_models
+  diffusion_models: |-
+    /models/checkpoints
+    /models/diffusion_models
 ```
 
-The probe runs as its own pass over newly scanned files, before hashing, since
-it is cheap and its answer is needed in the picker. Like hashing, it must
-never block anything and a failed read must never stop the rest.
+Every diffusion-class file is then reachable through either loader. No
+symlinks, no moving files, no user action. This is a contained change to one
+renderer and it is the linchpin: without it §3 is cosmetic.
 
-`ModelView` gains `class`, `packaging` and `packaging_source`
-(`user | probe | folder`), so the UI can show *why* a model is treated as it
-is.
+Two notes. Duplicate names across the two folders resolve to the first listed,
+which is already how ComfyUI and `ModelScanner` both behave. And the app's own
+scan still reports a model under the kind whose folder it was found in, so the
+library does not double-count.
 
-## 8. Layer 3 — the `model` param and the loader-slot rewrite
+## 5. The `model` param
 
-A new param type whose `bind` describes a **slot**: the graph inputs that
-consume this model's outputs. `krea2`:
+Almost exactly today's `checkpoint` param. Today:
+
+```json
+{ "key": "model", "type": "checkpoint", "bind": "1.ckpt_name" }
+```
+
+Proposed:
 
 ```json
 {
   "key": "model",
   "label": "Model",
   "type": "model",
+  "bind": "1.unet_name",
   "filter": { "class": "diffusion", "family": "flux" },
-  "default": "flux1-krea-dev.safetensors",
-  "bind": {
-    "slot": {
-      "model_to": ["3.model"],
-      "clip_to":  ["6.clip"],
-      "vae_to":   ["8.vae"],
-      "clip_type": "flux"
-    }
-  }
+  "default": "flux1-krea-dev.safetensors"
 }
 ```
 
-and `ltx`, disclaiming CLIP per §4:
+The only change is where the options come from: a class rather than the single
+`checkpoints` folder. `bind` stays a scalar and names whatever input the
+workflow's own loader uses — `ckpt_name` for a checkpoint-shaped workflow,
+`unet_name` for a split-file one. That is the manifest author's choice, made
+once, not a runtime decision.
 
-```json
-"bind": { "slot": { "model_to": ["3.model"], "clip_to": null, "vae_to": ["8.vae"] } }
-```
+`checkpoint` is a misnomer once it can point at `diffusion_models/`, so the
+type is renamed to `model` with `checkpoint` kept as an accepted alias.
+Existing manifests keep working untouched.
 
-`applyParam` gets a `case "model"` beside the existing `case "lora_list"`,
-calling a `spliceModel` that mirrors `spliceLoras`:
+**The family filter is a default sort, not a gate.** Models matching the
+workflow's family come first; the rest sit under an "Other models" divider,
+still selectable. An untagged model must stay reachable — see §6.
 
-1. Resolve the pick to its `name` (the folder-relative name ComfyUI binds to)
-   and its effective `packaging`.
-2. Build the loader subgraph, allocating ids with the existing `nextNodeId`:
-   - **`full`** — one `CheckpointLoaderSimple { ckpt_name }`; MODEL, CLIP and
-     VAE all come off it.
-   - **`diffusion_only`** — `UNETLoader { unet_name, weight_dtype }` for
-     MODEL, plus a `CLIPLoader` / `DualCLIPLoader` and a `VAELoader` for the
-     companions of §9.
+## 6. Family has to be detected, not asked for
 
-   Only for the outputs the slot claims: a `null` target list means that
-   output is left alone and no loader is built for it.
-3. Rewire every entry in `model_to` / `clip_to` / `vae_to` onto the new nodes
-   with the existing `setScalar`.
-4. Record the mapping *old loader node → new loader node* for §10.
+§8.1 gives family one automatic source (Civitai `baseModel`, on an explicit
+"Fetch info" click) and one manual one. Everything therefore starts `unset`.
 
-The rewrite **never deletes a node.** It only adds and rewires.
+That was harmless while family only decorated the Models screen. It stops
+being harmless the moment one picker lists every diffusion folder at once: an
+all-`unset` library shows SD1.5 checkpoints beside Flux diffusion models with
+nothing to separate them. The folder cannot help — `diffusion_models/` holds
+Flux *and* Z-Image *and* Anima.
 
-**A general prune pass closes the loop.** `rewriteGraph` gains a final step:
-walk backwards from `manifest.outputs` and drop every node nothing reaches.
-ComfyUI would not execute an orphan anyway, but two things here care.
-`collectModels` (`src/jobs/models.ts`) walks *every* node, so without the
-prune a discarded `UNETLoader` would write a model that was never loaded into
-the sidecar's `models` block and into `output_models`. And a stale
-placeholder filename in an orphan is a validation risk not worth reasoning
-about. Making the prune general — rather than making the swap decide what is
-safe to delete — keeps the swap trivial and fixes a latent sharp edge for
-hand-authored graphs at the same time.
+So family should be **detected from the file**. `scripts/classify-models.ts`
+already reads the safetensors header; the same tensor names that distinguish
+MODEL from CLIP from VAE also identify the architecture (`double_blocks.` →
+flux, `input_blocks.` + `cond_stage_model.` → sd15, and so on). One short read
+per file, no network, no weights, no "Fetch info" click.
 
-## 9. Companions — CLIP and VAE for a diffusion-only pick
+This is **not a blocker for §3–§5**: the picker works with everything `unset`,
+it simply cannot sort helpfully. Ship it second.
 
-Picking a bare diffusion model leaves three questions open: text encoder(s),
-VAE, and `weight_dtype`. Resolved in this order, first hit wins:
+Two consequences for §8.1 as written:
 
-1. **The model's own recorded companions** (`models.companions_json`:
-   `{clip: [...], vae: ..., weight_dtype: ...}`). Editable on the model page,
-   and offered to be remembered the first time a generation with that model
-   succeeds.
-2. **What the graph already has.** If the authored slot already supplies CLIP
-   and VAE and the arch matches the pick, keep them and change only the
-   diffusion filename. This is the `krea2` swap from §2 — the common case,
-   and it asks for nothing.
-3. **A family default**, derived from what is actually in the configured
-   folders (family `flux` → a `t5xxl*` plus a `clip_l*`, plus
-   `ae.safetensors`).
-4. **Fail, in the picker.** If nothing resolves, the model is listed but not
-   selectable and annotated — "needs a text encoder" — and selecting it
-   raises a `ParamError` at coerce time naming exactly what is missing.
+- **Families must be generational, not brand names.** `ltx` currently covers
+  both LTX-Video 0.9.x (T5 text encoder) and LTX-2.x (Gemma-3 12B) — different
+  models that would sort together and mislead. `FAMILIES` needs entries at the
+  granularity a workflow actually targets.
+- §8.1's "the app attaches no behaviour to a family" no longer holds. Family
+  drives picker ordering, so it becomes load-bearing and must be accurate.
 
-Rule 4 is what makes the picker feel right: permissive like SwarmUI's, but it
-never lets you queue something it already knows cannot wire up.
+## 7. Rebuilding the bundled workflows from the official sources
 
-Note that a `full` pick skips this section entirely — it needs no companions.
-So both halves of the §2 table work with zero configuration, in opposite
-ways.
+`workflows/bundled/README.md` already says seven of the eight have never been
+run and carry placeholder filenames. Checking four against docs.comfy.org
+shows the problem is worse than placeholder names — the graphs themselves are
+wrong, in two different ways.
 
-## 10. Interaction with the LoRA chain
+| workflow | repo has | official | problem |
+|---|---|---|---|
+| `krea2` | `flux1-krea-dev.safetensors`, `DualCLIPLoader` t5xxl + clip_l, Flux-shaped | Krea 2: `krea2_turbo_fp8_scaled` (diffusion_models), `qwen3vl_4b_fp8_scaled` (text_encoders), `qwen_image_vae` (vae), 8 steps | **different model** |
+| `ltx` | `ltx-video-2b-v0.9.5`, `CLIPLoader` t5xxl `type: ltxv` | LTX-2.3: `ltx-2.3-22b-dev-fp8` (checkpoints), `gemma_3_12B_it_fp4_mixed` (text_encoders), a required distilled LoRA, a spatial upscaler | **different model** |
+| `anima` | one `CheckpointLoaderSimple` | `anima-base-v1.0` (diffusion_models) + `qwen_3_06b_base` (text_encoders) + `qwen_image_vae` (vae) | **wrong topology** |
+| `z-image-turbo` | one `CheckpointLoaderSimple` | `z_image_turbo_bf16` (diffusion_models) + `qwen_3_4b` (text_encoders) + `ae.safetensors` (vae) | **wrong topology** |
 
-`lora_list` binds `model_from: "1.MODEL"`, `clip_from: "1.CLIP"` — hardcoded
-references to the very nodes the swap replaces. Two things handle this:
+`anima` and `z-image-turbo` cannot load their models at all: a
+`CheckpointLoaderSimple` has no way to read a split-file model, and no
+filename will fix that.
 
-- **Order.** The model swap runs before the LoRA splice. `rewriteGraph`
-  currently applies params in manifest order; it gains an explicit phase
-  order (`model` → scalars → `lora_list` → outputs → prune) so this does not
-  depend on how a manifest happens to be written.
-- **Remapping.** The swap's old→new node map is applied to any chain
-  reference pointing at a replaced loader. `"1.MODEL"` keeps working and
-  follows the swap automatically — **no bundled manifest needs its chain
-  edited.**
+`krea2` is a naming collision. The repo's workflow is **Flux.1 Krea [dev]** —
+a Flux-family model, which its filename, its family tag and its T5 + CLIP-L
+pair all confirm. **Krea 2** is a separate later model on a Qwen3-VL text
+encoder and a Qwen image VAE. ComfyUI v0.34.0 lists `krea2` as its own
+`CLIPLoader` type alongside `flux2`, so the two are distinct to ComfyUI as
+well. The repo needs to decide whether it ships one, the other, or both under
+honest names (`flux-krea` and `krea2`).
 
-For manifests authored from here on, a chain may also name the slot
-symbolically:
+### How to rebuild
 
-```json
-"model_from": "@model.MODEL",   "clip_from": "@model.CLIP"
-```
+Author these from the workflow JSON each docs page links, not by hand. That
+gets the real node graph, the real filenames and the real sampler settings in
+one step, and it is the only way to be sure. Note that the current-generation
+templates use ComfyUI **Subgraph** nodes, which `CORE_NODES`
+(`src/workflows/nodes.ts`) does not model — worth checking what
+`app.graphToPrompt()` produces for one before assuming the api graph round-trips.
 
-where `model` is the key of the `model` param. Explicit, and immune to node
-renumbering. The `@key.OUTPUT` form is a small addition to `parseBind`; plain
-`node.OUTPUT` stays valid.
+Then add a `model` param per §5 to each, bound to the input its loader
+actually uses.
 
-## 11. The manifest editor (§4.7)
+`sd15` is exempt: it is the one workflow that runs, it is what the contract
+check generates with, and it is correct as shipped. It gains a `model` param
+and nothing else.
 
-A `model` param is not a literal node input, so it cannot appear as a
-checkbox in the "Expose inputs" list — a slot spans several *consumers*.
-It gets its own dialog, exactly as §4.7 already carves out for `lora_list`
-("not a node input at all — it is a synthetic chain row … configured with its
-own dialog and is not counted among the literal inputs").
+Four workflows were not checked and still need the same pass:
+`illustrious`, `flux-klein`, `krea2-img2img`, and whatever replaces `ltx`.
 
-Two additions:
+## 8. What this explicitly does not do
 
-- Loader inputs owned by a slot (`1.unet_name`, `2.clip_name1`, `4.vae_name`)
-  are **marked as owned** in the literal-inputs list, so you cannot
-  independently expose `1.unet_name` and end up with two params writing the
-  same box.
-- The slot dialog is phrased in consumers, matching §3: pick which inputs
-  take MODEL, CLIP and VAE, with any of the three left unclaimed.
+Recorded so the next reader does not re-derive it:
 
-## 12. Reproducibility
+- **No runtime loader substitution.** No slot binds, no `spliceModel`, no
+  companion (CLIP/VAE) resolution, no `companions_json`, no old→new node
+  remapping, no `@key.OUTPUT` references, no param phase ordering. All of it
+  existed to cross the packaging line, and §2 shows nothing crosses it.
+- **No packaging column, no `model_probes.packaging`.** The header probe
+  survives only to detect family (§6).
+- **No sidecar change.** A `model` param's value is a filename string, so
+  `collectModels` and §6.2's `params` block are untouched, and Reuse
+  Parameters and `POST /api/jobs/rerun` keep working as they do.
+- **No graph pruning.** The first draft added a prune pass to `rewriteGraph`
+  to clean up orphaned loaders. With nothing replaced there are no orphans.
+  It remains a reasonable hardening for hand-authored graphs — as its own
+  change, not this one.
 
-§6.1 makes the sidecar authoritative, so the swap must not make a job
-un-replayable. It does not: `collectModels` runs on the **final, rewritten,
-pruned** graph, so `models[]` already records the loaders that actually ran,
-with the right `role` (`checkpoint` for a full pick, `unet` + `clip` + `vae`
-for a diffusion-only one). No change to the sidecar's `models` block.
+If a future architecture *does* ship both ways, re-read the first draft in
+this file's history rather than reinventing it. `scripts/classify-models.ts`
+is how to find out.
 
-One change is needed. Replaying a job's `params` re-runs companion
-resolution, and a user who edits a model's companions in between would get a
-different graph from the same params. So a `model` param's **stored value is
-the resolved set**, not the bare name:
-
-```json
-"model": {
-  "name": "krea2_turbo_bf16.safetensors",
-  "packaging": "diffusion_only",
-  "clip": ["t5xxl_fp16.safetensors", "clip_l.safetensors"],
-  "vae": "ae.safetensors",
-  "weight_dtype": "default"
-}
-```
-
-Submitting accepts either a bare string (resolve now) or the full object
-(replay exactly). Reuse Parameters and `POST /api/jobs/rerun` stay exact.
-This is an additive shape change to §6.2's `params` and must land in
-DESIGN.md before any code.
-
-## 13. UI surface
-
-- **One `ModelPicker` component** on the existing 326px popover (§11.3
-  already wants one popover component serving the LoRA picker, the models
-  filter, the use-in-workflow menu and promote-to-sample — this is the same
-  one, taking a class filter). Search box, thumbnail + display name rows,
-  family badge.
-- **Grouped by compatibility, not gated by it.** Workflow-family models
-  first, everything else under an "Other models" divider, selectable and
-  flagged. "Show all" already behaves this way for the LoRA picker (§11.4).
-- A row that cannot be wired shows its reason inline and is not selectable.
-- The **model page** gains `packaging` (showing the detected value and its
-  source when not overridden) and a companions editor, beside `family`.
-- The **output metadata sidebar** gains **View graph**, per §3.
-
-## 14. Migration and compatibility
-
-- `checkpoint` stays a valid param type, treated as a `model` param with
-  `filter.class = "diffusion"` and a scalar bind — a filename swap with no
-  shape change, exactly what it does today. Documented as superseded.
-- Existing manifests keep working untouched; §10's remapping covers their
-  LoRA chains. The bundled eight gain `model` params as a deliberate edit
-  (§4), not as a forced migration.
-- `model_folders` defaults grow, all empty. Existing `config.yaml` files are
-  unaffected.
-- `model_probes` is derived and rebuildable — `deno task reindex` and Rescan
-  both repopulate it, in keeping with "the database is a derived index".
-
-## 15. Suggested order of work
+## 9. Order of work
 
 | # | Step | Result |
 |---|---|---|
-| 1 | Class taxonomy: `model_classes` config, `class` on `ModelView`, `?class=` on `GET /api/models`, widened `ENUM_SOURCES`, wider folder defaults | one search box over every model folder |
-| 2 | The general prune pass in `rewriteGraph` + explicit param phase order | latent sharp edge closed; prerequisite for 4 |
-| 3 | Safetensors header probe: `model_probes`, packaging + arch detection, the family it fills in for free | models stop being `unset`; packaging known |
-| 4 | The `model` param and `spliceModel`, with old→new remapping and `@key.OUTPUT` binds | shape-crossing swaps work |
-| 5 | Companion resolution + `companions_json` + the picker's un-wireable annotations | arbitrary picks work, and fail early when they cannot |
-| 6 | `ModelPicker`, model-page packaging/companions editors, **`model` params on all eight bundled workflows**, output View graph | the feature as asked for |
+| 1 | Class taxonomy: `model_classes`, `class` on `ModelView`, `?class=`, widened `ENUM_SOURCES`, wider `DEFAULT_MODEL_KINDS` | one search box over every diffusion folder |
+| 2 | Folder aliasing in `extra_model_paths.ts` + a contract test that a `checkpoints/` file loads through `UNETLoader` | picked names actually resolve |
+| 3 | `model` param type (with `checkpoint` as alias) + the `ModelPicker` popover | swapping works, unsorted |
+| 4 | Family detection from the safetensors header; generational `FAMILIES` | the picker sorts usefully |
+| 5 | Rebuild the bundled workflows from official sources; add `model` params | the workflows are correct and swappable |
 
-Steps 1–3 are worth doing even if 4–6 are deferred: they are what turn
-`/models` into one library instead of four folders.
+Steps 1–2 are the feature; 3 makes it usable; 4 makes it pleasant; 5 is a
+separate correctness problem that this design is the occasion to fix.
 
-## 16. Risks and open questions
+## 10. Risks and open questions
 
-1. **Probe accuracy.** Tensor-name classification is heuristic and will be
-   wrong sometimes, which is why the user override is tier 1 and the folder
-   heuristic is the floor. Worth a golden-file test over a table of real
-   header JSONs — headers are small and can be committed as fixtures with no
-   weights.
-2. **`.ckpt` and `.gguf`** get folder-heuristic answers only. Both are named
-   in the UI as "packaging not detected".
-3. **`weight_dtype`** — proposed default `"default"`, overridable per model
-   via companions. Should it also be an exposed advanced param? Leaning no.
-4. **§8.2 needs rewriting.** This contradicts "choosing a model = choosing a
-   workflow" head-on. The narrow reading survives (§5) but the sentence does
-   not, and that is a DESIGN.md decision rather than an implementation one.
-5. **Custom nodes.** Everything above assumes the core loaders in
-   `CORE_NODES`. GGUF and other custom loaders need a node-schema source
-   beyond the hardcoded table; out of scope here, but the slot is where they
-   would plug in.
+1. **Folder aliasing and duplicate filenames.** The same name in
+   `checkpoints/` and `diffusion_models/` resolves to whichever is listed
+   first. Matches existing behaviour, but worth a test.
+2. **Subgraph nodes** in the official templates are unmodelled by
+   `CORE_NODES`. May affect §7 more than expected.
+3. **`FAMILIES` granularity** is a DESIGN.md decision (§6), not something to
+   settle in an implementation.
+4. **§8.2 needs rewriting.** "Choosing a model = choosing a workflow" does not
+   survive. The narrow reading does: a workflow still fixes its pipeline and
+   its defaults, and you are swapping weights, not the recipe.
+5. **`.ckpt` files** cannot be probed cheaply (pickle, not safetensors), so
+   they get no detected family. They stay listed and manually taggable.
+
+---
+
+## Appendix — verified against ComfyUI v0.34.0
+
+The version `scripts/setup-comfy.sh` pins. Read from source, not run.
+
+- **The folder is only a search path.** Both `checkpoints/` and
+  `diffusion_models/` hold plain safetensors state dicts. ComfyUI never
+  inspects the folder to decide what a file is; it decides from tensor names.
+  The folder chooses which node's dropdown lists the file — §4.
+- **`UNETLoader` can load an all-in-one checkpoint.** `comfy/sd.py:2286` is
+  commented `#Allow loading unets from checkpoint files`, and
+  `unet_prefix_from_state_dict` (`model_detection.py:1299`) strips
+  `model.diffusion_model.`, the SD1.5/SDXL prefix. Not needed by this design,
+  but it means the split is even shallower than it looks.
+- **`CLIPLoader` cannot read a checkpoint's text encoder.** `detect_te_model`
+  (`comfy/sd.py:1610`) matches bare keys such as
+  `text_model.encoder.layers.0.mlp.fc1.weight`; inside a checkpoint those
+  carry a `cond_stage_model.` prefix and nothing strips it. `VAELoader` is
+  likewise bare-file only. This is why an all-in-one cannot be driven through
+  a split-file graph, and so why §7's topologies must match their models.
