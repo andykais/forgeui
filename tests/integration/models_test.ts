@@ -191,6 +191,74 @@ Deno.test("one class lists every diffusion folder at once", async () => {
   }
 });
 
+Deno.test("a model's family is read from its header, and the user overrides it", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-family-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    const diffusion = join(dir, "diffusion_models");
+    await writeFakeSafetensors(join(checkpoints, "someSDXL.safetensors"), {
+      name: "sdxl",
+      tensors: [
+        "model.diffusion_model.input_blocks.0.0.weight",
+        "model.diffusion_model.label_emb.0.0.weight",
+      ],
+    });
+    await writeFakeSafetensors(join(diffusion, "flux1-dev.safetensors"), {
+      name: "flux",
+      tensors: [
+        "double_blocks.0.img_attn.norm.key_norm.weight",
+        "img_in.weight",
+      ],
+    });
+    await writeFakeSafetensors(join(diffusion, "mystery.safetensors"), {
+      name: "mystery",
+    });
+    await withTestApp(async (app) => {
+      await scanAndHash(app);
+      const listed = await models(app, "?class=diffusion");
+      const byName = new Map(
+        listed.models.map((model) => [model.name, model]),
+      );
+      // Nobody filed any of these; the header did (§6).
+      assertEquals(byName.get("someSDXL.safetensors")?.family, "sdxl");
+      assertEquals(byName.get("flux1-dev.safetensors")?.family, "flux");
+      // An architecture the probe does not know stays unfiled rather than
+      // being guessed at.
+      assertEquals(byName.get("mystery.safetensors")?.family, "unset");
+
+      // What the user says wins over what the file says.
+      const flux = byName.get("flux1-dev.safetensors")!;
+      const patched = await app.json(`/api/models/${flux.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ family: "sd15" }),
+      }) as ModelView;
+      assertEquals(patched.family, "sd15");
+      const after = await models(app, "?class=diffusion");
+      assertEquals(
+        after.models.find((model) => model.name === "flux1-dev.safetensors")
+          ?.family,
+        "sd15",
+      );
+
+      // Clearing it falls back to the header again, not to unset.
+      const cleared = await app.json(`/api/models/${flux.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ family: "unset" }),
+      }) as ModelView;
+      assertEquals(cleared.family, "flux");
+    }, {
+      argv: [
+        "--models-dir",
+        `checkpoints=${checkpoints}`,
+        "--models-dir",
+        `diffusion_models=${diffusion}`,
+      ],
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("hashing fills in identity, and only re-reads what changed", async () => {
   await withModels(async (app, fixtures) => {
     await scanAndHash(app);
@@ -328,10 +396,23 @@ Deno.test("families come back with model and workflow counts", async () => {
       families: { family: string; models: number; workflows: number }[];
     }>("/api/families");
     const byName = new Map(families.map((entry) => [entry.family, entry]));
-    // The hardcoded list of §8.1, plus `unset`.
+    // The hardcoded list of §8.1, plus `unset`. Families are generational:
+    // ltx and ltx-2 differ by text encoder, as do flux and flux2 (§6).
     assertEquals(
       families.map((entry) => entry.family).sort(),
-      ["anima", "flux", "ltx", "sd15", "sdxl", "unset", "z-image"],
+      [
+        "anima",
+        "chroma",
+        "flux",
+        "flux2",
+        "krea2",
+        "ltx",
+        "ltx-2",
+        "sd15",
+        "sdxl",
+        "unset",
+        "z-image",
+      ],
     );
     assertEquals(byName.get("flux")?.models, 1);
     assertEquals(byName.get("unset")?.models, 2);

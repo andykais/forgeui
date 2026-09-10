@@ -13,6 +13,20 @@ export interface Migration {
  */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "initial schema", sql: schemaSql },
+  {
+    version: 2,
+    name: "model_probes",
+    // Also in schema.sql, so a fresh database gets it from version 1 and
+    // this is a no-op there; an existing one gets it here.
+    sql: `
+      CREATE TABLE IF NOT EXISTS model_probes (
+        path TEXT PRIMARY KEY,
+        size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+        arch TEXT,
+        probed_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 export const SCHEMA_VERSION: number =

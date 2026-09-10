@@ -7,13 +7,16 @@ import {
   getModel,
   getModelByPath,
   latestOutputPathByModel,
+  listModelProbes,
   listModels,
   type ModelMetaPatch,
+  type ModelProbeRow,
   type ModelRow,
   normalizeModelHash,
   refreshModelUsage,
   type SidecarModelRef,
   updateModelMeta,
+  upsertModelProbe,
 } from "../db/queries.ts";
 import { mediaUrl } from "../outputs/store.ts";
 import type { SampleStore, SampleView } from "../samples/store.ts";
@@ -23,6 +26,7 @@ import type { ModelClass } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
+import { probeFamily } from "./probe.ts";
 import {
   ModelScanner,
   type RescanProgress,
@@ -145,6 +149,8 @@ export class ModelLibrary {
   #samples?: SampleStore;
   #index: SidecarModelIndex | null = null;
   #scanning: Promise<void> | null = null;
+  #probes = new Map<string, ModelProbeRow>();
+  #now: () => number;
 
   constructor(options: ModelLibraryOptions) {
     this.#db = options.db;
@@ -152,6 +158,8 @@ export class ModelLibrary {
     this.#config = options.config;
     this.#hub = options.hub;
     this.#samples = options.samples;
+    this.#now = options.now ?? Date.now;
+    this.#probes = listModelProbes(options.db);
     this.scanner = options.scanner ??
       new ModelScanner(() => options.config.config);
     this.hasher = new ModelHasher({
@@ -176,6 +184,9 @@ export class ModelLibrary {
       const result = await this.scanner.rescan((progress) =>
         this.#broadcastRescan(progress)
       );
+      // Reading headers is cheap and its answer is what the pickers sort by,
+      // so it happens before hashing rather than after it (§6).
+      await this.#probe(result.models);
       // A pass over new files may find sidecars to link, so the index the
       // last pass built is stale.
       this.#index = null;
@@ -358,7 +369,9 @@ export class ModelLibrary {
       mtime: scanned?.mtime ?? row?.mtime ?? null,
       // Unset, a display name falls back to the filename minus its extension.
       display_name: row?.display_name ?? basename(filename, extname(filename)),
-      family: row?.family ?? "unset",
+      // What the user filed it as wins; the header is the fallback, so a
+      // fresh library sorts sensibly without anyone tagging anything (§6).
+      family: row?.family ?? this.#probes.get(path)?.arch ?? "unset",
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
       thumb_path: row?.thumb_path ?? null,
@@ -368,6 +381,46 @@ export class ModelLibrary {
       hashing: row === null,
       present: scanned !== null,
     };
+  }
+
+  /**
+   * Read the header of every diffusion-class file whose size or mtime has
+   * moved since the last pass, and remember what it says. A file that cannot
+   * be read or is not recognised is recorded with a null arch, so a bad file
+   * is attempted once per change rather than on every scan.
+   */
+  async #probe(models: readonly ScannedModel[]): Promise<void> {
+    const overrides = this.#config.config.model_classes;
+    for (const model of models) {
+      if (classOf(model.kind, overrides) !== "diffusion") continue;
+      const seen = this.#probes.get(model.path);
+      if (
+        seen && seen.size === model.size && seen.mtime === model.mtime
+      ) {
+        continue;
+      }
+      let arch: string | null = null;
+      try {
+        arch = await probeFamily(model.path);
+      } catch {
+        // Not a safetensors file, or unreadable. Neither is fatal: the model
+        // stays listed and the user can still file it by hand (§8.1).
+        arch = null;
+      }
+      const row: ModelProbeRow = {
+        path: model.path,
+        size: model.size,
+        mtime: model.mtime,
+        arch,
+        probed_at: this.#now(),
+      };
+      this.#probes.set(model.path, row);
+      try {
+        upsertModelProbe(this.#db, row);
+      } catch (error) {
+        console.error(`could not record the probe of ${model.name}:`, error);
+      }
+    }
   }
 
   #broadcastRescan(progress: RescanProgress): void {

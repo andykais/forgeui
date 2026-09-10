@@ -14,12 +14,26 @@ export type ApiGraph = Record<string, ApiNode>;
 /** `[node_id, output_slot]` — how api graphs reference another node. */
 export type ApiLink = [string, number];
 
-/** Hardcoded family list (§8.1); the app attaches no behaviour to a family. */
+/**
+ * Hardcoded family list (§8.1). A family is an *architecture*, at the
+ * granularity a workflow targets: `ltx` and `ltx-2` are separate because
+ * LTX-Video 0.9.x conditions on T5 and LTX-2 on Gemma-3, so a model of one
+ * cannot be loaded into a workflow built for the other. Same for `flux` and
+ * `flux2`, and for `krea2`, which shares a brand with Flux Krea and nothing
+ * else.
+ *
+ * Since the picker orders by family (§5), this is no longer decoration: it
+ * is what tells a user which of their models a workflow can actually use.
+ */
 export const FAMILIES = [
   "flux",
+  "flux2",
+  "krea2",
+  "chroma",
   "sdxl",
   "anima",
   "ltx",
+  "ltx-2",
   "z-image",
   "sd15",
 ] as const;

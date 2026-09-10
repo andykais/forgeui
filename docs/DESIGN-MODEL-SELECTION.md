@@ -220,7 +220,12 @@ Two consequences for §8.1 as written:
 - **Families must be generational, not brand names.** `ltx` currently covers
   both LTX-Video 0.9.x (T5 text encoder) and LTX-2.x (Gemma-3 12B) — different
   models that would sort together and mislead. `FAMILIES` needs entries at the
-  granularity a workflow actually targets.
+  granularity a workflow actually targets. **Implemented as** `flux`, `flux2`,
+  `krea2`, `chroma`, `sdxl`, `anima`, `ltx`, `ltx-2`, `z-image`, `sd15` — the
+  architectures the probe can tell apart. `ltx` keeps its name and means the
+  0.9.x line, since the bundled workflow targeting it is rebuilt in §7 and
+  should take `ltx-2` at that point; renaming it to `ltx-0.9` is a §7
+  decision, not one to make twice.
 - §8.1's "the app attaches no behaviour to a family" no longer holds. Family
   drives picker ordering, so it becomes load-bearing and must be accurate.
 
@@ -270,7 +275,9 @@ Recorded so the next reader does not re-derive it:
   remapping, no `@key.OUTPUT` references, no param phase ordering. All of it
   existed to cross the packaging line, and §2 shows nothing crosses it.
 - **No packaging column, no `model_probes.packaging`.** The header probe
-  survives only to detect family (§6).
+  survives only to detect family (§6), so `model_probes` is
+  `(path, size, mtime, arch, probed_at)`. DESIGN.md §7 needs that table when
+  this proposal is accepted.
 - **No sidecar change.** A `model` param's value is a filename string, so
   `collectModels` and §6.2's `params` block are untouched, and Reuse
   Parameters and `POST /api/jobs/rerun` keep working as they do.
@@ -303,8 +310,9 @@ separate correctness problem that this design is the occasion to fix.
    first. Matches existing behaviour, but worth a test.
 2. **Subgraph nodes** in the official templates are unmodelled by
    `CORE_NODES`. May affect §7 more than expected.
-3. **`FAMILIES` granularity** is a DESIGN.md decision (§6), not something to
-   settle in an implementation.
+3. **`FAMILIES` granularity** is a DESIGN.md decision (§6). The list in §6 is
+   what the probe can distinguish; whether ForgeUI wants entries it cannot
+   detect is still open.
 4. **§8.2 needs rewriting.** "Choosing a model = choosing a workflow" does not
    survive. The narrow reading does: a workflow still fixes its pipeline and
    its defaults, and you are swapping weights, not the recipe.

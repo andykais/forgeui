@@ -11,6 +11,12 @@ export interface FakeModelOptions {
   /** Tensor bytes after the header; the fill byte is derived from the name. */
   bytes?: number;
   mtime?: Date;
+  /**
+   * Tensor names, and optionally shapes, for the header. Given one, the file
+   * probes as a real architecture would (§6); left out, it holds a single
+   * anonymous `weight` and probes as nothing.
+   */
+  tensors?: Record<string, number[]> | string[];
 }
 
 export async function writeFakeSafetensors(
@@ -18,12 +24,21 @@ export async function writeFakeSafetensors(
   options: FakeModelOptions = {},
 ): Promise<Uint8Array> {
   const name = options.name ?? "fixture";
-  const header = new TextEncoder().encode(
-    JSON.stringify({
-      __metadata__: { name },
-      weight: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
-    }),
-  );
+  const entries: Record<string, unknown> = { __metadata__: { name } };
+  const tensors = options.tensors ?? { weight: [1] };
+  const named = Array.isArray(tensors)
+    ? Object.fromEntries(tensors.map((key) => [key, [1]]))
+    : tensors;
+  let offset = 0;
+  for (const [key, shape] of Object.entries(named)) {
+    entries[key] = {
+      dtype: "F32",
+      shape,
+      data_offsets: [offset, offset + 4],
+    };
+    offset += 4;
+  }
+  const header = new TextEncoder().encode(JSON.stringify(entries));
   const tensor = new Uint8Array(options.bytes ?? 1024);
   tensor.fill(name.charCodeAt(0) & 0xff);
   const file = new Uint8Array(8 + header.length + tensor.length);

@@ -5,6 +5,7 @@ import {
   applyPragmas,
   DATABASE_OPTIONS,
   migrate,
+  MIGRATIONS,
   openDatabase,
   SCHEMA_VERSION,
   schemaVersion,
@@ -42,6 +43,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         [
           "inputs",
           "jobs",
+          "model_probes",
           "models",
           "node_timings",
           "output_inputs",
@@ -81,6 +83,42 @@ Deno.test("migrations are idempotent across reopens", async () => {
       );
     } finally {
       second.close();
+    }
+  });
+});
+
+Deno.test("a database from before the probes table gains it, keeping its rows", async () => {
+  await withDbDir((path) => {
+    // A version-1 database: the schema as it shipped, with no model_probes.
+    const old = new Database(path, DATABASE_OPTIONS);
+    old.exec(MIGRATIONS[0]!.sql);
+    old.exec("DROP TABLE model_probes");
+    old.exec("PRAGMA user_version = 1");
+    old.exec(
+      `INSERT INTO models (hash, path, kind, size, mtime, last_seen_at)
+       VALUES ('abc', '/models/a.safetensors', 'checkpoints', 1, 1, 1)`,
+    );
+    old.close();
+
+    const migrated = openDatabase(path);
+    try {
+      assertEquals(schemaVersion(migrated), SCHEMA_VERSION);
+      assert(names(migrated, "table").includes("model_probes"));
+      // The upgrade adds a table; it does not rebuild the library.
+      assertEquals(
+        migrated.prepare("SELECT count(*) FROM models").value<[number]>(),
+        [1],
+      );
+      migrated.exec(
+        `INSERT INTO model_probes (path, size, mtime, arch, probed_at)
+         VALUES ('/models/a.safetensors', 1, 1, 'flux', 2)`,
+      );
+      assertEquals(
+        migrated.prepare("SELECT arch FROM model_probes").value<[string]>(),
+        ["flux"],
+      );
+    } finally {
+      migrated.close();
     }
   });
 });

@@ -252,7 +252,7 @@ Deno.test("workflow-level fields are checked", () => {
   assertThrows(
     () => validateManifest(manifest([], { family: "pony" }), { graph }),
     ManifestError,
-    "one of flux, sdxl, anima, ltx, z-image",
+    "one of flux, flux2, krea2, chroma, sdxl, anima, ltx, ltx-2, z-image, sd15",
   );
   assertThrows(
     () => validateManifest(manifest([], { kind: "audio" }), { graph }),

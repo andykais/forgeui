@@ -759,6 +759,33 @@ export interface NewModel {
  * file whose bytes changed gets a new hash, and the row that used to hold
  * that path goes.
  */
+/** What a scanned file's header said it is, keyed by path (§6). */
+export interface ModelProbeRow {
+  path: string;
+  size: number;
+  mtime: number | null;
+  arch: string | null;
+  probed_at: number;
+}
+
+/** Every probe result, for the family fallback the library applies. */
+export function listModelProbes(db: Database): Map<string, ModelProbeRow> {
+  const rows = db.prepare(
+    `SELECT path, size, mtime, arch, probed_at FROM model_probes`,
+  ).all() as ModelProbeRow[];
+  return new Map(rows.map((row) => [row.path, row]));
+}
+
+export function upsertModelProbe(db: Database, probe: ModelProbeRow): void {
+  db.prepare(
+    `INSERT INTO model_probes (path, size, mtime, arch, probed_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET
+       size = excluded.size, mtime = excluded.mtime,
+       arch = excluded.arch, probed_at = excluded.probed_at`,
+  ).run(probe.path, probe.size, probe.mtime, probe.arch, probe.probed_at);
+}
+
 export function upsertModel(db: Database, model: NewModel): void {
   db.prepare(`DELETE FROM models WHERE path = ? AND hash != ?`).run(
     model.path,
