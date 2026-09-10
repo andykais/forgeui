@@ -197,6 +197,8 @@ export const api = {
       family?: string | null;
       notes?: string | null;
       tags?: string[];
+      strength_min?: number | null;
+      strength_max?: number | null;
       thumb_sample_id?: string | null;
     },
   ) =>

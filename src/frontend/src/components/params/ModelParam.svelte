@@ -2,6 +2,7 @@
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
   import { focusOnMount } from "../../lib/focus.ts";
+  import TagFilter from "./TagFilter.svelte";
   import type { ModelEntry, Param } from "../../types.ts";
 
   /**
@@ -30,13 +31,21 @@
 
   let open = $state(false);
   let search = $state("");
+  let tags = $state<string[]>([]);
 
   const family = $derived(param.filter?.family ?? null);
 
-  const matched = $derived.by(() => {
+  /** What the search leaves, before the tag chips narrow it further. */
+  const candidates = $derived.by(() => {
     const matches = matcher(search);
     return models.filter((model) => matches(model.name, model.display_name));
   });
+
+  const matched = $derived(
+    tags.length === 0
+      ? candidates
+      : candidates.filter((model) => tags.every((tag) => model.tags.includes(tag))),
+  );
 
   function fits(model: ModelEntry): boolean {
     return !family || model.family === family || model.family === "unset";
@@ -57,6 +66,7 @@
     onchange(model.name);
     open = false;
     search = "";
+    tags = [];
     onpicked?.();
   }
 </script>
@@ -82,6 +92,11 @@
       bind:value={search}
       aria-label="Search models"
       use:focusOnMount
+    />
+    <TagFilter
+      models={candidates}
+      selected={tags}
+      onchange={(chosen) => (tags = chosen)}
     />
     {#if models.length === 0}
       <p class="note">

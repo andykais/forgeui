@@ -187,19 +187,29 @@
    * what makes it unstickable — the handle is off, so nothing else writes to
    * it, and every keystroke reasserts the fit.
    */
-  function autogrow(node: HTMLTextAreaElement, _value: unknown) {
-    const fit = () => {
-      // `auto` first, so shrinking works too; `rows` is the floor.
-      node.style.height = "auto";
-      node.style.height = `${node.scrollHeight}px`;
-    };
+  function fitTextarea(node: HTMLTextAreaElement): void {
+    // `auto` first, so shrinking works too; `rows` is the floor.
+    node.style.height = "auto";
+    node.style.height = `${node.scrollHeight}px`;
+  }
+
+  function autogrow(node: HTMLTextAreaElement) {
+    const fit = () => fitTextarea(node);
     fit();
     node.addEventListener("input", fit);
-    return {
-      update: () => fit(),
-      destroy: () => node.removeEventListener("input", fit),
-    };
+    return { destroy: () => node.removeEventListener("input", fit) };
   }
+
+  /**
+   * A value that arrives from outside sizes the box too: the panel filled
+   * from the last job on load, `Edit in Generate`, Reset to defaults. Only an
+   * input event resizes it on its own, and none of those raise one.
+   */
+  $effect(() => {
+    values;
+    const fields = paramsEl?.querySelectorAll<HTMLTextAreaElement>("textarea.text");
+    for (const field of fields ?? []) fitTextarea(field);
+  });
 
   /** Enter runs the workflow, Shift+Enter is a newline (§11.4). */
   function onPromptKeydown(event: KeyboardEvent): void {
@@ -251,7 +261,7 @@
           rows="3"
           value={(values[param.key] as string) ?? ""}
           aria-label={label(param)}
-          use:autogrow={values[param.key]}
+          use:autogrow
           onkeydown={onPromptKeydown}
           oninput={(event) =>
             onchange(param.key, (event.currentTarget as HTMLTextAreaElement).value)}

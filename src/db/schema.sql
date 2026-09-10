@@ -40,6 +40,7 @@ CREATE TABLE models (
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT, notes TEXT, tags_json TEXT,
+  strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default (§8.1)
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
   last_used_at INTEGER,           -- derived: max(outputs.created_at) over output_models; same maintenance

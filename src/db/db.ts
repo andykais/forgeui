@@ -4,7 +4,13 @@ import schemaSql from "./schema.sql" with { type: "text" };
 export interface Migration {
   version: number;
   name: string;
-  sql: string;
+  sql?: string;
+  /**
+   * For a step SQL cannot express idempotently. `ADD COLUMN` has no
+   * `IF NOT EXISTS`, and every migration also has to be a no-op on a fresh
+   * database, which gets the whole of `schema.sql` as version 1.
+   */
+  apply?: (db: Database) => void;
 }
 
 /**
@@ -26,6 +32,24 @@ export const MIGRATIONS: readonly Migration[] = [
         probed_at INTEGER NOT NULL
       );
     `,
+  },
+  {
+    version: 3,
+    name: "per-model strength range",
+    // Also in schema.sql, so a fresh database already has these and this does
+    // nothing; an existing one gets them here. NULL means the default range,
+    // so nothing has to be backfilled.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(models)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      for (const column of ["strength_min", "strength_max"]) {
+        if (present.has(column)) continue;
+        db.exec(`ALTER TABLE models ADD COLUMN ${column} REAL`);
+      }
+    },
   },
 ];
 
@@ -61,7 +85,8 @@ export function migrate(db: Database): number {
     if (migration.version <= version) continue;
     db.exec("BEGIN");
     try {
-      db.exec(migration.sql);
+      if (migration.sql) db.exec(migration.sql);
+      migration.apply?.(db);
       db.exec(`PRAGMA user_version = ${migration.version}`);
       db.exec("COMMIT");
     } catch (error) {

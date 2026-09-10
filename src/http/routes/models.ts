@@ -56,6 +56,28 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
     patch.tags = tags;
   }
 
+  for (const field of ["strength_min", "strength_max"] as const) {
+    if (body[field] === undefined) continue;
+    if (body[field] === null) {
+      patch[field] = null;
+      continue;
+    }
+    const value = typeof body[field] === "string"
+      ? Number(body[field])
+      : body[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new BodyError(`${field}: expected a number or null`);
+    }
+    patch[field] = value;
+  }
+  if (
+    patch.strength_min !== undefined && patch.strength_min !== null &&
+    patch.strength_max !== undefined && patch.strength_max !== null &&
+    patch.strength_min > patch.strength_max
+  ) {
+    throw new BodyError("strength_min: must not be above strength_max");
+  }
+
   // "Set as thumbnail" (§8.3); null goes back to the newest output.
   if (body.thumb_sample_id !== undefined) {
     if (
@@ -68,7 +90,8 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
 
   if (Object.keys(patch).length === 0) {
     throw new BodyError(
-      "nothing to change: expected display_name, family, notes, tags or thumb_sample_id",
+      "nothing to change: expected display_name, family, notes, tags, " +
+        "strength_min, strength_max or thumb_sample_id",
     );
   }
   return patch;

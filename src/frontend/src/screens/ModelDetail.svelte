@@ -100,6 +100,21 @@
    * Only the field that was written gets its draft resynced: a reply that
    * arrives while another field is being typed into must not overwrite it.
    */
+  /** Blank puts the bound back to the default rather than to zero. */
+  function setBound(field: "strength_min" | "strength_max", input: HTMLInputElement) {
+    const raw = input.value.trim();
+    if (raw === "") {
+      void patch({ [field]: null });
+      return;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      input.value = String(model?.[field] ?? "");
+      return;
+    }
+    void patch({ [field]: value });
+  }
+
   async function patch(body: Parameters<typeof api.patchModel>[1]) {
     if (!model) return;
     try {
@@ -358,6 +373,36 @@
             sha256 <span class="value pending">still being read</span>
           {/if}
         </div>
+
+        <!--
+          What a LoRA's strength sliders reach in the panel (§8.1). Typed by
+          hand, because only the person who trained or downloaded it knows
+          how far it wants to be pushed; blank is the -2..2 default.
+        -->
+        {#if model.class === "lora"}
+          <div class="strength row">
+            <span class="label">strength range</span>
+            <input
+              class="mono bound"
+              type="number"
+              step="0.1"
+              aria-label="Lowest strength"
+              disabled={hashing}
+              value={model.strength_min}
+              onchange={(event) => setBound("strength_min", event.currentTarget)}
+            />
+            <span class="dim">to</span>
+            <input
+              class="mono bound"
+              type="number"
+              step="0.1"
+              aria-label="Highest strength"
+              disabled={hashing}
+              value={model.strength_max}
+              onchange={(event) => setBound("strength_max", event.currentTarget)}
+            />
+          </div>
+        {/if}
 
         <div class="tags">
           {#each model.tags as tag (tag)}
@@ -635,6 +680,18 @@
 
   .outputs {
     color: var(--accent);
+  }
+
+  .strength {
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .bound {
+    width: 66px;
+    text-align: right;
+    font-size: 12px;
+    padding: 3px 6px;
   }
 
   .tags {

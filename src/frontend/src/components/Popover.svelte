@@ -69,8 +69,13 @@
    */
   function onWindowClick(event: MouseEvent) {
     if (!open || !element) return;
+    const target = event.target as Node | null;
+    // Something that closed itself on this very click is gone from the tree
+    // by the time this runs, and `contains` then says it was outside. A
+    // detached target is not a click elsewhere, it is a click on us.
+    if (!target || !target.isConnected) return;
     const boundary = element.parentElement ?? element;
-    if (!boundary.contains(event.target as Node)) onclose();
+    if (!boundary.contains(target)) onclose();
   }
 
   function onWindowKey(event: KeyboardEvent) {

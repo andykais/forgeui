@@ -230,6 +230,9 @@ export interface ModelEntry {
   mtime: number | null;
   notes: string | null;
   tags: string[];
+  /** The ends of this model's strength sliders; always a number (§8.1). */
+  strength_min: number;
+  strength_max: number;
   thumb_path: string | null;
   thumb_url: string | null;
   output_count: number;

@@ -388,6 +388,7 @@ CREATE TABLE models (
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT, notes TEXT, tags_json TEXT,
+  strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
   last_used_at INTEGER,           -- derived: max(outputs.created_at) over output_models; same maintenance
@@ -476,6 +477,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   The **filename is immutable** and appears only on the model page metadata
   line. Sidecars keep recording filename + hash, so renames never affect
   reproduction. Display names may collide; the hash is the identity.
+- A LoRA carries the ends of its own strength sliders, `strength_min` and
+  `strength_max`, typed on its model page — only whoever trained or
+  downloaded it knows how far it wants to be pushed. Unset means the default
+  range of -2 to 2, which is wider than the ±1 most LoRAs want and leaves
+  room for the ones that do not. A row added from the picker starts at 1.
 - Model page = header (thumb, display name, family, size, full sha256, tags,
   notes, Civitai link, filename + folder with Copy path) + **Samples** strip +
   the standard gallery filtered to `output_models.model_hash = ?`. Header
@@ -726,12 +732,23 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   number.
 
 ### 11.3 Interaction notes
+
+- **Model and LoRA pickers** open over the param panel rather than hanging
+  off the row that triggered them, so a picker low in the panel is not half
+  off the bottom of the screen, and the search box takes the caret as it
+  opens. Above the list are chips for the five commonest tags among the
+  models it would show, each with the count it would leave; the rest are
+  behind one `N more` control with its own search. Choosing more than one
+  narrows — a model has to carry all of them.
 - Param panels are narrow (360px) so results stay visible; textareas
   auto-grow.
 - **LoRA rows**: picker with thumbnail + name, remove button, drag to
-  reorder. **Linked is the default**: one `strength` slider drives model and
-  clip together; the ⛓ toggle unlinks and splits it into two sliders. The
-  sidecar always records both values regardless.
+  reorder **from the grip alone** — a row that is draggable everywhere means
+  a drag on the strength slider moves the row instead of the handle.
+  **Linked is the default**: one `strength` slider drives model and clip
+  together; the ⛓ toggle unlinks and splits it into two sliders. The sidecar
+  always records both values regardless. A slider reaches as far as its own
+  model's `strength_min`/`strength_max` say (§8.1), and a row starts at 1.
 - **Size presets are ratios** (`1:1, 2:3, 3:2, 4:3, 16:9, 9:16, 21:9`); exact
   pixels live on the native `title` tooltip and in the W/H fields. Ratios
   resolve against the workflow's base resolution, so 16:9 is 1344×768 on Flux
@@ -859,7 +876,7 @@ GET  /api/models?kind&class&family&q     q: substring, case-insensitive, over di
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+PATCH /api/models/:hash                 display_name, family, notes, tags, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup

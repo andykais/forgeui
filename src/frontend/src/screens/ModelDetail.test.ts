@@ -43,6 +43,8 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     mtime: 1_780_000_000_000,
     notes: null,
     tags: ["film"],
+    strength_min: -2,
+    strength_max: 2,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,

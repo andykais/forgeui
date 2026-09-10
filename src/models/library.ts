@@ -74,6 +74,12 @@ export interface ModelView {
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
+  /**
+   * The ends of this model's strength sliders (§8.1). Always a number: what
+   * the row holds is what the owner typed, and this is that or the default.
+   */
+  strength_min: number;
+  strength_max: number;
   /** The chosen sample, else the most recent output, else nothing (§8.1). */
   thumb_url: string | null;
   output_count: number;
@@ -101,6 +107,14 @@ export interface FamilyCount {
   family: string;
   models: number;
 }
+
+/**
+ * How far a LoRA's strength sliders reach when nobody has said otherwise.
+ * Wide enough for the ones that want to be pushed, and every LoRA that is
+ * happy at 1 is unbothered by the room either side (§8.1).
+ */
+export const DEFAULT_STRENGTH_MIN = -2;
+export const DEFAULT_STRENGTH_MAX = 2;
 
 /** Which folder kinds a sidecar's role is likely to have come from. */
 const ROLE_KINDS: Record<string, string[]> = {
@@ -382,6 +396,8 @@ export class ModelLibrary {
       family: row?.family ?? this.#probes.get(path)?.arch ?? "unset",
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
+      strength_min: row?.strength_min ?? DEFAULT_STRENGTH_MIN,
+      strength_max: row?.strength_max ?? DEFAULT_STRENGTH_MAX,
       thumb_path: row?.thumb_path ?? null,
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,

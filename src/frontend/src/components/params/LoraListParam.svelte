@@ -7,6 +7,7 @@
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
   import { focusOnMount } from "../../lib/focus.ts";
+  import TagFilter from "./TagFilter.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
 
@@ -37,13 +38,21 @@
   let pickerOpen = $state(false);
   let showAll = $state(false);
   let search = $state("");
+  let tags = $state<string[]>([]);
   /** Rows whose two strengths are shown separately. */
   let unlinked = $state<Record<string, boolean>>({});
   let dragging = $state<number | null>(null);
+  /**
+   * Which row the grip has armed for dragging. `draggable` on the whole row
+   * meant a drag that started on the strength slider moved the row instead of
+   * the handle, so only the grip turns it on.
+   */
+  let grabbed = $state<number | null>(null);
 
   const family = $derived(param.filter?.family ?? null);
 
-  const listed = $derived.by(() => {
+  /** Everything the family filter and the search leave, before the tags. */
+  const candidates = $derived.by(() => {
     const matches = matcher(search);
     return models.filter((model) => {
       // A model nobody has filed yet is not hidden by a family filter: it
@@ -54,10 +63,23 @@
     });
   });
 
+  const listed = $derived(
+    tags.length === 0
+      ? candidates
+      : candidates.filter((model) => tags.every((tag) => model.tags.includes(tag))),
+  );
+
+  /** What the sliders on a row reach, from the model it names (§8.1). */
+  function boundsOf(name: string): { min: number; max: number } {
+    const model = models.find((entry) => entry.name === name);
+    return { min: model?.strength_min ?? -2, max: model?.strength_max ?? 2 };
+  }
+
   function add(model: ModelEntry) {
-    onchange([...value, { name: model.name, strength_model: 0.8, strength_clip: 0.8 }]);
+    onchange([...value, { name: model.name, strength_model: 1, strength_clip: 1 }]);
     pickerOpen = false;
     search = "";
+    tags = [];
     onpicked?.();
   }
 
@@ -89,21 +111,36 @@
 <div class="lora-list">
   {#each value as row, index (row.name + index)}
     {@const linked = !unlinked[row.name]}
+    {@const bounds = boundsOf(row.name)}
     <div
       class="lora-row"
       class:dragging={dragging === index}
-      draggable="true"
+      draggable={grabbed === index}
       role="listitem"
       ondragstart={() => (dragging = index)}
-      ondragend={() => (dragging = null)}
+      ondragend={() => {
+        dragging = null;
+        grabbed = null;
+      }}
       ondragover={(event) => event.preventDefault()}
       ondrop={() => {
         if (dragging !== null) move(dragging, index);
         dragging = null;
+        grabbed = null;
       }}
     >
       <div class="row head">
-        <span class="grip" title="Drag to reorder"><GripVertical size={13} /></span>
+        <!-- The only thing that arms the drag, so the sliders stay usable. -->
+        <span
+          class="grip"
+          title="Drag to reorder"
+          role="presentation"
+          onpointerdown={() => (grabbed = index)}
+          onpointerup={() => (grabbed = null)}
+          onpointercancel={() => (grabbed = null)}
+        >
+          <GripVertical size={13} />
+        </span>
         <span class="name" title={row.name}>{row.name}</span>
         <span class="spacer"></span>
         {#if family}<span class="badge accent">{family}</span>{/if}
@@ -122,8 +159,8 @@
           <span class="strength-label">strength</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_model}
             aria-label={`${row.name} strength`}
@@ -149,8 +186,8 @@
           <span class="strength-label">model</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_model}
             aria-label={`${row.name} model strength`}
@@ -179,8 +216,8 @@
           <span class="strength-label">clip</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_clip}
             aria-label={`${row.name} clip strength`}
@@ -215,6 +252,11 @@
           {showAll ? `Filter to ${family}` : "Show all"}
         </button>
       {/if}
+      <TagFilter
+        models={candidates}
+        selected={tags}
+        onchange={(chosen) => (tags = chosen)}
+      />
       {#if models.length === 0}
         <p class="empty">
           No LoRAs found. Point <code class="mono">model_folders.loras</code> at a folder

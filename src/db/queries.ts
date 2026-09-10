@@ -702,13 +702,17 @@ export interface ModelRow {
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
+  /** The ends of this model's strength sliders; null means the default. */
+  strength_min: number | null;
+  strength_max: number | null;
   output_count: number;
   last_used_at: number | null;
   last_seen_at: number;
 }
 
 const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
-  notes, tags_json, thumb_path, output_count, last_used_at, last_seen_at`;
+  notes, tags_json, thumb_path, strength_min, strength_max,
+  output_count, last_used_at, last_seen_at`;
 
 type ModelRecord = [
   string,
@@ -721,6 +725,8 @@ type ModelRecord = [
   string | null,
   string | null,
   string | null,
+  number | null,
+  number | null,
   number,
   number | null,
   number,
@@ -738,9 +744,11 @@ function toModel(record: ModelRecord): ModelRow {
     notes: record[7],
     tags: parse<string[]>(record[8], []),
     thumb_path: record[9],
-    output_count: record[10],
-    last_used_at: record[11],
-    last_seen_at: record[12],
+    strength_min: record[10],
+    strength_max: record[11],
+    output_count: record[12],
+    last_used_at: record[13],
+    last_seen_at: record[14],
   };
 }
 
@@ -841,6 +849,8 @@ export interface ModelMetaPatch {
   notes?: string | null;
   tags?: string[];
   thumb_path?: string | null;
+  strength_min?: number | null;
+  strength_max?: number | null;
 }
 
 /** The edit-in-place header of §8.1. Nothing here touches the file. */
@@ -850,7 +860,7 @@ export function updateModelMeta(
   patch: ModelMetaPatch,
 ): boolean {
   const sets: string[] = [];
-  const values: (string | null)[] = [];
+  const values: (string | number | null)[] = [];
   if (patch.display_name !== undefined) {
     sets.push("display_name = ?");
     values.push(patch.display_name);
@@ -870,6 +880,14 @@ export function updateModelMeta(
   if (patch.thumb_path !== undefined) {
     sets.push("thumb_path = ?");
     values.push(patch.thumb_path);
+  }
+  if (patch.strength_min !== undefined) {
+    sets.push("strength_min = ?");
+    values.push(patch.strength_min);
+  }
+  if (patch.strength_max !== undefined) {
+    sets.push("strength_max = ?");
+    values.push(patch.strength_max);
   }
   if (sets.length === 0) return false;
   return db.prepare(`UPDATE models SET ${sets.join(", ")} WHERE hash = ?`)

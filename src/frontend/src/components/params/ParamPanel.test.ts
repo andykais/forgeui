@@ -39,6 +39,8 @@ const loras: ModelEntry[] = [
     hash: null,
     notes: null,
     tags: [],
+    strength_min: -2,
+    strength_max: 2,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
@@ -60,6 +62,8 @@ const loras: ModelEntry[] = [
     hash: null,
     notes: null,
     tags: [],
+    strength_min: -2,
+    strength_max: 2,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
@@ -94,6 +98,8 @@ function diffusionModel(name: string, family: string, kind = "checkpoints"): Mod
     hash: null,
     notes: null,
     tags: [],
+    strength_min: -2,
+    strength_max: 2,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
@@ -446,13 +452,25 @@ describe("the LoRA list", () => {
     },
   };
 
-  test("a row is added from the picker with linked strengths", async () => {
+  test("a row is added from the picker at full strength, linked", async () => {
     const { handlers } = mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
     await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
-      { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+      { name: "krea/film-grain.safetensors", strength_model: 1, strength_clip: 1 },
     ]);
+  });
+
+  test("a row's sliders reach as far as its model says", async () => {
+    mount([loraParam], {
+      loras: [
+        { name: "krea/film-grain.safetensors", strength_model: 1, strength_clip: 1 },
+      ],
+    });
+    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
+    // The fixture leaves the bounds at the default.
+    expect(slider.getAttribute("min")).toBe("-2");
+    expect(slider.getAttribute("max")).toBe("2");
   });
 
   test("an added LoRA is marked rather than offered twice", async () => {
