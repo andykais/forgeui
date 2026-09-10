@@ -35,11 +35,11 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     outputs: ["MODEL"],
   },
   CLIPLoader: {
-    widgets: ["clip_name", "type"],
+    widgets: ["clip_name", "type", "device"],
     outputs: ["CLIP"],
   },
   DualCLIPLoader: {
-    widgets: ["clip_name1", "clip_name2", "type"],
+    widgets: ["clip_name1", "clip_name2", "type", "device"],
     outputs: ["CLIP"],
   },
   VAELoader: {
@@ -76,6 +76,11 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     outputs: ["CONDITIONING"],
   },
   ModelSamplingSD3: {
+    inputs: ["model"],
+    widgets: ["shift"],
+    outputs: ["MODEL"],
+  },
+  ModelSamplingAuraFlow: {
     inputs: ["model"],
     widgets: ["shift"],
     outputs: ["MODEL"],

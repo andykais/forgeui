@@ -117,7 +117,10 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
     ]);
     assertEquals(keys("flux-klein"), ["prompt", "size", "seed", "loras"]);
-    assertEquals(keys("z-image-turbo"), ["prompt", "size", "seed"]);
+    // Rebuilt from the official ComfyUI template (§7): three loaders for a
+    // split-file model, and a model param to swap it.
+    assertEquals(keys("z-image-turbo"), ["prompt", "model", "size", "seed"]);
+    assertEquals(byId.get("z-image-turbo")!.params.advanced, 2); // steps, shift
     assertEquals(keys("sd15"), [
       "prompt",
       "negative",

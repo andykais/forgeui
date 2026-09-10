@@ -12,7 +12,7 @@ from then on (§4.6).
 | `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
 | `anima`         | Anima                 | anima   | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
 | `flux-klein`    | Flux Klein            | flux    | image | prompt, size, seed, loras                                       |
-| `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, size, seed                                              |
+| `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, model, size, seed · steps, shift advanced                |
 | `ltx`           | LTX Video             | ltx     | video | prompt, size, frames, fps, seed, loras                          |
 | `sd15`          | Stable Diffusion 1.5  | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
 
@@ -20,7 +20,28 @@ Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
 below.
 
-## The model filenames are placeholders — except `sd15`
+## Rebuilding one from the official ComfyUI template
+
+`scripts/import_template.ts` turns a ComfyUI workflow template into the flat
+api graph this app queues:
+
+```sh
+deno run --allow-read --allow-write scripts/import_template.ts \
+  <template>.json workflows/bundled/<id>/workflow.api.json
+```
+
+Every current template is a **Subgraph**: the saved document has three or four
+top-level nodes, one of them a UUID-typed instance of a definition under
+`definitions.subgraphs`, and the real graph lives inside. ComfyUI flattens
+that at `graphToPrompt()` time because the prompt format has no subgraph
+concept; the script does the same offline, splices the parent's output node
+onto the inner node that feeds it, and renumbers to `1..n`. Widget order comes
+from `src/workflows/nodes.ts`, so a node type missing there is an error naming
+the type rather than a wrong guess.
+
+`z-image-turbo` was rebuilt this way and is what the output should look like.
+
+## The model filenames are placeholders — except `sd15` and `z-image-turbo`
 
 `sd15` names the checkpoint `deno task comfy:setup` downloads
 (`v1-5-pruned-emaonly-fp16.safetensors`), so it runs as shipped and is what the
@@ -36,7 +57,6 @@ resolve on your machine until you point it at a file you actually have.
 | `flux-klein`             | `flux-klein.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors`     |
 | `illustrious`            | `illustriousXL.safetensors`                                                                    |
 | `anima`                  | `anima.safetensors`                                                                            |
-| `z-image-turbo`          | `z-image-turbo.safetensors`                                                                    |
 | `ltx`                    | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors`                                    |
 
 **Fixing them:** open the workflow from the Workflows screen ("Open in
