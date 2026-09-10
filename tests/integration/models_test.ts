@@ -416,9 +416,10 @@ Deno.test("families come back with model and workflow counts", async () => {
     );
     assertEquals(byName.get("flux")?.models, 1);
     assertEquals(byName.get("unset")?.models, 2);
-    // Two bundled workflows are Flux.1 and one is FLUX.2; one is sd15 (§4.6).
-    assertEquals(byName.get("flux")?.workflows, 2);
+    // One bundled workflow is Flux.1, one FLUX.2, one Krea 2, one sd15 (§4.6).
+    assertEquals(byName.get("flux")?.workflows, 1);
     assertEquals(byName.get("flux2")?.workflows, 1);
+    assertEquals(byName.get("krea2")?.workflows, 1);
     assertEquals(byName.get("sd15")?.workflows, 1);
     assertEquals(byName.get("sd15")?.models, 0);
   });

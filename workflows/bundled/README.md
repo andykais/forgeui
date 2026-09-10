@@ -39,8 +39,19 @@ node that feeds it, and renumbers to `1..n`. Widget order comes from
 `src/workflows/nodes.ts`, so a node type missing there is an error naming the
 type rather than a wrong guess.
 
-`z-image-turbo`, `anima` and `flux-klein` were rebuilt this way; the rest are
-still the placeholders described below.
+`z-image-turbo`, `anima`, `flux-klein` and `krea2` were rebuilt this way; the
+rest are still the placeholders described below.
+
+`krea2` changed model in the process. The graph here was **Flux.1 Krea [dev]**,
+a Flux-family model; the page it is named after covers **Krea 2**, which runs on
+a Qwen3-VL text encoder and is a different architecture. Deriving from the
+source made the workflow match its name. `krea2-img2img` still holds the old
+Flux graph and keeps its old name; it needs image inputs before it can run at
+all, so it is left for that phase.
+
+`ltx` is also still the old graph, LTX-Video 0.9.5 rather than LTX-2.3.
+Text-to-video without image-to-video is not much use, and image inputs are a
+later phase, so rebuilding it waits for them.
 
 A template holding several variants ships all but one bypassed, so
 `--subgraph <n>` picks which one to import — `flux-klein` is variant 1, the
@@ -56,11 +67,11 @@ The other seven have never been run: this repository has no GPU and none of
 their weights. Every model filename below is a **placeholder** and will not
 resolve on your machine until you point it at a file you actually have.
 
-| workflow                 | placeholder filenames                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------- |
-| `krea2`, `krea2-img2img` | `flux1-krea-dev.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors` |
-| `illustrious`            | `illustriousXL.safetensors`                                                                    |
-| `ltx`                    | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors`                                    |
+| workflow        | placeholder filenames                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `krea2-img2img` | `flux1-krea-dev.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors` |
+| `illustrious`   | `illustriousXL.safetensors`                                                                    |
+| `ltx`           | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors`                                    |
 
 **Fixing them:** open the workflow from the Workflows screen ("Open in
 ComfyUI"), pick your real model files in the loader nodes, then use the app's

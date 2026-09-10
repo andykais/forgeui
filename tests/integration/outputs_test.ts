@@ -119,7 +119,7 @@ Deno.test("GET /api/outputs pages through the gallery by keyset", async () => {
     assertEquals(first.width, 1024);
     assertEquals(first.prompt, "one heron");
     assertEquals(first.workflow_id, "krea2");
-    assertEquals(first.family, "flux");
+    assertEquals(first.family, "krea2");
     assert(first.generation_ms !== null && first.generation_ms >= 0);
     assertEquals(first.models, []);
 

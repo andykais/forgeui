@@ -20,8 +20,12 @@
 import { CORE_NODES } from "../src/workflows/nodes.ts";
 import type { ApiGraph, ApiNode } from "../src/workflows/types.ts";
 
-/** Nodes that exist only to annotate the canvas. */
-const CANVAS_ONLY = new Set(["MarkdownNote", "Note", "PreviewAny", "Reroute"]);
+/**
+ * Nodes that exist only to annotate the canvas. Anything that carries a value
+ * through belongs in `src/workflows/nodes.ts` instead: `PreviewAny` looks like
+ * a debug readout but returns its input, and templates chain through it.
+ */
+const CANVAS_ONLY = new Set(["MarkdownNote", "Note"]);
 
 /** `origin_id` of a link fed by the subgraph's own boundary. */
 const BOUNDARY = -10;
@@ -115,9 +119,28 @@ function widgetsOf(node: UiNode): Record<string, unknown> {
   let at = 0;
   for (const name of schema.widgets ?? []) {
     if (at >= values.length) break;
-    out[name] = values[at++];
+    const value = values[at++];
+    out[name] = value;
     // A UI-only widget sits directly after the one it decorates.
     if (schema.after && name in schema.after) at++;
+    // A DynamicCombo's chosen option brings its own widgets along, and the
+    // prompt names them `<parent>.<child>`.
+    const options = schema.dynamic?.[name];
+    if (options) {
+      const expansion = options[String(value)];
+      if (!expansion) {
+        throw new ImportError(
+          `${node.type}.${name}: no expansion for "${value}" in ` +
+            `src/workflows/nodes.ts (known: ${
+              Object.keys(options).join(", ")
+            })`,
+        );
+      }
+      for (const child of expansion) {
+        if (at >= values.length) break;
+        out[`${name}.${child}`] = values[at++];
+      }
+    }
   }
   // Values left over mean the widget list is short, and every name after the
   // gap would take the wrong value — steps reading what cfg meant. A node
@@ -191,7 +214,27 @@ export function flatten(
   }
 
   appendOutputs(graph, document, definition, links);
+  assertNoDanglingLinks(graph);
   return graph;
+}
+
+/**
+ * Every link must land on a node that survived. A node dropped by mistake —
+ * one wrongly treated as canvas-only, say — leaves references to an id that
+ * is no longer there, and renumbering then quietly points them at whichever
+ * node inherits that number. Fail with both ends named instead.
+ */
+function assertNoDanglingLinks(graph: ApiGraph): void {
+  for (const [id, node] of Object.entries(graph)) {
+    for (const [input, value] of Object.entries(node.inputs)) {
+      if (!Array.isArray(value) || typeof value[0] !== "string") continue;
+      if (graph[value[0]]) continue;
+      throw new ImportError(
+        `${node.class_type} (${id}).${input} is fed by node ${value[0]}, ` +
+          `which is not in the flattened graph`,
+      );
+    }
+  }
 }
 
 /**

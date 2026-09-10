@@ -34,13 +34,20 @@ interface WorkflowDetail extends WorkflowSummary {
 }
 
 /** The eight of §4.6, in the order the Workflows screen shows them (by name). */
+/**
+ * Node ids in the bundled `krea2` graph, which came from the official
+ * ComfyUI template (§7) rather than being hand-numbered.
+ */
+const KREA2_SAMPLER = "1";
+const KREA2_SAVE = "21";
+
 /** Listed by display name, which is how `GET /api/workflows` orders them. */
 const BUNDLED = [
   ["anima", "Anima"],
-  ["krea2", "Flux Krea 2"],
   ["krea2-img2img", "Flux Krea 2 (img2img)"],
   ["flux-klein", "Flux.2 Klein 4B"],
   ["illustrious", "Illustrious XL"],
+  ["krea2", "Krea 2 Turbo"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["z-image-turbo", "Z-Image Turbo"],
@@ -91,7 +98,17 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     const byId = new Map((await list(app)).map((w) => [w.id, w]));
     const keys = (id: string) => byId.get(id)!.params.keys;
 
-    assertEquals(keys("krea2"), ["prompt", "size", "seed", "loras"]);
+    // Rebuilt from the official template (§7). The real Krea 2 is a separate
+    // model from Flux.1 Krea [dev], which is what the old graph held; its
+    // LoRA sits behind the template's own style switch rather than a chain.
+    assertEquals(keys("krea2"), [
+      "prompt",
+      "model",
+      "size",
+      "seed",
+      "enhance",
+      "style",
+    ]);
     assertEquals(byId.get("krea2")!.params.advanced, 2); // steps, cfg
     assertEquals(keys("krea2-img2img"), [
       "image",
@@ -148,7 +165,7 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
-      ["anima", "flux", "flux", "flux2", "sdxl", "ltx", "sd15", "z-image"],
+      ["anima", "flux", "flux2", "sdxl", "krea2", "ltx", "sd15", "z-image"],
     );
   });
 });
@@ -199,7 +216,7 @@ Deno.test("GET /api/workflows/:id carries the manifest and both graphs", async (
   await withTestApp(async (app) => {
     const workflow = await detail(app, "krea2");
     assertEquals(workflow.manifest?.id, "krea2");
-    assertEquals(workflow.api_json["9"]?.class_type, "SaveImage");
+    assertEquals(workflow.api_json[KREA2_SAVE]?.class_type, "SaveImage");
     // No ui.json shipped, so the editor gets one rebuilt from the api graph.
     assertEquals(workflow.has_ui_json, false);
     assertEquals(
@@ -230,7 +247,7 @@ Deno.test("GET /api/workflows/:id/inputs lists literal inputs for the editor", a
       }[];
     };
 
-    const sampler = inputs.filter((input) => input.node_id === "3");
+    const sampler = inputs.filter((input) => input.node_id === KREA2_SAMPLER);
     assertEquals(sampler.map((input) => input.input), [
       "seed",
       "steps",
@@ -239,12 +256,17 @@ Deno.test("GET /api/workflows/:id/inputs lists literal inputs for the editor", a
       "scheduler",
       "denoise",
     ]);
+    // krea2's prompt is a PrimitiveStringMultiline the template feeds into
+    // the encoder, so `text` is a link now and `value` is the literal.
     assertEquals(
-      inputs.find((input) => input.input === "text")?.exposed_by,
+      inputs.find((input) => input.node_id === "13")?.exposed_by,
       "prompt",
     );
-    // The LoRA chain is not a literal input (§4.7).
-    assertEquals(inputs.some((input) => input.exposed_by === "loras"), false);
+    // A model param binds one literal input, like any scalar (§5).
+    assertEquals(
+      inputs.find((input) => input.input === "unet_name")?.exposed_by,
+      "model",
+    );
     // Links never appear.
     assertEquals(inputs.some((input) => input.input === "clip"), false);
   });
@@ -277,7 +299,7 @@ Deno.test("saving a bundled workflow creates a user copy that shadows it", async
         join(app.paths.bundledWorkflows, "krea2", "manifest.json"),
       ),
     ) as Manifest;
-    assertEquals(bundled.name, "Flux Krea 2");
+    assertEquals(bundled.name, "Krea 2 Turbo");
     assert(
       (await Deno.stat(join(app.paths.userWorkflows, "krea2"))).isDirectory,
     );
@@ -471,7 +493,7 @@ Deno.test("duplicate makes an independent copy with a free id", async () => {
     assertEquals(first.status, 201);
     const copy = await first.json() as WorkflowDetail;
     assertEquals(copy.id, "krea2-copy");
-    assertEquals(copy.name, "Flux Krea 2 copy");
+    assertEquals(copy.name, "Krea 2 Turbo copy");
     assertEquals(copy.source, "user");
     assertEquals(copy.has_bundled, false);
     assertEquals(copy.manifest?.id, "krea2-copy");

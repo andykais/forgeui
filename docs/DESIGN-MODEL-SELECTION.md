@@ -240,11 +240,11 @@ each one derived from the official ComfyUI workflow for its model.
 | workflow | source |
 |---|---|
 | `krea2` | https://docs.comfy.org/tutorials/image/krea/krea-2 |
-| `ltx` | https://docs.comfy.org/tutorials/video/ltx/ltx-2-3 |
+| `ltx` | https://docs.comfy.org/tutorials/video/ltx/ltx-2-3 — **deferred**: text-to-video without image-to-video has little use, and image inputs are a later phase |
 | `anima` | https://docs.comfy.org/tutorials/image/anima/anima |
 | `z-image-turbo` | https://docs.comfy.org/tutorials/image/z-image/z-image-turbo |
 | `flux-klein` | https://docs.comfy.org/tutorials/flux/flux-2-klein |
-| `krea2-img2img` | https://docs.comfy.org/tutorials/basic/image-to-image, applied to the `krea2` graph above |
+| `krea2-img2img` | https://docs.comfy.org/tutorials/basic/image-to-image, applied to the `krea2` graph above — **deferred** with `ltx`, for the same reason |
 | `sd15` | https://docs.comfy.org/tutorials/basic/text-to-image — already matches; leave the graph alone |
 | `illustrious` | no official page: an SDXL community finetune. Keep the current SDXL graph and only add the `model` param |
 

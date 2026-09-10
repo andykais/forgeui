@@ -2,6 +2,14 @@ import { delay } from "@std/async/delay";
 import { contentType } from "@std/media-types";
 import { extname, join } from "@std/path";
 import { withTextChunk } from "../../src/jobs/png.ts";
+
+/** JSON with every non-ASCII character escaped, for a `tEXt` chunk. */
+function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(
+    /[^\u0020-\u007e]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
 import { tinyPng } from "../fixtures/png.ts";
 import {
   type ApiGraph,
@@ -825,7 +833,11 @@ export class FakeComfy {
       const bytes = withTextChunk(
         tinyPng({ width, height, color: [0x6f, 0xb6, 0xc8] }),
         "prompt",
-        JSON.stringify(run.graph),
+        // `tEXt` is Latin-1, and a graph may hold anything a prompt does —
+        // an em dash in a baked system prompt is enough. Real ComfyUI escapes
+        // before embedding and so does the app (`serializeSidecarAscii`), so
+        // the fake has to as well or it fails where nothing real would.
+        asciiJson(run.graph),
       );
       await Deno.writeFile(join(dir, filename), bytes);
       images.push({ filename, subfolder, type: "output" });

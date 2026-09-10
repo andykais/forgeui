@@ -1,10 +1,10 @@
 {
   "id": "krea2",
-  "name": "Flux Krea 2",
-  "family": "flux",
+  "name": "Krea 2 Turbo",
+  "family": "krea2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Flux Krea 2. VAE, sampler and scheduler are fixed.",
+  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1. Enhance prompt runs the prompt through the same Qwen3-VL encoder the workflow already loads, so it costs no extra download.",
   "params": [
     {
       "key": "prompt",
@@ -12,7 +12,18 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "6.text"
+      "bind": "13.value"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "krea2"
+      },
+      "default": "krea2_turbo_fp8_scaled.safetensors",
+      "bind": "5.unet_name"
     },
     {
       "key": "size",
@@ -24,8 +35,8 @@
       ],
       "step": 16,
       "bind": {
-        "w": "5.width",
-        "h": "5.height"
+        "w": "2.width",
+        "h": "2.height"
       }
     },
     {
@@ -33,53 +44,47 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "3.seed"
+      "bind": "1.seed"
     },
     {
-      "key": "loras",
-      "label": "LoRAs",
-      "type": "lora_list",
-      "filter": {
-        "family": "flux"
-      },
-      "bind": {
-        "chain": {
-          "model_from": "1.MODEL",
-          "clip_from": "2.CLIP",
-          "model_to": [
-            "3.model"
-          ],
-          "clip_to": [
-            "6.clip"
-          ]
-        }
-      }
+      "key": "enhance",
+      "label": "Enhance prompt",
+      "type": "bool",
+      "default": true,
+      "bind": "18.value"
+    },
+    {
+      "key": "style",
+      "label": "Darkbrush style",
+      "type": "bool",
+      "default": false,
+      "bind": "17.value"
     },
     {
       "key": "steps",
       "label": "Steps",
       "type": "int",
-      "advanced": true,
-      "default": 28,
+      "default": 8,
       "min": 1,
-      "max": 100,
-      "bind": "3.steps"
+      "max": 50,
+      "advanced": true,
+      "bind": "1.steps"
     },
     {
       "key": "cfg",
       "label": "CFG",
       "type": "float",
-      "advanced": true,
-      "default": 1.0,
+      "default": 1,
       "min": 0,
       "max": 20,
       "step": 0.1,
-      "bind": "3.cfg"
+      "advanced": true,
+      "bind": "1.cfg"
     }
   ],
   "outputs": [
     {
-      "node": "9",
+      "node": "21",
       "kind": "image"
     }
   ]
