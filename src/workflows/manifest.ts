@@ -1,6 +1,6 @@
+import { MODEL_CLASSES, type ModelClass } from "../config/types.ts";
 import {
   type ApiGraph,
-  ENUM_SOURCES,
   type EnumSource,
   FAMILIES,
   type Family,
@@ -9,7 +9,9 @@ import {
   type LoraRow,
   type Manifest,
   type ManifestOutput,
+  MODEL_PARAM_CLASS,
   type ModelFilter,
+  type ModelParamType,
   type Param,
   PARAM_TYPES,
   type ParamType,
@@ -162,6 +164,9 @@ function filter(value: unknown, where: string): ModelFilter | undefined {
   if (raw.family !== undefined) {
     out.family = oneOf<Family>(raw.family, `${where}.family`, FAMILIES);
   }
+  if (raw.class !== undefined) {
+    out.class = oneOf<ModelClass>(raw.class, `${where}.class`, MODEL_CLASSES);
+  }
   return out;
 }
 
@@ -303,9 +308,11 @@ function validateParam(
         : array(raw.options, `${at}.options`).map((option, i) =>
           nonEmptyStr(option, `${at}.options[${i}]`)
         );
-      const source = raw.source === undefined
+      // A source is a model class or a `model_folders` key, and kinds are
+      // open-ended, so anything non-empty is accepted rather than an enum.
+      const source: EnumSource | undefined = raw.source === undefined
         ? undefined
-        : oneOf<EnumSource>(raw.source, `${at}.source`, ENUM_SOURCES);
+        : nonEmptyStr(raw.source, `${at}.source`);
       if (!options && !source) {
         throw new ManifestError(
           `${at}: an enum needs either options or a source`,
@@ -369,18 +376,25 @@ function validateParam(
         ...(step !== undefined ? { step: step as 8 | 16 | 64 } : {}),
       };
     }
-    case "checkpoint":
+    case "model":
+    case "text_encoder":
+    case "vae":
+    case "checkpoint": {
+      // `checkpoint` is the old spelling from when a model could only come
+      // from the checkpoints folder; it parses to a `model` param whose class
+      // defaults to `diffusion`, which is the same set widened (§5, §14).
+      const kind: ModelParamType = type === "checkpoint" ? "model" : type;
+      const parsed = filter(raw.filter, `${at}.filter`) ?? {};
       return {
         ...common,
-        type,
+        type: kind,
         bind: scalarBind(),
-        ...(filter(raw.filter, `${at}.filter`)
-          ? { filter: filter(raw.filter, `${at}.filter`)! }
-          : {}),
+        filter: { class: MODEL_PARAM_CLASS[kind], ...parsed },
         ...(raw.default !== undefined
           ? { default: str(raw.default, `${at}.default`) }
           : {}),
       };
+    }
     case "lora_list": {
       const bind = record(raw.bind, `${at}.bind`);
       const parsed = chain(bind.chain, `${at}.bind.chain`);

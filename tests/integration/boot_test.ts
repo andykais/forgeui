@@ -116,17 +116,30 @@ Deno.test("a hand-written config.yaml is honoured on boot", async () => {
     // still list every known kind.
     assertEquals(config.model_folders, {
       checkpoints: ["/mnt/models/checkpoints"],
+      "Stable-Diffusion": [],
+      diffusion_models: [],
+      unet: [],
       loras: ["/mnt/models/loras"],
       vae: [],
+      text_encoders: [],
       controlnet: [],
+      upscale_models: [],
+      latent_upscale_models: [],
+      embeddings: [],
     });
     assertEquals(app.createdConfig, false);
 
-    // Folders reach ComfyUI through the generated file, not through the app.
+    // Folders reach ComfyUI through the generated file, not through the app,
+    // and a diffusion folder is written under both keys so either loader
+    // resolves a name the one picker offered (§4).
     const extra = await Deno.readTextFile(app.paths.extraModelPaths);
     assertStringIncludes(
       extra,
       "  checkpoints: |-\n    /mnt/models/checkpoints",
+    );
+    assertStringIncludes(
+      extra,
+      "  diffusion_models: |-\n    /mnt/models/checkpoints",
     );
     assertStringIncludes(extra, "  loras: |-\n    /mnt/models/loras");
   }, {

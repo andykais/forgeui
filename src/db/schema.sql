@@ -46,6 +46,13 @@ CREATE TABLE models (
   last_seen_at INTEGER NOT NULL
 );
 
+CREATE TABLE model_probes (      -- derived: what a file's header says it is
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL, mtime INTEGER NOT NULL,  -- re-probe when either moves
+  arch TEXT,                      -- a FAMILIES entry, or NULL when unrecognised
+  probed_at INTEGER NOT NULL
+);
+
 CREATE TABLE output_models (      -- discoverability: what used what
   output_id TEXT NOT NULL, model_hash TEXT NOT NULL, role TEXT NOT NULL,
   PRIMARY KEY (output_id, model_hash, role)

@@ -1,10 +1,10 @@
 {
   "id": "flux-klein",
-  "name": "Flux Klein",
-  "family": "flux",
+  "name": "Flux.2 Klein 4B",
+  "family": "flux2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Flux Klein. Steps, CFG, sampler and scheduler are fixed.",
+  "description": "Text-to-image with the distilled FLUX.2 [klein] 4B: four steps at cfg 1 through the custom sampler chain. Qwen-3 4B encodes the prompt; the negative is ConditioningZeroOut, as the template ships it.",
   "params": [
     {
       "key": "prompt",
@@ -12,7 +12,18 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "6.text"
+      "bind": "13.text"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "flux2"
+      },
+      "default": "flux-2-klein-4b.safetensors",
+      "bind": "9.unet_name"
     },
     {
       "key": "size",
@@ -24,8 +35,8 @@
       ],
       "step": 16,
       "bind": {
-        "w": "5.width",
-        "h": "5.height"
+        "w": "7.value",
+        "h": "8.value"
       }
     },
     {
@@ -33,32 +44,55 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "3.seed"
+      "bind": "12.noise_seed"
     },
     {
-      "key": "loras",
-      "label": "LoRAs",
-      "type": "lora_list",
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "default": 4,
+      "min": 1,
+      "max": 50,
+      "advanced": true,
+      "bind": "2.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "3.cfg"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "model",
       "filter": {
-        "family": "flux"
+        "class": "clip"
       },
-      "bind": {
-        "chain": {
-          "model_from": "1.MODEL",
-          "clip_from": "2.CLIP",
-          "model_to": [
-            "3.model"
-          ],
-          "clip_to": [
-            "6.clip"
-          ]
-        }
-      }
+      "default": "qwen_3_4b.safetensors",
+      "advanced": true,
+      "bind": "10.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "model",
+      "filter": {
+        "class": "vae"
+      },
+      "default": "flux2-vae.safetensors",
+      "advanced": true,
+      "bind": "11.vae_name"
     }
   ],
   "outputs": [
     {
-      "node": "9",
+      "node": "15",
       "kind": "image"
     }
   ]

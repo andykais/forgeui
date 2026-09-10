@@ -74,6 +74,14 @@ async function listDir(path: string): Promise<string[]> {
   return names.sort();
 }
 
+/**
+ * Node ids in the bundled `krea2` graph, which came from the official
+ * ComfyUI template (§7) rather than being hand-numbered. Naming them here
+ * keeps the next rebuild to one edit.
+ */
+const KREA2_SAMPLER = "7";
+const KREA2_SAVE = "9";
+
 Deno.test("a job runs end to end: submit, progress, files, sidecar, index", async () => {
   await withTestApp(async (app) => {
     const socket = await app.socket();
@@ -91,7 +99,7 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     assertEquals(submitted.workflow_id, "krea2");
     assertEquals(submitted.params.seed, 4242);
     assertEquals(
-      submitted.api_graph["9"]?.inputs.filename_prefix,
+      submitted.api_graph[KREA2_SAVE]?.inputs.filename_prefix,
       `${submitted.id}/out`,
     );
     assertEquals(app.fake!.prompts.length, 1);
@@ -143,7 +151,7 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     );
     assertEquals(sidecar.job_id, submitted.id);
     assertEquals(sidecar.workflow?.id, "krea2");
-    assertEquals(sidecar.workflow?.family, "flux");
+    assertEquals(sidecar.workflow?.family, "krea2");
     assert(sidecar.workflow?.hash.startsWith("sha256:"));
     assertEquals(sidecar.params.prompt, PROMPT);
     assertEquals(sidecar.params.seed, 4242);
@@ -155,16 +163,18 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     }]);
     assertEquals(
       sidecar.models.map((model) => `${model.role}:${model.name}`),
+      // Every model the graph names, in role order (§6.2). No LoRA: the
+      // template's sample style LoRA is gone, and the lora_list param
+      // splices one in only when a row is added (§7.1).
       [
-        "unet:flux1-krea-dev.safetensors",
-        "clip:t5xxl_fp16.safetensors",
-        "clip:clip_l.safetensors",
-        "vae:ae.safetensors",
+        "unet:krea2_turbo_fp8_scaled.safetensors",
+        "clip:qwen3vl_4b_fp8_scaled.safetensors",
+        "vae:qwen_image_vae.safetensors",
       ],
     );
     assert(sidecar.timing.total_ms >= 0);
     assertEquals(
-      (sidecar.api_graph as ApiGraph)["9"]?.inputs.filename_prefix,
+      (sidecar.api_graph as ApiGraph)[KREA2_SAVE]?.inputs.filename_prefix,
       `${submitted.id}/out`,
     );
     assertEquals(
@@ -200,7 +210,7 @@ Deno.test("a job runs end to end: submit, progress, files, sidecar, index", asyn
     assertEquals(output?.[3], 128);
     assertEquals(output?.[4], 96);
     assertEquals(output?.[6], "krea2");
-    assertEquals(output?.[7], "flux");
+    assertEquals(output?.[7], "krea2");
     assertEquals(output?.[8], PROMPT);
     // The hash is of the bytes on disk, so reindex can recompute it.
     const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -325,7 +335,7 @@ Deno.test("an error mid-graph lands on the job row and clears staging", async ()
     assertEquals(failed.outputs, []);
     assertEquals(failed.error?.type, "torch.OutOfMemoryError");
     assertStringIncludes(failed.error?.message ?? "", "exceed allowed memory");
-    assertEquals(failed.error?.node_id, "3");
+    assertEquals(failed.error?.node_id, KREA2_SAMPLER);
     assert(failed.finished_at !== null);
     // The staging directory is removed (§5 step 8).
     assertEquals(await listDir(app.paths.staging), []);
@@ -456,11 +466,11 @@ Deno.test("rerun resubmits the frozen graph from a sidecar", async () => {
     // Same seed, same everything — except where the files land (§6.4).
     assertEquals(rerun.params.seed, 999);
     assertEquals(
-      rerun.api_graph["3"]?.inputs.seed,
-      original.api_graph["3"]?.inputs.seed,
+      rerun.api_graph[KREA2_SAMPLER]?.inputs.seed,
+      original.api_graph[KREA2_SAMPLER]?.inputs.seed,
     );
     assertEquals(
-      rerun.api_graph["9"]?.inputs.filename_prefix,
+      rerun.api_graph[KREA2_SAVE]?.inputs.filename_prefix,
       `${rerun.id}/out`,
     );
 
@@ -551,7 +561,7 @@ Deno.test("ComfyUI refusing a graph fails the job and says why", async () => {
       "/api/workflows/krea2",
     );
     const graph = structuredClone(detail.api_json);
-    graph["3"]!.class_type = "SuperCustomSampler";
+    graph[KREA2_SAMPLER]!.class_type = "SuperCustomSampler";
     await app.fetch("/api/workflows/krea2", {
       method: "PUT",
       body: JSON.stringify({ api_json: graph }),
@@ -571,13 +581,13 @@ Deno.test("ComfyUI refusing a graph fails the job and says why", async () => {
       job: JobRow;
     };
     assertEquals(body.error.code, "comfy_rejected");
-    assert("3" in body.node_errors);
+    assert(KREA2_SAMPLER in body.node_errors);
 
     // The attempt is still on the record (§5.2: job rows are kept forever).
     const failed = await job(app, body.job.id);
     assertEquals(failed.status, "failed");
     assertEquals(failed.error?.type, "submit_failed");
-    assert("3" in (failed.error?.node_errors ?? {}));
+    assert(KREA2_SAMPLER in (failed.error?.node_errors ?? {}));
   }, { comfy: true });
 });
 

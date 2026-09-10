@@ -25,7 +25,9 @@ export function defaultFor(param: Param): unknown {
       return (param.default as number) ?? -1;
     case "size":
       return [...((param.default as [number, number]) ?? [1024, 1024])];
-    case "checkpoint":
+    case "model":
+    case "text_encoder":
+    case "vae":
       return (param.default as string) ?? "";
     case "lora_list":
       return ((param.default as LoraRow[]) ?? []).map((row) => ({ ...row }));

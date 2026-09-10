@@ -7,20 +7,26 @@ import {
   getModel,
   getModelByPath,
   latestOutputPathByModel,
+  listModelProbes,
   listModels,
   type ModelMetaPatch,
+  type ModelProbeRow,
   type ModelRow,
   normalizeModelHash,
   refreshModelUsage,
   type SidecarModelRef,
   updateModelMeta,
+  upsertModelProbe,
 } from "../db/queries.ts";
 import { mediaUrl } from "../outputs/store.ts";
 import type { SampleStore, SampleView } from "../samples/store.ts";
 import type { WsHub } from "../http/ws.ts";
+import { classOf } from "../config/defaults.ts";
+import type { ModelClass } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
+import { probeFamily } from "./probe.ts";
 import {
   ModelScanner,
   type RescanProgress,
@@ -58,6 +64,8 @@ export interface ModelView {
   name: string;
   filename: string;
   kind: string;
+  /** What the model is for, above the folder it came from (§3). */
+  class: ModelClass;
   size: number;
   mtime: number | null;
   display_name: string;
@@ -82,6 +90,8 @@ export interface ModelDetail extends ModelView {
 
 export interface ModelListFilters {
   kind?: string;
+  /** Every kind in the class; `diffusion` is the one picker's grab bag. */
+  class?: ModelClass;
   family?: string;
   q?: string;
 }
@@ -139,6 +149,8 @@ export class ModelLibrary {
   #samples?: SampleStore;
   #index: SidecarModelIndex | null = null;
   #scanning: Promise<void> | null = null;
+  #probes = new Map<string, ModelProbeRow>();
+  #now: () => number;
 
   constructor(options: ModelLibraryOptions) {
     this.#db = options.db;
@@ -146,6 +158,8 @@ export class ModelLibrary {
     this.#config = options.config;
     this.#hub = options.hub;
     this.#samples = options.samples;
+    this.#now = options.now ?? Date.now;
+    this.#probes = listModelProbes(options.db);
     this.scanner = options.scanner ??
       new ModelScanner(() => options.config.config);
     this.hasher = new ModelHasher({
@@ -170,6 +184,9 @@ export class ModelLibrary {
       const result = await this.scanner.rescan((progress) =>
         this.#broadcastRescan(progress)
       );
+      // Reading headers is cheap and its answer is what the pickers sort by,
+      // so it happens before hashing rather than after it (§6).
+      await this.#probe(result.models);
       // A pass over new files may find sidecars to link, so the index the
       // last pass built is stale.
       this.#index = null;
@@ -221,7 +238,9 @@ export class ModelLibrary {
       views.push(this.#view(null, row, thumbs));
     }
     const filtered = views.filter((view) =>
-      matchesFamily(view, filters.family) && matchesQuery(view, filters.q)
+      matchesClass(view, filters.class) &&
+      matchesFamily(view, filters.family) &&
+      matchesQuery(view, filters.q)
     );
     filtered.sort((a, b) =>
       a.display_name.localeCompare(b.display_name) ||
@@ -337,18 +356,22 @@ export class ModelLibrary {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
     const name = scanned?.name ?? filename;
+    const kind = scanned?.kind ?? row!.kind;
     return {
       id: row ? row.hash : pathId(path),
       hash: row?.hash ?? null,
       path,
       name,
       filename,
-      kind: scanned?.kind ?? row!.kind,
+      kind,
+      class: classOf(kind, this.#config.config.model_classes),
       size: scanned?.size ?? row!.size,
       mtime: scanned?.mtime ?? row?.mtime ?? null,
       // Unset, a display name falls back to the filename minus its extension.
       display_name: row?.display_name ?? basename(filename, extname(filename)),
-      family: row?.family ?? "unset",
+      // What the user filed it as wins; the header is the fallback, so a
+      // fresh library sorts sensibly without anyone tagging anything (§6).
+      family: row?.family ?? this.#probes.get(path)?.arch ?? "unset",
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
       thumb_path: row?.thumb_path ?? null,
@@ -360,6 +383,46 @@ export class ModelLibrary {
     };
   }
 
+  /**
+   * Read the header of every diffusion-class file whose size or mtime has
+   * moved since the last pass, and remember what it says. A file that cannot
+   * be read or is not recognised is recorded with a null arch, so a bad file
+   * is attempted once per change rather than on every scan.
+   */
+  async #probe(models: readonly ScannedModel[]): Promise<void> {
+    const overrides = this.#config.config.model_classes;
+    for (const model of models) {
+      if (classOf(model.kind, overrides) !== "diffusion") continue;
+      const seen = this.#probes.get(model.path);
+      if (
+        seen && seen.size === model.size && seen.mtime === model.mtime
+      ) {
+        continue;
+      }
+      let arch: string | null = null;
+      try {
+        arch = await probeFamily(model.path);
+      } catch {
+        // Not a safetensors file, or unreadable. Neither is fatal: the model
+        // stays listed and the user can still file it by hand (§8.1).
+        arch = null;
+      }
+      const row: ModelProbeRow = {
+        path: model.path,
+        size: model.size,
+        mtime: model.mtime,
+        arch,
+        probed_at: this.#now(),
+      };
+      this.#probes.set(model.path, row);
+      try {
+        upsertModelProbe(this.#db, row);
+      } catch (error) {
+        console.error(`could not record the probe of ${model.name}:`, error);
+      }
+    }
+  }
+
   #broadcastRescan(progress: RescanProgress): void {
     this.#hub.broadcast({ type: "rescan_progress", data: progress });
   }
@@ -368,11 +431,51 @@ export class ModelLibrary {
     this.#hub.broadcast({ type: "hashing_progress", data: progress });
   }
 
-  /** Folders the requested kind is scanned from, for Settings and the UI. */
-  folders(kind?: string): string[] {
+  /** Folders the requested kind or class is scanned from (Settings, the UI). */
+  folders(filter: { kind?: string; class?: ModelClass } = {}): string[] {
     const configured = this.#config.config.model_folders;
-    if (kind) return configured[kind] ?? [];
+    if (filter.kind) return configured[filter.kind] ?? [];
+    if (filter.class) {
+      const overrides = this.#config.config.model_classes;
+      const found: string[] = [];
+      for (const [kind, folders] of Object.entries(configured)) {
+        if (classOf(kind, overrides) !== filter.class) continue;
+        for (const folder of folders) {
+          if (!found.includes(folder)) found.push(folder);
+        }
+      }
+      return found;
+    }
     return Object.values(configured).flat();
+  }
+
+  /**
+   * Whether a file of this class is on disk under this name. A workflow binds
+   * the folder-relative name ComfyUI resolves, so this is the same question
+   * ComfyUI will ask when the graph is queued — asked early enough to say so
+   * before anything is submitted.
+   */
+  hasModelNamed(name: string, modelClass: ModelClass): boolean {
+    const overrides = this.#config.config.model_classes;
+    let any = false;
+    for (const model of this.scanner.registry.values()) {
+      if (classOf(model.kind, overrides) !== modelClass) continue;
+      any = true;
+      if (model.name === name) return true;
+    }
+    // Nothing of this class has been scanned, so there is no difference here
+    // between a name that is missing and a folder that was never configured.
+    // Answering "yes" keeps the app usable for someone whose library the app
+    // cannot see; the only cost is that ComfyUI reports the failure instead.
+    return !any;
+  }
+
+  /** Kinds belonging to a class, for the scan a class-filtered list needs. */
+  kindsOfClass(modelClass: ModelClass): string[] {
+    const overrides = this.#config.config.model_classes;
+    return this.scanner.kinds().filter((kind) =>
+      classOf(kind, overrides) === modelClass
+    );
   }
 }
 
@@ -388,6 +491,11 @@ function thumbUrl(row: ModelRow | null, thumbs: Map<string, string>):
   if (!row) return null;
   const path = row.thumb_path ?? thumbs.get(row.hash) ?? null;
   return path === null ? null : mediaUrl(path);
+}
+
+function matchesClass(view: ModelView, modelClass?: ModelClass): boolean {
+  if (!modelClass) return true;
+  return view.class === modelClass;
 }
 
 function matchesFamily(view: ModelView, family?: string): boolean {

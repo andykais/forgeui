@@ -4,7 +4,7 @@
   "family": "z-image",
   "kind": "image",
   "category": null,
-  "description": "Few-step text-to-image with Z-Image Turbo. Eight steps by default.",
+  "description": "Few-step text-to-image with Z-Image Turbo. Eight steps at cfg 1 on res_multistep, as the official workflow ships it.",
   "params": [
     {
       "key": "prompt",
@@ -12,7 +12,18 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "6.text"
+      "bind": "5.text"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "z-image"
+      },
+      "default": "z_image_turbo_bf16.safetensors",
+      "bind": "6.unet_name"
     },
     {
       "key": "size",
@@ -24,8 +35,8 @@
       ],
       "step": 16,
       "bind": {
-        "w": "5.width",
-        "h": "5.height"
+        "w": "4.width",
+        "h": "4.height"
       }
     },
     {
@@ -33,12 +44,55 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "3.seed"
+      "bind": "1.seed"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "default": 8,
+      "min": 1,
+      "max": 50,
+      "advanced": true,
+      "bind": "1.steps"
+    },
+    {
+      "key": "shift",
+      "label": "Shift",
+      "type": "float",
+      "default": 3,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "3.shift"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "model",
+      "filter": {
+        "class": "clip"
+      },
+      "default": "qwen_3_4b.safetensors",
+      "advanced": true,
+      "bind": "8.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "model",
+      "filter": {
+        "class": "vae"
+      },
+      "default": "ae.safetensors",
+      "advanced": true,
+      "bind": "7.vae_name"
     }
   ],
   "outputs": [
     {
-      "node": "9",
+      "node": "10",
       "kind": "image"
     }
   ]

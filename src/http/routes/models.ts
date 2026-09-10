@@ -1,3 +1,4 @@
+import { MODEL_CLASSES, type ModelClass } from "../../config/types.ts";
 import { FAMILIES } from "../../workflows/types.ts";
 import type { ModelPatch } from "../../models/library.ts";
 import { BodyError, json, readJson } from "../json.ts";
@@ -97,17 +98,37 @@ export function modelRoutes(ctx: AppContext): Route[] {
       path: "/api/models",
       handler: async (_req, { url }) => {
         const kind = url.searchParams.get("kind") ?? undefined;
-        // The scan is what makes a model visible, so a first request that
-        // arrives before the background pass finished still answers with the
-        // folder's contents rather than with nothing.
-        if (kind && ctx.models.scanner.registry.size === 0) {
-          await ctx.models.scanner.list(kind);
+        const raw = url.searchParams.get("class");
+        if (
+          raw !== null && !(MODEL_CLASSES as readonly string[]).includes(raw)
+        ) {
+          throw new BodyError(
+            `class: expected one of ${MODEL_CLASSES.join(", ")}`,
+          );
+        }
+        const modelClass = (raw ?? undefined) as ModelClass | undefined;
+        // The scan is what makes a model visible, so a request that arrives
+        // before the background pass reached this kind still answers with the
+        // folder's contents rather than with nothing. Kinds already walked
+        // are left alone, so this never re-reads the disk; a class asks for
+        // every kind under it.
+        const wanted = kind
+          ? [kind]
+          : modelClass
+          ? ctx.models.kindsOfClass(modelClass)
+          : [];
+        for (const each of wanted) {
+          if (!ctx.models.scanner.hasScanned(each)) {
+            await ctx.models.scanner.list(each);
+          }
         }
         return json({
           kind: kind ?? null,
-          folders: ctx.models.folders(kind),
+          class: modelClass ?? null,
+          folders: ctx.models.folders({ kind, class: modelClass }),
           models: ctx.models.list({
             kind,
+            class: modelClass,
             family: url.searchParams.get("family") ?? undefined,
             q: url.searchParams.get("q") ?? undefined,
           }),

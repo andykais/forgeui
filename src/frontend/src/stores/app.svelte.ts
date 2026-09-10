@@ -27,7 +27,15 @@ class AppState {
   dataDir = $state<string>("");
   workflows = $state<WorkflowSummary[]>([]);
   loras = $state<ModelEntry[]>([]);
+  /** Everything that can drive a generation, from every diffusion folder. */
   checkpoints = $state<ModelEntry[]>([]);
+  /**
+   * The other classes a `model` param can pick from — a workflow names its
+   * text encoder and VAE as well as its base model (§5), and each picker asks
+   * for its own class.
+   */
+  clips = $state<ModelEntry[]>([]);
+  vaes = $state<ModelEntry[]>([]);
   /** The model library's two background passes (§8.1), pushed on `/ws`. */
   rescan = $state<RescanProgress | null>(null);
   hashing = $state<HashingProgress | null>(null);
@@ -96,19 +104,37 @@ class AppState {
   }
 
   async refreshModels(): Promise<void> {
-    const [loras, checkpoints] = await Promise.all([
+    const [loras, checkpoints, clips, vaes] = await Promise.all([
       api.modelsOfKind("loras").catch(() => []),
-      api.modelsOfKind("checkpoints").catch(() => []),
+      api.modelsOfClass("diffusion").catch(() => []),
+      api.modelsOfClass("clip").catch(() => []),
+      api.modelsOfClass("vae").catch(() => []),
     ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
+    this.clips = clips;
+    this.vaes = vaes;
+  }
+
+  /** The list a `model` param of this class picks from. */
+  modelsOfClass(modelClass: string | undefined): ModelEntry[] {
+    switch (modelClass) {
+      case "clip":
+        return this.clips;
+      case "vae":
+        return this.vaes;
+      case "lora":
+        return this.loras;
+      default:
+        return this.checkpoints;
+    }
   }
 
   /** Everything the pickers and the models filter name, by hash. */
   model(hash: string | null | undefined): ModelEntry | null {
     if (!hash) return null;
     return (
-      [...this.checkpoints, ...this.loras].find(
+      [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes].find(
         (model) => model.hash === hash || model.id === hash,
       ) ?? null
     );

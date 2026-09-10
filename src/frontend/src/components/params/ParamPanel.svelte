@@ -5,7 +5,7 @@
   import SeedParam from "./SeedParam.svelte";
   import SizeParam from "./SizeParam.svelte";
   import LoraListParam from "./LoraListParam.svelte";
-  import Popover from "../Popover.svelte";
+  import ModelParam from "./ModelParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param } from "../../types.ts";
 
   /**
@@ -20,6 +20,8 @@
     lastSeed: number | null;
     loras?: ModelEntry[];
     checkpoints?: ModelEntry[];
+    /** A `model` param picks from its own class, not always `diffusion`. */
+    modelsOfClass?: (modelClass: string | undefined) => ModelEntry[];
     /** Keys the panel was filled from that this manifest no longer has (§6.4). */
     warnings?: string[];
     onchange: (key: string, value: unknown) => void;
@@ -36,6 +38,7 @@
     lastSeed,
     loras = [],
     checkpoints = [],
+    modelsOfClass = () => checkpoints,
     warnings = [],
     onchange,
     onreset,
@@ -45,7 +48,6 @@
   }: Props = $props();
 
   let advancedOpen = $state(false);
-  let checkpointOpen = $state<string | null>(null);
 
   const main = $derived(manifest.params.filter((param) => !param.advanced));
   const advanced = $derived(manifest.params.filter((param) => param.advanced));
@@ -165,41 +167,13 @@
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
         />
-      {:else if param.type === "checkpoint"}
-        <div class="picker-wrap">
-          <button
-            class="picker"
-            onclick={() =>
-              (checkpointOpen = checkpointOpen === param.key ? null : param.key)}
-          >
-            <span class="mono">
-              {(values[param.key] as string) || "choose a checkpoint…"}
-            </span>
-          </button>
-          <Popover
-            open={checkpointOpen === param.key}
-            title="Checkpoints"
-            onclose={() => (checkpointOpen = null)}
-          >
-            {#if checkpoints.length === 0}
-              <p class="note">
-                No checkpoints found in <code class="mono">model_folders</code>.
-              </p>
-            {:else}
-              {#each checkpoints as model (model.name)}
-                <button
-                  class="option"
-                  onclick={() => {
-                    onchange(param.key, model.name);
-                    checkpointOpen = null;
-                  }}
-                >
-                  {model.display_name}
-                </button>
-              {/each}
-            {/if}
-          </Popover>
-        </div>
+      {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}
+        <ModelParam
+          {param}
+          value={(values[param.key] as string) ?? ""}
+          models={modelsOfClass(param.filter?.class)}
+          onchange={(name) => onchange(param.key, name)}
+        />
       {:else}
         <!--
           image / mask / video: the content-addressed input store is Phase 3,
@@ -356,30 +330,6 @@
     flex-direction: column;
     gap: 12px;
     margin-top: 10px;
-  }
-
-  .picker-wrap {
-    position: relative;
-  }
-
-  .picker {
-    width: 100%;
-    text-align: left;
-    background: var(--raised);
-    font-size: 12px;
-  }
-
-  .option {
-    display: block;
-    width: 100%;
-    background: transparent;
-    text-align: left;
-    padding: 5px 7px;
-    font-size: 12px;
-  }
-
-  .option:hover {
-    background: var(--control);
   }
 
   .note {

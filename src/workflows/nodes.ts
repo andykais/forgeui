@@ -19,6 +19,15 @@ export interface NodeSchema {
    * `control_after_generate` combo that follows a seed.
    */
   after?: Record<string, string | number | boolean>;
+  /**
+   * Inputs whose widget expands into several, keyed by the value selected.
+   * ComfyUI calls these `DynamicCombo`: picking `on` for a sampling mode adds
+   * that mode's own widgets after it, and the prompt names them
+   * `<parent>.<child>` (comfy_api/latest/_io.py). The selected key decides how
+   * many values the node's `widgets_values` holds, so the width cannot be
+   * read from the widget list alone.
+   */
+  dynamic?: Record<string, Record<string, string[]>>;
   /** Output slot names, in slot order. */
   outputs?: string[];
   /** Writes files; a prompt is queued for these (§5 step 3). */
@@ -35,11 +44,11 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     outputs: ["MODEL"],
   },
   CLIPLoader: {
-    widgets: ["clip_name", "type"],
+    widgets: ["clip_name", "type", "device"],
     outputs: ["CLIP"],
   },
   DualCLIPLoader: {
-    widgets: ["clip_name1", "clip_name2", "type"],
+    widgets: ["clip_name1", "clip_name2", "type", "device"],
     outputs: ["CLIP"],
   },
   VAELoader: {
@@ -79,6 +88,106 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     inputs: ["model"],
     widgets: ["shift"],
     outputs: ["MODEL"],
+  },
+  ModelSamplingAuraFlow: {
+    inputs: ["model"],
+    widgets: ["shift"],
+    outputs: ["MODEL"],
+  },
+  // ---- utility nodes the official templates wire in (§7) -----------------
+  // `PrimitiveInt` and `RandomNoise` carry the same `control_after_generate`
+  // combo a seed does, which the editor writes into `widgets_values` too.
+  PrimitiveInt: {
+    widgets: ["value"],
+    after: { value: "fixed" },
+    outputs: ["INT"],
+  },
+  PrimitiveFloat: {
+    widgets: ["value"],
+    outputs: ["FLOAT"],
+  },
+  PrimitiveBoolean: {
+    widgets: ["value"],
+    outputs: ["BOOLEAN"],
+  },
+  PrimitiveStringMultiline: {
+    widgets: ["value"],
+    outputs: ["STRING"],
+  },
+  // Returns its input as well as showing it, so templates chain through it.
+  // Not `output: true` here: that flag means "writes files" (§5 step 3), and
+  // this writes none.
+  PreviewAny: {
+    inputs: ["source"],
+    outputs: ["STRING"],
+  },
+  StringConcatenate: {
+    widgets: ["string_a", "string_b", "delimiter"],
+    outputs: ["STRING"],
+  },
+  // The prompt enhancer: a language model rewrites the prompt before it is
+  // encoded. `sampling_mode` is a DynamicCombo — choosing `on` adds the seven
+  // sampling widgets below it, named `sampling_mode.temperature` and so on.
+  TextGenerate: {
+    inputs: ["clip", "image", "video", "audio"],
+    widgets: [
+      "prompt",
+      "max_length",
+      "sampling_mode",
+      "thinking",
+      "use_default_template",
+    ],
+    dynamic: {
+      sampling_mode: {
+        on: [
+          "temperature",
+          "top_k",
+          "top_p",
+          "min_p",
+          "repetition_penalty",
+          "seed",
+          "presence_penalty",
+        ],
+        off: [],
+      },
+    },
+    outputs: ["STRING"],
+  },
+  ComfySwitchNode: {
+    inputs: ["on_false", "on_true"],
+    widgets: ["switch"],
+    outputs: ["output"],
+  },
+  ResolutionSelector: {
+    widgets: ["aspect_ratio", "megapixels", "multiple"],
+    outputs: ["INT", "INT"],
+  },
+  // ---- the Flux.2 custom sampler chain -----------------------------------
+  KSamplerSelect: {
+    widgets: ["sampler_name"],
+    outputs: ["SAMPLER"],
+  },
+  Flux2Scheduler: {
+    widgets: ["steps", "width", "height"],
+    outputs: ["SIGMAS"],
+  },
+  CFGGuider: {
+    inputs: ["model", "positive", "negative"],
+    widgets: ["cfg"],
+    outputs: ["GUIDER"],
+  },
+  RandomNoise: {
+    widgets: ["noise_seed"],
+    after: { noise_seed: "randomize" },
+    outputs: ["NOISE"],
+  },
+  SamplerCustomAdvanced: {
+    inputs: ["noise", "guider", "sampler", "sigmas", "latent_image"],
+    outputs: ["output", "denoised_output"],
+  },
+  EmptyFlux2LatentImage: {
+    widgets: ["width", "height", "batch_size"],
+    outputs: ["LATENT"],
   },
   EmptyLatentImage: {
     widgets: ["width", "height", "batch_size"],

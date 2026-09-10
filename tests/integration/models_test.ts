@@ -16,6 +16,7 @@ const CHECKPOINT = "v1-5-pruned-emaonly-fp16.safetensors";
 
 interface ModelsResponse {
   kind: string | null;
+  class: string | null;
   folders: string[];
   models: ModelView[];
   progress: {
@@ -127,6 +128,174 @@ Deno.test("scanned models are listed before they are hashed", async () => {
     const body = await rejected.json() as { error: { code: string } };
     assertEquals(body.error.code, "hashing");
   });
+});
+
+Deno.test("one class lists every diffusion folder at once", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-classes-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    const diffusion = join(dir, "diffusion_models");
+    const loras = join(dir, "loras");
+    await writeFakeSafetensors(join(checkpoints, "sdxl.safetensors"), {
+      name: "sdxl",
+    });
+    await writeFakeSafetensors(join(diffusion, "flux1-dev.safetensors"), {
+      name: "flux",
+    });
+    await writeFakeSafetensors(join(loras, "grain.safetensors"), {
+      name: "grain",
+    });
+    await withTestApp(async (app) => {
+      // Two folders, one class: what a workflow's model picker asks for.
+      const listed = await models(app, "?class=diffusion");
+      assertEquals(listed.class, "diffusion");
+      assertEquals(
+        listed.models.map((model) => model.name).sort(),
+        ["flux1-dev.safetensors", "sdxl.safetensors"],
+      );
+      assert(listed.models.every((model) => model.class === "diffusion"));
+      assertEquals(listed.folders.sort(), [checkpoints, diffusion].sort());
+
+      // A LoRA is a different class and stays out of it.
+      const loraClass = await models(app, "?class=lora");
+      assertEquals(loraClass.models.map((model) => model.name), [
+        "grain.safetensors",
+      ]);
+
+      // The folder a model came from is still reported as its kind.
+      const byKind = await models(app, "?kind=diffusion_models");
+      assertEquals(byKind.models.map((model) => model.name), [
+        "flux1-dev.safetensors",
+      ]);
+
+      // class and q compose.
+      const searched = await models(app, "?class=diffusion&q=flux");
+      assertEquals(searched.models.map((model) => model.name), [
+        "flux1-dev.safetensors",
+      ]);
+
+      const bad = await app.fetch("/api/models?class=nonsense");
+      assertEquals(bad.status, 400);
+    }, {
+      argv: [
+        "--models-dir",
+        `checkpoints=${checkpoints}`,
+        "--models-dir",
+        `diffusion_models=${diffusion}`,
+        "--models-dir",
+        `loras=${loras}`,
+      ],
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a model's family is read from its header, and the user overrides it", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-family-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    const diffusion = join(dir, "diffusion_models");
+    await writeFakeSafetensors(join(checkpoints, "someSDXL.safetensors"), {
+      name: "sdxl",
+      tensors: [
+        "model.diffusion_model.input_blocks.0.0.weight",
+        "model.diffusion_model.label_emb.0.0.weight",
+      ],
+    });
+    await writeFakeSafetensors(join(diffusion, "flux1-dev.safetensors"), {
+      name: "flux",
+      tensors: [
+        "double_blocks.0.img_attn.norm.key_norm.weight",
+        "img_in.weight",
+      ],
+    });
+    await writeFakeSafetensors(join(diffusion, "mystery.safetensors"), {
+      name: "mystery",
+    });
+    await withTestApp(async (app) => {
+      await scanAndHash(app);
+      const listed = await models(app, "?class=diffusion");
+      const byName = new Map(
+        listed.models.map((model) => [model.name, model]),
+      );
+      // Nobody filed any of these; the header did (§6).
+      assertEquals(byName.get("someSDXL.safetensors")?.family, "sdxl");
+      assertEquals(byName.get("flux1-dev.safetensors")?.family, "flux");
+      // An architecture the probe does not know stays unfiled rather than
+      // being guessed at.
+      assertEquals(byName.get("mystery.safetensors")?.family, "unset");
+
+      // What the user says wins over what the file says.
+      const flux = byName.get("flux1-dev.safetensors")!;
+      const patched = await app.json(`/api/models/${flux.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ family: "sd15" }),
+      }) as ModelView;
+      assertEquals(patched.family, "sd15");
+      const after = await models(app, "?class=diffusion");
+      assertEquals(
+        after.models.find((model) => model.name === "flux1-dev.safetensors")
+          ?.family,
+        "sd15",
+      );
+
+      // Clearing it falls back to the header again, not to unset.
+      const cleared = await app.json(`/api/models/${flux.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ family: "unset" }),
+      }) as ModelView;
+      assertEquals(cleared.family, "flux");
+    }, {
+      argv: [
+        "--models-dir",
+        `checkpoints=${checkpoints}`,
+        "--models-dir",
+        `diffusion_models=${diffusion}`,
+      ],
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a model a workflow names but the folders do not hold is refused", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-missing-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    await writeFakeSafetensors(join(checkpoints, "real.safetensors"), {
+      name: "real",
+    });
+    await withTestApp(async (app) => {
+      await scanAndHash(app);
+      const response = await app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: "illustrious",
+          params: { prompt: "figs", model: "not-on-disk.safetensors" },
+        }),
+      });
+      // Refused before anything is queued, naming the param and the value so
+      // it can be fixed in the panel rather than in a ComfyUI log.
+      assertEquals(response.status, 400);
+      const body = await response.json() as { error: { message: string } };
+      assertStringIncludes(body.error.message, "not in your model folders");
+      assertStringIncludes(body.error.message, "not-on-disk.safetensors");
+
+      // One that is there passes the check.
+      const ok = await app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: "illustrious",
+          params: { prompt: "figs", model: "real.safetensors" },
+        }),
+      });
+      // No ComfyUI in this app, so it stops later — but not as a bad param.
+      assertEquals(ok.status, 503);
+    }, { argv: ["--models-dir", `checkpoints=${checkpoints}`] });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("hashing fills in identity, and only re-reads what changed", async () => {
@@ -266,15 +435,30 @@ Deno.test("families come back with model and workflow counts", async () => {
       families: { family: string; models: number; workflows: number }[];
     }>("/api/families");
     const byName = new Map(families.map((entry) => [entry.family, entry]));
-    // The hardcoded list of §8.1, plus `unset`.
+    // The hardcoded list of §8.1, plus `unset`. Families are generational:
+    // ltx and ltx-2 differ by text encoder, as do flux and flux2 (§6).
     assertEquals(
       families.map((entry) => entry.family).sort(),
-      ["anima", "flux", "ltx", "sd15", "sdxl", "unset", "z-image"],
+      [
+        "anima",
+        "chroma",
+        "flux",
+        "flux2",
+        "krea2",
+        "ltx",
+        "ltx-2",
+        "sd15",
+        "sdxl",
+        "unset",
+        "z-image",
+      ],
     );
     assertEquals(byName.get("flux")?.models, 1);
     assertEquals(byName.get("unset")?.models, 2);
-    // Three bundled workflows are flux, one is sd15 (§4.6).
-    assertEquals(byName.get("flux")?.workflows, 3);
+    // One bundled workflow is Flux.1, one FLUX.2, one Krea 2, one sd15 (§4.6).
+    assertEquals(byName.get("flux")?.workflows, 1);
+    assertEquals(byName.get("flux2")?.workflows, 1);
+    assertEquals(byName.get("krea2")?.workflows, 2); // plain and enhanced
     assertEquals(byName.get("sd15")?.workflows, 1);
     assertEquals(byName.get("sd15")?.models, 0);
   });

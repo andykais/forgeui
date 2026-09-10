@@ -141,7 +141,9 @@ function defaultValue(param: Param): unknown {
       return param.default ?? -1;
     case "size":
       return [...param.default];
-    case "checkpoint":
+    case "model":
+    case "text_encoder":
+    case "vae":
       return param.default ?? "";
     case "lora_list":
       return param.default ? structuredClone(param.default) : [];
@@ -216,7 +218,9 @@ export function coerceParams(
       case "size":
         values[param.key] = coerceSize(param, raw);
         break;
-      case "checkpoint":
+      case "model":
+      case "text_encoder":
+      case "vae":
         values[param.key] = typeof raw === "string" ? raw : "";
         break;
       case "lora_list":

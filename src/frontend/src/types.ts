@@ -8,7 +8,9 @@ export type ParamType =
   | "enum"
   | "seed"
   | "size"
-  | "checkpoint"
+  | "model"
+  | "text_encoder"
+  | "vae"
   | "lora_list"
   | "image"
   | "mask"
@@ -33,7 +35,7 @@ export interface Param {
   step?: number;
   options?: string[];
   source?: string;
-  filter?: { family?: string };
+  filter?: { family?: string; class?: string };
   bind: string | { w: string; h: string } | { chain: LoraChain };
   of?: string;
 }
@@ -222,6 +224,8 @@ export interface ModelEntry {
   display_name: string;
   family: string;
   kind: string;
+  /** What the model is for, above the folder it came from (§3). */
+  class: string;
   size: number;
   mtime: number | null;
   notes: string | null;

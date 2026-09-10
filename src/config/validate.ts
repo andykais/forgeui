@@ -1,6 +1,8 @@
 import {
   KEY_ACTIONS,
   type KeyAction,
+  MODEL_CLASSES,
+  type ModelClass,
   type PartialConfig,
   type PartialUiConfig,
   UI_SCREENS,
@@ -147,7 +149,14 @@ export function validatePartialConfig(
   where = "config",
 ): PartialConfig {
   const raw = record(value, where);
-  rejectUnknown(raw, where, ["server", "comfy", "model_folders", "keys", "ui"]);
+  rejectUnknown(raw, where, [
+    "server",
+    "comfy",
+    "model_folders",
+    "model_classes",
+    "keys",
+    "ui",
+  ]);
   const out: PartialConfig = {};
 
   if ("server" in raw) {
@@ -186,6 +195,18 @@ export function validatePartialConfig(
       out.model_folders[kind] = strArray(
         value,
         `${where}.model_folders.${kind}`,
+      );
+    }
+  }
+
+  if ("model_classes" in raw) {
+    const classes = record(raw.model_classes, `${where}.model_classes`);
+    out.model_classes = {};
+    for (const [kind, value] of Object.entries(classes)) {
+      out.model_classes[kind] = oneOf<ModelClass>(
+        value,
+        `${where}.model_classes.${kind}`,
+        MODEL_CLASSES,
       );
     }
   }

@@ -86,6 +86,10 @@ CMD ["--data-dir", "/workspace", \
      "--host", "0.0.0.0", \
      "--comfy-path", "/opt/ComfyUI", \
      "--models-dir", "checkpoints=/models/checkpoints", \
+     "--models-dir", "diffusion_models=/models/diffusion_models", \
+     "--models-dir", "unet=/models/unet", \
      "--models-dir", "loras=/models/loras", \
      "--models-dir", "vae=/models/vae", \
-     "--models-dir", "controlnet=/models/controlnet"]
+     "--models-dir", "text_encoders=/models/text_encoders", \
+     "--models-dir", "controlnet=/models/controlnet", \
+     "--models-dir", "upscale_models=/models/upscale_models"]

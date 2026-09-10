@@ -132,8 +132,14 @@ Container Toolkit; generate the CDI spec once on the host with
 podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
-`loras`, `vae`, `controlnet` — matching how the container's entrypoint wires
-up `--models-dir` (see `Containerfile`'s `CMD`).
+`diffusion_models`, `unet`, `loras`, `vae`, `text_encoders`, `controlnet`,
+`upscale_models` — matching how the container's entrypoint wires up
+`--models-dir` (see `Containerfile`'s `CMD`). A folder you do not use can
+simply be absent; a missing folder scans as empty.
+
+Anything that can drive a generation is one *class* to the app, so
+`checkpoints`, `diffusion_models` and `unet` are listed together in a
+workflow's model picker regardless of which of them a file sits in.
 
 `/workspace` is ForgeUI's data directory (`--data-dir`, §3): `config.yaml`,
 `app.db`, `workflows/user`, `outputs`, `samples`, and everything else the app

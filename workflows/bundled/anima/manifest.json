@@ -4,7 +4,7 @@
   "family": "anima",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Anima. LoRAs are filtered to the anima family.",
+  "description": "Text-to-image with Anima Base v1. The Turbo LoRA switch is the template's own: on, it runs the turbo weights at 8 steps and cfg 1 instead of the base 30 and 4.",
   "params": [
     {
       "key": "prompt",
@@ -12,14 +12,25 @@
       "type": "text",
       "required": true,
       "default": "",
-      "bind": "6.text"
+      "bind": "7.text"
     },
     {
       "key": "negative",
       "label": "Negative prompt",
       "type": "text",
-      "default": "worst quality, low quality",
-      "bind": "7.text"
+      "default": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia",
+      "bind": "5.text"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "anima"
+      },
+      "default": "anima-base-v1.0.safetensors",
+      "bind": "8.unet_name"
     },
     {
       "key": "size",
@@ -31,8 +42,8 @@
       ],
       "step": 16,
       "bind": {
-        "w": "5.width",
-        "h": "5.height"
+        "w": "4.width",
+        "h": "4.height"
       }
     },
     {
@@ -40,54 +51,62 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "3.seed"
+      "bind": "6.seed"
     },
     {
-      "key": "loras",
-      "label": "LoRAs",
-      "type": "lora_list",
-      "filter": {
-        "family": "anima"
-      },
-      "bind": {
-        "chain": {
-          "model_from": "1.MODEL",
-          "clip_from": "1.CLIP",
-          "model_to": [
-            "3.model"
-          ],
-          "clip_to": [
-            "6.clip",
-            "7.clip"
-          ]
-        }
-      }
+      "key": "turbo",
+      "label": "Turbo LoRA",
+      "type": "bool",
+      "default": false,
+      "bind": "17.value"
     },
     {
       "key": "steps",
       "label": "Steps",
       "type": "int",
-      "advanced": true,
-      "default": 28,
+      "default": 30,
       "min": 1,
       "max": 100,
-      "bind": "3.steps"
+      "advanced": true,
+      "bind": "9.value"
     },
     {
       "key": "cfg",
       "label": "CFG",
       "type": "float",
-      "advanced": true,
-      "default": 5.0,
+      "default": 4,
       "min": 0,
       "max": 20,
       "step": 0.1,
-      "bind": "3.cfg"
+      "advanced": true,
+      "bind": "14.value"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "model",
+      "filter": {
+        "class": "clip"
+      },
+      "default": "qwen_3_06b_base.safetensors",
+      "advanced": true,
+      "bind": "1.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "model",
+      "filter": {
+        "class": "vae"
+      },
+      "default": "qwen_image_vae.safetensors",
+      "advanced": true,
+      "bind": "2.vae_name"
     }
   ],
   "outputs": [
     {
-      "node": "9",
+      "node": "18",
       "kind": "image"
     }
   ]

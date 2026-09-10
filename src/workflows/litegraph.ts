@@ -50,16 +50,51 @@ export interface LiteGraphDocument {
 const COLUMN_WIDTH = 340;
 const ROW_HEIGHT = 200;
 
-function widgetOrder(
+/**
+ * The values a node's `widgets_values` holds, in the editor's own order.
+ *
+ * Three things make this more than "the literal inputs":
+ *
+ * - A widget promoted to a link still occupies its slot. The editor keeps the
+ *   value it had, and the api graph no longer carries one, so a placeholder
+ *   goes in — dropping it shifts every widget after it by one, which is how a
+ *   linked `steps` turns the next value into a NaN.
+ * - A UI-only widget follows the one it decorates (`control_after_generate`).
+ * - A `DynamicCombo`'s chosen option brings its own widgets, immediately
+ *   after the parent and before the next declared widget.
+ */
+function widgetValuesOf(
   classType: string,
   inputs: Record<string, unknown>,
-): string[] {
-  const declared = CORE_NODES[classType]?.widgets;
+): unknown[] {
+  const schema = CORE_NODES[classType];
+  const declared = schema?.widgets;
   const literals = Object.keys(inputs).filter((name) => !isLink(inputs[name]));
-  if (!declared) return literals;
-  const ordered = declared.filter((name) => literals.includes(name));
+  if (!declared) return literals.map((name) => inputs[name]);
+
+  const values: unknown[] = [];
+  const taken = new Set<string>();
+  for (const name of declared) {
+    const linked = isLink(inputs[name]);
+    if (!linked && !(name in inputs)) continue;
+    taken.add(name);
+    // A linked widget keeps its slot; the link is what the node reads.
+    values.push(linked ? null : inputs[name]);
+    const extra = schema?.after?.[name];
+    if (extra !== undefined) values.push(extra);
+    const options = schema?.dynamic?.[name];
+    if (!options || linked) continue;
+    for (const child of options[String(inputs[name])] ?? []) {
+      const key = `${name}.${child}`;
+      taken.add(key);
+      values.push(inputs[key]);
+    }
+  }
   // Anything the schema does not know about keeps its position at the end.
-  return [...ordered, ...literals.filter((name) => !declared.includes(name))];
+  for (const name of literals) {
+    if (!taken.has(name)) values.push(inputs[name]);
+  }
+  return values;
 }
 
 function linkOrder(
@@ -150,13 +185,7 @@ export function apiGraphToLiteGraph(graph: ApiGraph): LiteGraphDocument {
     const row = perColumn.get(column) ?? 0;
     perColumn.set(column, row + 1);
 
-    const widgets = widgetOrder(apiNode.class_type, apiNode.inputs);
-    const widgetValues: unknown[] = [];
-    for (const name of widgets) {
-      widgetValues.push(apiNode.inputs[name]);
-      const extra = schema?.after?.[name];
-      if (extra !== undefined) widgetValues.push(extra);
-    }
+    const widgetValues = widgetValuesOf(apiNode.class_type, apiNode.inputs);
 
     const inputs: LiteGraphSlot[] = linkOrder(
       apiNode.class_type,

@@ -46,7 +46,9 @@
     "enum",
     "seed",
     "size",
-    "checkpoint",
+    "model",
+    "text_encoder",
+    "vae",
   ];
 
   $effect(() => {
@@ -463,6 +465,7 @@
               lastSeed={null}
               loras={app.loras}
               checkpoints={app.checkpoints}
+              modelsOfClass={(c) => app.modelsOfClass(c)}
               onchange={(key, value) =>
                 (previewValues = { ...previewValues, [key]: value })}
               onreset={resetPreview}

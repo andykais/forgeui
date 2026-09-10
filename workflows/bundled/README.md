@@ -5,22 +5,60 @@ The eight workflows of DESIGN §4.6, shipped with the app and copied into
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
 
-| id              | name                  | family  | kind  | exposed params                                                  |
-| --------------- | --------------------- | ------- | ----- | --------------------------------------------------------------- |
-| `krea2`         | Flux Krea 2           | flux    | image | prompt, size, seed, loras · steps, cfg advanced                 |
-| `krea2-img2img` | Flux Krea 2 (img2img) | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced |
-| `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
-| `anima`         | Anima                 | anima   | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
-| `flux-klein`    | Flux Klein            | flux    | image | prompt, size, seed, loras                                       |
-| `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, size, seed                                              |
-| `ltx`           | LTX Video             | ltx     | video | prompt, size, frames, fps, seed, loras                          |
-| `sd15`          | Stable Diffusion 1.5  | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced       |
+| id               | name                    | family  | kind  | exposed params                                                              |
+| ---------------- | ----------------------- | ------- | ----- | --------------------------------------------------------------------------- |
+| `krea2`          | Krea 2 Turbo            | krea2   | image | prompt, model, size, seed, loras · steps, cfg, clip, vae advanced           |
+| `krea2-enhanced` | Krea 2 Turbo (enhanced) | krea2   | image | as `krea2`, plus the template's prompt enhancer · enhancer length advanced  |
+| `krea2-img2img`  | Flux Krea 2 (img2img)   | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced             |
+| `illustrious`    | Illustrious XL          | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced            |
+| `anima`          | Anima                   | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced |
+| `flux-klein`     | Flux.2 Klein 4B         | flux2   | image | prompt, model, size, seed · steps, cfg, clip, vae advanced                  |
+| `z-image-turbo`  | Z-Image Turbo           | z-image | image | prompt, model, size, seed · steps, shift, clip, vae advanced                |
+| `ltx`            | LTX Video               | ltx     | video | prompt, size, frames, fps, seed, loras                                      |
+| `sd15`           | Stable Diffusion 1.5    | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                   |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
 below.
 
-## The model filenames are placeholders — except `sd15`
+## Rebuilding one from the official ComfyUI template
+
+`scripts/import_template.ts` turns a ComfyUI workflow template into the flat api
+graph this app queues:
+
+```sh
+deno run --allow-read --allow-write scripts/import_template.ts \
+  <template>.json workflows/bundled/<id>/workflow.api.json
+```
+
+Every current template is a **Subgraph**: the saved document has three or four
+top-level nodes, one of them a UUID-typed instance of a definition under
+`definitions.subgraphs`, and the real graph lives inside. ComfyUI flattens that
+at `graphToPrompt()` time because the prompt format has no subgraph concept; the
+script does the same offline, splices the parent's output node onto the inner
+node that feeds it, and renumbers to `1..n`. Widget order comes from
+`src/workflows/nodes.ts`, so a node type missing there is an error naming the
+type rather than a wrong guess.
+
+`z-image-turbo`, `anima`, `flux-klein` and `krea2` were rebuilt this way; the
+rest are still the placeholders described below.
+
+`krea2` changed model in the process. The graph here was **Flux.1 Krea [dev]**,
+a Flux-family model; the page it is named after covers **Krea 2**, which runs on
+a Qwen3-VL text encoder and is a different architecture. Deriving from the
+source made the workflow match its name. `krea2-img2img` still holds the old
+Flux graph and keeps its old name; it needs image inputs before it can run at
+all, so it is left for that phase.
+
+`ltx` is also still the old graph, LTX-Video 0.9.5 rather than LTX-2.3.
+Text-to-video without image-to-video is not much use, and image inputs are a
+later phase, so rebuilding it waits for them.
+
+A template holding several variants ships all but one bypassed, so
+`--subgraph <n>` picks which one to import — `flux-klein` is variant 1, the
+distilled 4B, which the template ships switched off in favour of the base.
+
+## The model filenames are placeholders — except the rebuilt four
 
 `sd15` names the checkpoint `deno task comfy:setup` downloads
 (`v1-5-pruned-emaonly-fp16.safetensors`), so it runs as shipped and is what the
@@ -30,14 +68,11 @@ The other seven have never been run: this repository has no GPU and none of
 their weights. Every model filename below is a **placeholder** and will not
 resolve on your machine until you point it at a file you actually have.
 
-| workflow                 | placeholder filenames                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------- |
-| `krea2`, `krea2-img2img` | `flux1-krea-dev.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors` |
-| `flux-klein`             | `flux-klein.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors`     |
-| `illustrious`            | `illustriousXL.safetensors`                                                                    |
-| `anima`                  | `anima.safetensors`                                                                            |
-| `z-image-turbo`          | `z-image-turbo.safetensors`                                                                    |
-| `ltx`                    | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors`                                    |
+| workflow        | placeholder filenames                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `krea2-img2img` | `flux1-krea-dev.safetensors`, `t5xxl_fp16.safetensors`, `clip_l.safetensors`, `ae.safetensors` |
+| `illustrious`   | `illustriousXL.safetensors`                                                                    |
+| `ltx`           | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors`                                    |
 
 **Fixing them:** open the workflow from the Workflows screen ("Open in
 ComfyUI"), pick your real model files in the loader nodes, then use the app's

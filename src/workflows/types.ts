@@ -1,5 +1,7 @@
 /** Manifest and workflow shapes (DESIGN.md §4.2–§4.3). */
 
+import { MODEL_CLASSES, type ModelClass } from "../config/types.ts";
+
 /** A prompt-format graph: the thing that gets queued. */
 export interface ApiNode {
   class_type: string;
@@ -12,12 +14,26 @@ export type ApiGraph = Record<string, ApiNode>;
 /** `[node_id, output_slot]` — how api graphs reference another node. */
 export type ApiLink = [string, number];
 
-/** Hardcoded family list (§8.1); the app attaches no behaviour to a family. */
+/**
+ * Hardcoded family list (§8.1). A family is an *architecture*, at the
+ * granularity a workflow targets: `ltx` and `ltx-2` are separate because
+ * LTX-Video 0.9.x conditions on T5 and LTX-2 on Gemma-3, so a model of one
+ * cannot be loaded into a workflow built for the other. Same for `flux` and
+ * `flux2`, and for `krea2`, which shares a brand with Flux Krea and nothing
+ * else.
+ *
+ * Since the picker orders by family (§5), this is no longer decoration: it
+ * is what tells a user which of their models a workflow can actually use.
+ */
 export const FAMILIES = [
   "flux",
+  "flux2",
+  "krea2",
+  "chroma",
   "sdxl",
   "anima",
   "ltx",
+  "ltx-2",
   "z-image",
   "sd15",
 ] as const;
@@ -31,6 +47,10 @@ export const PARAM_TYPES = [
   "enum",
   "seed",
   "size",
+  "model",
+  "text_encoder",
+  "vae",
+  /** Superseded by `model`; accepted and normalised to it (§5). */
   "checkpoint",
   "lora_list",
   "image",
@@ -46,14 +66,22 @@ export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 export const WORKFLOW_CATEGORIES = ["img2img"] as const;
 export type WorkflowCategory = typeof WORKFLOW_CATEGORIES[number];
 
-/** Model kinds an `enum` param can pull its options from. */
+/**
+ * Where an `enum` param pulls its options from: a model class (`diffusion`
+ * lists every kind that can drive a generation) or any configured folder
+ * kind. A kind is not a closed set — `config.yaml` may name any of them —
+ * so this is validated as a non-empty string rather than an enum.
+ */
 export const ENUM_SOURCES = [
+  ...MODEL_CLASSES,
   "checkpoints",
   "loras",
   "vae",
   "controlnet",
+  "text_encoders",
 ] as const;
-export type EnumSource = typeof ENUM_SOURCES[number];
+/** A class name, or a `model_folders` key. */
+export type EnumSource = string;
 
 export interface ParamCommon {
   key: string;
@@ -111,10 +139,32 @@ export interface SizeParam extends ParamCommon {
 
 export interface ModelFilter {
   family?: Family;
+  /** Which model class the picker lists; defaults to `diffusion` (§5). */
+  class?: ModelClass;
 }
 
-export interface CheckpointParam extends ParamCommon {
-  type: "checkpoint";
+/**
+ * A model file, picked from a class rather than from one folder. `bind` is a
+ * scalar naming whatever input the workflow's own loader uses — `ckpt_name`
+ * for a checkpoint-shaped graph, `unet_name` for a split-file one — so the
+ * pick is a filename substitution, not a change of graph shape (§2).
+ *
+ * The three types differ only in which class they pick from, which is what
+ * makes each picker list the right files: a workflow names a text encoder and
+ * a VAE as well as a base model, and offering all of `diffusion` for a VAE
+ * slot is not a choice anybody wants.
+ */
+export type ModelParamType = "model" | "text_encoder" | "vae";
+
+/** The class each type picks from when the manifest does not say. */
+export const MODEL_PARAM_CLASS: Record<ModelParamType, ModelClass> = {
+  model: "diffusion",
+  text_encoder: "clip",
+  vae: "vae",
+};
+
+export interface ModelParam extends ParamCommon {
+  type: ModelParamType;
   bind: string;
   filter?: ModelFilter;
   default?: string;
@@ -155,7 +205,7 @@ export type Param =
   | EnumParam
   | SeedParam
   | SizeParam
-  | CheckpointParam
+  | ModelParam
   | LoraListParam
   | MediaParam;
 
