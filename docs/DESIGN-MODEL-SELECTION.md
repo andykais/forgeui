@@ -298,8 +298,18 @@ and `POST /api/jobs` refuses it, naming the param and the value. A class the
 library has scanned nothing for is not judged: there is no difference there
 between a missing file and a folder the user never configured.
 
-**Sample prompts are cleared.** A template ships a demo prompt; the manifest's
-default owns it, and it defaults to empty.
+**A manifest states a `default` only where the graph cannot.** A scalar-bound
+param and the input it binds are the same fact written twice, and two copies
+drift: a loader changed in the ComfyUI editor left the panel showing the old
+filename, and the panel then overwrote that edit at submit. So the graph is
+the default, resolved on load, and the manifest overrides it only where it
+means something the graph has no way to say — `seed`'s `-1` for "randomise at
+submit", and `size`'s base resolution that ratio presets resolve against
+(§4.3). Everything else — model, text encoder, VAE, steps, cfg, prompts — is
+stated once, in the graph.
+
+**Sample prompts are cleared.** A template ships a demo prompt; the graph
+holds an empty string, which is therefore the default.
 
 **Output nodes are renamed to `ForgeUI/out`.** The rewrite stamps
 `<jobid>/out` at submit time (§5 step 3); the template's own prefix would

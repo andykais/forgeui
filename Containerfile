@@ -86,6 +86,7 @@ CMD ["--data-dir", "/workspace", \
      "--host", "0.0.0.0", \
      "--comfy-path", "/opt/ComfyUI", \
      "--models-dir", "checkpoints=/models/checkpoints", \
+     "--models-dir", "Stable-Diffusion=/models/Stable-Diffusion", \
      "--models-dir", "diffusion_models=/models/diffusion_models", \
      "--models-dir", "unet=/models/unet", \
      "--models-dir", "loras=/models/loras", \
