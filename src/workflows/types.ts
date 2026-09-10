@@ -1,5 +1,7 @@
 /** Manifest and workflow shapes (DESIGN.md §4.2–§4.3). */
 
+import { MODEL_CLASSES } from "../config/types.ts";
+
 /** A prompt-format graph: the thing that gets queued. */
 export interface ApiNode {
   class_type: string;
@@ -46,14 +48,22 @@ export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 export const WORKFLOW_CATEGORIES = ["img2img"] as const;
 export type WorkflowCategory = typeof WORKFLOW_CATEGORIES[number];
 
-/** Model kinds an `enum` param can pull its options from. */
+/**
+ * Where an `enum` param pulls its options from: a model class (`diffusion`
+ * lists every kind that can drive a generation) or any configured folder
+ * kind. A kind is not a closed set — `config.yaml` may name any of them —
+ * so this is validated as a non-empty string rather than an enum.
+ */
 export const ENUM_SOURCES = [
+  ...MODEL_CLASSES,
   "checkpoints",
   "loras",
   "vae",
   "controlnet",
+  "text_encoders",
 ] as const;
-export type EnumSource = typeof ENUM_SOURCES[number];
+/** A class name, or a `model_folders` key. */
+export type EnumSource = string;
 
 export interface ParamCommon {
   key: string;

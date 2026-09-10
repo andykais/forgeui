@@ -16,6 +16,7 @@ const CHECKPOINT = "v1-5-pruned-emaonly-fp16.safetensors";
 
 interface ModelsResponse {
   kind: string | null;
+  class: string | null;
   folders: string[];
   models: ModelView[];
   progress: {
@@ -127,6 +128,67 @@ Deno.test("scanned models are listed before they are hashed", async () => {
     const body = await rejected.json() as { error: { code: string } };
     assertEquals(body.error.code, "hashing");
   });
+});
+
+Deno.test("one class lists every diffusion folder at once", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-classes-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    const diffusion = join(dir, "diffusion_models");
+    const loras = join(dir, "loras");
+    await writeFakeSafetensors(join(checkpoints, "sdxl.safetensors"), {
+      name: "sdxl",
+    });
+    await writeFakeSafetensors(join(diffusion, "flux1-dev.safetensors"), {
+      name: "flux",
+    });
+    await writeFakeSafetensors(join(loras, "grain.safetensors"), {
+      name: "grain",
+    });
+    await withTestApp(async (app) => {
+      // Two folders, one class: what a workflow's model picker asks for.
+      const listed = await models(app, "?class=diffusion");
+      assertEquals(listed.class, "diffusion");
+      assertEquals(
+        listed.models.map((model) => model.name).sort(),
+        ["flux1-dev.safetensors", "sdxl.safetensors"],
+      );
+      assert(listed.models.every((model) => model.class === "diffusion"));
+      assertEquals(listed.folders.sort(), [checkpoints, diffusion].sort());
+
+      // A LoRA is a different class and stays out of it.
+      const loraClass = await models(app, "?class=lora");
+      assertEquals(loraClass.models.map((model) => model.name), [
+        "grain.safetensors",
+      ]);
+
+      // The folder a model came from is still reported as its kind.
+      const byKind = await models(app, "?kind=diffusion_models");
+      assertEquals(byKind.models.map((model) => model.name), [
+        "flux1-dev.safetensors",
+      ]);
+
+      // class and q compose.
+      const searched = await models(app, "?class=diffusion&q=flux");
+      assertEquals(searched.models.map((model) => model.name), [
+        "flux1-dev.safetensors",
+      ]);
+
+      const bad = await app.fetch("/api/models?class=nonsense");
+      assertEquals(bad.status, 400);
+    }, {
+      argv: [
+        "--models-dir",
+        `checkpoints=${checkpoints}`,
+        "--models-dir",
+        `diffusion_models=${diffusion}`,
+        "--models-dir",
+        `loras=${loras}`,
+      ],
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("hashing fills in identity, and only re-reads what changed", async () => {

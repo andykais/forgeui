@@ -64,11 +64,20 @@ Deno.test("first run writes config.yaml with defaults and a keys block", async (
       fullscreen: ["f"],
       close: ["Escape"],
     });
+    // Every known kind is written out empty, so pointing one somewhere is
+    // an edit rather than a guess at the key's name (§3).
     assertEquals(parsed.model_folders, {
       checkpoints: [],
+      "Stable-Diffusion": [],
+      diffusion_models: [],
+      unet: [],
       loras: [],
       vae: [],
+      text_encoders: [],
       controlnet: [],
+      upscale_models: [],
+      latent_upscale_models: [],
+      embeddings: [],
     });
 
     // A second boot reads the file instead of recreating it.

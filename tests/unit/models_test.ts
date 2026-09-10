@@ -9,6 +9,7 @@ import { decodePathId, pathId } from "../../src/models/library.ts";
 import { ModelScanner, type ScannedModel } from "../../src/models/scan.ts";
 import type { ModelRow } from "../../src/db/queries.ts";
 import { openDatabase } from "../../src/db/db.ts";
+import { classOf, DIFFUSION_KINDS } from "../../src/config/defaults.ts";
 import { defaultConfig } from "../../src/config/defaults.ts";
 import { sha256Of, writeFakeSafetensors } from "../fixtures/models.ts";
 
@@ -220,4 +221,28 @@ Deno.test("the re-hash decision compares path, size and mtime", () => {
   assert(!unchanged(row, { ...model, path: "/m/b.safetensors" }));
   // A file the scanner could not stat is not the file that was hashed.
   assert(!unchanged(row, { ...model, mtime: null }));
+});
+
+Deno.test("every folder a diffusion model can live in is one class", () => {
+  // The four folders SwarmUI treats as one "Model" (§1).
+  for (
+    const kind of [
+      "checkpoints",
+      "Stable-Diffusion",
+      "diffusion_models",
+      "unet",
+    ]
+  ) {
+    assertEquals(classOf(kind), "diffusion", kind);
+    assert(DIFFUSION_KINDS.includes(kind), `${kind} is not pooled`);
+  }
+  assertEquals(classOf("loras"), "lora");
+  assertEquals(classOf("text_encoders"), "clip");
+  assertEquals(classOf("clip"), "clip");
+  assertEquals(classOf("latent_upscale_models"), "upscale");
+  // An unknown kind is not an error: a folder may point anywhere.
+  assertEquals(classOf("gligen"), "other");
+  // The config override wins over the table.
+  assertEquals(classOf("gligen", { gligen: "diffusion" }), "diffusion");
+  assertEquals(classOf("checkpoints", { checkpoints: "other" }), "other");
 });

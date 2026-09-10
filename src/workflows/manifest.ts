@@ -1,6 +1,5 @@
 import {
   type ApiGraph,
-  ENUM_SOURCES,
   type EnumSource,
   FAMILIES,
   type Family,
@@ -303,9 +302,11 @@ function validateParam(
         : array(raw.options, `${at}.options`).map((option, i) =>
           nonEmptyStr(option, `${at}.options[${i}]`)
         );
-      const source = raw.source === undefined
+      // A source is a model class or a `model_folders` key, and kinds are
+      // open-ended, so anything non-empty is accepted rather than an enum.
+      const source: EnumSource | undefined = raw.source === undefined
         ? undefined
-        : oneOf<EnumSource>(raw.source, `${at}.source`, ENUM_SOURCES);
+        : nonEmptyStr(raw.source, `${at}.source`);
       if (!options && !source) {
         throw new ManifestError(
           `${at}: an enum needs either options or a source`,

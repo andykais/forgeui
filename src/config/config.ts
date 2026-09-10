@@ -79,11 +79,13 @@ export function mergePartialConfig(
   const server = mergeSection(a.server, b.server);
   const comfy = mergeSection(a.comfy, b.comfy);
   const folders = mergeSection(a.model_folders, b.model_folders);
+  const classes = mergeSection(a.model_classes, b.model_classes);
   const keys = mergeSection(a.keys, b.keys);
   const ui = mergeUi(a.ui, b.ui);
   if (server) out.server = server;
   if (comfy) out.comfy = comfy;
   if (folders) out.model_folders = folders;
+  if (classes) out.model_classes = classes;
   if (keys) out.keys = keys;
   if (ui) out.ui = ui;
   return out;
@@ -97,6 +99,7 @@ export function effectiveConfig(...layers: PartialConfig[]): Config {
     server: { ...base.server, ...layer.server },
     comfy: { ...base.comfy, ...layer.comfy },
     model_folders: { ...base.model_folders, ...layer.model_folders },
+    model_classes: { ...base.model_classes, ...layer.model_classes },
     keys: { ...base.keys, ...layer.keys },
     ui: {
       ...base.ui,

@@ -41,6 +41,26 @@ export interface ComfyConfig {
 /** `kind` → folders, mirroring ComfyUI's `extra_model_paths.yaml` keys. */
 export type ModelFolders = Record<string, string[]>;
 
+/**
+ * What a model is *for*, above the folder it was found in. Many kinds map
+ * onto one class: `checkpoints`, `Stable-Diffusion`, `diffusion_models` and
+ * `unet` are all `diffusion`, and one picker lists them together.
+ */
+export const MODEL_CLASSES = [
+  "diffusion",
+  "lora",
+  "vae",
+  "clip",
+  "controlnet",
+  "upscale",
+  "embedding",
+  "other",
+] as const;
+export type ModelClass = typeof MODEL_CLASSES[number];
+
+/** `kind` → class, for folder keys the default table does not cover. */
+export type ModelClasses = Record<string, ModelClass>;
+
 export type KeyBindings = Record<KeyAction, string[]>;
 
 export interface UiConfig {
@@ -55,6 +75,8 @@ export interface Config {
   server: ServerConfig;
   comfy: ComfyConfig;
   model_folders: ModelFolders;
+  /** Overrides for `kind` → class; the defaults cover the known kinds. */
+  model_classes: ModelClasses;
   keys: KeyBindings;
   ui: UiConfig;
 }
@@ -64,6 +86,7 @@ export interface PartialConfig {
   server?: Partial<ServerConfig>;
   comfy?: Partial<ComfyConfig>;
   model_folders?: ModelFolders;
+  model_classes?: ModelClasses;
   keys?: Partial<KeyBindings>;
   ui?: PartialUiConfig;
 }

@@ -18,6 +18,8 @@ import {
 import { mediaUrl } from "../outputs/store.ts";
 import type { SampleStore, SampleView } from "../samples/store.ts";
 import type { WsHub } from "../http/ws.ts";
+import { classOf } from "../config/defaults.ts";
+import type { ModelClass } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
@@ -58,6 +60,8 @@ export interface ModelView {
   name: string;
   filename: string;
   kind: string;
+  /** What the model is for, above the folder it came from (§3). */
+  class: ModelClass;
   size: number;
   mtime: number | null;
   display_name: string;
@@ -82,6 +86,8 @@ export interface ModelDetail extends ModelView {
 
 export interface ModelListFilters {
   kind?: string;
+  /** Every kind in the class; `diffusion` is the one picker's grab bag. */
+  class?: ModelClass;
   family?: string;
   q?: string;
 }
@@ -221,7 +227,9 @@ export class ModelLibrary {
       views.push(this.#view(null, row, thumbs));
     }
     const filtered = views.filter((view) =>
-      matchesFamily(view, filters.family) && matchesQuery(view, filters.q)
+      matchesClass(view, filters.class) &&
+      matchesFamily(view, filters.family) &&
+      matchesQuery(view, filters.q)
     );
     filtered.sort((a, b) =>
       a.display_name.localeCompare(b.display_name) ||
@@ -337,13 +345,15 @@ export class ModelLibrary {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
     const name = scanned?.name ?? filename;
+    const kind = scanned?.kind ?? row!.kind;
     return {
       id: row ? row.hash : pathId(path),
       hash: row?.hash ?? null,
       path,
       name,
       filename,
-      kind: scanned?.kind ?? row!.kind,
+      kind,
+      class: classOf(kind, this.#config.config.model_classes),
       size: scanned?.size ?? row!.size,
       mtime: scanned?.mtime ?? row?.mtime ?? null,
       // Unset, a display name falls back to the filename minus its extension.
@@ -368,11 +378,30 @@ export class ModelLibrary {
     this.#hub.broadcast({ type: "hashing_progress", data: progress });
   }
 
-  /** Folders the requested kind is scanned from, for Settings and the UI. */
-  folders(kind?: string): string[] {
+  /** Folders the requested kind or class is scanned from (Settings, the UI). */
+  folders(filter: { kind?: string; class?: ModelClass } = {}): string[] {
     const configured = this.#config.config.model_folders;
-    if (kind) return configured[kind] ?? [];
+    if (filter.kind) return configured[filter.kind] ?? [];
+    if (filter.class) {
+      const overrides = this.#config.config.model_classes;
+      const found: string[] = [];
+      for (const [kind, folders] of Object.entries(configured)) {
+        if (classOf(kind, overrides) !== filter.class) continue;
+        for (const folder of folders) {
+          if (!found.includes(folder)) found.push(folder);
+        }
+      }
+      return found;
+    }
     return Object.values(configured).flat();
+  }
+
+  /** Kinds belonging to a class, for the scan a class-filtered list needs. */
+  kindsOfClass(modelClass: ModelClass): string[] {
+    const overrides = this.#config.config.model_classes;
+    return this.scanner.kinds().filter((kind) =>
+      classOf(kind, overrides) === modelClass
+    );
   }
 }
 
@@ -388,6 +417,11 @@ function thumbUrl(row: ModelRow | null, thumbs: Map<string, string>):
   if (!row) return null;
   const path = row.thumb_path ?? thumbs.get(row.hash) ?? null;
   return path === null ? null : mediaUrl(path);
+}
+
+function matchesClass(view: ModelView, modelClass?: ModelClass): boolean {
+  if (!modelClass) return true;
+  return view.class === modelClass;
 }
 
 function matchesFamily(view: ModelView, family?: string): boolean {

@@ -131,6 +131,15 @@ export class ModelScanner {
     return Object.keys(this.#config().model_folders);
   }
 
+  /**
+   * Whether this kind's folders have been walked at all. A kind with no
+   * models is still "scanned": the caller wants to know if a walk is owed,
+   * not whether it found anything.
+   */
+  hasScanned(kind: string): boolean {
+    return this.#cache.has(kind);
+  }
+
   async list(kind: string, options: { refresh?: boolean } = {}): Promise<
     ScannedModel[]
   > {
