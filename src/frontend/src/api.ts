@@ -12,6 +12,9 @@ import type {
   RescanProgress,
   Sample,
   Storage,
+  TelemetryEntryPage,
+  TelemetryReport,
+  TelemetrySeries,
   WorkflowDetail,
   WorkflowSummary,
 } from "./types.ts";
@@ -259,6 +262,26 @@ export const api = {
     }),
 
   storage: () => request<Storage>("/api/system/storage"),
+
+  /**
+   * Telemetry (§7.1). The report's own filter params travel through
+   * unchanged, so the URL the user is looking at is the query the server
+   * answers.
+   */
+  telemetryReports: () =>
+    request<{ reports: TelemetryReport[]; bytes: number }>("/api/telemetry/reports"),
+  telemetrySeries: (report: string, filters: URLSearchParams) =>
+    request<TelemetrySeries>(`/api/telemetry/${report}/series?${filters}`),
+  telemetryEntries: (
+    report: string,
+    filters: URLSearchParams,
+    options: { cursor?: string | null; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams(filters);
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.limit) params.set("limit", String(options.limit));
+    return request<TelemetryEntryPage>(`/api/telemetry/${report}/entries?${params}`);
+  },
 
   systemStatus: () =>
     request<{ comfy: import("./types.ts").ComfyStatus; data_dir: string }>(

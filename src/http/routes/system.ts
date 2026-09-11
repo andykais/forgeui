@@ -99,13 +99,17 @@ export function systemRoutes(ctx: AppContext): Route[] {
       method: "GET",
       path: "/api/system/storage",
       handler: async () => {
-        const [outputs, inputs, samples, staging, db] = await Promise.all([
-          measure(ctx.paths.outputs),
-          measure(ctx.paths.inputs),
-          measure(ctx.paths.samples),
-          measure(ctx.paths.staging),
-          databaseUse(ctx.paths.db),
-        ]);
+        const [outputs, inputs, samples, staging, db, telemetry] = await Promise
+          .all([
+            measure(ctx.paths.outputs),
+            measure(ctx.paths.inputs),
+            measure(ctx.paths.samples),
+            measure(ctx.paths.staging),
+            databaseUse(ctx.paths.db),
+            // The health log grows on its own and is safe to delete (§7.1),
+            // so it is its own line rather than folded into `db`.
+            databaseUse(ctx.paths.telemetryDb),
+          ]);
         // Model folders are not measured: they are somebody else's disk, and
         // the app never writes there (§3).
         return json({
@@ -115,11 +119,12 @@ export function systemRoutes(ctx: AppContext): Route[] {
           samples,
           staging,
           db,
+          telemetry,
           total: {
             files: outputs.files + inputs.files + samples.files +
-              staging.files + db.files,
+              staging.files + db.files + telemetry.files,
             bytes: outputs.bytes + inputs.bytes + samples.bytes +
-              staging.bytes + db.bytes,
+              staging.bytes + db.bytes + telemetry.bytes,
           },
         });
       },

@@ -5,6 +5,7 @@
   import Brain from "@lucide/svelte/icons/brain";
   import Workflow from "@lucide/svelte/icons/workflow";
   import Server from "@lucide/svelte/icons/server";
+  import Activity from "@lucide/svelte/icons/activity";
   import Settings from "@lucide/svelte/icons/settings";
   import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
   import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
@@ -27,6 +28,7 @@
     { screen: "models", label: "Models", icon: Brain, href: "/models" },
     { screen: "workflows", label: "Workflows", icon: Workflow, href: "/workflows" },
     { screen: "comfy", label: "ComfyUI", icon: Server, href: "/comfy" },
+    { screen: "telemetry", label: "Telemetry", icon: Activity, href: "/telemetry" },
     { screen: "settings", label: "Settings", icon: Settings, href: "/settings" },
   ];
 

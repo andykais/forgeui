@@ -328,6 +328,8 @@ export interface Storage {
   samples: StorageUse;
   staging: StorageUse;
   db: StorageUse;
+  /** The health log of §7.1, which nothing else needs to run. */
+  telemetry: StorageUse;
   total: StorageUse;
 }
 
@@ -335,4 +337,78 @@ export interface LoraRow {
   name: string;
   strength_model: number;
   strength_clip: number;
+}
+
+// ------------------------------------------------------- telemetry (§7.1)
+
+export type TelemetryUnit = "ms" | "bytes";
+
+export interface TelemetryColumn {
+  key: string;
+  label: string;
+  kind: "time" | "value" | "text" | "number";
+}
+
+export interface TelemetryFilterOption {
+  value: string | number;
+  entries: number;
+}
+
+export interface TelemetryFilter {
+  /** The URL param, which is also the column it narrows. */
+  key: string;
+  label: string;
+  /** `enum` is picked from `options`; `min` is a number the user types. */
+  kind: "enum" | "min";
+  column?: string;
+  numeric?: boolean;
+  unit?: "ms";
+  options?: TelemetryFilterOption[];
+}
+
+export interface TelemetryReport {
+  id: string;
+  title: string;
+  description: string;
+  unit: TelemetryUnit;
+  value_label: string;
+  columns: TelemetryColumn[];
+  filters: TelemetryFilter[];
+  entries: number;
+}
+
+export interface TelemetryPoint {
+  id: number;
+  at: number;
+  value: number;
+}
+
+export interface TelemetrySeries {
+  report: string;
+  points: TelemetryPoint[];
+  /** True when the oldest points were left out to stay under the cap. */
+  truncated: boolean;
+  total: number;
+}
+
+export interface TelemetryEntry {
+  id: number;
+  report: string;
+  at: number;
+  value: number;
+  label: string | null;
+  method: string | null;
+  route: string | null;
+  status: number | null;
+  family: string | null;
+  model_class: string | null;
+  change: string | null;
+  /** The raw entry the sidebar shows (§11.2). */
+  data: Record<string, unknown>;
+}
+
+export interface TelemetryEntryPage {
+  report: string;
+  entries: TelemetryEntry[];
+  cursor: string | null;
 }

@@ -102,3 +102,43 @@ export function vram(free: number | null, total: number | null): string {
   const gb = (value: number) => `${(value / 1024 ** 3).toFixed(1)} GB`;
   return total ? `${gb(free)} VRAM free` : gb(free);
 }
+
+/** A telemetry value in the unit its report declares (§7.1). */
+export function measure(value: number | null | undefined, unit: "ms" | "bytes"): string {
+  if (value === null || value === undefined) return "—";
+  if (unit === "bytes") return bytes(value);
+  // A local API call is often under a millisecond, and `0ms` for every row
+  // would hide the differences the report exists to show.
+  if (value > 0 && value < 10) return `${value.toFixed(1)}ms`;
+  return duration(value);
+}
+
+/**
+ * A time for the timeline's x axis, at the precision its span deserves: a
+ * week of entries reads as dates, a minute of them as seconds (§11.2).
+ */
+export function axisTime(at: number, spanMs: number): string {
+  const date = new Date(at);
+  if (spanMs >= 3 * 86_400_000) {
+    return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  }
+  if (spanMs >= 86_400_000) {
+    return date.toLocaleString(undefined, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  if (spanMs >= 120_000) {
+    return date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}

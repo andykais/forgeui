@@ -36,6 +36,7 @@ import {
   SampleNotFoundError,
   type SampleStore,
 } from "../samples/store.ts";
+import type { TelemetryStore } from "../telemetry/store.ts";
 import { ManifestError } from "../workflows/manifest.ts";
 import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
@@ -53,6 +54,7 @@ import { outputRoutes } from "./routes/outputs.ts";
 import { sampleRoutes } from "./routes/samples.ts";
 import { serveFrontend } from "./static.ts";
 import { systemRoutes } from "./routes/system.ts";
+import { telemetryRoutes } from "./routes/telemetry.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
 import type { WsHub } from "./ws.ts";
 
@@ -67,6 +69,8 @@ export interface AppContext {
   models: ModelLibrary;
   samples: SampleStore;
   hub: WsHub;
+  /** The health log of §7.1; its own database, never `app.db`. */
+  telemetry: TelemetryStore;
 }
 
 export interface RouteMatch {
@@ -99,9 +103,24 @@ export function routeTable(ctx: AppContext): Route[] {
     ...modelRoutes(ctx),
     ...sampleRoutes(ctx),
     ...systemRoutes(ctx),
+    ...telemetryRoutes(ctx),
     ...maintenanceRoutes(ctx),
   ];
 }
+
+/**
+ * The telemetry log's own routes are not recorded in it (§7.1): reading a
+ * report would otherwise be most of what the report has to show.
+ */
+function recordsRequests(pathname: string): boolean {
+  return pathname.startsWith("/api/") &&
+    !pathname.startsWith(TELEMETRY_PREFIX);
+}
+
+const TELEMETRY_PREFIX = "/api/telemetry";
+
+/** What an `/api` request that matched no route is filed under (§7.1). */
+export const UNROUTED = "(no route)";
 
 export function createHandler(
   ctx: AppContext,
@@ -136,6 +155,24 @@ export function createHandler(
       }
     }
 
+    /**
+     * Duration is measured around the handler only, so the number in the
+     * report is the app's work rather than the client's read of the body.
+     */
+    const startedAt = performance.now();
+    const record = (route: string, status: number): void => {
+      if (!recordsRequests(url.pathname)) return;
+      ctx.telemetry.recordApiRequest({
+        method: req.method,
+        route,
+        path: url.pathname,
+        status,
+        // Microseconds below the millisecond are noise in a report about
+        // whole requests, and they make every raw entry unreadable.
+        duration_ms: Math.round((performance.now() - startedAt) * 1000) / 1000,
+      });
+    };
+
     const methodsForPath: string[] = [];
     for (const route of compiled) {
       const result = route.pattern.exec({ pathname: url.pathname });
@@ -148,14 +185,27 @@ export function createHandler(
       for (const [key, value] of Object.entries(result.pathname.groups)) {
         if (value !== undefined) params[key] = decodeURIComponent(value);
       }
+      let response: Response;
       try {
-        return await route.handler(req, { params, url });
+        response = await route.handler(req, { params, url });
       } catch (cause) {
-        return handlerError(cause, req);
+        response = handlerError(cause, req);
       }
+      record(route.path, response.status);
+      return response;
     }
-    if (methodsForPath.length > 0) return methodNotAllowed(methodsForPath);
-    if (url.pathname.startsWith("/api/")) return notFound(url.pathname);
+    // A request that matched nothing is recorded under one route name, not
+    // under the path it asked for: the url filter is a closed list (§7.1).
+    if (methodsForPath.length > 0) {
+      const response = methodNotAllowed(methodsForPath);
+      record(UNROUTED, response.status);
+      return response;
+    }
+    if (url.pathname.startsWith("/api/")) {
+      const response = notFound(url.pathname);
+      record(UNROUTED, response.status);
+      return response;
+    }
     // Everything else is the Svelte app; its router owns the URL (§11.2).
     if (req.method === "GET" || req.method === "HEAD") {
       try {

@@ -4,6 +4,8 @@ import { join, resolve } from "@std/path";
 export interface DataPaths {
   root: string;
   db: string;
+  /** The telemetry log of §7.1; a separate file from `app.db` on purpose. */
+  telemetryDb: string;
   configFile: string;
   extraModelPaths: string;
   workflows: string;
@@ -22,6 +24,7 @@ export function dataPaths(root: string): DataPaths {
   return {
     root: abs,
     db: join(abs, "app.db"),
+    telemetryDb: join(abs, "telemetry.db"),
     configFile: join(abs, "config.yaml"),
     extraModelPaths: join(abs, "extra_model_paths.yaml"),
     workflows: join(abs, "workflows"),

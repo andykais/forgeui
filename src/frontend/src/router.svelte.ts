@@ -10,6 +10,7 @@ export type ScreenName =
   | "workflows"
   | "workflow"
   | "comfy"
+  | "telemetry"
   | "settings";
 
 export interface Route {
@@ -50,6 +51,9 @@ export function parseRoute(path: string, search: string): Route {
       : { screen: "workflows", id: null, path, query };
   }
   if (first === "comfy") return { screen: "comfy", id: null, path, query };
+  if (first === "telemetry") {
+    return { screen: "telemetry", id: null, path, query };
+  }
   if (first === "settings") {
     return { screen: "settings", id: null, path, query };
   }

@@ -36,6 +36,7 @@ src/jobs/       submit/progress/completion pipeline, node timings, sidecar, png
 src/outputs/    gallery queries, soft delete, reindex
 src/models/     the folder scan, the background hasher, output_models backfill
 src/samples/    per-model sample media: file drop, promote, thumbnails
+src/telemetry/  the health log (§7.1): its own SQLite file, the five reports, the VRAM sampler
 src/http/       router, routes/*, /ws hub, media, static
 src/frontend/   the Svelte app — npm + Vite, the only non-Deno toolchain
 tests/          unit/ integration/ golden/ fake-comfy/ fixtures/ e2e/
@@ -68,7 +69,9 @@ those use the npm toolchain. Run both sides before you call something green.
 ## Conventions
 
 - TypeScript strict, Deno std + `@db/sqlite`, no ORM. Every SQL statement lives
-  in `src/db/queries.ts`, one function per query.
+  in `src/db/queries.ts`, one function per query — with the same rule inside
+  `src/telemetry/queries.ts` for the telemetry database, which is its own file
+  and its own migration chain (§7.1).
 - **Open SQLite only through `openDatabase()` / `DATABASE_OPTIONS`.** The driver
   truncates integers above 2³¹ without `int64`, which is every `created_at`.
 - The sidecar is the source of truth; the database is a derived index that
