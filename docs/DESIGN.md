@@ -861,7 +861,12 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   which is what makes routing work and what took ctrl-click away with it.
   Ctrl, ⌘ and the middle button are the browser's, through `opensElsewhere`;
   shift is left to the caller, because the metadata sidebar gives it a
-  meaning of its own.
+  meaning of its own. **The middle button never arrives as a `click`** — no
+  browser fires one for it — so an anchor middle-clicks natively (its handler
+  never runs, so nothing is prevented) while anything that is not an anchor,
+  such as a table row, has to answer `onauxclick` itself and call `newTab`.
+  A row's own controls stop the click from reaching it but stop nothing on an
+  auxclick, so the row skips one whose target sits inside a control.
 - A **LoRA row carries its own model's family**, not the workflow's: they are
   the same word on every row only by coincidence, and a LoRA nobody has filed
   read as the workflow's family the moment it was chosen, having said `unset`
@@ -897,10 +902,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   re-rolls immediately in either state. **Editing the field auto-locks** to
   the typed value; `-1` always means random (the field unlocks and the hint
   returns).
-- Progress card spans two columns: percent, ETA, node label, step counter over
-  the streaming preview. The preview **fits** rather than fills: a frame from
-  the sampler is a handful of pixels to begin with, and cropping it to the
-  card's 2:1 only makes the one thing it is for harder to read. Failed cards expose the error inline with Retry.
+- Progress card is **one tile like every other**: percent, ETA, node label and
+  step counter over the streaming preview, sized to fit the square. It spanned
+  two columns once, for the numbers' sake; what that actually cost was the
+  grid's rhythm, reflowing every finished tile around it for as long as a job
+  was in flight. The numbers shrank instead. The preview **fits** rather than
+  fills: a frame from the sampler is a handful of pixels to begin with, and
+  cropping it only makes the one thing it is for harder to read. Failed cards
+  expose the error inline with Retry.
 - Video and image tiles are one component; kind only changes the badge and
   hover playback (muted autoplay).
 - Tile actions (Edit in Generate, Rerun now, Use in workflow, Upscale) appear

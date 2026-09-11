@@ -50,7 +50,9 @@ export function parseRoute(path: string, search: string): Route {
       : { screen: "workflows", id: null, path, query };
   }
   if (first === "comfy") return { screen: "comfy", id: null, path, query };
-  if (first === "settings") return { screen: "settings", id: null, path, query };
+  if (first === "settings") {
+    return { screen: "settings", id: null, path, query };
+  }
   return { screen: "generate", id: null, path, query };
 }
 
@@ -73,12 +75,28 @@ function apply(url: string, replace: boolean): void {
  *
  * Ctrl, ⌘ and the middle button are the browser's. Shift is left to the
  * caller: the metadata sidebar gives it a meaning of its own (§11.2).
+ *
+ * The middle button only ever shows up here on an `auxclick`: `click` is not
+ * fired for it at all. An `<a href>` therefore middle-clicks natively — its
+ * `onclick` never runs, so nothing is prevented — but anything that is not a
+ * link has to say so itself, with `newTab` on an `onauxclick`.
  */
 export function opensElsewhere(event: MouseEvent): boolean {
   return event.ctrlKey || event.metaKey || event.button === 1;
 }
 
-export function navigate(url: string, options: { replace?: boolean } = {}): void {
+/**
+ * Open an in-app URL in a new tab, the way the browser would have. `noopener`
+ * because the new tab has no business reaching back into this one.
+ */
+export function newTab(url: string): void {
+  globalThis.open(url, "_blank", "noopener");
+}
+
+export function navigate(
+  url: string,
+  options: { replace?: boolean } = {},
+): void {
   if (url === `${location.pathname}${location.search}`) return;
   apply(url, options.replace ?? false);
 }
@@ -94,10 +112,16 @@ export function setQuery(
     else query.set(key, value);
   }
   const search = query.toString();
-  apply(`${location.pathname}${search ? `?${search}` : ""}`, options.replace ?? true);
+  apply(
+    `${location.pathname}${search ? `?${search}` : ""}`,
+    options.replace ?? true,
+  );
 }
 
-export function href(screen: ScreenName, query?: Record<string, string>): string {
+export function href(
+  screen: ScreenName,
+  query?: Record<string, string>,
+): string {
   const path = screen === "generate" ? "/generate" : `/${screen}`;
   const search = query ? new URLSearchParams(query).toString() : "";
   return `${path}${search ? `?${search}` : ""}`;

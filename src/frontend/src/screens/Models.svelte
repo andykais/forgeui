@@ -8,7 +8,7 @@
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate, router, setQuery } from "../router.svelte.ts";
+  import { navigate, newTab, opensElsewhere, router, setQuery } from "../router.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { matcher } from "../lib/search.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
@@ -218,6 +218,19 @@
       selectedId = null;
     }
   });
+
+  /**
+   * A table row is not a link, so the browser has no opinion about it: both
+   * the ctrl-click and the middle-click a row is expected to answer to have
+   * to be spelled out. `click` is never fired for the middle button, so the
+   * middle-click arrives on `onauxclick` instead — hence the two handlers.
+   */
+  function openRow(model: ModelEntry, event: MouseEvent) {
+    selectedId = model.id;
+    const href = `/models/${encodeURIComponent(model.id)}`;
+    if (opensElsewhere(event)) newTab(href);
+    else navigate(href);
+  }
 
   function onKeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null;
@@ -512,20 +525,17 @@
             <tr
               class:selected={selectedId === model.id}
               data-model={model.id}
-              onclick={(event) => {
-                selectedId = model.id;
-                // Ctrl/⌘ or the middle button means a new tab, the way it
-                // does on a link — a row that always navigates in place
-                // cannot be opened beside what you are already looking at.
-                if (event.ctrlKey || event.metaKey) {
-                  globalThis.open(
-                    `/models/${encodeURIComponent(model.id)}`,
-                    "_blank",
-                    "noopener",
-                  );
-                  return;
-                }
-                navigate(`/models/${encodeURIComponent(model.id)}`);
+              onclick={(event) => openRow(model, event)}
+              onauxclick={(event) => {
+                if (event.button !== 1) return;
+                // The controls inside the row stop the click from reaching
+                // it; nothing stops an auxclick, so the row has to ask. A
+                // link in here middle-clicks itself, natively.
+                const target = event.target as HTMLElement | null;
+                if (target?.closest("button, a, input")) return;
+                // Firefox otherwise starts autoscroll on the middle button.
+                event.preventDefault();
+                openRow(model, event);
               }}
             >
               <td class="thumb-cell">
