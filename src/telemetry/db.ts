@@ -9,6 +9,23 @@ import schemaSql from "./schema.sql" with { type: "text" };
  */
 export const TELEMETRY_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "telemetry schema", sql: schemaSql },
+  {
+    version: 2,
+    name: "entry series",
+    // Also in schema.sql, so a fresh database has it from version 1 and this
+    // does nothing there; a log written before the memory report gets the
+    // column here, with NULL for every row that predates it.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(entries)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("series")) {
+        db.exec("ALTER TABLE entries ADD COLUMN series TEXT");
+      }
+    },
+  },
 ];
 
 export const TELEMETRY_SCHEMA_VERSION: number =

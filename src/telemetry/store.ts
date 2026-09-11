@@ -24,6 +24,7 @@ import {
   type ColumnDef,
   type FilterDef,
   type ReportDef,
+  type SeriesDef,
   TELEMETRY_REPORTS,
 } from "./reports.ts";
 
@@ -49,6 +50,10 @@ export interface ReportView {
   value_label: string;
   columns: ColumnDef[];
   filters: (FilterDef & { options?: DimensionOption[] })[];
+  /** The graph plots a running total of the entries (§7.1). */
+  cumulative: boolean;
+  /** The lines the graph draws; absent when it draws one. */
+  series?: SeriesDef[];
   entries: number;
 }
 
@@ -73,15 +78,22 @@ export interface OutputSample {
   created_at?: number;
 }
 
-export type VramPhase = "start" | "tick" | "end";
+export type MemoryPhase = "start" | "tick" | "end";
 
-export interface VramSample {
-  phase: VramPhase;
+/** One kind of memory at one instant: a point on one of the two lines. */
+export interface MemoryReading {
+  series: "vram" | "ram";
   /** Bytes in use, which is what the report plots. */
   used: number;
-  free: number | null;
-  total: number | null;
-  device: string | null;
+  free: number;
+  total: number;
+  /** The GPU, for the VRAM reading; null for RAM. */
+  device?: string | null;
+}
+
+export interface MemorySample {
+  phase: MemoryPhase;
+  readings: MemoryReading[];
   /** The generation the sample belongs to; null for a sample without one. */
   job_id?: string | null;
 }
@@ -175,14 +187,25 @@ export class TelemetryStore {
     });
   }
 
-  recordVram(sample: VramSample, at = this.#now()): void {
-    this.record({
-      report: "vram",
-      at,
-      value: sample.used,
-      label: sample.phase,
-      data: { ...sample },
-    });
+  /**
+   * One entry per kind of memory, so VRAM and RAM are two lines of the same
+   * graph rather than one number that has to stand for both (§11.2).
+   */
+  recordMemory(sample: MemorySample, at = this.#now()): void {
+    for (const reading of sample.readings) {
+      this.record({
+        report: "memory",
+        at,
+        value: reading.used,
+        label: sample.phase,
+        series: reading.series,
+        data: {
+          phase: sample.phase,
+          job_id: sample.job_id ?? null,
+          ...reading,
+        },
+      });
+    }
   }
 
   /**
@@ -200,9 +223,23 @@ export class TelemetryStore {
 
       for (const model of current.values()) {
         const before = previous.get(model.path);
-        // A file whose size moved is the same model, not a new one: the
-        // library re-hashes on size or mtime change and so does this.
         if (before && before.size === model.size) continue;
+        // A file whose size moved is the old bytes gone and new bytes in
+        // their place, recorded as both — so the running total moves by the
+        // difference rather than counting the file twice (§7.1).
+        if (before) {
+          this.record({
+            report: "model_size",
+            at,
+            value: before.size,
+            label: before.display_name,
+            family: before.family,
+            model_class: before.model_class,
+            change: "deleted",
+            data: { ...before, change: "deleted", replaced: true },
+          });
+          result.deleted++;
+        }
         this.record({
           report: "model_size",
           at,
@@ -249,6 +286,8 @@ export class TelemetryStore {
       unit: report.unit,
       value_label: report.valueLabel,
       columns: [...report.columns],
+      cumulative: report.cumulative === true,
+      series: report.series ? [...report.series] : undefined,
       filters: report.filters.map((filter) =>
         filter.column
           ? {
@@ -266,8 +305,18 @@ export class TelemetryStore {
     }));
   }
 
+  /**
+   * The timeline's data, shaped by what the report is: a running total for a
+   * report whose entries are changes, and one line per `series` value for a
+   * report that records more than one thing at a time (§7.1).
+   */
   series(report: string, filters: TelemetryFilters = {}): SeriesResult {
-    return listSeries(this.#db, report, filters);
+    const def = TELEMETRY_REPORTS.find((entry) => entry.id === report);
+    return listSeries(this.#db, report, {
+      filters,
+      cumulative: def?.cumulative === true,
+      bySeries: (def?.series?.length ?? 0) > 0,
+    });
   }
 
   entries(

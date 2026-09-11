@@ -487,7 +487,7 @@ raw entry the UI's sidebar shows is kept verbatim in `data_json`.
 ```sql
 CREATE TABLE entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  report TEXT NOT NULL,        -- api_requests|output_size|model_size|vram|telemetry_size
+  report TEXT NOT NULL,        -- api_requests|output_size|model_size|memory|telemetry_size
   at INTEGER NOT NULL,         -- epoch ms, when the thing happened
   value REAL NOT NULL,         -- what the graph plots: ms for durations, bytes for sizes
   label TEXT,                  -- the row's name: the path, the output id, the model
@@ -497,6 +497,7 @@ CREATE TABLE entries (
   family TEXT,                 -- output_size, model_size
   model_class TEXT,            -- model_size: diffusion|lora|vae|…
   change TEXT,                 -- model_size: added|deleted
+  series TEXT,                 -- memory: vram|ram — one report, two lines
   data_json TEXT NOT NULL      -- the raw entry, verbatim, for the sidebar
 );
 CREATE INDEX entries_report_at ON entries(report, at DESC, id DESC);
@@ -513,15 +514,33 @@ CREATE TABLE model_sizes (     -- what the last model pass saw, so the next one 
 
 The five reports, and what makes an entry:
 
-| report           | value          | filters                               | recorded                                                                              |
-| ---------------- | -------------- | ------------------------------------- | ------------------------------------------------------------------------------------- |
-| `api_requests`   | duration in ms | method, route, status, min duration   | every routed `/api/*` request, once it has answered                                    |
-| `output_size`    | bytes          | family                                | one entry per output file a job produced                                               |
-| `model_size`     | bytes          | model class, family                   | one entry per model added or removed, per scan — startup and every Rescan              |
-| `vram`           | bytes in use   | none                                  | at the start of a generation, every 10s while one is running, and when it finishes     |
-| `telemetry_size` | bytes          | none                                  | every insert into this database **except** its own (§7.1 would otherwise not terminate) |
+| report           | title                     | value          | graph      | filters                             | recorded                                                                                |
+| ---------------- | ------------------------- | -------------- | ---------- | ----------------------------------- | --------------------------------------------------------------------------------------- |
+| `api_requests`   | API request duration      | duration in ms | entries    | method, route, status, min duration | every routed `/api/*` request, once it has answered                                      |
+| `output_size`    | Output size               | bytes          | cumulative | family                              | one entry per output file a job produced                                                 |
+| `model_size`     | Model size                | bytes          | cumulative | model class, family                 | one entry per model added or removed, per scan — startup and every Rescan                |
+| `memory`         | Memory Usage              | bytes in use   | two lines  | none                                | at the start of a generation, every 10s while one is running, and when it finishes       |
+| `telemetry_size` | Size of the telemetry log | bytes          | entries    | none                                | every insert into this database **except** its own (§7.1 would otherwise not terminate)  |
 
-Three of those are worth spelling out:
+**A cumulative report's graph is the running total, not the entries.** An
+entry there is a *change* — an output written, a model added — and the
+question the graph answers is what those changes come to: how much disk the
+outputs take, how much the model folders hold. A `deleted` entry subtracts, so
+a model that is removed takes its bytes back out of the line, and a model
+whose file was replaced is recorded as both a deletion and an addition so the
+total moves by the difference rather than counting the file twice. The table
+underneath is unchanged: one row per entry, because *which* output or model
+is exactly what the table is for. The running total is accumulated in SQL
+rather than in the browser, so a series that hits the cap starts at the height
+the dropped entries left it at instead of at zero.
+
+**A report may draw more than one line.** `memory` records VRAM and RAM at the
+same instant, as two entries that share a timestamp and differ in `series`.
+Two lines always carry a legend, and the two colours are assigned in a fixed
+order from `--series-1` / `--series-2` (§11.5) — never cycled, never
+re-assigned when one line has no data yet.
+
+Four of those are worth spelling out:
 
 - **`api_requests` records the route pattern**, `/api/outputs/:id`, not the
   path it matched. The pattern is a closed set, so the url filter is a list to
@@ -532,7 +551,12 @@ Three of those are worth spelling out:
 - **`model_size` entries are changes, not an inventory.** Each pass diffs what
   is on disk against `model_sizes`, writes an `added` or `deleted` entry per
   difference, and replaces the table. A rescan that finds nothing new writes
-  nothing.
+  nothing. Hidden models (§8.1) are diffed too: hiding one is a decision about
+  the pickers, not about the disk.
+- **`memory` needs both halves of a pair.** "In use" is the total minus the
+  free bytes, so a machine that reports one without the other gets no line
+  rather than a row of nulls — and a machine that reports RAM but no VRAM
+  still gets its RAM line.
 - **`telemetry_size` reads `page_count * page_size`** rather than stat-ing the
   file, so the insert that triggers it stays in-process. `data_json` carries
   the report that caused it and the row count.
@@ -952,6 +976,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   time** squeezed into the width available — there is no zoom, no range
   picker and no paging; the table is an endless scroll on the same keyset
   cursor the gallery uses.
+- **What the graph plots depends on the report** (§7.1): the entries
+  themselves for a measurement, the running total for a report whose entries
+  are changes, and one line per `series` for a report that records more than
+  one thing at a time. The table always lists the entries themselves.
+- The y axis is scaled to the data: its top is rounded up inside the unit it
+  is labelled in, and stays within a fifth of the tallest mark — a peak of
+  11.2 GB reads 12 GB, never 1.0 TB.
 - The timeline is **bars or a line**, toggled in the graph's header and
   remembered in the URL. Bars draw one mark per data point. The line is a
   smoothed mean over a window that follows the point count, with the raw
@@ -963,7 +994,8 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   verbatim `data_json` of §7.1 — and Esc closes it.
 - Reports that have filters carry them as chips above the graph
   (`api_requests`: method, url, status, min duration; `output_size`: family;
-  `model_size`: model class, family). `vram` and `telemetry_size` have none.
+  `model_size`: model class, family). `memory` and `telemetry_size` have
+  none.
   Options come from the data: a filter lists the values actually recorded,
   with how many entries each has.
 - The graph and the table read the same filters, so narrowing is one
@@ -1198,7 +1230,8 @@ GET  /api/system/comfy/log              tail of the child process log
 GET  /api/system/storage                counts + bytes for outputs, inputs, samples, app.db, telemetry.db
 GET  /ws                                job/progress/output events, system_status, hashing_progress, rescan_progress (JSON) + preview frames (binary, job-id-prefixed)
 GET  /api/telemetry/reports             the catalogue: id, title, the value's unit, and each filter with its options and counts
-GET  /api/telemetry/:report/series      every point under the filters, oldest first: [{id, at, value}]; `truncated` when the cap bit
+GET  /api/telemetry/:report/series      the lines to draw: [{key, points:[{id, at, value}]}], oldest first, running totals already
+                                        accumulated for a cumulative report; `truncated` when the cap bit
 GET  /api/telemetry/:report/entries     the table: keyset paginated on (at, id) newest first, each row carrying its raw `data`
 POST /api/maintenance/reindex
 POST /api/maintenance/sweep-staging

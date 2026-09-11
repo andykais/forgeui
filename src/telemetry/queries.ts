@@ -20,6 +20,8 @@ export interface TelemetryEntryRow {
   family: string | null;
   model_class: string | null;
   change: string | null;
+  /** Which line of a multi-line report this belongs to (§11.2). */
+  series: string | null;
   /** The raw entry §11.2's sidebar shows, parsed. */
   data: Record<string, unknown>;
 }
@@ -35,6 +37,7 @@ export interface NewTelemetryEntry {
   family?: string | null;
   model_class?: string | null;
   change?: string | null;
+  series?: string | null;
   data?: Record<string, unknown>;
 }
 
@@ -50,6 +53,7 @@ export interface TelemetryFilters {
   family?: string[];
   model_class?: string[];
   change?: string[];
+  series?: string[];
   min_value?: number;
 }
 
@@ -76,8 +80,8 @@ export function insertTelemetryEntry(
   db.prepare(
     `INSERT INTO entries (
        report, at, value, label, method, route, status,
-       family, model_class, change, data_json
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       family, model_class, change, series, data_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.report,
     entry.at,
@@ -89,6 +93,7 @@ export function insertTelemetryEntry(
     entry.family ?? null,
     entry.model_class ?? null,
     entry.change ?? null,
+    entry.series ?? null,
     JSON.stringify(entry.data ?? {}),
   );
   return Number(db.lastInsertRowId);
@@ -119,6 +124,7 @@ function rowToEntry(row: Record<string, unknown>): TelemetryEntryRow {
     family: (row.family as string | null) ?? null,
     model_class: (row.model_class as string | null) ?? null,
     change: (row.change as string | null) ?? null,
+    series: (row.series as string | null) ?? null,
     data,
   };
 }
@@ -150,35 +156,102 @@ export interface SeriesPoint {
   value: number;
 }
 
-export interface SeriesResult {
+/** One line of the timeline; `key` is null for a report that draws one. */
+export interface SeriesLine {
+  key: string | null;
   points: SeriesPoint[];
+}
+
+export interface SeriesResult {
+  series: SeriesLine[];
   /** True when older points were left out to stay under the cap. */
   truncated: boolean;
 }
 
-/** Every point under the filters, oldest first — what the timeline draws. */
+export interface SeriesOptions {
+  filters?: TelemetryFilters;
+  /**
+   * Plot the running total of the entries rather than the entries (§7.1). A
+   * `deleted` entry subtracts, so the line is what is on disk now, not what
+   * has ever been written.
+   */
+  cumulative?: boolean;
+  /** Split into one line per value of the `series` column. */
+  bySeries?: boolean;
+  max?: number;
+}
+
+interface SeriesRow {
+  id: number;
+  at: number;
+  value: number;
+  change: string | null;
+  series: string | null;
+}
+
+/** A deletion takes its bytes back out of the total (§7.1). */
+function signed(row: SeriesRow): number {
+  return row.change === "deleted" ? -row.value : row.value;
+}
+
+/**
+ * Every point under the filters, oldest first — what the timeline draws. A
+ * cumulative report is accumulated here rather than in the browser so the
+ * total is right even when the cap drops the oldest entries: what they came
+ * to is carried in as the line's starting height.
+ */
 export function listSeries(
   db: Database,
   report: string,
-  filters: TelemetryFilters = {},
-  max = SERIES_MAX_POINTS,
+  options: SeriesOptions = {},
 ): SeriesResult {
-  const where = buildEntriesWhere(report, filters);
+  const max = options.max ?? SERIES_MAX_POINTS;
+  const where = buildEntriesWhere(report, options.filters);
   // Newest first with the cap, then reversed: when the cap bites it is the
   // oldest points that go, not the ones the user just made.
   const rows = db.prepare(
-    `SELECT id, at, value FROM entries ${where.sql}
+    `SELECT id, at, value, change, series FROM entries ${where.sql}
      ORDER BY at DESC, id DESC LIMIT ?`,
-  ).all<{ id: number; at: number; value: number }>(...where.params, max + 1);
+  ).all<SeriesRow>(...where.params, max + 1);
   const truncated = rows.length > max;
-  const points = (truncated ? rows.slice(0, max) : rows)
-    .map((row) => ({
-      id: Number(row.id),
-      at: Number(row.at),
-      value: Number(row.value),
-    }))
-    .reverse();
-  return { points, truncated };
+  const kept = (truncated ? rows.slice(0, max) : rows).reverse();
+
+  // What the entries older than the first kept one added up to, so a capped
+  // cumulative line starts at the right height instead of at zero.
+  const carried = new Map<string, number>();
+  if (truncated && options.cumulative && kept[0]) {
+    const dropped = db.prepare(
+      `SELECT series, SUM(CASE WHEN change = 'deleted' THEN -value ELSE value END)
+         AS total FROM entries ${where.sql} AND (at < ? OR (at = ? AND id < ?))
+       GROUP BY series`,
+    ).all<{ series: string | null; total: number }>(
+      ...where.params,
+      kept[0].at,
+      kept[0].at,
+      kept[0].id,
+    );
+    for (const row of dropped) {
+      carried.set(row.series ?? "", Number(row.total ?? 0));
+    }
+  }
+
+  const lines = new Map<string, SeriesLine>();
+  const running = new Map<string, number>();
+  for (const row of kept) {
+    const key = options.bySeries ? row.series ?? "" : "";
+    let line = lines.get(key);
+    if (!line) {
+      line = { key: options.bySeries ? row.series : null, points: [] };
+      lines.set(key, line);
+      running.set(key, carried.get(key) ?? 0);
+    }
+    const value = options.cumulative
+      ? running.get(key)! + signed(row)
+      : Number(row.value);
+    if (options.cumulative) running.set(key, value);
+    line.points.push({ id: Number(row.id), at: Number(row.at), value });
+  }
+  return { series: [...lines.values()], truncated };
 }
 
 export interface EntryCursor {

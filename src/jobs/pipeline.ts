@@ -26,7 +26,7 @@ import {
 import type { WsHub } from "../http/ws.ts";
 import type { OutputStore } from "../outputs/store.ts";
 import type { TelemetryStore } from "../telemetry/store.ts";
-import type { VramMonitor } from "../telemetry/vram.ts";
+import type { MemoryMonitor } from "../telemetry/memory.ts";
 import { isOutputNodeType } from "../workflows/nodes.ts";
 import { coerceParams } from "../workflows/coerce.ts";
 import { rewriteGraph } from "../workflows/rewrite.ts";
@@ -125,8 +125,8 @@ export interface JobRunnerOptions {
   modelExists?: (name: string, modelClass: ModelClass) => boolean;
   /** The output-size report; absent in tests that do not care (§7.1). */
   telemetry?: TelemetryStore;
-  /** Opens and closes the VRAM report's sampling window (§7.1). */
-  vram?: VramMonitor;
+  /** Opens and closes the Memory Usage report's sampling window (§7.1). */
+  memory?: MemoryMonitor;
   now?: () => number;
 }
 
@@ -140,7 +140,7 @@ export class JobRunner {
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
   #telemetry?: TelemetryStore;
-  #vram?: VramMonitor;
+  #memory?: MemoryMonitor;
   #now: () => number;
   #live = new Map<string, LiveJob>();
   #byPrompt = new Map<string, string>();
@@ -158,7 +158,7 @@ export class JobRunner {
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
     this.#telemetry = options.telemetry;
-    this.#vram = options.vram;
+    this.#memory = options.memory;
     this.#now = options.now ?? Date.now;
   }
 
@@ -438,9 +438,9 @@ export class JobRunner {
         const live = this.#ensureLive(jobId);
         live.tracker.start();
         this.#currentJobId = jobId;
-        // A generation is under way: the VRAM report samples now, every ten
-        // seconds, and again when this closes (§7.1).
-        this.#vram?.generationStarted(jobId);
+        // A generation is under way: the Memory Usage report samples now,
+        // every ten seconds, and again when this closes (§7.1).
+        this.#memory?.generationStarted(jobId);
         updateJobStatus(this.#db, jobId, {
           status: "running",
           started_at: this.#now(),
@@ -853,7 +853,7 @@ export class JobRunner {
   }
 
   #forget(jobId: string): void {
-    this.#vram?.generationFinished(jobId);
+    this.#memory?.generationFinished(jobId);
     const live = this.#live.get(jobId);
     if (live?.promptId) this.#byPrompt.delete(live.promptId);
     this.#live.delete(jobId);

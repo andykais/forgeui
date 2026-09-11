@@ -48,6 +48,9 @@ export interface SystemStats {
   device: string | null;
   vram_total: number | null;
   vram_free: number | null;
+  /** System memory, which ComfyUI reports beside the GPU's (§7.1). */
+  ram_total: number | null;
+  ram_free: number | null;
 }
 
 export interface ComfyClientOptions {
@@ -254,6 +257,8 @@ export class ComfyClient {
       device: typeof device?.name === "string" ? device.name : null,
       vram_total: number(device?.vram_total),
       vram_free: number(device?.vram_free),
+      ram_total: number(system?.ram_total),
+      ram_free: number(system?.ram_free),
     };
   }
 

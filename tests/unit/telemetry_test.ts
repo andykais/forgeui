@@ -12,7 +12,7 @@ import {
   totalEntries,
 } from "../../src/telemetry/queries.ts";
 import { CursorError } from "../../src/outputs/cursor.ts";
-import { VramMonitor } from "../../src/telemetry/vram.ts";
+import { MemoryMonitor } from "../../src/telemetry/memory.ts";
 
 /**
  * The telemetry log in isolation (§7.1): its own database, the entry shapes
@@ -175,13 +175,20 @@ Deno.test("the series is every point under the filters, oldest first", async () 
       });
     }
     const series = store.series("api_requests");
-    assertEquals(series.points.map((point) => point.value), [5, 50, 500]);
+    // One line, because this report does not declare any.
+    assertEquals(series.series.length, 1);
+    const points = series.series[0]!.points;
+    assertEquals(series.series[0]!.key, null);
+    assertEquals(points.map((point) => point.value), [5, 50, 500]);
     assertEquals(series.truncated, false);
     // Sorted by time, which for the graph is the x axis.
-    assert(series.points[0]!.at < series.points[2]!.at);
+    assert(points[0]!.at < points[2]!.at);
 
     const filtered = store.series("api_requests", { min_value: 50 });
-    assertEquals(filtered.points.map((point) => point.value), [50, 500]);
+    assertEquals(
+      filtered.series[0]!.points.map((point) => point.value),
+      [50, 500],
+    );
   });
 });
 
@@ -189,17 +196,82 @@ Deno.test("a series past the cap keeps the newest points and says so", async () 
   await withHarness(({ store, now }) => {
     for (let i = 0; i < 6; i++) {
       now.at += 1000;
-      store.recordVram({
-        phase: "tick",
-        used: i,
-        free: 1,
-        total: 2,
-        device: "cuda:0",
+      store.recordApiRequest({
+        method: "GET",
+        route: "/api/outputs",
+        path: "/api/outputs",
+        status: 200,
+        duration_ms: i,
       });
     }
-    const capped = listSeries(store.db, "vram", {}, 4);
+    const capped = listSeries(store.db, "api_requests", { max: 4 });
     assertEquals(capped.truncated, true);
-    assertEquals(capped.points.map((point) => point.value), [2, 3, 4, 5]);
+    assertEquals(
+      capped.series[0]!.points.map((point) => point.value),
+      [2, 3, 4, 5],
+    );
+  });
+});
+
+Deno.test("a cumulative report plots the running total, not the entries", async () => {
+  await withHarness(({ store, now }) => {
+    const model = (name: string, size: number) => ({
+      path: `/models/loras/${name}.safetensors`,
+      size,
+      model_class: "lora",
+      family: null,
+      kind: "loras",
+      display_name: name,
+    });
+
+    store.recordModelPass([model("a", 100)]);
+    now.at += 60_000;
+    store.recordModelPass([model("a", 100), model("b", 250)]);
+    now.at += 60_000;
+    // `b` is gone: the total comes back down rather than carrying on up.
+    store.recordModelPass([model("a", 100)]);
+
+    const series = store.series("model_size");
+    assertEquals(
+      series.series[0]!.points.map((point) => point.value),
+      [100, 350, 100],
+    );
+    // The table is still the entries themselves, one row per change (§11.2).
+    assertEquals(
+      store.entries("model_size").entries.map((entry) => [
+        entry.change,
+        entry.value,
+      ]),
+      [["deleted", 250], ["added", 250], ["added", 100]],
+    );
+  });
+});
+
+Deno.test("a capped cumulative series starts where the dropped entries left it", async () => {
+  await withHarness(({ store, now }) => {
+    for (let i = 0; i < 6; i++) {
+      now.at += 1000;
+      store.recordOutput({
+        output_id: `job-${i}`,
+        path: `outputs/job-${i}.png`,
+        bytes: 100,
+        kind: "image",
+        family: "flux",
+        workflow_id: "krea2",
+        job_id: "job",
+      });
+    }
+    // Four points drawn, two dropped — and the line picks up at 300, not at
+    // 100, because the two it cannot draw still happened (§7.1).
+    const capped = listSeries(store.db, "output_size", {
+      cumulative: true,
+      max: 4,
+    });
+    assertEquals(capped.truncated, true);
+    assertEquals(
+      capped.series[0]!.points.map((point) => point.value),
+      [300, 400, 500, 600],
+    );
   });
 });
 
@@ -295,15 +367,18 @@ Deno.test("a model pass records what changed and nothing else", async () => {
     assertEquals(deleted.value, grain.size);
     assertEquals(deleted.model_class, "lora");
 
-    // A file whose size moved is recorded again: it is new bytes on disk.
+    // A file whose size moved is the old bytes gone and new bytes in their
+    // place, so the running total moves by the difference rather than
+    // counting the file twice.
     now.at += 60_000;
     assertEquals(
       store.recordModelPass([{ ...sdxl, size: sdxl.size + 1024 }]),
-      { added: 1, deleted: 0 },
+      { added: 1, deleted: 1 },
     );
     const regrown = store.entries("model_size").entries[0]!;
     assertEquals(regrown.change, "added");
     assertEquals(regrown.data.previous_size, sdxl.size);
+    assertEquals(store.entries("model_size").entries[1]!.change, "deleted");
   });
 });
 
@@ -329,9 +404,24 @@ Deno.test("the catalogue offers the values a report has actually recorded", asyn
       "api_requests",
       "output_size",
       "model_size",
-      "vram",
+      "memory",
       "telemetry_size",
     ]);
+    // The two shapes the graph reads off the catalogue (§7.1).
+    assertEquals(
+      catalogue.map((report) => [report.id, report.cumulative]),
+      [
+        ["api_requests", false],
+        ["output_size", true],
+        ["model_size", true],
+        ["memory", false],
+        ["telemetry_size", false],
+      ],
+    );
+    assertEquals(
+      catalogue.find((report) => report.id === "memory")?.series,
+      [{ key: "vram", label: "VRAM" }, { key: "ram", label: "RAM" }],
+    );
 
     const requests = catalogue[0]!;
     const methods = requests.filters.find((filter) => filter.key === "method");
@@ -360,37 +450,57 @@ Deno.test("the catalogue offers the values a report has actually recorded", asyn
   });
 });
 
-Deno.test("the vram monitor samples a generation's start, ticks and end", async () => {
+Deno.test("the memory monitor samples a generation's start, ticks and end", async () => {
   await withHarness(async ({ store }) => {
-    let reading: { free: number | null; total: number | null } = {
-      free: 4_000_000_000,
-      total: 10_000_000_000,
+    let stats = {
+      vram_free: 4_000_000_000 as number | null,
+      vram_total: 10_000_000_000 as number | null,
+      ram_free: 8_000_000_000 as number | null,
+      ram_total: 32_000_000_000 as number | null,
+      device: "cuda:0" as string | null,
     };
-    const monitor = new VramMonitor({
+    const monitor = new MemoryMonitor({
       store,
-      read: () => Promise.resolve({ ...reading, device: "cuda:0" }),
+      read: () => Promise.resolve({ ...stats }),
       intervalMs: 20,
     });
 
     monitor.generationStarted("job-a");
     await monitor.idle();
-    assertEquals(store.count("vram"), 1);
-    assertEquals(store.entries("vram").entries[0]!.label, "start");
+    // One sample, two entries: VRAM and RAM are two lines of one graph.
+    assertEquals(store.count("memory"), 2);
+    const first = store.entries("memory").entries;
+    assertEquals(first.map((entry) => entry.series).sort(), ["ram", "vram"]);
+    assertEquals(first.every((entry) => entry.label === "start"), true);
     // The value is what is in use, not what is free.
-    assertEquals(store.entries("vram").entries[0]!.value, 6_000_000_000);
+    assertEquals(
+      first.find((entry) => entry.series === "vram")?.value,
+      6_000_000_000,
+    );
+    assertEquals(
+      first.find((entry) => entry.series === "ram")?.value,
+      24_000_000_000,
+    );
 
     // A second job does not restart the window.
     monitor.generationStarted("job-b");
     await monitor.idle();
-    assertEquals(store.count("vram"), 1);
+    assertEquals(store.count("memory"), 2);
     assert(monitor.sampling, "still sampling while a job runs");
 
     await new Promise((resolve) => setTimeout(resolve, 70));
     await monitor.idle();
-    const ticks = store.entries("vram").entries.filter((entry) =>
+    const ticks = store.entries("memory").entries.filter((entry) =>
       entry.label === "tick"
     );
     assert(ticks.length >= 2, `expected ticks, got ${ticks.length}`);
+
+    // The graph reads as two lines, each with its own points.
+    const series = store.series("memory");
+    assertEquals(series.series.map((line) => line.key).sort(), [
+      "ram",
+      "vram",
+    ]);
 
     // The window closes only with the last job, and closing takes a sample.
     monitor.generationFinished("job-a");
@@ -399,19 +509,32 @@ Deno.test("the vram monitor samples a generation's start, ticks and end", async 
     monitor.generationFinished("job-b");
     await monitor.idle();
     assertEquals(monitor.sampling, false);
-    assertEquals(store.entries("vram").entries[0]!.label, "end");
+    assertEquals(store.entries("memory").entries[0]!.label, "end");
 
     // Nothing is sampled once the window is shut.
-    const settled = store.count("vram");
+    const settled = store.count("memory");
     await new Promise((resolve) => setTimeout(resolve, 50));
     await monitor.idle();
-    assertEquals(store.count("vram"), settled);
+    assertEquals(store.count("memory"), settled);
 
-    // Without both numbers there is nothing to plot, so nothing is written.
-    reading = { free: null, total: null };
+    // A machine that reports RAM but no VRAM still gets its RAM line.
+    stats = { ...stats, vram_free: null, vram_total: null };
     monitor.sample("tick");
     await monitor.idle();
-    assertEquals(store.count("vram"), settled);
+    assertEquals(store.count("memory"), settled + 1);
+    assertEquals(store.entries("memory").entries[0]!.series, "ram");
+
+    // Without either pair there is nothing to plot, so nothing is written.
+    stats = {
+      vram_free: null,
+      vram_total: null,
+      ram_free: null,
+      ram_total: null,
+      device: null,
+    };
+    monitor.sample("tick");
+    await monitor.idle();
+    assertEquals(store.count("memory"), settled + 1);
     monitor.stop();
   });
 });

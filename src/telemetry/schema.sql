@@ -14,6 +14,7 @@ CREATE TABLE entries (
   family TEXT,                 -- output_size, model_size
   model_class TEXT,            -- model_size: diffusion|lora|vae|…
   change TEXT,                 -- model_size: added|deleted
+  series TEXT,                 -- memory: vram|ram — one report, two lines
   data_json TEXT NOT NULL      -- the raw entry, verbatim, for the sidebar
 );
 CREATE INDEX entries_report_at ON entries(report, at DESC, id DESC);

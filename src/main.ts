@@ -22,7 +22,7 @@ import { ModelLibrary } from "./models/library.ts";
 import { SampleStore } from "./samples/store.ts";
 import { openTelemetryDatabase } from "./telemetry/db.ts";
 import { TelemetryStore } from "./telemetry/store.ts";
-import { VramMonitor } from "./telemetry/vram.ts";
+import { MemoryMonitor } from "./telemetry/memory.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -45,8 +45,8 @@ export interface App {
   db: Database;
   /** `telemetry.db` (§7.1), opened beside `app.db` and closed with it. */
   telemetry: TelemetryStore;
-  /** The sampler behind the VRAM report (§7.1). */
-  vram: VramMonitor;
+  /** The sampler behind the Memory Usage report (§7.1). */
+  memory: MemoryMonitor;
   paths: DataPaths;
   workflows: WorkflowStore;
   comfy: ComfyManager;
@@ -83,14 +83,16 @@ async function startAppWith(
   const hub = new WsHub();
   const telemetry = new TelemetryStore({ db: telemetryDb });
   // Reads ComfyUI's own numbers; nothing is sampled while the app is idle.
-  const vram = new VramMonitor({
+  const memory = new MemoryMonitor({
     store: telemetry,
     read: async () => {
       const stats = await comfy.refreshStats(0);
       if (!stats) return null;
       return {
-        free: stats.vram_free,
-        total: stats.vram_total,
+        vram_free: stats.vram_free,
+        vram_total: stats.vram_total,
+        ram_free: stats.ram_free,
+        ram_total: stats.ram_total,
         device: stats.device ?? null,
       };
     },
@@ -127,7 +129,7 @@ async function startAppWith(
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
     telemetry,
-    vram,
+    memory,
   });
   hub.onHello(() => [
     { type: "system_status", data: comfy.status() },
@@ -190,7 +192,7 @@ async function startAppWith(
     config: store,
     db,
     telemetry,
-    vram,
+    memory,
     paths,
     workflows,
     comfy,
@@ -203,12 +205,12 @@ async function startAppWith(
     async shutdown() {
       models.stop();
       outputs.close();
-      vram.stop();
+      memory.stop();
       hub.close();
       await comfy.close();
       await models.idle();
       // A sample already in flight still has a database to write to.
-      await vram.idle();
+      await memory.idle();
       await server.shutdown();
       db.close();
       telemetryDb.close();

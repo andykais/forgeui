@@ -10,11 +10,11 @@
   import type {
     TelemetryEntry,
     TelemetryFilter,
-    TelemetryPoint,
+    TelemetryLine,
     TelemetryReport,
   } from "../types.ts";
   import Popover from "../components/Popover.svelte";
-  import TimelineChart from "../components/TimelineChart.svelte";
+  import TimelineChart, { type ChartSeries } from "../components/TimelineChart.svelte";
 
   /**
    * Telemetry (§7.1, §11.2): one report at a time, always in both shapes —
@@ -24,7 +24,7 @@
    */
   let reports = $state<TelemetryReport[]>([]);
   let logBytes = $state<number | null>(null);
-  let points = $state<TelemetryPoint[]>([]);
+  let series = $state<TelemetryLine[]>([]);
   let seriesTruncated = $state(false);
   let seriesTotal = $state<number | null>(null);
   let entries = $state<TelemetryEntry[]>([]);
@@ -99,7 +99,7 @@
     loadingSeries = true;
     try {
       const body = await api.telemetrySeries(report.id, filterParams);
-      points = body.points;
+      series = body.series;
       seriesTruncated = body.truncated;
       seriesTotal = body.total;
       error = null;
@@ -201,8 +201,40 @@
     if (key === "value") return measure(entry.value, report?.unit ?? "ms");
     const value = (entry as unknown as Record<string, unknown>)[key];
     if (value === null || value === undefined || value === "") return "—";
+    // A line is named the same way in the table as in the legend: "VRAM",
+    // not the `vram` it is stored under.
+    if (key === "series") {
+      const line = report?.series?.find((entry) => entry.key === value);
+      if (line) return line.label;
+    }
     return String(value);
   }
+
+  /**
+   * The lines the chart draws, named from the report's own definition so a
+   * legend reads "VRAM" rather than the column value it was stored under.
+   * A report that declares its lines keeps their order even while one of
+   * them has nothing yet, so a colour never moves from one to the other.
+   */
+  const lines = $derived.by<ChartSeries[]>(() => {
+    const defined = report?.series ?? [];
+    if (defined.length === 0) {
+      return [
+        {
+          key: null,
+          label: report?.value_label ?? "",
+          points: series[0]?.points ?? [],
+        },
+      ];
+    }
+    return defined.map((line) => ({
+      key: line.key,
+      label: line.label,
+      points: series.find((entry) => entry.key === line.key)?.points ?? [],
+    }));
+  });
+
+  const plotted = $derived(lines.reduce((total, line) => total + line.points.length, 0));
 
   /** The raw entry, pretty-printed: what §11.2's sidebar is for. */
   const rawEntry = $derived(
@@ -336,7 +368,7 @@
       <div class="card">
         <div class="card-head">
           <div class="titles">
-            <h2>{report.value_label} over time</h2>
+            <h2>{report.title}</h2>
             <p class="dim">{report.description}</p>
           </div>
           <span class="mono dim count">
@@ -345,7 +377,7 @@
               : `${seriesTotal.toLocaleString()} ${
                   seriesTotal === 1 ? "entry" : "entries"
                 }`}
-            {#if seriesTruncated}· newest {points.length.toLocaleString()} drawn{/if}
+            {#if seriesTruncated}· newest {plotted.toLocaleString()} drawn{/if}
           </span>
           <div class="row shapes">
             {#each [["bars", "Bars", BarChart3], ["line", "Line", LineChartIcon]] as const as [value, label, Icon] (value)}
@@ -361,10 +393,11 @@
           </div>
         </div>
         <TimelineChart
-          {points}
+          series={lines}
           unit={report.unit}
           valueLabel={report.value_label}
           {mode}
+          aggregate={report.cumulative ? "last" : "max"}
           loading={loadingSeries}
         />
       </div>

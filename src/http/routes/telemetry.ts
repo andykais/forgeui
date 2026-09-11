@@ -85,13 +85,14 @@ export function telemetryRoutes(ctx: AppContext): Route[] {
         const report = params.report!;
         if (!reportDef(report)) return notFound(`no report "${report}"`);
         const filters = filtersFrom(url, report);
-        const series = store.series(report, filters);
+        const result = store.series(report, filters);
         // The graph fits everything it is given into the width it has
-        // (§11.2), so the count it is about to draw comes with it.
+        // (§11.2), so the count it is about to draw comes with it. A report
+        // that draws one line still answers with a list of one.
         return json({
           report,
-          points: series.points,
-          truncated: series.truncated,
+          series: result.series,
+          truncated: result.truncated,
           total: store.count(report, filters),
         });
       },

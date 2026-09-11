@@ -9,7 +9,7 @@ export const TELEMETRY_REPORTS_IDS = [
   "api_requests",
   "output_size",
   "model_size",
-  "vram",
+  "memory",
   "telemetry_size",
 ] as const;
 
@@ -23,6 +23,7 @@ export const DIMENSIONS = [
   "family",
   "model_class",
   "change",
+  "series",
 ] as const;
 
 export type Dimension = typeof DIMENSIONS[number];
@@ -50,6 +51,13 @@ export interface ColumnDef {
   kind: "time" | "value" | "text" | "number";
 }
 
+/** One line of a report that draws more than one (§11.2). */
+export interface SeriesDef {
+  /** The value in the `series` column. */
+  key: string;
+  label: string;
+}
+
 export interface ReportDef {
   id: ReportId;
   title: string;
@@ -60,6 +68,15 @@ export interface ReportDef {
   valueLabel: string;
   columns: ColumnDef[];
   filters: FilterDef[];
+  /**
+   * The graph plots the running total rather than the entries themselves: an
+   * entry is a change (a model added, an output written), and what the
+   * question is about is what those changes add up to. The table still lists
+   * the entries one by one (§11.2). `change: "deleted"` subtracts.
+   */
+  cumulative?: boolean;
+  /** The lines this report draws, when it draws more than one. */
+  series?: SeriesDef[];
 }
 
 const WHEN: ColumnDef = { key: "at", label: "When", kind: "time" };
@@ -98,10 +115,12 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   },
   {
     id: "output_size",
-    title: "Output size over time",
-    description: "One entry per output file a generation produced.",
+    title: "Output size",
+    description:
+      "One entry per output file a generation produced; the graph is what they add up to.",
     unit: "bytes",
-    valueLabel: "Size",
+    valueLabel: "Size on disk",
+    cumulative: true,
     columns: [
       WHEN,
       { key: "value", label: "Size", kind: "value" },
@@ -114,11 +133,12 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   },
   {
     id: "model_size",
-    title: "Model size over time",
+    title: "Model size",
     description:
-      "One entry per model added or removed, written on startup and on every rescan.",
+      "One entry per model added or removed, written on startup and on every rescan; the graph is what the folders hold.",
     unit: "bytes",
-    valueLabel: "Size",
+    valueLabel: "Size on disk",
+    cumulative: true,
     columns: [
       WHEN,
       { key: "value", label: "Size", kind: "value" },
@@ -138,15 +158,20 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
     ],
   },
   {
-    id: "vram",
-    title: "VRAM over time",
+    id: "memory",
+    title: "Memory Usage",
     description:
-      "Sampled when a generation starts, every 10 seconds while one runs, and when it finishes. A sample needs both the total and the free VRAM from ComfyUI.",
+      "VRAM and RAM in use, as ComfyUI reports them: sampled when a generation starts, every 10 seconds while one runs, and when it finishes.",
     unit: "bytes",
-    valueLabel: "VRAM in use",
+    valueLabel: "In use",
+    series: [
+      { key: "vram", label: "VRAM" },
+      { key: "ram", label: "RAM" },
+    ],
     columns: [
       WHEN,
-      { key: "value", label: "VRAM in use", kind: "value" },
+      { key: "value", label: "In use", kind: "value" },
+      { key: "series", label: "Memory", kind: "text" },
       { key: "label", label: "Sample", kind: "text" },
     ],
     filters: [],

@@ -18,7 +18,10 @@ interface CatalogueResponse {
 
 interface SeriesResponse {
   report: string;
-  points: { id: number; at: number; value: number }[];
+  series: {
+    key: string | null;
+    points: { id: number; at: number; value: number }[];
+  }[];
   truncated: boolean;
   total: number;
 }
@@ -82,8 +85,15 @@ Deno.test("the catalogue names five reports and what each one can be filtered by
       "api_requests",
       "output_size",
       "model_size",
-      "vram",
+      "memory",
       "telemetry_size",
+    ]);
+    assertEquals(body.reports.map((report) => report.title), [
+      "API request duration",
+      "Output size",
+      "Model size",
+      "Memory Usage",
+      "Size of the telemetry log",
     ]);
     assert(body.bytes > 0, "the log has a size");
 
@@ -101,7 +111,7 @@ Deno.test("the catalogue names five reports and what each one can be filtered by
       ["model_class", "family"],
     );
     // §11.2: these two have no filters at all.
-    assertEquals(byId.get("vram")!.filters, []);
+    assertEquals(byId.get("memory")!.filters, []);
     assertEquals(byId.get("telemetry_size")!.filters, []);
 
     // The columns are the graphed value plus everything filterable (§11.2).
@@ -111,6 +121,16 @@ Deno.test("the catalogue names five reports and what each one can be filtered by
     );
     assertEquals(byId.get("api_requests")!.unit, "ms");
     assertEquals(byId.get("output_size")!.unit, "bytes");
+
+    // The graph reads both of these off the catalogue (§7.1): what a line
+    // plots, and how many lines there are.
+    assertEquals(byId.get("output_size")!.cumulative, true);
+    assertEquals(byId.get("model_size")!.cumulative, true);
+    assertEquals(byId.get("api_requests")!.cumulative, false);
+    assertEquals(byId.get("memory")!.series, [
+      { key: "vram", label: "VRAM" },
+      { key: "ram", label: "RAM" },
+    ]);
   });
 });
 
@@ -165,7 +185,7 @@ Deno.test("every api request is recorded under its route pattern, and the report
       true,
     );
     const slow = await series(app, "api_requests", "min_value=1000000");
-    assertEquals(slow.points, []);
+    assertEquals(slow.series, []);
     assertEquals(slow.total, 0);
 
     const statuses = await entries(app, "api_requests", "status=404&limit=50");
@@ -199,14 +219,15 @@ Deno.test("the table pages and the graph does not", async () => {
 
     // The graph asks for all of it for all time (§11.2).
     const graph = await series(app, "api_requests");
-    assert(graph.points.length >= 12, `got ${graph.points.length} points`);
+    // One line, and it is the only one: this report declares no series.
+    assertEquals(graph.series.length, 1);
+    assertEquals(graph.series[0]!.key, null);
+    const points = graph.series[0]!.points;
+    assert(points.length >= 12, `got ${points.length} points`);
     assertEquals(graph.truncated, false);
-    assertEquals(graph.total, graph.points.length);
-    for (let i = 1; i < graph.points.length; i++) {
-      assert(
-        graph.points[i - 1]!.at <= graph.points[i]!.at,
-        "points are oldest first",
-      );
+    assertEquals(graph.total, points.length);
+    for (let i = 1; i < points.length; i++) {
+      assert(points[i - 1]!.at <= points[i]!.at, "points are oldest first");
     }
 
     // A report that does not exist is a 404, and a bad cursor is a 400.
@@ -240,7 +261,7 @@ Deno.test("the log records its own size for every entry but its own", async () =
   });
 });
 
-Deno.test("a generation records an entry per output and a vram window", async () => {
+Deno.test("a generation records an entry per output and a memory window", async () => {
   await withTestApp(async (app) => {
     const submitted = await app.json<{ id: string }>("/api/jobs", {
       method: "POST",
@@ -251,7 +272,7 @@ Deno.test("a generation records an entry per output and a vram window", async ()
     });
     const done = await awaitJob(app, submitted.id);
     assertEquals(done.status, "done");
-    await app.vram.idle();
+    await app.memory.idle();
 
     // One entry per file the job produced, sized from disk (§7.1).
     const outputs = await entries(app, "output_size", "limit=50");
@@ -273,19 +294,42 @@ Deno.test("a generation records an entry per output and a vram window", async ()
       0,
     );
 
+    // The output graph is the running total of those entries (§7.1).
+    const outputGraph = await series(app, "output_size");
+    const cumulative = outputGraph.series[0]!.points.map((point) =>
+      point.value
+    );
+    const sizes = outputs.entries.map((entry) => entry.value).reverse();
+    assertEquals(cumulative.length, sizes.length);
+    assertEquals(
+      cumulative[cumulative.length - 1],
+      sizes.reduce((total, size) => total + size, 0),
+    );
+
     // The window opened when the job started executing and closed when it
     // finished, so both ends are on the graph (§7.1).
-    const vram = await entries(app, "vram", "limit=50");
-    const phases = vram.entries.map((entry) => entry.label);
+    const memory = await entries(app, "memory", "limit=50");
+    const phases = memory.entries.map((entry) => entry.label);
     assert(phases.includes("start"), `no start in ${phases}`);
     assert(phases.includes("end"), `no end in ${phases}`);
-    // The fake reports 25.7GB total and 24.0GB free, so "in use" is the rest.
-    const sample = vram.entries[0]!;
-    assertEquals(sample.value, 25_757_220_864 - 24_051_089_408);
-    assertEquals(sample.data.device, "cuda:0 FakeGPU");
-    assertEquals(sample.data.job_id, submitted.id);
+
+    // Each sample is two entries, and the graph draws them as two lines.
+    const vram = memory.entries.find((entry) => entry.series === "vram")!;
+    const ram = memory.entries.find((entry) => entry.series === "ram")!;
+    // The fake reports 25.7GB of VRAM with 24.0GB free, and 67GB of RAM with
+    // 41GB free, so "in use" is the rest of each.
+    assertEquals(vram.value, 25_757_220_864 - 24_051_089_408);
+    assertEquals(ram.value, 67_108_864_000 - 41_231_686_144);
+    assertEquals(vram.data.device, "cuda:0 FakeGPU");
+    assertEquals(vram.data.job_id, submitted.id);
+
+    const memoryGraph = await series(app, "memory");
+    assertEquals(
+      memoryGraph.series.map((line) => line.key).sort(),
+      ["ram", "vram"],
+    );
     // Nothing keeps sampling once the generation is over.
-    assertEquals(app.vram.sampling, false);
+    assertEquals(app.memory.sampling, false);
   }, { comfy: true });
 });
 
@@ -350,9 +394,16 @@ Deno.test("a model scan records what it added, and a later one what it lost", as
     assertEquals(after.entries[0]!.label, "film-grain");
     assertEquals(after.entries[0]!.value, lora.value);
 
+    // Three entries, and a line that goes up by each model and back down by
+    // the one that left (§7.1).
     const graph = await series(app, "model_size");
-    assertEquals(graph.points.length, 3);
+    const running = graph.series[0]!.points.map((point) => point.value);
+    assertEquals(running.length, 3);
     assertEquals(graph.total, 3);
+    // Both models on disk, then the one that left taken back out again.
+    const both = added.entries.reduce((total, entry) => total + entry.value, 0);
+    assertEquals(running[1], both);
+    assertEquals(running[2], both - lora.value);
   } finally {
     await app.dispose();
     await Deno.remove(folders, { recursive: true });

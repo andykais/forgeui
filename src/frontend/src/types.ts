@@ -366,6 +366,12 @@ export interface TelemetryFilter {
   options?: TelemetryFilterOption[];
 }
 
+/** One line of a report that draws more than one (§11.2). */
+export interface TelemetrySeriesDef {
+  key: string;
+  label: string;
+}
+
 export interface TelemetryReport {
   id: string;
   title: string;
@@ -374,6 +380,10 @@ export interface TelemetryReport {
   value_label: string;
   columns: TelemetryColumn[];
   filters: TelemetryFilter[];
+  /** The graph plots the running total of the entries (§7.1). */
+  cumulative: boolean;
+  /** The lines the graph draws; absent when it draws one. */
+  series?: TelemetrySeriesDef[];
   entries: number;
 }
 
@@ -383,9 +393,15 @@ export interface TelemetryPoint {
   value: number;
 }
 
+/** One line's points, oldest first; `key` is null for a single-line report. */
+export interface TelemetryLine {
+  key: string | null;
+  points: TelemetryPoint[];
+}
+
 export interface TelemetrySeries {
   report: string;
-  points: TelemetryPoint[];
+  series: TelemetryLine[];
   /** True when the oldest points were left out to stay under the cap. */
   truncated: boolean;
   total: number;
@@ -403,6 +419,7 @@ export interface TelemetryEntry {
   family: string | null;
   model_class: string | null;
   change: string | null;
+  series: string | null;
   /** The raw entry the sidebar shows (§11.2). */
   data: Record<string, unknown>;
 }

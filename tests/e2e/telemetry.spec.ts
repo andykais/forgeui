@@ -16,9 +16,9 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
   // One tab per report, and the log's own size in the corner.
   for (const title of [
     "API request duration",
-    "Output size over time",
-    "Model size over time",
-    "VRAM over time",
+    "Output size",
+    "Model size",
+    "Memory Usage",
     "Size of the telemetry log",
   ]) {
     await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
@@ -73,11 +73,18 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
   await expect(page.getByRole("button", { name: /^Method: GET/ })).toBeVisible();
 
   // Another report, with no filters of its own and nothing recorded yet.
-  await page.getByRole("button", { name: /Model size over time/ }).click();
+  await page.getByRole("button", { name: /Model size/ }).click();
   await expect(page).toHaveURL(/report=model_size/);
   await expect(page.getByRole("button", { name: /^Model type:/ })).toBeVisible();
   // The method filter does not travel between reports (§7.1).
   await expect(page).not.toHaveURL(/method=/);
+
+  // Memory Usage draws two lines, so it always carries a legend (§11.2).
+  await page.getByRole("button", { name: /Memory Usage/ }).click();
+  await expect(page).toHaveURL(/report=memory/);
+  await expect(page.locator(".chart .legend")).toContainText("VRAM");
+  await expect(page.locator(".chart .legend")).toContainText("RAM");
+  await expect(page.getByRole("columnheader", { name: "Memory" })).toBeVisible();
 
   await page.getByRole("button", { name: /Size of the telemetry log/ }).click();
   await expect(page.getByRole("columnheader", { name: "Log size" })).toBeVisible();
