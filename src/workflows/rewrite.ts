@@ -151,6 +151,29 @@ function applyParam(
         `${where}.chain`,
       );
       return;
+    case "bool": {
+      // A switched checkbox picks which of two sources feeds one input, so
+      // that a branch of the graph can be turned on and off rather than
+      // shipped as a second workflow (§4.4). ComfyUI executes only what an
+      // output needs, so the side that is not linked never runs.
+      if (typeof param.bind !== "string") {
+        const { input, on, off } = param.bind.switch;
+        const source = value === true ? on : off;
+        setScalar(
+          graph,
+          input,
+          resolveSource(
+            graph,
+            source,
+            `${where}.${value === true ? "on" : "off"}`,
+          ),
+          `${where}.input`,
+        );
+        return;
+      }
+      setScalar(graph, param.bind, value, where);
+      return;
+    }
     case "image":
     case "mask":
     case "video":

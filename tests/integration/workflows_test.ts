@@ -48,7 +48,6 @@ const BUNDLED = [
   ["flux-klein", "Flux.2 Klein"],
   ["illustrious", "Illustrious XL"],
   ["krea2", "Krea 2 Turbo"],
-  ["krea2-enhanced", "Krea 2 Turbo (enhanced)"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["z-image-turbo", "Z-Image Turbo"],
@@ -140,18 +139,18 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     // Rebuilt from the official template (§7). The real Krea 2 is a separate
     // model from Flux.1 Krea [dev], which is what the old graph held; its
     // LoRA sits behind the template's own style switch rather than a chain.
+    // The prompt enhancer is a checkbox on this one workflow rather than a
+    // second copy of it (§7.1).
     assertEquals(keys("krea2"), [
       "prompt",
+      "enhance",
       "model",
       "size",
       "seed",
       "loras",
     ]);
-    // The enhanced variant exists to be compared against the plain one, so
-    // its inputs match but for the enhancer's own length (§7.1).
-    assertEquals(keys("krea2-enhanced"), keys("krea2"));
-    // steps, cfg, and the text encoder and VAE the workflow loads (§7.1).
-    assertEquals(byId.get("krea2")!.params.advanced, 4);
+    // steps, cfg, the text encoder and VAE, and the enhancer's own length.
+    assertEquals(byId.get("krea2")!.params.advanced, 5);
     assertEquals(keys("krea2-img2img"), [
       "image",
       "prompt",
@@ -232,7 +231,6 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "flux",
         "flux2",
         "sdxl",
-        "krea2",
         "krea2",
         "ltx",
         "sd15",
@@ -328,17 +326,30 @@ Deno.test("GET /api/workflows/:id/inputs lists literal inputs for the editor", a
       "scheduler",
       "denoise",
     ]);
+    // The prompt lives in its own string node so both the encoder and the
+    // enhancer can read it; `4.text` is a link either way (§7.1).
     assertEquals(
-      inputs.find((input) => input.input === "text")?.exposed_by,
+      inputs.find((input) => input.node_id === "10" && input.input === "value")
+        ?.exposed_by,
       "prompt",
+    );
+    // The enhancer's own prompt is a literal nothing exposes.
+    assertEquals(
+      inputs.find((input) => input.node_id === "11" && input.input === "value")
+        ?.exposed_by,
+      null,
     );
     // A model param binds one literal input, like any scalar (§5).
     assertEquals(
       inputs.find((input) => input.input === "unet_name")?.exposed_by,
       "model",
     );
-    // Links never appear.
+    // Links never appear — `4.text` among them, now the switch feeds it.
     assertEquals(inputs.some((input) => input.input === "clip"), false);
+    assertEquals(
+      inputs.some((input) => input.node_id === "4" && input.input === "text"),
+      false,
+    );
   });
 });
 
@@ -391,8 +402,8 @@ Deno.test("saving a bundled workflow creates a user copy that shadows it", async
     assertEquals(after.has_user_copy, true);
     assertEquals(after.has_bundled, true);
     assertEquals(after.name, "Krea 2 Turbo (mine)");
-    // steps, clip and vae are left; cfg was the one removed.
-    assertEquals(after.params.advanced, 3);
+    // steps, clip, vae and the enhancer length are left; cfg was removed.
+    assertEquals(after.params.advanced, 4);
     // Editing the manifest changes the workflow hash (§4.7).
     assert(after.hash !== before.hash);
 

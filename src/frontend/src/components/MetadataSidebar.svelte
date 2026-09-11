@@ -189,7 +189,9 @@
           title="Save as sample"
           onclose={() => (promoteOpen = false)}
         >
-          {#each promotable as model (model.hash)}
+          <!-- Hash and role together: one file can fill two roles in a graph,
+               and two rows keyed on the hash alone would be one key twice. -->
+          {#each promotable as model (`${model.hash}:${model.role}`)}
             <button
               class="option check"
               onclick={() =>

@@ -6,6 +6,7 @@
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
+  import { byChoice } from "../../lib/models.ts";
   import { focusOnMount } from "../../lib/focus.ts";
   import { navigate, opensElsewhere } from "../../router.svelte.ts";
   import TagFilter from "./TagFilter.svelte";
@@ -52,10 +53,14 @@
 
   const family = $derived(param.filter?.family ?? null);
 
-  /** Everything the family filter and the search leave, before the tags. */
+  /**
+   * Everything the family filter and the search leave, before the tags. One
+   * row per name: a LoRA reachable through two configured folders is one
+   * choice, and the list is keyed on the name it would write.
+   */
   const candidates = $derived.by(() => {
     const matches = matcher(search);
-    return models.filter((model) => {
+    return byChoice(models).filter((model) => {
       // A model nobody has filed yet is not hidden by a family filter: it
       // has no family because the user has not said, not because it is wrong.
       const familyOk =

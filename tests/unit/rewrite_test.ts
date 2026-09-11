@@ -226,3 +226,127 @@ Deno.test("binding into a node that vanished is an error, not a silent no-op", (
     'no node "6"',
   );
 });
+
+/**
+ * A branch of the graph that a checkbox turns on and off (§4.4). The whole
+ * point is that it moves a *link*: a bool that could only set a widget could
+ * not express "read the prompt from the enhancer instead", which is why the
+ * enhancer used to be a second copy of the whole workflow.
+ */
+function switchFixture(): { graph: ApiGraph; manifest: Manifest } {
+  const graph: ApiGraph = {
+    "1": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: "base.safetensors" },
+    },
+    "3": {
+      class_type: "KSampler",
+      inputs: {
+        seed: 0,
+        model: ["1", 0],
+        positive: ["6", 0],
+        negative: ["6", 0],
+        latent_image: ["5", 0],
+      },
+    },
+    "5": {
+      class_type: "EmptyLatentImage",
+      inputs: { width: 512, height: 512, batch_size: 1 },
+    },
+    "6": {
+      class_type: "CLIPTextEncode",
+      inputs: { text: ["10", 0], clip: ["1", 1] },
+    },
+    "8": {
+      class_type: "VAEDecode",
+      inputs: { samples: ["3", 0], vae: ["1", 2] },
+    },
+    "9": {
+      class_type: "SaveImage",
+      inputs: { filename_prefix: "ForgeUI/out", images: ["8", 0] },
+    },
+    "10": { class_type: "PrimitiveStringMultiline", inputs: { value: "" } },
+    "13": {
+      class_type: "TextGenerate",
+      inputs: { prompt: ["10", 0], max_length: 512, clip: ["1", 1] },
+    },
+  };
+  const manifest = validateManifest({
+    id: "fixture",
+    name: "Fixture",
+    family: "krea2",
+    kind: "image",
+    category: null,
+    description: null,
+    params: [
+      { key: "prompt", type: "text", bind: "10.value" },
+      {
+        key: "enhance",
+        type: "bool",
+        default: false,
+        bind: {
+          switch: { input: "6.text", on: "13.STRING", off: "10.STRING" },
+        },
+      },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph });
+  return { graph, manifest };
+}
+
+Deno.test("a switched checkbox moves a link rather than setting a widget", () => {
+  const { graph, manifest } = switchFixture();
+  const off = rewriteGraph({
+    manifest,
+    graph,
+    params: { prompt: "a cat", enhance: false },
+    jobId: "01JA",
+  });
+  // Off: the encoder reads the prompt straight through, and the enhancer is
+  // left unreached, so ComfyUI never runs it.
+  assertEquals(off.graph["6"]!.inputs.text, ["10", 0]);
+  assertEquals(off.graph["10"]!.inputs.value, "a cat");
+
+  const on = rewriteGraph({
+    manifest,
+    graph,
+    params: { prompt: "a cat", enhance: true },
+    jobId: "01JA",
+  });
+  assertEquals(on.graph["6"]!.inputs.text, ["13", 0]);
+  // The prompt still lands in the same node; the enhancer reads it from there.
+  assertEquals(on.graph["10"]!.inputs.value, "a cat");
+  assertEquals(on.graph["13"]!.inputs.prompt, ["10", 0]);
+});
+
+Deno.test("a switch is rejected when the graph cannot answer it", () => {
+  const { graph } = switchFixture();
+  const bind = (patch: Record<string, string>) => ({
+    id: "fixture",
+    name: "Fixture",
+    family: "krea2",
+    kind: "image",
+    category: null,
+    description: null,
+    params: [{
+      key: "enhance",
+      type: "bool",
+      bind: {
+        switch: {
+          input: "6.text",
+          on: "13.STRING",
+          off: "10.STRING",
+          ...patch,
+        },
+      },
+    }],
+    outputs: [{ node: "9", kind: "image" }],
+  });
+  // A source that names an output the node does not have.
+  assertThrows(() => validateManifest(bind({ on: "13.IMAGE" }), { graph }));
+  // A source node that is not there at all.
+  assertThrows(() => validateManifest(bind({ off: "99.STRING" }), { graph }));
+  // An input that holds a literal: nothing to re-link, so the manifest has
+  // drifted from the graph and saying so now beats a surprise at submit.
+  assertThrows(() => validateManifest(bind({ input: "10.value" }), { graph }));
+});

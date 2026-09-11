@@ -171,7 +171,7 @@ Field notes:
 |---|---|---|
 | `text` | textarea | scalar |
 | `int`, `float` | number/slider | scalar |
-| `bool` | toggle | scalar |
+| `bool` | toggle | scalar, or `switch` (graph rewrite, §4.4) |
 | `enum` | dropdown; `options` in manifest, or `source: "checkpoints"` etc. | scalar |
 | `seed` | number + 🎲 + "lock" | scalar; `-1` → random at submit |
 | `size` | width×height with ratio presets/aspect lock; `default` is the workflow's base resolution, optional `step` (16 or 64) snaps ratio results to the model's grid | `{w, h}` |
@@ -181,7 +181,9 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
-### 4.4 `lora_list` graph rewrite
+### 4.4 Graph rewrites
+
+#### `lora_list`
 At submit time the server splices `LoraLoader` nodes into the api graph:
 
 1. Start with `model = chain.model_from`, `clip = chain.clip_from`.
@@ -193,6 +195,24 @@ At submit time the server splices `LoraLoader` nodes into the api graph:
 This avoids depending on third-party stack loader nodes. Workflows using
 model-only LoRAs (no CLIP) set `clip_from`/`clip_to` to null and the rewrite
 uses `LoraLoaderModelOnly`.
+
+#### `bool` with a `switch` bind
+
+A checkbox usually sets a widget, and a widget cannot turn a branch of the
+graph on and off. Some options are a branch: Krea 2's prompt enhancer is four
+nodes that either feed the encoder or do not. Rather than ship the workflow
+twice — which is what it did at first, and which meant every later change to
+Krea 2 had to be made in both copies — a `bool` may bind a `switch`:
+
+```json
+"bind": { "switch": { "input": "4.text", "on": "13.STRING", "off": "10.STRING" } }
+```
+
+At submit the bound `input` is linked to `on` or to `off` accordingly.
+ComfyUI executes only what an output needs, so the side that is not linked
+never runs. Both sources are validated against the graph at load, and `input`
+must already be fed by a link: an input holding a literal means the manifest
+has drifted from its graph, and saying so on load beats a surprise at submit.
 
 ### 4.5 Workflow versions
 Only the **latest** version of each workflow is exposed in the UI. There is no
@@ -218,7 +238,7 @@ copy shadows the bundled one.
 Initial set:
 | id | family | kind | notes |
 |---|---|---|---|
-| `krea2` | flux | image | prompt, seed, size, loras; steps/cfg advanced |
+| `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
 | `krea2-img2img` | flux | image | `category: img2img`; image (required), prompt, denoise (default 0.5), seed, size, loras; steps/cfg advanced. Image is resized to `size` before encoding |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
 | `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
@@ -520,6 +540,17 @@ Model hashing runs in a background worker; a model is re-hashed only if
   it the losing path had no row at all — which is what "still hashing" means
   — so it was queued again on every single rescan, for ever, and the count
   never reached zero.
+
+  The corollary is that **`ModelView.id` is not unique across a list**: the
+  list walks files, and two files that hashed the same carry one id between
+  them. A keyed `{#each}` over it therefore throws `each_key_duplicate` and
+  renders nothing — which is how the model picker went blank for anyone with
+  one checkpoint reachable through two configured folders. So key a list on
+  what its rows actually mean: a picker writes a model's **name** into the
+  workflow, so it lists one row per name (`byChoice`); the gallery's filter
+  is a **hash**, so it lists one per model (`byModel`); the Models screen
+  lists files, and keys on the path. The id is the identity of a model, not
+  of a row in a list of files.
 - **Hashing progress counts the pass that is running**, not every pass since
   launch. Carrying the totals forward made each rescan report a window onto
   nothing — "74/86", the tail of the last pass plus the head of this one.

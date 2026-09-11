@@ -4,14 +4,28 @@
   "family": "krea2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1, Qwen3-VL encoding the prompt.",
+  "description": "Text-to-image with Krea 2 Turbo: eight steps at cfg 1, Qwen3-VL encoding the prompt. Tick \"Enhance the prompt\" and the same encoder rewrites it into a fuller one first.",
   "params": [
     {
       "key": "prompt",
       "label": "Prompt",
       "type": "text",
       "required": true,
-      "bind": "4.text"
+      "bind": "10.value"
+    },
+    {
+      "key": "enhance",
+      "label": "Enhance the prompt",
+      "description": "Rewrite the prompt with the workflow's own Qwen3-VL encoder before encoding it.",
+      "type": "bool",
+      "default": false,
+      "bind": {
+        "switch": {
+          "input": "4.text",
+          "on": "13.STRING",
+          "off": "10.STRING"
+        }
+      }
     },
     {
       "key": "model",
@@ -94,6 +108,15 @@
       "type": "vae",
       "advanced": true,
       "bind": "3.vae_name"
+    },
+    {
+      "key": "max_length",
+      "label": "Enhancer length",
+      "type": "int",
+      "min": 32,
+      "max": 4096,
+      "advanced": true,
+      "bind": "13.max_length"
     }
   ],
   "outputs": [

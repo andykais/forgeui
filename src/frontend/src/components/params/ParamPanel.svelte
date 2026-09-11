@@ -427,6 +427,8 @@
 
   .count {
     font-size: 11px;
+    /* The one thing in this row that must always be readable. */
+    flex: none;
   }
 
   .link {
@@ -539,6 +541,9 @@
   .keys {
     font-size: 11px;
     flex: 1;
+    /* A flex item will not shrink below its content without this, so a long
+       enough key list pushed the count off the end rather than ellipsing. */
+    min-width: 0;
     text-align: left;
     white-space: nowrap;
     overflow: hidden;

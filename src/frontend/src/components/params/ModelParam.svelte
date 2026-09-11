@@ -1,6 +1,7 @@
 <script lang="ts">
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
+  import { byChoice } from "../../lib/models.ts";
   import { focusOnMount } from "../../lib/focus.ts";
   import TagFilter from "./TagFilter.svelte";
   import type { ModelEntry, Param } from "../../types.ts";
@@ -35,10 +36,13 @@
 
   const family = $derived(param.filter?.family ?? null);
 
-  /** What the search leaves, before the tag chips narrow it further. */
+  /**
+   * What the search leaves, before the tag chips narrow it further. One row
+   * per name, because a name is what choosing writes into the workflow.
+   */
   const candidates = $derived.by(() => {
     const matches = matcher(search);
-    return models.filter((model) => matches(model.name, model.display_name));
+    return byChoice(models).filter((model) => matches(model.name, model.display_name));
   });
 
   const matched = $derived(
@@ -105,7 +109,7 @@
     {:else if matched.length === 0}
       <p class="note">Nothing matches “{search}”.</p>
     {:else}
-      {#each preferred as model (model.id)}
+      {#each preferred as model (model.name)}
         <button
           class="option"
           class:current={model.name === value}
@@ -119,7 +123,7 @@
         <!-- Not this workflow's family, but still reachable: the filter
              orders the list, it does not hide half of it. -->
         <p class="divider">Other models</p>
-        {#each others as model (model.id)}
+        {#each others as model (model.name)}
           <button
             class="option"
             class:current={model.name === value}
