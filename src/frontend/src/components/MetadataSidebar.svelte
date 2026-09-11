@@ -1,11 +1,13 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
+  import Plus from "@lucide/svelte/icons/plus";
   import type { OutputDetail } from "../types.ts";
   import { absoluteTime, duration, relativeTime } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
   import { api } from "../api.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
+  import { panel } from "../stores/panel.svelte.ts";
   import Popover from "./Popover.svelte";
 
   /**
@@ -119,12 +121,40 @@
   /** A LoRA row as the panel wrote it: a name and one or two strengths. */
   function loraOf(entry: unknown) {
     const row = entry as Record<string, unknown>;
-    const model = row.strength_model;
-    const clip = row.strength_clip;
+    const model = typeof row.strength_model === "number" ? row.strength_model : 1;
+    const clip = typeof row.strength_clip === "number" ? row.strength_clip : model;
     return {
       ...linkTo(String(row.name)),
+      name: String(row.name),
+      strength_model: model,
+      strength_clip: clip,
       strength: model === clip ? `${model}` : `${model} / ${clip}`,
     };
+  }
+
+  /**
+   * The workflow open in the param panel, when it takes LoRAs at all. What
+   * makes a LoRA usable is the strength somebody found for it, and that
+   * number is sitting right here in the run that used it — so it can be put
+   * into the panel as it stands rather than read off and typed back in.
+   */
+  const loraTarget = $derived(
+    panel.manifest && panel.loraParam
+      ? { name: panel.detail?.name ?? panel.manifest.name }
+      : null,
+  );
+
+  function applyLora(lora: ReturnType<typeof loraOf>) {
+    const what = panel.addLora({
+      name: lora.name,
+      strength_model: lora.strength_model,
+      strength_clip: lora.strength_clip,
+    });
+    if (what === null) return;
+    toasts.message(
+      `${what === "added" ? "Added" : "Set"} ${lora.label} at ${lora.strength}` +
+        ` in ${loraTarget?.name ?? "the panel"}`,
+    );
   }
 
   function isLoraList(value: unknown): boolean {
@@ -283,6 +313,16 @@
                 <span class="lora">
                   <span class="lora-name mono">{@render modelLink(lora)}</span>
                   <span class="lora-strength mono dim">{lora.strength}</span>
+                  {#if loraTarget}
+                    <button
+                      class="apply"
+                      title={`Add this LoRA at ${lora.strength} to ${loraTarget.name}`}
+                      aria-label={`Add ${lora.label} at ${lora.strength} to ${loraTarget.name}`}
+                      onclick={() => applyLora(lora)}
+                    >
+                      <Plus size={12} />
+                    </button>
+                  {/if}
                 </span>
               {/each}
             </div>
@@ -487,6 +527,27 @@
   .lora-strength {
     flex: 0 0 auto;
     font-size: 11px;
+  }
+
+  /* Dim rather than hidden: an offer nobody can see is not an offer, and
+     three of them at full strength would shout over the names beside them. */
+  .apply {
+    display: flex;
+    flex: 0 0 auto;
+    background: transparent;
+    padding: 1px;
+    color: var(--text-4);
+    opacity: 0.4;
+  }
+
+  .lora:hover .apply,
+  .apply:focus-visible {
+    opacity: 1;
+  }
+
+  .apply:hover {
+    background: var(--control);
+    color: var(--text);
   }
 
   .file {

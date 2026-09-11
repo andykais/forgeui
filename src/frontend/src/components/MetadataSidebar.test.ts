@@ -25,6 +25,22 @@ vi.mock("../stores/app.svelte.ts", () => ({
   },
 }));
 
+/** The panel the sidebar offers to put a LoRA into (§11.2). */
+const stub = {
+  manifest: null as unknown,
+  loraParam: null as unknown,
+  detail: null as unknown,
+  addLora: vi.fn(() => "added" as const),
+};
+vi.mock("../stores/panel.svelte.ts", () => ({ panel: stub }));
+
+/** A workflow is open in the panel, and it takes LoRAs. */
+function panelTakesLoras() {
+  stub.manifest = { name: "Krea 2 Turbo" };
+  stub.loraParam = { key: "loras", type: "lora_list" };
+  stub.detail = { name: "Krea 2 Turbo" };
+}
+
 const { default: MetadataSidebar } = await import("./MetadataSidebar.svelte");
 
 function lora(name: string, hash: string): ModelEntry {
@@ -63,7 +79,13 @@ function output(): OutputDetail {
     app_version: "0.1.0",
     job_id: "01J",
     created_at: "2026-09-11T00:00:00Z",
-    workflow: { id: "w", name: "Krea 2 Turbo", hash: "h", family: "krea2", kind: "image" },
+    workflow: {
+      id: "w",
+      name: "Krea 2 Turbo",
+      hash: "h",
+      family: "krea2",
+      kind: "image",
+    },
     params: {
       prompt: "a red firetruck\n\non a wet street",
       seed: 6568869050459850,
@@ -124,6 +146,10 @@ describe("the metadata sidebar", () => {
   beforeEach(() => {
     library.length = 0;
     library.push(lora("glow.safetensors", A), lora("grain.safetensors", B));
+    stub.manifest = null;
+    stub.loraParam = null;
+    stub.detail = null;
+    stub.addLora.mockClear();
   });
 
   test("names every LoRA, rather than one of them twice", () => {
@@ -182,7 +208,9 @@ describe("the metadata sidebar", () => {
   test("the prompt is shown exactly as it was written", () => {
     mount();
     const prompt = [...document.querySelectorAll(".field")]
-      .find((row) => row.querySelector(".key")?.textContent?.trim() === "prompt")
+      .find((row) =>
+        row.querySelector(".key")?.textContent?.trim() === "prompt"
+      )
       ?.querySelector(".selectable");
     expect(prompt?.textContent).toBe("a red firetruck\n\non a wet street");
   });
@@ -192,5 +220,33 @@ describe("the metadata sidebar", () => {
     // Both LoRAs are named by the `loras` param, so neither is repeated as a
     // role row above it.
     expect(screen.queryAllByText("lora")).toHaveLength(0);
+  });
+
+  test("offers each LoRA to the workflow open in the panel", async () => {
+    panelTakesLoras();
+    mount();
+    const add = await screen.findByLabelText(
+      "Add grain at 0.5 to Krea 2 Turbo",
+    );
+    await add.click();
+    // The strengths come from the run, not from the model's own defaults:
+    // what makes a LoRA usable is the number somebody already found for it.
+    expect(stub.addLora).toHaveBeenCalledWith({
+      name: "grain.safetensors",
+      strength_model: 0.5,
+      strength_clip: 0.5,
+    });
+  });
+
+  test("says nothing when the open workflow takes no LoRAs", () => {
+    stub.manifest = { name: "Some workflow" };
+    stub.loraParam = null;
+    mount();
+    expect(screen.queryByLabelText(/^Add /)).toBeNull();
+  });
+
+  test("says nothing when no workflow is open at all", () => {
+    mount();
+    expect(screen.queryByLabelText(/^Add /)).toBeNull();
   });
 });

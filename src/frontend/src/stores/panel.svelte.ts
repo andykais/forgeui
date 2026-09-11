@@ -55,7 +55,9 @@ export function fillValues(
   const values: Record<string, unknown> = {};
   for (const param of manifest.params) {
     const provided = params[param.key];
-    values[param.key] = provided === undefined ? defaultFor(param) : plain(provided);
+    values[param.key] = provided === undefined
+      ? defaultFor(param)
+      : plain(provided);
   }
   const known = new Set(manifest.params.map((param) => param.key));
   return {
@@ -105,7 +107,8 @@ class PanelState {
     return this.params
       .filter(
         (param) =>
-          param.required && param.type !== "seed" && isEmpty(this.values[param.key]),
+          param.required && param.type !== "seed" &&
+          isEmpty(this.values[param.key]),
       )
       .map((param) => param.label ?? param.key);
   }
@@ -214,6 +217,47 @@ class PanelState {
     }
     this.values = values;
     this.seedLocked = false;
+  }
+
+  // -------------------------------------------------------------- the LoRAs
+
+  /** The `lora_list` param, if this workflow has one at all. */
+  get loraParam(): Param | null {
+    return this.params.find((param) => param.type === "lora_list") ?? null;
+  }
+
+  /**
+   * Put one LoRA into the panel's list at a strength somebody already ran it
+   * at (§11.2). A LoRA is only worth anything at the strength it was tuned
+   * to, and that number is sitting in the metadata of the output you are
+   * looking at — copying it out by hand is the kind of transcription the app
+   * exists to avoid.
+   *
+   * Already in the list: its strengths are moved to these rather than a
+   * second row of the same file being added, which ComfyUI would apply
+   * twice. The return says which happened, so the caller can say so.
+   */
+  addLora(row: LoraRow): "added" | "updated" | null {
+    const param = this.loraParam;
+    if (!param) return null;
+    const rows = (this.values[param.key] as LoraRow[] | undefined) ?? [];
+    const at = rows.findIndex((existing) => existing.name === row.name);
+    if (at < 0) {
+      this.set(param.key, [...rows, { ...row }]);
+      return "added";
+    }
+    const before = rows[at]!;
+    if (
+      before.strength_model === row.strength_model &&
+      before.strength_clip === row.strength_clip
+    ) {
+      return "updated";
+    }
+    this.set(
+      param.key,
+      rows.map((existing, i) => i === at ? { ...row } : existing),
+    );
+    return "updated";
   }
 
   // --------------------------------------------------------------- the seed

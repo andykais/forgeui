@@ -199,6 +199,7 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "model",
       "size",
       "seed",
+      "loras",
       "turbo",
     ]);
     assertEquals(byId.get("anima")!.params.advanced, 4); // steps, cfg, clip, vae

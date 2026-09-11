@@ -726,6 +726,17 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   cannot identify one, because a job with three LoRAs has three rows under
   the one `lora` role. Prompt and seed are
   `user-select: all`, so one click takes the whole value.
+- **A LoRA row offers itself to the panel.** Each LoRA in the params carries
+  a `+` that adds it to the workflow open in Generate **at the strength this
+  run used** — the number that makes a LoRA worth anything is the one
+  somebody already found for it, and it is sitting right there in the
+  metadata, so it should not have to be read off and typed back in. Model
+  and clip strengths stay apart when they differ. A LoRA the panel already
+  lists is moved to the new strength rather than added a second time, which
+  ComfyUI would apply twice. The `+` is dim rather than hidden — an offer
+  nobody can see is not an offer — and it is absent when no workflow is open
+  or the open one takes no LoRAs. Its title names the workflow, so it is
+  unambiguous from the Gallery, where the panel is off screen.
 - **No `dd` holds a value here**, which is why the rows are plain elements
   rather than a description list: Firefox's plain-text serialiser indents the
   contents of a `dd` by four spaces — on every line, blank ones included —
