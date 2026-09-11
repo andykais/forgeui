@@ -2,6 +2,8 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Brain from "@lucide/svelte/icons/brain";
   import Copy from "@lucide/svelte/icons/copy";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
@@ -56,6 +58,12 @@
       rereading = false;
     }
   }
+  /** Named rather than inline, so `model` is narrowed where it is read. */
+  function toggleHidden() {
+    if (!model) return;
+    void patch({ hidden: !model.hidden });
+  }
+
   let nameDraft = $state("");
   let notesDraft = $state("");
   let tagDraft = $state("");
@@ -397,6 +405,24 @@
             >
               {rereading ? "Re-reading…" : "Re-read this file"}
             </button>
+            <!--
+              Hidden is out of the Generate pickers, not gone: it is still
+              here, still in the Models list behind Show hidden (§8.1).
+            -->
+            <button
+              class="reread"
+              class:on={model.hidden}
+              title={model.hidden
+                ? "Offer this in the Generate inputs again"
+                : "Keep this out of the Generate inputs; it stays listed on Models"}
+              onclick={toggleHidden}
+            >
+              {#if model.hidden}
+                <Eye size={11} /> Hidden
+              {:else}
+                <EyeOff size={11} /> Hide
+              {/if}
+            </button>
             <span class="spacer"></span>
             look up
             <a
@@ -687,8 +713,16 @@
   }
 
   .reread {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-size: 10px;
     padding: 2px 6px;
+  }
+
+  .reread.on {
+    background: var(--accent-tint-2);
+    color: var(--accent);
   }
 
   .reread:hover:not(:disabled) {

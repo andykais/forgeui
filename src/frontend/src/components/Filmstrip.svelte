@@ -144,6 +144,11 @@
     display: block;
   }
 
+  /* A preview frame is tiny; show all of it rather than a crop of it. */
+  .thumb.running img {
+    object-fit: contain;
+  }
+
   .pct {
     position: absolute;
     font-size: 11px;

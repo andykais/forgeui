@@ -15,10 +15,13 @@
    */
   let {
     model,
+    selected = false,
     onfamily,
     onhidden,
   }: {
     model: ModelEntry;
+    /** Where the arrow keys are, which is not where the mouse is (§11.4). */
+    selected?: boolean;
     onfamily: (model: ModelEntry, family: string) => void;
     /** Keep it out of the Generate pickers, or put it back (§8.1). */
     onhidden?: (model: ModelEntry, hidden: boolean) => void;
@@ -28,7 +31,12 @@
   const galleryHref = $derived(model.hash ? `/gallery?models=${model.hash}` : "/gallery");
 </script>
 
-<article class="card" data-model={model.id} data-hashing={model.hashing}>
+<article
+  class="card"
+  class:selected
+  data-model={model.id}
+  data-hashing={model.hashing}
+>
   <a
     class="thumb"
     {href}
@@ -126,6 +134,11 @@
     background: var(--raised);
     border-radius: var(--radius-card);
     overflow: hidden;
+  }
+
+  .card.selected {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   .thumb {

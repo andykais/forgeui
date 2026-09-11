@@ -124,7 +124,12 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /*
+     * Fit, not fill. A preview frame is a handful of pixels to begin with —
+     * cropping it to the card's 2:1 and scaling what is left only makes it
+     * harder to read, which is the one thing it is there for.
+     */
+    object-fit: contain;
     opacity: 0.75;
   }
 

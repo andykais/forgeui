@@ -84,10 +84,13 @@ export function defaultConfig(): Config {
     ),
     model_classes: {},
     keys: {
-      select_prev: ["ArrowLeft"],
-      select_next: ["ArrowRight"],
-      select_up: ["ArrowUp"],
-      select_down: ["ArrowDown"],
+      // WASD beside the arrows, so a hand already on the keyboard does not
+      // have to travel. Every screen that reads these gets them at once,
+      // which is the point of the table (§11.4).
+      select_prev: ["ArrowLeft", "a"],
+      select_next: ["ArrowRight", "d"],
+      select_up: ["ArrowUp", "w"],
+      select_down: ["ArrowDown", "s"],
       fullscreen: ["f"],
       close: ["Escape"],
     },

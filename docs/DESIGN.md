@@ -758,7 +758,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   of them for one model is four times the work. Under the tabs, when a class
   pools more than one folder, a row of folder chips (`All` + each folder key)
   narrows to one of them; the family chips sit below that, so each row down
-  narrows further. Both are URL params (`?class=`, `?kind=`). Tiles or table
+  narrows further. Both views take the keyboard (§11.4): the tiles walk left
+  and right, because an `auto-fill` grid has no column count to step by
+  without measuring it, and the table walks up and down, one model to a
+  line. Enter opens the highlight, Esc drops it. Both are URL params (`?class=`, `?kind=`). Tiles or table
   of cards with
   thumbnail (chosen sample → most recent output → empty plate), display name,
   family badge (or an inline SET FAMILY control when unset), count of outputs
@@ -776,8 +779,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   multi-select or bulk edits in v1; family is set from the same picker on the
   card, in the table's Family column, or on the model page.
 - Model detail page as described in §8.1: header with Copy path, full sha256
-  on its own line (`user-select: all`, no truncation, no button), **Re-read
-  this file** and lookups on **civitaiarchive** and **civitai** built from
+  on its own line (`user-select: all`, no truncation, no button), **Hide**
+  (out of the Generate inputs, still listed here — the same toggle the grid
+  card carries), **Re-read this file** and lookups on **civitaiarchive** and **civitai** built from
   that sha256 — the one identifier that survives a rename or a refiling.
   Re-read is a debugging action: it reads the header and the hash again
   past both caches, which is the only way to correct a wrong cached answer,
@@ -881,7 +885,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   the typed value; `-1` always means random (the field unlocks and the hint
   returns).
 - Progress card spans two columns: percent, ETA, node label, step counter over
-  the streaming preview. Failed cards expose the error inline with Retry.
+  the streaming preview. The preview **fits** rather than fills: a frame from
+  the sampler is a handful of pixels to begin with, and cropping it to the
+  card's 2:1 only makes the one thing it is for harder to read. Failed cards expose the error inline with Retry.
 - Video and image tiles are one component; kind only changes the badge and
   hover playback (muted autoplay).
 - Tile actions (Edit in Generate, Rerun now, Use in workflow, Upscale) appear
@@ -925,13 +931,17 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 
   ```yaml
   keys:
-    select_prev:  [ArrowLeft]
-    select_next:  [ArrowRight]
-    select_up:    [ArrowUp]
-    select_down:  [ArrowDown]
+    select_prev:  [ArrowLeft, a]
+    select_next:  [ArrowRight, d]
+    select_up:    [ArrowUp, w]
+    select_down:  [ArrowDown, s]
     fullscreen:   [f]
     close:        [Escape]
   ```
+
+  A chord is never one of these: a binding is a bare key, and several are
+  plain letters, so an event carrying ctrl, meta or alt matches nothing —
+  otherwise `Ctrl+A` would move the selection on its way to selecting all.
 
   Values are `KeyboardEvent.key` names; a list allows alternates. Adding a
   new shortcut later means adding a key here, not a hardcoded handler.

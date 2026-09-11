@@ -417,8 +417,15 @@ class AppState {
     });
   }
 
-  /** The two keyboard behaviours, read from `config.yaml` only (§11.4). */
+  /**
+   * The keyboard behaviours, read from `config.yaml` only (§11.4).
+   *
+   * A chord is never one of these. The bindings are bare keys, and several
+   * are now plain letters, so without this `Ctrl+A` would move the selection
+   * on its way to selecting all — and `Cmd+S` would too.
+   */
   keyAction(event: KeyboardEvent): string | null {
+    if (event.ctrlKey || event.metaKey || event.altKey) return null;
     const keys = this.config?.keys;
     if (!keys) return null;
     for (const [action, bindings] of Object.entries(keys)) {

@@ -38,6 +38,14 @@
   let loading = $state(false);
   let searchDraft = $state("");
   let rescanning = $state(false);
+  /**
+   * Keyboard navigation (§11.4): which model the arrows are moving from.
+   * A grid whose column count is `auto-fill` cannot be walked in two
+   * dimensions without measuring it, so the tiles step through the list
+   * left and right, and the table — one model per line — up and down.
+   */
+  let selectedId = $state<string | null>(null);
+  let listEl = $state<HTMLElement | undefined>(undefined);
 
   const query = $derived(router.current.query);
   const modelClass = $derived(query.get("class") ?? "diffusion");
@@ -204,6 +212,59 @@
     }
   }
 
+  /** Keep the highlight on something that is still listed. */
+  $effect(() => {
+    if (selectedId && !models.some((model) => model.id === selectedId)) {
+      selectedId = null;
+    }
+  });
+
+  function onKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    const index = models.findIndex((model) => model.id === selectedId);
+    // Enter opens whatever the highlight is on, which is what a click does.
+    // Before the binding lookup, because Enter is not one of the bindings:
+    // §11.4's table is about moving, and this is about arriving.
+    if (event.key === "Enter" && index >= 0 && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      navigate(`/models/${encodeURIComponent(models[index]!.id)}`);
+      return;
+    }
+
+    const action = app.keyAction(event);
+    if (!action) return;
+    if (action === "close" && selectedId !== null) {
+      event.preventDefault();
+      selectedId = null;
+      return;
+    }
+
+    // Left and right walk the tiles, up and down walk the table; each view
+    // answers to the pair that matches how it is laid out.
+    const forward = view === "table" ? "select_down" : "select_next";
+    const back = view === "table" ? "select_up" : "select_prev";
+    const delta = action === forward ? 1 : action === back ? -1 : 0;
+    if (delta === 0) return;
+    event.preventDefault();
+    // Nothing chosen yet: the first key takes the first model rather than
+    // jumping into the middle of the list.
+    const next = index < 0 ? models[0] : models[index + delta];
+    if (!next) return;
+    selectedId = next.id;
+    listEl
+      ?.querySelector(`[data-model="${CSS.escape(next.id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }
+
   const hashingLeft = $derived(models.filter((model) => model.hashing).length);
   /** What the listed models take up on disk, for the info row. */
   const listedBytes = $derived(
@@ -268,6 +329,8 @@
     return counts;
   });
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <section class="models">
   <header class="filters">
@@ -430,7 +493,7 @@
       </p>
     </div>
   {:else if view === "table"}
-    <div class="table-wrap">
+    <div class="table-wrap" bind:this={listEl}>
       <table>
         <thead>
           <tr>
@@ -445,8 +508,12 @@
         <tbody>
           {#each models as model (model.path)}
             <tr
+              class:selected={selectedId === model.id}
               data-model={model.id}
-              onclick={() => navigate(`/models/${encodeURIComponent(model.id)}`)}
+              onclick={() => {
+                selectedId = model.id;
+                navigate(`/models/${encodeURIComponent(model.id)}`);
+              }}
             >
               <td class="thumb-cell">
                 {#if model.thumb_url}
@@ -491,9 +558,14 @@
       </table>
     </div>
   {:else}
-    <div class="grid">
+    <div class="grid" bind:this={listEl}>
       {#each models as model (model.path)}
-        <ModelCard {model} onfamily={setFamily} onhidden={setHidden} />
+        <ModelCard
+          {model}
+          selected={selectedId === model.id}
+          onfamily={setFamily}
+          onhidden={setHidden}
+        />
       {/each}
     </div>
   {/if}
@@ -674,6 +746,20 @@
   tbody tr:hover {
     background: var(--raised);
     cursor: pointer;
+  }
+
+  /* Where the arrow keys are, which is not the same as where the mouse is. */
+  tbody tr.selected td {
+    background: var(--control);
+    box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+  }
+
+  tbody tr.selected td:first-child {
+    box-shadow: inset 1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+  }
+
+  tbody tr.selected td:last-child {
+    box-shadow: inset -1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
   }
 
   .thumb-cell {
