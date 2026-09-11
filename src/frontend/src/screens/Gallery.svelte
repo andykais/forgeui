@@ -123,7 +123,7 @@
     setQuery({ output: output?.id ?? null });
   }
 
-  async function editInGenerate(output: Output) {
+  async function reuseParams(output: Output) {
     if (!output.workflow_id) return;
     const detail = await api.output(output.id);
     await panel.editWith(output.workflow_id, detail.sidecar?.params ?? output.params);
@@ -251,7 +251,7 @@
     {selected}
     onselect={select}
     onclose={() => select(null)}
-    onedit={editInGenerate}
+    onedit={reuseParams}
     onrerun={rerun}
     ondelete={remove}
   />

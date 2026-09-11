@@ -169,6 +169,8 @@ export const api = {
       family?: string;
       q?: string;
       tags?: string;
+      /** Only the hidden ones; absent or false means only the visible. */
+      hidden?: boolean;
     } = {},
   ) => {
     const params = new URLSearchParams();
@@ -177,6 +179,7 @@ export const api = {
     if (query.family) params.set("family", query.family);
     if (query.q) params.set("q", query.q);
     if (query.tags) params.set("tags", query.tags);
+    if (query.hidden) params.set("hidden", "1");
     return request<{
       kind: string | null;
       class: string | null;
@@ -207,6 +210,7 @@ export const api = {
       strength_min?: number | null;
       strength_max?: number | null;
       thumb_sample_id?: string | null;
+      hidden?: boolean;
     },
   ) =>
     request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`, {

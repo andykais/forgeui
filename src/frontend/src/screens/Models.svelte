@@ -1,6 +1,6 @@
 <script lang="ts">
   import Search from "@lucide/svelte/icons/search";
-  import Tag from "@lucide/svelte/icons/tag";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -10,10 +10,12 @@
   import { app } from "../stores/app.svelte.ts";
   import { navigate, router, setQuery } from "../router.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
+  import { matcher } from "../lib/search.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import ModelCard from "../components/ModelCard.svelte";
   import FamilyPicker from "../components/FamilyPicker.svelte";
+  import TagPicker from "../components/TagPicker.svelte";
 
   /**
    * Models (§11.2, frame 04): a tab per model class, tiles or table, search
@@ -35,7 +37,6 @@
   let classes = $state<Record<string, string>>({});
   let loading = $state(false);
   let searchDraft = $state("");
-  let tagsDraft = $state("");
   let rescanning = $state(false);
 
   const query = $derived(router.current.query);
@@ -46,9 +47,14 @@
   const q = $derived(query.get("q") ?? "");
   /** Comma separated, all required; a URL param like every other filter. */
   const tags = $derived(query.get("tags") ?? "");
+  const chosenTags = $derived(
+    tags.split(",").map((tag) => tag.trim()).filter((tag) => tag.length > 0),
+  );
+  /** The set-aside pile, or everything else; never both (§8.1). */
+  const hidden = $derived(query.get("hidden") === "1");
   const view = $derived(query.get("view") === "table" ? "table" : "tiles");
   const filterKey = $derived(
-    `${modelClass}\u0000${kind}\u0000${family}\u0000${q}\u0000${tags}`,
+    `${modelClass}\u0000${kind}\u0000${family}\u0000${q}\u0000${tags}\u0000${hidden}`,
   );
 
   /** What a class is called on a tab; anything else is shown as it is named. */
@@ -138,14 +144,16 @@
         family: family || undefined,
         q: q || undefined,
         tags: tags || undefined,
+        hidden: hidden || undefined,
       });
       if (mine !== request) return;
       models = body.models;
       folders = body.folders;
       classes = body.classes;
       searchDraft = q;
-      tagsDraft = tags;
-      const everything = await api.models({});
+      // Both piles, so the counts can reflect the filters without a second
+      // round trip per chip.
+      const everything = await api.models({ hidden: hidden || undefined });
       if (mine !== request) return;
       all = everything.models;
     } catch (cause) {
@@ -176,6 +184,16 @@
     }
   }
 
+  async function setHidden(model: ModelEntry, next: boolean) {
+    try {
+      await api.patchModel(model.id, { hidden: next });
+      await load();
+      await app.refreshModels();
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not hide it");
+    }
+  }
+
   async function setFamily(model: ModelEntry, next: string) {
     try {
       const updated = await api.patchModel(model.id, { family: next });
@@ -187,6 +205,35 @@
   }
 
   const hashingLeft = $derived(models.filter((model) => model.hashing).length);
+  /** What the listed models take up on disk, for the info row. */
+  const listedBytes = $derived(
+    models.reduce((total, model) => total + model.size, 0),
+  );
+
+  /**
+   * The counts beside the tabs and the chips answer the same question the
+   * list does. `all` is already narrowed to the visible or the hidden pile;
+   * the search and the tags are applied here, so typing narrows the counts
+   * rather than leaving them describing a library nobody is looking at.
+   *
+   * The class and folder counts ignore the class and folder filters, and the
+   * family counts ignore the family filter — a count on a chip has to say
+   * what clicking it would give you, not what you already have.
+   */
+  const searched = $derived.by(() => {
+    const matches = matcher(q);
+    const wanted = tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(
+      (tag) => tag.length > 0,
+    );
+    return all.filter((model) => {
+      if (q && !matches(model.name, model.display_name, ...model.tags)) {
+        return false;
+      }
+      if (wanted.length === 0) return true;
+      const mine = model.tags.map((tag) => tag.toLowerCase());
+      return wanted.every((tag) => mine.some((own) => own.includes(tag)));
+    });
+  });
   /**
    * The chips are reconciled rather than hardcoded: a family the server
    * accepts, or that a model on disk is already filed as, has to be filterable
@@ -199,14 +246,14 @@
   );
   const perKind = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const model of all) {
+    for (const model of searched) {
       counts.set(model.kind, (counts.get(model.kind) ?? 0) + 1);
     }
     return counts;
   });
   const perClass = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const model of all) {
+    for (const model of searched) {
       counts.set(model.class, (counts.get(model.class) ?? 0) + 1);
     }
     return counts;
@@ -214,7 +261,7 @@
   /** Families of what this tab is showing, not of the whole library. */
   const perFamily = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const model of all) {
+    for (const model of searched) {
       if (kind ? model.kind !== kind : model.class !== modelClass) continue;
       counts.set(model.family, (counts.get(model.family) ?? 0) + 1);
     }
@@ -258,26 +305,31 @@
     <!--
       Tags, asked for as tags. `q` reaches them too, but only mixed in with
       every name and filename, so a tag whose word appears in a filename
-      cannot be asked for on its own.
+      cannot be asked for on its own. Chosen from a list rather than typed
+      blind: you had to know a tag existed before you could ask for it.
     -->
-    <label class="search tags" title="Comma separated; a model must carry all of them">
-      <Tag size={13} />
-      <input
-        placeholder="Tags…"
-        value={tagsDraft}
-        oninput={(event) => (tagsDraft = (event.currentTarget as HTMLInputElement).value)}
-        onkeydown={(event) => {
-          if (event.key === "Enter") setQuery({ tags: tagsDraft || null });
-          if (event.key === "Escape") {
-            tagsDraft = "";
-            setQuery({ tags: null });
-          }
-        }}
-        onblur={() => setQuery({ tags: tagsDraft || null })}
-      />
-    </label>
+    <TagPicker
+      models={all}
+      selected={chosenTags}
+      onchange={(next) => setQuery({ tags: next.length > 0 ? next.join(",") : null })}
+    />
 
     <span class="spacer"></span>
+
+    <!--
+      The pile you have set aside, or everything else — never both. Something
+      you cannot identify and might want to delete later should be out of the
+      way of the Generate pickers without being gone (§8.1).
+    -->
+    <button
+      class="toggle"
+      class:active={hidden}
+      title="Show only the models hidden from the Generate inputs"
+      onclick={() => setQuery({ hidden: hidden ? null : "1" })}
+    >
+      <EyeOff size={13} />
+      Show hidden
+    </button>
 
     <div class="row views">
       <button
@@ -344,7 +396,8 @@
   </div>
 
   <div class="count mono dim">
-    {models.length} model{models.length === 1 ? "" : "s"}{hashingLeft > 0
+    {models.length} model{models.length === 1 ? "" : "s"}
+    {#if listedBytes > 0}· {bytes(listedBytes)}{/if}{hashingLeft > 0
       ? ` · ${hashingLeft} still hashing`
       : ""}
     {#if folders.length > 0}
@@ -440,7 +493,7 @@
   {:else}
     <div class="grid">
       {#each models as model (model.path)}
-        <ModelCard {model} onfamily={setFamily} />
+        <ModelCard {model} onfamily={setFamily} onhidden={setHidden} />
       {/each}
     </div>
   {/if}
@@ -534,10 +587,6 @@
     width: 180px;
   }
 
-  /* Narrower: a tag is a word, where a model search is a path. */
-  .search.tags input {
-    width: 120px;
-  }
 
   .spacer {
     flex: 1;
@@ -548,6 +597,19 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  .toggle.active {
+    background: var(--accent-tint-2);
+    color: var(--accent);
   }
 
   .count {

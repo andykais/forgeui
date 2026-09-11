@@ -63,6 +63,15 @@ export type ModelClasses = Record<string, ModelClass>;
 
 export type KeyBindings = Record<KeyAction, string[]>;
 
+/**
+ * What a model tile shows when nobody has picked a thumbnail by hand:
+ * `first_sample` is the earliest sample on its page — a reference image you
+ * put there on purpose — and `latest_generated` is whatever came out of it
+ * most recently (§8.1).
+ */
+export const MODEL_THUMBNAILS = ["first_sample", "latest_generated"] as const;
+export type ModelThumbnail = typeof MODEL_THUMBNAILS[number];
+
 export interface UiConfig {
   /** Icon rail (56px) vs. labelled rail (196px). */
   rail_expanded: boolean;
@@ -76,6 +85,8 @@ export interface UiConfig {
    * touched and deleting one leaves no hole (§4.6).
    */
   workflow_order: string[];
+  /** What a model tile falls back to when no thumbnail was chosen (§8.1). */
+  model_thumbnail: ModelThumbnail;
 }
 
 export interface Config {
@@ -104,4 +115,5 @@ export interface PartialUiConfig {
   sidebar_collapsed?: Partial<Record<UiScreen, boolean>>;
   filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
   workflow_order?: string[];
+  model_thumbnail?: ModelThumbnail;
 }

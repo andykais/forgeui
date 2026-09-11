@@ -264,6 +264,7 @@ Deno.test("the re-hash decision compares path, size and mtime", () => {
     thumb_path: null,
     output_count: 0,
     last_used_at: null,
+    hidden: false,
     last_seen_at: 0,
   };
   const model: ScannedModel = {
@@ -306,6 +307,52 @@ Deno.test("every folder a diffusion model can live in is one class", () => {
   // The config override wins over the table.
   assertEquals(classOf("gligen", { gligen: "diffusion" }), "diffusion");
   assertEquals(classOf("checkpoints", { checkpoints: "other" }), "other");
+});
+
+Deno.test("two identical files are not re-hashed for ever", async () => {
+  // `models` is keyed by content, so both of these are one row there and the
+  // second overwrites the first. The losing path then had no row at all,
+  // which reads as "still hashing" and got it queued again on every rescan —
+  // a handful of duplicates and the count never reached zero.
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-dupes-" });
+  const checkpoints = join(dir, "checkpoints");
+  const dbDir = await Deno.makeTempDir({ prefix: "forgeui-dupes-db-" });
+  const db = openDatabase(join(dbDir, "app.db"));
+  try {
+    // Byte-identical, which is what a copy or a hard link in a model folder
+    // actually is.
+    for (const name of ["one.safetensors", "two.safetensors"]) {
+      await writeFakeSafetensors(join(checkpoints, name), {
+        name: "same",
+        bytes: 4096,
+      });
+    }
+    const scanner = scannerFor({ checkpoints: [checkpoints] });
+    const hasher = new ModelHasher({ db });
+
+    hasher.enqueue((await scanner.rescan()).models);
+    hasher.start();
+    await hasher.idle();
+    assertEquals(hasher.progress.done, 2);
+    // One row, because they are one model: the same weights twice over.
+    assertEquals(
+      db.prepare("SELECT count(*) FROM models").value<[number]>()?.[0],
+      1,
+    );
+    // Two files, because that is what is on the disk.
+    assertEquals(
+      db.prepare("SELECT count(*) FROM model_files").value<[number]>()?.[0],
+      2,
+    );
+
+    // And the second pass has nothing to do — which is the whole point.
+    assertEquals(hasher.enqueue((await scanner.rescan()).models), 0);
+    assertEquals(hasher.enqueue((await scanner.rescan()).models), 0);
+  } finally {
+    db.close();
+    await Deno.remove(dir, { recursive: true });
+    await Deno.remove(dbDir, { recursive: true });
+  }
 });
 
 Deno.test("a header is re-read when the file moves or the detector does", () => {

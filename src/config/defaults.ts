@@ -97,6 +97,8 @@ export function defaultConfig(): Config {
       sidebar_collapsed: { generate: false, gallery: false, models: false },
       filmstrip_collapsed: { generate: false, gallery: false, models: false },
       workflow_order: [],
+      // What was already happening before this was a setting.
+      model_thumbnail: "latest_generated",
     },
   };
 }

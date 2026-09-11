@@ -212,6 +212,8 @@ export interface Config {
     filmstrip_collapsed: Record<UiScreen, boolean>;
     /** Workflow ids the user dragged into place, most wanted first (§4.6). */
     workflow_order: string[];
+    /** What a model tile falls back to when none was chosen (§8.1). */
+    model_thumbnail: "first_sample" | "latest_generated";
   };
 }
 
@@ -243,6 +245,8 @@ export interface ModelEntry {
   hashing: boolean;
   /** Why the hasher could not read it; a file that failed is not waiting. */
   hash_error: string | null;
+  /** Kept out of the Generate pickers; still listed on Models (§8.1). */
+  hidden: boolean;
   present: boolean;
 }
 

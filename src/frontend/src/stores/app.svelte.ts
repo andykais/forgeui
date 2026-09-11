@@ -377,6 +377,15 @@ class AppState {
     });
   }
 
+  /** What a model tile falls back to when none was chosen by hand (§8.1). */
+  setModelThumbnail(choice: Config["ui"]["model_thumbnail"]): void {
+    this.#patchUi({ model_thumbnail: choice }, (ui) => {
+      ui.model_thumbnail = choice;
+    });
+    // Every tile in the app changes, so the lists behind them are refetched.
+    void this.refreshModels();
+  }
+
   /** Optimistic locally, then persisted: Settings has no save button (§11.2). */
   #patchUi(patch: unknown, apply: (ui: Config["ui"]) => void): void {
     if (!this.config) return;

@@ -33,6 +33,7 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     last_used_at: null,
     hashing: false,
     hash_error: null,
+    hidden: false,
     present: true,
     ...overrides,
   };

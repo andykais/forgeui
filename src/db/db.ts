@@ -70,6 +70,37 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 5,
+    name: "per-file hashes and hidden models",
+    // Both are in schema.sql, so a fresh database has them from version 1 and
+    // this does nothing there. `model_files` is backfilled from `models`, so
+    // an existing library is not re-hashed wholesale — only the paths that
+    // never won their hash, which are the ones that were looping.
+    apply: (db) => {
+      const columns = new Set(
+        db.prepare("PRAGMA table_info(models)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!columns.has("hidden")) {
+        db.exec(
+          "ALTER TABLE models ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS model_files (
+          path TEXT PRIMARY KEY,
+          size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+          hash TEXT NOT NULL,
+          hashed_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS model_files_hash ON model_files(hash);
+        INSERT OR IGNORE INTO model_files (path, size, mtime, hash, hashed_at)
+          SELECT path, size, mtime, hash, last_seen_at FROM models;
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

@@ -43,6 +43,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         [
           "inputs",
           "jobs",
+          "model_files",
           "model_probes",
           "models",
           "node_timings",
@@ -54,6 +55,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         ],
       );
       assertEquals(names(db, "index"), [
+        "model_files_hash",
         "output_models_model",
         "outputs_created",
         "outputs_workflow",

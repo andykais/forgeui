@@ -4,9 +4,11 @@ import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
 import type { DataPaths } from "../config/paths.ts";
 import type { ConfigStore } from "../config/config.ts";
 import {
+  firstSamplePathByModel,
   getModel,
   getModelByPath,
   latestOutputPathByModel,
+  listModelFiles,
   listModelProbes,
   listModels,
   type ModelMetaPatch,
@@ -22,7 +24,7 @@ import { mediaUrl } from "../outputs/store.ts";
 import type { SampleStore, SampleView } from "../samples/store.ts";
 import type { WsHub } from "../http/ws.ts";
 import { classOf } from "../config/defaults.ts";
-import type { ModelClass } from "../config/types.ts";
+import type { ModelClass, ModelThumbnail } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
@@ -84,6 +86,12 @@ export interface ModelView {
   thumb_url: string | null;
   output_count: number;
   last_used_at: number | null;
+  /**
+   * Kept out of the Generate pickers (§8.1). The Models screen still lists
+   * it, behind its own filter: something you cannot identify and might want
+   * to delete later should be out of the way, not gone.
+   */
+  hidden: boolean;
   /** True until the hash lands; the UI shows the `hashing` badge (§8.1). */
   hashing: boolean;
   /**
@@ -114,6 +122,12 @@ export interface ModelListFilters {
    * question, and one a name that happens to contain the word cannot answer.
    */
   tags?: string[];
+  /**
+   * Hidden models: `false` or absent lists only the visible ones, `true`
+   * lists only the hidden. There is no "both" — the point of the filter is
+   * to look at the pile you have set aside, or not to (§8.1).
+   */
+  hidden?: boolean;
 }
 
 export interface FamilyCount {
@@ -275,12 +289,11 @@ export class ModelLibrary {
 
   list(filters: ModelListFilters = {}): ModelView[] {
     const views: ModelView[] = [];
-    const thumbs = latestOutputPathByModel(this.#db);
+    const thumbs = this.#thumbs();
+    const files = listModelFiles(this.#db);
     for (const model of this.scanner.registry.values()) {
       if (filters.kind && model.kind !== filters.kind) continue;
-      views.push(
-        this.#view(model, getModelByPath(this.#db, model.path), thumbs),
-      );
+      views.push(this.#view(model, this.#rowFor(model.path, files), thumbs));
     }
     // A hashed model whose file has gone still has a page and a history, so
     // it stays listed rather than disappearing from under its outputs.
@@ -291,6 +304,7 @@ export class ModelLibrary {
     const filtered = views.filter((view) =>
       matchesClass(view, filters.class) &&
       matchesFamily(view, filters.family) &&
+      view.hidden === (filters.hidden ?? false) &&
       matchesTags(view, filters.tags) &&
       matchesQuery(view, filters.q)
     );
@@ -304,7 +318,7 @@ export class ModelLibrary {
   get(id: string): ModelDetail | null {
     const path = decodePathId(id);
     const row = path !== null
-      ? getModelByPath(this.#db, path)
+      ? this.#rowFor(path, listModelFiles(this.#db))
       : getModel(this.#db, normalizeModelHash(id));
     const scanned = path !== null
       ? this.scanner.registry.get(path) ?? null
@@ -312,7 +326,7 @@ export class ModelLibrary {
       ? this.scanner.registry.get(row.path) ?? null
       : null;
     if (!scanned && !row) return null;
-    const view = this.#view(scanned, row, latestOutputPathByModel(this.#db));
+    const view = this.#view(scanned, row, this.#thumbs());
     return {
       ...view,
       samples: view.hash ? this.#samples?.list(view.hash) ?? [] : [],
@@ -368,7 +382,7 @@ export class ModelLibrary {
       if (model.hash) return model;
       const scanned = this.#byName(model.name, model.role);
       if (!scanned) return model;
-      const row = getModelByPath(this.#db, scanned.path);
+      const row = this.#rowFor(scanned.path, listModelFiles(this.#db));
       return row ? { ...model, hash: row.hash } : model;
     });
   }
@@ -400,10 +414,32 @@ export class ModelLibrary {
     }
   }
 
+  /** Both candidate pictures, plus which the user asked for (§8.1). */
+  #thumbs(): ModelThumbs {
+    return {
+      prefer: this.#config.config.ui.model_thumbnail,
+      samples: firstSamplePathByModel(this.#db),
+      outputs: latestOutputPathByModel(this.#db),
+    };
+  }
+
+  /**
+   * The `models` row a path belongs to. `models` is keyed by content, so two
+   * identical files at two paths share one row and only one of them is named
+   * on it; going through the per-file hash finds it for both, rather than
+   * leaving the other one looking like it had never been hashed (§8.1).
+   */
+  #rowFor(path: string, files: Map<string, { hash: string }>): ModelRow | null {
+    const byPath = getModelByPath(this.#db, path);
+    if (byPath) return byPath;
+    const hash = files.get(path)?.hash;
+    return hash ? getModel(this.#db, hash) : null;
+  }
+
   #view(
     scanned: ScannedModel | null,
     row: ModelRow | null,
-    thumbs: Map<string, string>,
+    thumbs: ModelThumbs,
   ): ModelView {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
@@ -433,6 +469,7 @@ export class ModelLibrary {
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
       last_used_at: row?.last_used_at ?? null,
+      hidden: row?.hidden ?? false,
       // Still waiting only while nothing has gone wrong: a file that failed
       // to read is not on its way, it is stopped.
       hashing: row === null && !failure,
@@ -564,13 +601,31 @@ export function refreshUsageFor(db: Database, hashes: string[]): void {
   if (hashes.length > 0) refreshModelUsage(db, hashes);
 }
 
-/** The chosen sample, else the most recent output, else an empty plate. */
-function thumbUrl(row: ModelRow | null, thumbs: Map<string, string>):
-  | string
-  | null {
+/**
+ * What a model is pictured by, everywhere it is pictured (§8.1). A thumbnail
+ * chosen by hand always wins — "Set as thumbnail" is a decision, not a
+ * preference. Failing that it is whatever `ui.model_thumbnail` asks for, and
+ * the other one is the fallback, so a model with only one of the two is
+ * still not an empty plate.
+ */
+function thumbUrl(
+  row: ModelRow | null,
+  thumbs: ModelThumbs,
+): string | null {
   if (!row) return null;
-  const path = row.thumb_path ?? thumbs.get(row.hash) ?? null;
+  const [first, second] = thumbs.prefer === "first_sample"
+    ? [thumbs.samples, thumbs.outputs]
+    : [thumbs.outputs, thumbs.samples];
+  const path = row.thumb_path ?? first.get(row.hash) ?? second.get(row.hash) ??
+    null;
   return path === null ? null : mediaUrl(path);
+}
+
+/** Both candidate pictures for every model, and which one is wanted. */
+interface ModelThumbs {
+  prefer: ModelThumbnail;
+  samples: Map<string, string>;
+  outputs: Map<string, string>;
 }
 
 function matchesClass(view: ModelView, modelClass?: ModelClass): boolean {

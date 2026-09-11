@@ -2,6 +2,7 @@ import {
   KEY_ACTIONS,
   type KeyAction,
   MODEL_CLASSES,
+  MODEL_THUMBNAILS,
   type ModelClass,
   type PartialConfig,
   type PartialUiConfig,
@@ -113,6 +114,7 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
     "sidebar_collapsed",
     "filmstrip_collapsed",
     "workflow_order",
+    "model_thumbnail",
   ]);
   const ui: PartialUiConfig = {};
   pick(raw, "rail_expanded", ui, bool, where);
@@ -135,6 +137,13 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       raw.filmstrip_collapsed,
       `${where}.filmstrip_collapsed`,
       bool,
+    );
+  }
+  if ("model_thumbnail" in raw) {
+    ui.model_thumbnail = oneOf(
+      raw.model_thumbnail,
+      `${where}.model_thumbnail`,
+      MODEL_THUMBNAILS,
     );
   }
   if ("workflow_order" in raw) {

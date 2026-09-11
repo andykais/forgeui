@@ -58,7 +58,7 @@
   });
 
   /**
-   * Promote to sample (§8.3): the models popover, restricted to the models
+   * Save as sample (§8.3): the models popover, restricted to the models
    * this output actually used, each checkable, with a confirm
    * (MOCK-REVISIONS §13).
    */
@@ -71,12 +71,12 @@
     try {
       const { samples } = await api.promote(output.id, hashes);
       toasts.message(
-        `Promoted to ${samples.length} sample${samples.length === 1 ? "" : "s"}`,
+        `Saved as ${samples.length} sample${samples.length === 1 ? "" : "s"}`,
       );
       promoteOpen = false;
       checked = {};
     } catch (cause) {
-      toasts.message(cause instanceof Error ? cause.message : "could not promote it");
+      toasts.message(cause instanceof Error ? cause.message : "could not save it");
     } finally {
       promoting = false;
     }
@@ -178,15 +178,15 @@
 
 <aside class="sidebar scroll">
   <div class="actions">
-    <button class="primary" onclick={onedit}>Edit in Generate →</button>
-    <button onclick={onrerun}>Rerun now ⟳</button>
+    <button class="primary" onclick={onedit}>Reuse parameters →</button>
+    <button onclick={onrerun}>Generate again ⟳</button>
     {#if promotable.length > 0}
       <div class="chip-wrap">
-        <button onclick={() => (promoteOpen = !promoteOpen)}>Promote to sample</button>
+        <button onclick={() => (promoteOpen = !promoteOpen)}>Save as sample</button>
         <Popover
           open={promoteOpen}
           width={240}
-          title="Promote to sample"
+          title="Save as sample"
           onclose={() => (promoteOpen = false)}
         >
           {#each promotable as model (model.hash)}
@@ -205,7 +205,7 @@
             disabled={promoting || promotable.every((model) => !checked[model.hash!])}
             onclick={promote}
           >
-            {promoting ? "Promoting…" : "Promote"}
+            {promoting ? "Saving…" : "Save"}
           </button>
         </Popover>
       </div>

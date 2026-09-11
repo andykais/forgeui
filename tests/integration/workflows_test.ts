@@ -205,7 +205,13 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(byId.get("anima")!.params.advanced, 4); // steps, cfg, clip, vae
     // Rebuilt from the official ComfyUI template (§7): three loaders for a
     // split-file model, and a model param to swap it.
-    assertEquals(keys("z-image-turbo"), ["prompt", "model", "size", "seed"]);
+    assertEquals(keys("z-image-turbo"), [
+      "prompt",
+      "model",
+      "size",
+      "loras",
+      "seed",
+    ]);
     // steps, shift, clip, vae (§7.1).
     assertEquals(byId.get("z-image-turbo")!.params.advanced, 4);
     assertEquals(keys("sd15"), [

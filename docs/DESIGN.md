@@ -224,7 +224,7 @@ Initial set:
 | `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
-| `z-image-turbo` | z-image | image | prompt, seed, size; few steps by default |
+| `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
@@ -274,6 +274,11 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
    messages prefixed with the job id (push; never polled): `uint32` event (1 =
    preview), `uint32` format (1 = JPEG, 2 = PNG, as ComfyUI tags it), `uint32`
    job id length, the job id in UTF-8, then the image bytes.
+   The managed child is launched with **`--preview-method auto`**: ComfyUI's
+   own default is `none`, which sends no preview frames at all, so the
+   running card sat on its dark ground waiting for one that was never
+   coming. A ComfyUI the app did not start (`mode: local_url`) needs the
+   same flag passed to it by whoever did.
    Every (re)connection to ComfyUI is followed by a reconcile pass over the
    jobs the app still thinks are in flight, resolving them from `/queue` and
    `/history`; that is how a dropped socket or a ComfyUI that died before
@@ -469,7 +474,14 @@ Model hashing runs in a background worker; a model is re-hashed only if
   existing outputs whose sidecar `models[].name` matches and whose `hash` is
   `null`; the sidecar is not rewritten. `reindex` applies the same name-based
   resolution for sidecars with `hash: null`.
-- Each model has: thumbnail (chosen sample or first output), family, notes,
+- **What a model is pictured by**: a thumbnail chosen by hand on its page
+  always wins — "Set as thumbnail" is a decision, not a preference. Failing
+  that it is whichever of its **first sample** or its **latest generation**
+  `ui.model_thumbnail` asks for, with the other as the fallback so a model
+  with only one of the two is still not an empty plate. The setting is in
+  `config.yaml` and on the Settings page, and it applies everywhere a model
+  is pictured.
+- Each model has: thumbnail (as above), family, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
@@ -482,8 +494,10 @@ Model hashing runs in a background worker; a model is re-hashed only if
   there is anything to run them in. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the
   list), else read from the file itself (§6), else set by the user from the
-  same list, else `unset`. A probe answer records **which detector produced
-  it**, and a scan re-reads any header an older one answered for: a family
+  same list, else `unset`. A model can also be **hidden**: kept out of the
+  Generate pickers while still listed on Models behind its own filter, for
+  the files you cannot identify and might want to delete later. A probe
+  answer records **which detector produced it**, and a scan re-reads any header an older one answered for: a family
   added in a later build otherwise never reached a model already on disk —
   the file had not changed, so no rescan ever looked at it again, and adding
   one did nothing for the people who had those models. `wan2` is one family and not two: ComfyUI builds
@@ -495,6 +509,13 @@ Model hashing runs in a background worker; a model is re-hashed only if
   a searchable list. It is positioned in viewport coordinates rather than
   absolutely inside its trigger: a card and a table cell both clip their own
   overflow, which swallowed the list whole.
+- **A file is identified by its path, a model by its content.** `models` is
+  keyed by the sha256, so two identical files at two paths are one model
+  there and only one of them is named on the row; `model_files` records what
+  each *file* hashed to, which is what the re-hash decision reads. Without
+  it the losing path had no row at all — which is what "still hashing" means
+  — so it was queued again on every single rescan, for ever, and the count
+  never reached zero.
 - **Hashing progress counts the pass that is running**, not every pass since
   launch. Carrying the totals forward made each rescan report a window onto
   nothing — "74/86", the tail of the last pass plus the head of this one.
@@ -643,6 +664,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   node and streaming previews (ComfyUI binary preview frames). Failed cards
   keep their slot with the error inline plus Retry / Edit in Generate / Copy
   error.
+- The viewer's actions are **Reuse parameters**, **Generate again**, **Save
+  as sample** and Delete. Reuse parameters fills the panel and leaves the
+  view alone — it used to drop back to the grid, taking away the thing you
+  were setting the next run up from. The chip over the media reads **latest**
+  while it is following (a label: nothing happens when clicked, so nothing
+  lights up under the pointer) and **jump to latest** when it is not, which
+  is the way back.
 - **Focused output view**: clicking a result keeps the params panel left
   (360px) and puts the output in the centre, using **the same viewer layout
   as Gallery**: a metadata sidebar on the right (actions, created, duration,
@@ -735,10 +763,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   thumbnail (chosen sample → most recent output → empty plate), display name,
   family badge (or an inline SET FAMILY control when unset), count of outputs
   (a link into the Gallery filtered to that hash). Search (same matcher as
-  the API `q`) + a **tags** box beside it + family filter including an
+  the API `q`) + a **tag picker** beside it + family filter including an
   "unset" chip. `q` reaches tags, but only mixed in with names and
   filenames, so `?tags=` is the way to ask for a tag and mean it: comma
-  separated, all of them required, a URL param like every other filter. No
+  separated, all of them required, a URL param like every other filter. The
+  picker lists the ten commonest with their counts and narrows as you type,
+  because a text box could only be typed into blind. **Show hidden** swaps
+  the list for the models kept out of the Generate pickers; it is one or the
+  other, never both. Every count beside a tab or a chip follows the search,
+  the tags and that switch — a count has to say what clicking it would give
+  you. The row under the filters carries the total size on disk. No
   multi-select or bulk edits in v1; family is set from the same picker on the
   card, in the table's Family column, or on the model page.
 - Model detail page as described in §8.1: header with Copy path, full sha256
@@ -805,6 +839,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   at the top whenever the search narrows the list.
 - Param panels are narrow (360px) so results stay visible; textareas
   auto-grow.
+- Picking a **model** hands the caret to the prompt: that is the start of
+  writing one. Adding a **LoRA** does not — you are working in the list and
+  usually about to add another, and being thrown back up to the prompt took
+  the panel's scroll with it.
 - **LoRA rows**: picker with thumbnail + name, remove button, drag to
   reorder **from the grip alone** — a row that is draggable everywhere means
   a drag on the strength slider moves the row instead of the handle.

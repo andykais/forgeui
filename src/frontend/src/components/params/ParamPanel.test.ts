@@ -47,6 +47,7 @@ const loras: ModelEntry[] = [
     last_used_at: null,
     hashing: false,
     hash_error: null,
+    hidden: false,
     present: true,
   },
   {
@@ -71,6 +72,7 @@ const loras: ModelEntry[] = [
     last_used_at: null,
     hashing: false,
     hash_error: null,
+    hidden: false,
     present: true,
   },
 ];
@@ -108,6 +110,7 @@ function diffusionModel(name: string, family: string, kind = "checkpoints"): Mod
     last_used_at: null,
     hashing: false,
     hash_error: null,
+    hidden: false,
     present: true,
   };
 }
@@ -675,14 +678,31 @@ describe("the LoRA search box", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Search LoRAs"));
   });
 
-  test("adding one hands the caret to the prompt", async () => {
+  test("adding one leaves the caret and the panel where they were", async () => {
+    // Unlike picking a model, which is the start of writing a prompt. Adding
+    // a LoRA is not: you are working in this list, usually about to add
+    // another, and being thrown back up to the prompt took the panel's scroll
+    // with it.
     mount([{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }, loraParam], {
       prompt: "figs",
       loras: [],
     });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
     await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
-    // A tick for the panel's own re-render, then a frame.
+    await tick();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(document.activeElement).not.toBe(screen.getByLabelText("Prompt"));
+  });
+
+  test("picking a model still hands the caret to the prompt", async () => {
+    mount([
+      { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
+      { key: "model", label: "Model", type: "model", bind: "1.ckpt_name" },
+    ], { prompt: "figs", model: "" }, {
+      checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")],
+    });
+    await fireEvent.click(screen.getByText("choose a model…"));
+    await fireEvent.click(screen.getByText("krea2_turbo_bf16"));
     await tick();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));

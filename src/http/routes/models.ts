@@ -78,6 +78,13 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
     throw new BodyError("strength_min: must not be above strength_max");
   }
 
+  if (body.hidden !== undefined) {
+    if (typeof body.hidden !== "boolean") {
+      throw new BodyError("hidden: expected true or false");
+    }
+    patch.hidden = body.hidden;
+  }
+
   // "Set as thumbnail" (§8.3); null goes back to the newest output.
   if (body.thumb_sample_id !== undefined) {
     if (
@@ -91,7 +98,7 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
   if (Object.keys(patch).length === 0) {
     throw new BodyError(
       "nothing to change: expected display_name, family, notes, tags, " +
-        "strength_min, strength_max or thumb_sample_id",
+        "hidden, strength_min, strength_max or thumb_sample_id",
     );
   }
   return patch;
@@ -158,6 +165,7 @@ export function modelRoutes(ctx: AppContext): Route[] {
             family: url.searchParams.get("family") ?? undefined,
             q: url.searchParams.get("q") ?? undefined,
             tags: splitTags(url.searchParams.get("tags")),
+            hidden: url.searchParams.get("hidden") === "1",
           }),
           progress: ctx.models.progress,
         });

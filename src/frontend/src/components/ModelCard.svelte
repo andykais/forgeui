@@ -1,5 +1,7 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import type { ModelEntry } from "../types.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { navigate } from "../router.svelte.ts";
@@ -14,9 +16,12 @@
   let {
     model,
     onfamily,
+    onhidden,
   }: {
     model: ModelEntry;
     onfamily: (model: ModelEntry, family: string) => void;
+    /** Keep it out of the Generate pickers, or put it back (§8.1). */
+    onhidden?: (model: ModelEntry, hidden: boolean) => void;
   } = $props();
 
   const href = $derived(`/models/${encodeURIComponent(model.id)}`);
@@ -75,6 +80,19 @@
       {/if}
 
       <span class="spacer"></span>
+
+      {#if onhidden && !model.hashing && model.hash}
+        <button
+          class="hide"
+          title={model.hidden
+            ? "Show this in the Generate inputs again"
+            : "Hide this from the Generate inputs"}
+          aria-label={model.hidden ? `Unhide ${model.display_name}` : `Hide ${model.display_name}`}
+          onclick={() => onhidden(model, !model.hidden)}
+        >
+          {#if model.hidden}<Eye size={12} />{:else}<EyeOff size={12} />{/if}
+        </button>
+      {/if}
 
       {#if model.output_count > 0}
         <a
@@ -172,6 +190,19 @@
     color: var(--error);
   }
 
+
+  .hide {
+    display: flex;
+    align-items: center;
+    background: transparent;
+    padding: 2px 4px;
+    color: var(--text-4);
+  }
+
+  .hide:hover {
+    color: var(--text-2);
+    background: var(--control);
+  }
 
   .count {
     font-size: 11px;

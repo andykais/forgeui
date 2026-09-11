@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Anvil from "@lucide/svelte/icons/anvil";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import Images from "@lucide/svelte/icons/images";
   import Brain from "@lucide/svelte/icons/brain";
@@ -47,8 +48,14 @@
 </script>
 
 <nav class="rail" class:expanded aria-label="Screens">
+  <!--
+    The anvil, which is also the favicon: one mark for the app rather than a
+    lone "f" that meant nothing on its own. The name comes back beside it
+    when the rail is open.
+  -->
   <div class="mark" title="ForgeUI">
-    <span class="wordmark mono">{expanded ? "ForgeUI" : "f"}</span>
+    <Anvil size={16} />
+    {#if expanded}<span class="wordmark mono">ForgeUI</span>{/if}
   </div>
 
   <div class="items">
@@ -97,6 +104,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 7px;
     margin: 0 8px 8px;
     border-radius: var(--radius-input);
     background: var(--accent-tint);

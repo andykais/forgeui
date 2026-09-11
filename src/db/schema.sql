@@ -44,8 +44,22 @@ CREATE TABLE models (
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
   last_used_at INTEGER,           -- derived: max(outputs.created_at) over output_models; same maintenance
+  hidden INTEGER NOT NULL DEFAULT 0,  -- kept out of the Generate pickers (§8.1)
   last_seen_at INTEGER NOT NULL
 );
+
+-- What each *file* hashed to. `models` is keyed by content, so two identical
+-- files at two paths are one row there and the second overwrites the first;
+-- the losing path then had no row at all, which reads as "still hashing" and
+-- got it re-queued on every rescan, for ever. A file is identified by its
+-- path, and this is where that lives (§8.1).
+CREATE TABLE model_files (
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL, mtime INTEGER NOT NULL,  -- re-hash when either moves
+  hash TEXT NOT NULL,
+  hashed_at INTEGER NOT NULL
+);
+CREATE INDEX model_files_hash ON model_files(hash);
 
 CREATE TABLE model_probes (      -- derived: what a file's header says it is
   path TEXT PRIMARY KEY,

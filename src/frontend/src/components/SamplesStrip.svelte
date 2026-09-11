@@ -8,7 +8,7 @@
   /**
    * The Samples strip of the model page (§8.3, frame 05): media that shows
    * what this model does, dropped on the page or promoted from an output.
-   * The hover menu is Set as thumbnail and Delete, plus Edit in Generate on
+   * The hover menu is Set as thumbnail and Delete, plus Reuse parameters on
    * the ones that came from an output and therefore have params to reuse.
    *
    * The Civitai URL field and Fetch info button belong to Phase 3 and are
@@ -63,7 +63,7 @@
           </button>
           {#if sample.reusable}
             <button
-              title="Edit in Generate"
+              title="Reuse parameters"
               aria-label={`Edit ${sample.id} in Generate`}
               onclick={() => onedit(sample)}
             >

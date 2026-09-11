@@ -51,6 +51,7 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     last_used_at: null,
     hashing: false,
     hash_error: null,
+    hidden: false,
     present: true,
     samples: [],
     ...overrides,

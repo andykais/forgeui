@@ -135,13 +135,18 @@
     focusRequested = false;
   }
 
-  async function editInGenerate(output: Output) {
+  /**
+   * Reuse parameters: fill the panel from this output and leave the view
+   * alone. It used to drop back to the grid, which took away the thing you
+   * were looking at while setting up the next run from it — the whole point
+   * of the button is to work from what is on screen.
+   */
+  async function reuseParams(output: Output) {
     const workflowId = output.workflow_id;
     if (!workflowId) return;
     const detail = await api.output(output.id);
     await panel.editWith(workflowId, detail.sidecar?.params ?? output.params);
     setQuery({ workflow: workflowId });
-    closeFocused();
   }
 
   async function rerun(output: Output) {
@@ -359,7 +364,7 @@
         following = sessionOutputs[0]?.id === output.id;
       }}
       onclose={closeFocused}
-      onedit={editInGenerate}
+      onedit={reuseParams}
       onrerun={rerun}
       ondelete={remove}
       onfollow={() => {

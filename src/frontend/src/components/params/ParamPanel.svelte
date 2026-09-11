@@ -352,12 +352,17 @@
           onchange={(value) => onchange(param.key, value)}
         />
       {:else if param.type === "lora_list"}
+        <!--
+          No `onpicked` here, unlike a model. Picking a model is the start of
+          writing a prompt, so the caret goes there; adding a LoRA is not —
+          you are working in this list and usually about to add another, and
+          being thrown back up to the prompt took the panel with it.
+        -->
         <LoraListParam
           {param}
           value={(values[param.key] as LoraRow[]) ?? []}
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
-          onpicked={focusPrompt}
           fill={pickerFill}
         />
       {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}

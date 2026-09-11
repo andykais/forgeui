@@ -192,6 +192,32 @@
       </div>
     </article>
 
+    <!--
+      The one appearance setting that is not read-only here: it changes what
+      you see on every model tile in the app, so it belongs beside the folders
+      those models came from rather than buried in `config.yaml` (§8.1).
+    -->
+    <article class="card">
+      <div class="row card-head">
+        <h2>Model tiles</h2>
+      </div>
+      <span class="label">Picture a model with</span>
+      <div class="row choices">
+        {#each [["first_sample", "its first sample"], ["latest_generated", "the latest thing it made"]] as const as [value, text] (value)}
+          <button
+            class:active={(config?.ui.model_thumbnail ?? "latest_generated") === value}
+            onclick={() => app.setModelThumbnail(value)}
+          >
+            {text}
+          </button>
+        {/each}
+      </div>
+      <p class="dim note">
+        A thumbnail set by hand on a model's page wins over both; whichever of
+        these a model has none of falls back to the other.
+      </p>
+    </article>
+
     <article class="card">
       <div class="row card-head">
         <h2>Data directory</h2>
@@ -281,6 +307,21 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+  }
+
+  .choices {
+    gap: 6px;
+    margin: 4px 0 2px;
+  }
+
+  .choices button {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  .choices button.active {
+    background: var(--accent-tint-2);
+    color: var(--accent);
   }
 
   .use-label {

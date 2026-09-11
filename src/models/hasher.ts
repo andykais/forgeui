@@ -3,11 +3,12 @@ import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
 import { delay } from "@std/async/delay";
 import {
-  getModelByPath,
+  listModelFiles,
   markModelSeen,
-  type ModelRow,
+  type ModelFileRow,
   refreshModelUsage,
   upsertModel,
+  upsertModelFile,
 } from "../db/queries.ts";
 import type { ScannedModel } from "./scan.ts";
 
@@ -17,8 +18,12 @@ import type { ScannedModel } from "./scan.ts";
  * pickers, generation and the gallery all work off the path — so nothing here
  * may block anything, and a failure to read one file must not stop the rest.
  *
- * Re-hashing is decided on `path + size + mtime`: an untouched file keeps the
- * hash it already has, which is what makes a restart cheap.
+ * Re-hashing is decided on `path + size + mtime`, recorded per *file* in
+ * `model_files`: an untouched file keeps the hash it already has, which is
+ * what makes a restart cheap. It has to be per file rather than per model,
+ * because `models` is keyed by content — two identical files at two paths are
+ * one row there, the second overwrites the first, and the losing path then
+ * looked unhashed for ever and was queued again on every single rescan.
  *
  * The queue is smallest first. Reading is what costs, so folder order put a
  * hundred LoRAs behind ten multi-gigabyte checkpoints and none of them gained
@@ -100,6 +105,8 @@ export class ModelHasher {
 
   #queue: ScannedModel[] = [];
   #queued = new Set<string>();
+  /** What each path hashed to last time, so an untouched file is skipped. */
+  #files = new Map<string, ModelFileRow>();
   #running = false;
   #stopped = false;
   #done = 0;
@@ -117,6 +124,7 @@ export class ModelHasher {
     this.#onHashed = options.onHashed;
     this.#now = options.now ?? Date.now;
     this.#hashFile = options.hashFile ?? hashFileStreaming;
+    this.#files = listModelFiles(options.db);
   }
 
   get progress(): HashingProgress {
@@ -142,7 +150,7 @@ export class ModelHasher {
     let queued = 0;
     for (const model of models) {
       if (this.#queued.has(model.path)) continue;
-      const existing = getModelByPath(this.#db, model.path);
+      const existing = this.#files.get(model.path);
       if (existing && unchanged(existing, model)) {
         markModelSeen(this.#db, existing.hash, this.#now());
         this.#onHashed?.({ model, hash: existing.hash, fresh: false });
@@ -235,6 +243,17 @@ export class ModelHasher {
   }
 
   #write(model: ScannedModel, hash: string): void {
+    const file: ModelFileRow = {
+      path: model.path,
+      size: model.size,
+      mtime: model.mtime ?? 0,
+      hash,
+      hashed_at: this.#now(),
+    };
+    // The per-file record first: it is what stops this path being queued
+    // again, whether or not it ends up owning the `models` row.
+    upsertModelFile(this.#db, file);
+    this.#files.set(model.path, file);
     upsertModel(this.#db, {
       hash,
       path: model.path,
@@ -253,7 +272,10 @@ export class ModelHasher {
 }
 
 /** The §8.1 re-hash decision: same file, same size, same mtime. */
-export function unchanged(row: ModelRow, model: ScannedModel): boolean {
+export function unchanged(
+  row: { path: string; size: number; mtime: number },
+  model: ScannedModel,
+): boolean {
   return row.path === model.path && row.size === model.size &&
     row.mtime === (model.mtime ?? 0);
 }

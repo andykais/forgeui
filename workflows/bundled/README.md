@@ -13,7 +13,7 @@ from then on (§4.6).
 | `illustrious`    | Illustrious XL          | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced            |
 | `anima`          | Anima                   | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced |
 | `flux-klein`     | Flux.2 Klein            | flux2   | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced           |
-| `z-image-turbo`  | Z-Image Turbo           | z-image | image | prompt, model, size, seed · steps, shift, clip, vae advanced                |
+| `z-image-turbo`  | Z-Image Turbo           | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced         |
 | `ltx`            | LTX Video               | ltx     | video | prompt, size, frames, fps, seed, loras                                      |
 | `sd15`           | Stable Diffusion 1.5    | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                   |
 

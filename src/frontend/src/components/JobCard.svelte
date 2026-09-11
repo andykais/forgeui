@@ -9,7 +9,7 @@
    * A job that has no output yet: running (percent, ETA, node, step counter
    * over the streaming preview), queued (a dashed placeholder with its own
    * cancel — the strip does not cancel individual queued jobs), or failed
-   * (the error inline with Retry, Edit in Generate and Copy error) — §11.2.
+   * (the error inline with Retry, Reuse parameters and Copy error) — §11.2.
    */
   interface Props {
     job: Job;
@@ -89,7 +89,7 @@
     <pre class="mono error-text">{job.error?.message ?? "unknown error"}</pre>
     <div class="row actions">
       <button class="retry" onclick={retry}>Retry</button>
-      <button onclick={editInGenerate}>Edit in Generate →</button>
+      <button onclick={editInGenerate}>Reuse parameters →</button>
       <button onclick={copyError}>Copy error</button>
     </div>
   </div>

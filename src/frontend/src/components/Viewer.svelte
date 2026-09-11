@@ -161,10 +161,15 @@
     </header>
 
     <div class="media" class:one-to-one={!fit} bind:this={mediaBox}>
-      {#if following !== null}
-        <button class="follow-chip" class:pinned={!following} onclick={onfollow}>
-          {following ? "following latest" : `pinned · ${selected.id.slice(-7)}`}
-        </button>
+      <!--
+        Two different things wearing one shape before: while it is following,
+        the chip is a label and does nothing when clicked, so it no longer
+        offers itself as a button; pinned, it is the way back, and says so.
+      -->
+      {#if following === true}
+        <span class="follow-chip">latest</span>
+      {:else if following === false}
+        <button class="follow-chip jump" onclick={onfollow}>jump to latest</button>
       {/if}
       {#if following && isNewest}
         <span class="newest badge accent">newest</span>
@@ -324,9 +329,20 @@
     color: var(--accent);
   }
 
-  .follow-chip.pinned {
+  /* A label, not a control: nothing happens on click, so nothing lights up. */
+  span.follow-chip {
+    border-radius: var(--radius-control);
+    cursor: default;
+  }
+
+  .follow-chip.jump {
     background: var(--raised-2);
-    color: var(--text-4);
+    color: var(--text-2);
+  }
+
+  .follow-chip.jump:hover {
+    background: var(--control);
+    color: var(--text);
   }
 
   .newest {
