@@ -3,6 +3,7 @@
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
   import LineChartIcon from "@lucide/svelte/icons/line-chart";
   import X from "@lucide/svelte/icons/x";
+  import Info from "@lucide/svelte/icons/info";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { router, setQuery } from "../router.svelte.ts";
@@ -369,7 +370,18 @@
         <div class="card-head">
           <div class="titles">
             <h2>{report.title}</h2>
-            <p class="dim">{report.description}</p>
+            <!--
+              What an entry is and when one is written: a note for the moment
+              someone asks, not a line of prose over every graph (§11.2).
+            -->
+            <span
+              class="info"
+              role="img"
+              title={report.description}
+              aria-label={report.description}
+            >
+              <Info size={13} />
+            </span>
           </div>
           <span class="mono dim count">
             {seriesTotal === null
@@ -618,6 +630,9 @@
   .titles {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .titles h2 {
@@ -627,9 +642,14 @@
     color: var(--text);
   }
 
-  .titles p {
-    margin: 2px 0 0;
-    font-size: 11px;
+  .info {
+    display: flex;
+    color: var(--text-4);
+    cursor: help;
+  }
+
+  .info:hover {
+    color: var(--text-2);
   }
 
   .shapes {

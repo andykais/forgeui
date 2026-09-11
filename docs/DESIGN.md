@@ -970,7 +970,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 
 **Telemetry**
 - One screen per report (§7.1), picked from a row of tabs; the report and
-  every filter are URL params, so a view is a link.
+  every filter are URL params, so a view is a link. What an entry is and
+  when one is written is on an `info` icon beside the report's title, as its
+  `title` — a note for the moment somebody asks, not a line of prose over
+  every graph.
 - **Two shapes, always both.** A timeline across the top and a table of the
   recorded entries underneath it. The graph holds **every point for all
   time** squeezed into the width available — there is no zoom, no range
@@ -985,9 +988,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   11.2 GB reads 12 GB, never 1.0 TB.
 - The timeline is **bars or a line**, toggled in the graph's header and
   remembered in the URL. Bars draw one mark per data point. The line is a
-  smoothed mean over a window that follows the point count, with the raw
-  points behind it faintly, so a thousand API requests read as a trend
-  rather than as noise.
+  smoothed mean over a window that follows the point count, so a thousand API
+  requests read as a trend rather than as noise — and only the trend is
+  drawn, because the bars are already the view that holds every point.
 - The table's columns are the graphed value plus whatever that report can be
   filtered by, so the thing a filter narrows is always visible in the rows.
   **Clicking a row opens a right-hand sidebar with the raw entry** — the

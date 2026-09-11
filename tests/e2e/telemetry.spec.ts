@@ -25,6 +25,12 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
   }
   await expect(page.getByText(/telemetry\.db ·/)).toBeVisible();
 
+  // The note about what an entry is rides an info icon rather than sitting
+  // over the graph (§11.2).
+  const info = page.locator(".titles .info");
+  await expect(info).toHaveAttribute("title", /One entry per answered/);
+  await expect(page.getByText("One entry per answered")).toHaveCount(0);
+
   // Both shapes, always: a timeline with marks in it, and a table under it.
   const chart = page.locator(".chart svg");
   await expect(chart).toBeVisible();

@@ -6,8 +6,9 @@
   /**
    * The telemetry timeline (§11.2). Every point the report holds, for all
    * time, squeezed into the width there is — as one mark per point, or as a
-   * smoothed line over them. One value, one y axis, no zoom and no range
-   * picker: narrowing is the filters' job, not the graph's.
+   * smoothed line over them, which is the whole of the difference between
+   * the two shapes. One value, one y axis, no zoom and no range picker:
+   * narrowing is the filters' job, not the graph's.
    *
    * A report can draw more than one line (Memory Usage draws VRAM and RAM),
    * in which case a legend is always present: identity never rests on colour
@@ -196,16 +197,17 @@
   /**
    * The smoothing window follows the point count: a handful of entries is
    * drawn as it is, a thousand is a trend. Always odd, so the mean is
-   * centred on the slot it replaces.
+   * centred on the slot it replaces. Only the trend is drawn — the bars are
+   * where every point is, which is what the toggle is for (§11.2).
    */
   const smoothWindow = $derived(
     Math.max(1, Math.min(31, 2 * Math.floor(slots.length / 24) + 1)),
   );
 
   interface Drawn {
-    /** Slot index and value, for the slots this line actually has. */
+    /** Slot indexes this line actually has a value in. */
     at: number[];
-    raw: number[];
+    /** The value drawn at each of them, smoothed when there is enough to. */
     smoothed: number[];
   }
 
@@ -228,7 +230,7 @@
         for (let i = from; i <= to; i++) total += raw[i]!;
         return total / (to - from + 1);
       });
-      return { at, raw, smoothed };
+      return { at, smoothed };
     }),
   );
 
@@ -272,7 +274,11 @@
       const x = Math.max(PAD.left + 32, Math.min(width - PAD.right - 32, centre(slot)));
       const previous = labels[labels.length - 1];
       if (previous && x - previous.x < LABEL_GAP * 0.7) continue;
-      labels.push({ x, text: axisTime(slot.at, span) });
+      const text = axisTime(slot.at, span);
+      // Two ticks that read the same say less than one: a span of seconds
+      // puts several slots inside the same clock label.
+      if (previous && previous.text === text) continue;
+      labels.push({ x, text });
     }
     return labels;
   });
@@ -391,10 +397,6 @@
                 slots[line.at[0]!]!,
               ).toFixed(1)} ${PAD.top + plotHeight} Z`}
             />
-          {/if}
-          {#if smoothWindow > 1}
-            <!-- The raw heights stay behind the trend, faintly (§11.2). -->
-            <path class="raw" data-series={index} d={path(line, line.raw)} />
           {/if}
           <path class="line" data-series={index} d={path(line, line.smoothed)} />
           {#if showMarkers}
@@ -558,14 +560,6 @@
     stroke-width: 2;
     stroke-linejoin: round;
     stroke-linecap: round;
-  }
-
-  /* The unsmoothed series, kept as a whisper under the trend. */
-  .raw {
-    fill: none;
-    stroke: var(--series, var(--series-1));
-    stroke-width: 1;
-    opacity: 0.28;
   }
 
   .area {
