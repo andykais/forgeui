@@ -187,17 +187,40 @@
    * what makes it unstickable — the handle is off, so nothing else writes to
    * it, and every keystroke reasserts the fit.
    */
-  function fitTextarea(node: HTMLTextAreaElement): void {
-    // `auto` first, so shrinking works too; `rows` is the floor.
+  /** The text each box was last sized for, so an unchanged one is left alone. */
+  const fitted = new WeakMap<HTMLTextAreaElement, string>();
+
+  function fitTextarea(node: HTMLTextAreaElement, force = false): void {
+    // Every param change runs this over every prompt, and a slider sends one
+    // per pixel dragged. Measuring costs a reflow, so a box whose text has
+    // not moved is not touched at all.
+    if (!force && fitted.get(node) === node.value) return;
+    fitted.set(node, node.value);
+    // `height: auto` momentarily shrinks the panel's content, and the browser
+    // clamps the scroll position to the shorter page before the real height
+    // comes back. Putting it back is what stops the panel jumping to the top.
+    const scroller = node.closest<HTMLElement>(".scroll");
+    const top = scroller?.scrollTop;
     node.style.height = "auto";
     node.style.height = `${node.scrollHeight}px`;
+    if (scroller && top !== undefined && scroller.scrollTop !== top) {
+      scroller.scrollTop = top;
+    }
   }
 
   function autogrow(node: HTMLTextAreaElement) {
     const fit = () => fitTextarea(node);
+    // A narrower panel wraps the same text differently, so that one is forced.
+    const rewrap = () => fitTextarea(node, true);
     fit();
     node.addEventListener("input", fit);
-    return { destroy: () => node.removeEventListener("input", fit) };
+    globalThis.addEventListener("resize", rewrap);
+    return {
+      destroy: () => {
+        node.removeEventListener("input", fit);
+        globalThis.removeEventListener("resize", rewrap);
+      },
+    };
   }
 
   /**

@@ -152,6 +152,17 @@
     color: var(--text-4);
   }
 
+  /* No spinners: the arrows are noise at this size and nobody clicks them. */
+  .field input {
+    appearance: textfield;
+  }
+
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
   .field input {
     background: transparent;
   }

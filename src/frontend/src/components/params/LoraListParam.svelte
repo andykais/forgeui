@@ -7,6 +7,7 @@
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
   import { focusOnMount } from "../../lib/focus.ts";
+  import { navigate } from "../../router.svelte.ts";
   import TagFilter from "./TagFilter.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
@@ -75,6 +76,27 @@
     return { min: model?.strength_min ?? -2, max: model?.strength_max ?? 2 };
   }
 
+  /** A row is a link to its model page once the file has been hashed (§8.1). */
+  function pageOf(name: string): string | null {
+    const model = models.find((entry) => entry.name === name);
+    return model?.hash ? `/models/${model.hash}` : null;
+  }
+
+  /** Typed strengths are clamped to the model's own range before they land. */
+  function typeStrength(
+    index: number,
+    part: "model" | "clip",
+    input: HTMLInputElement,
+    bounds: { min: number; max: number },
+  ) {
+    const typed = Number(input.value);
+    if (!Number.isFinite(typed)) {
+      input.value = String(value[index]?.[`strength_${part}`] ?? 1);
+      return;
+    }
+    setStrength(index, part, Math.min(bounds.max, Math.max(bounds.min, typed)));
+  }
+
   function add(model: ModelEntry) {
     onchange([...value, { name: model.name, strength_model: 1, strength_clip: 1 }]);
     pickerOpen = false;
@@ -141,8 +163,26 @@
         >
           <GripVertical size={13} />
         </span>
-        <span class="name" title={row.name}>{row.name}</span>
-        <span class="spacer"></span>
+        <!--
+          No spacer beside this: one here and `flex: 1` on the name split the
+          row between them, so the name ellipsised with half the row empty.
+          It now takes everything up to the badge and clips only there.
+        -->
+        {#if pageOf(row.name)}
+          <a
+            class="name link"
+            href={pageOf(row.name)}
+            title={`${row.name} — open its model page`}
+            onclick={(event) => {
+              event.preventDefault();
+              navigate(pageOf(row.name)!);
+            }}
+          >
+            {row.name}
+          </a>
+        {:else}
+          <span class="name" title={row.name}>{row.name}</span>
+        {/if}
         {#if family}<span class="badge accent">{family}</span>{/if}
         <button
           class="icon"
@@ -171,7 +211,17 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_model.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_model.toFixed(2)}
+            aria-label={`${row.name} strength value`}
+            onchange={(event) =>
+              typeStrength(index, "model", event.currentTarget, bounds)}
+          />
           <button
             class="icon"
             title="Unlink model and clip strengths"
@@ -198,7 +248,17 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_model.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_model.toFixed(2)}
+            aria-label={`${row.name} strength value`}
+            onchange={(event) =>
+              typeStrength(index, "model", event.currentTarget, bounds)}
+          />
           <button
             class="icon"
             title="Link model and clip strengths"
@@ -228,7 +288,16 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_clip.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_clip.toFixed(2)}
+            aria-label={`${row.name} clip strength value`}
+            onchange={(event) => typeStrength(index, "clip", event.currentTarget, bounds)}
+          />
           <span class="icon-spacer"></span>
         </div>
       {/if}
@@ -347,10 +416,47 @@
     flex: 1;
   }
 
+  /*
+   * A number you can type into, that looks like the number it replaced until
+   * you do: no plate, no border, and no spinner — the arrows are noise at
+   * this size and nobody clicks them.
+   */
   .value {
-    width: 34px;
+    width: 42px;
+    flex: 0 0 auto;
     text-align: right;
     font-size: 11px;
+    padding: 1px 2px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    appearance: textfield;
+  }
+
+  .value::-webkit-outer-spin-button,
+  .value::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  .value:hover {
+    border-color: var(--line-2);
+  }
+
+  .value:focus,
+  .value:focus-visible {
+    background: var(--raised-2);
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  .name.link {
+    color: var(--text);
+  }
+
+  .name.link:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .icon {

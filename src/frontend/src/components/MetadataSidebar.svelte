@@ -84,12 +84,67 @@
     setTimeout(() => (copied = copied === path ? null : copied), 1200);
   }
 
-  function paramRows(): [string, unknown][] {
-    const params = sidecar?.params ?? output.params;
-    return Object.entries(params).filter(
+  const params = $derived(
+    Object.entries(sidecar?.params ?? output.params).filter(
       ([, value]) =>
         value !== null && value !== "" && !(Array.isArray(value) && value.length === 0),
+    ),
+  );
+
+  /** The hash the sidecar recorded for a model filename, if it has one. */
+  const hashOfName = $derived(new Map(models.map((model) => [model.name, model.hash])));
+
+  function linkTo(name: string) {
+    const hash = hashOfName.get(name) ?? null;
+    return { name, hash, label: hash ? app.modelName(hash) : name };
+  }
+
+  /** A LoRA row as the panel wrote it: a name and one or two strengths. */
+  function loraOf(entry: unknown) {
+    const row = entry as Record<string, unknown>;
+    const model = row.strength_model;
+    const clip = row.strength_clip;
+    return {
+      ...linkTo(String(row.name)),
+      strength: model === clip ? `${model}` : `${model} / ${clip}`,
+    };
+  }
+
+  function isLoraList(value: unknown): boolean {
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (entry) =>
+          entry !== null &&
+          typeof entry === "object" &&
+          typeof (entry as Record<string, unknown>).name === "string",
+      )
     );
+  }
+
+  /**
+   * Every model filename a param already shows. The roles above the params
+   * named the same files a second time — the same LoRA as a `lora` row and
+   * again inside `loras` — so a role is only listed when no param carries it.
+   */
+  const namedByParams = $derived.by(() => {
+    const names = new Set<string>();
+    for (const [, value] of params) {
+      if (typeof value === "string") names.add(value);
+      else if (isLoraList(value)) {
+        for (const entry of value as Record<string, unknown>[]) {
+          names.add(String(entry.name));
+        }
+      }
+    }
+    return names;
+  });
+
+  const otherModels = $derived(models.filter((model) => !namedByParams.has(model.name)));
+
+  /** The prompt and the seed are what people copy out of here (§11.2). */
+  function selectable(key: string): boolean {
+    return key === "seed" || key.includes("prompt");
   }
 
   function render(value: unknown): string {
@@ -99,16 +154,7 @@
       }
       return value.map((entry) => render(entry)).join(", ");
     }
-    if (value && typeof value === "object") {
-      const row = value as Record<string, unknown>;
-      if (typeof row.name === "string") {
-        const model = row.strength_model;
-        const clip = row.strength_clip;
-        const strengths = model === clip ? `${model}` : `${model} / ${clip}`;
-        return `${row.name} — ${strengths}`;
-      }
-      return JSON.stringify(value);
-    }
+    if (value && typeof value === "object") return JSON.stringify(value);
     return String(value);
   }
 </script>
@@ -153,42 +199,73 @@
   <section>
     <div class="label">Params</div>
     <dl>
-      <dt>created</dt>
-      <dd class="mono">
-        {absoluteTime(output.created_at)}
-        <span class="dim">· {relativeTime(output.created_at)}</span>
-      </dd>
-      <dt>duration</dt>
-      <dd class="mono">
-        {duration(output.generation_ms ?? sidecar?.timing.total_ms ?? null)}
-      </dd>
-      <dt>workflow</dt>
-      <dd>
-        {sidecar?.workflow?.name ?? output.workflow_id ?? "—"}
-        {#if output.workflow_hash}
-          <span class="dim mono">· {output.workflow_hash.slice(7, 13)}</span>
+      {#snippet modelLink(link: { name: string; label: string; hash: string | null })}
+        {#if link.hash}
+          <a
+            class="model-link"
+            href={`/models/${link.hash}`}
+            title="Open the model page · shift-click to filter the grid"
+            onclick={(event) => openModel(event, link.hash!)}
+          >
+            {link.label}
+          </a>
+        {:else}
+          {link.label}
         {/if}
-      </dd>
-      {#each models as model (model.role + model.name)}
-        <dt>{model.role}</dt>
+      {/snippet}
+
+      <div class="row">
+        <dt>created</dt>
         <dd class="mono">
-          {#if model.hash}
-            <a
-              class="model-link"
-              href={`/models/${model.hash}`}
-              title="Open the model page · shift-click to filter the grid"
-              onclick={(event) => openModel(event, model.hash!)}
-            >
-              {model.label}
-            </a>
-          {:else}
-            {model.label}
+          {absoluteTime(output.created_at)}
+          <span class="dim">· {relativeTime(output.created_at)}</span>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>duration</dt>
+        <dd class="mono">
+          {duration(output.generation_ms ?? sidecar?.timing.total_ms ?? null)}
+        </dd>
+      </div>
+      <div class="row">
+        <dt>workflow</dt>
+        <dd>
+          {sidecar?.workflow?.name ?? output.workflow_id ?? "—"}
+          {#if output.workflow_hash}
+            <span class="dim mono">· {output.workflow_hash.slice(7, 13)}</span>
           {/if}
         </dd>
+      </div>
+
+      <!-- Only the roles no param already names; the rest appear once, below. -->
+      {#each otherModels as model (model.role + model.name)}
+        <div class="row">
+          <dt>{model.role}</dt>
+          <dd class="mono">{@render modelLink(model)}</dd>
+        </div>
       {/each}
-      {#each paramRows() as [key, value] (key)}
-        <dt>{key}</dt>
-        <dd class="mono value">{render(value)}</dd>
+
+      {#each params as [key, value] (key)}
+        <div class="row">
+          <dt>{key}</dt>
+          {#if isLoraList(value)}
+            <dd class="loras">
+              {#each value as Record<string, unknown>[] as entry (entry.name)}
+                {@const lora = loraOf(entry)}
+                <span class="lora">
+                  <span class="lora-name mono">{@render modelLink(lora)}</span>
+                  <span class="lora-strength mono dim">{lora.strength}</span>
+                </span>
+              {/each}
+            </dd>
+          {:else if typeof value === "string" && hashOfName.has(value)}
+            <dd class="mono">{@render modelLink(linkTo(value))}</dd>
+          {:else}
+            <dd class="mono value" class:selectable={selectable(key)}>
+              {render(value)}
+            </dd>
+          {/if}
+        </div>
       {/each}
     </dl>
   </section>
@@ -312,11 +389,25 @@
   }
 
   dl {
-    display: grid;
-    grid-template-columns: 74px 1fr;
-    gap: 3px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     margin: 6px 0 0;
     font-size: 12px;
+  }
+
+  /*
+   * One plate per param, the same ground the inputs on the left sit on, so
+   * where a long prompt ends and the next param begins is a line you can see
+   * rather than one you have to work out.
+   */
+  .row {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 8px;
+    background: var(--raised);
+    border-radius: var(--radius-control);
+    padding: 4px 7px;
   }
 
   dt {
@@ -329,10 +420,42 @@
     margin: 0;
     color: var(--text-2);
     overflow-wrap: anywhere;
+    min-width: 0;
   }
 
   dd.value {
     white-space: pre-wrap;
+  }
+
+  /* One click takes the whole value, which is the point of showing it. */
+  dd.selectable {
+    user-select: all;
+  }
+
+  .loras {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .lora {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .lora-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lora-strength {
+    flex: 0 0 auto;
+    font-size: 11px;
   }
 
   .file {

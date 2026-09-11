@@ -621,6 +621,12 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   collapsed filmstrip becomes a one-line count bar), and each open/closed
   state persists per screen. There is no separate session rail. Esc returns
   to the full-width grid. See §11.4 for follow-latest behaviour.
+- **Metadata sidebar**: every row sits on its own raised plate, so the eye
+  finds where the prompt stops and the next param starts without reading it.
+  A model-valued param carries the link to its model page itself, and the
+  roles below (unet / clip / vae / loras) list only what no param already
+  named — the same LoRA is never shown twice. Prompt and seed are
+  `user-select: all`, so one click takes the whole value.
 - Reuse Parameters lands here with the panel filled in.
 
 **Gallery**
@@ -749,6 +755,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   together; the ⛓ toggle unlinks and splits it into two sliders. The sidecar
   always records both values regardless. A slider reaches as far as its own
   model's `strength_min`/`strength_max` say (§8.1), and a row starts at 1.
+  The strength beside the slider is an editable number, for the values a
+  drag cannot land on; it wears no outline until it takes the caret. No
+  number field in the panel shows spin arrows — not these and not the size
+  W/H — they are a pixel-hunt for a step nobody wants.
 - **Size presets are ratios** (`1:1, 2:3, 3:2, 4:3, 16:9, 9:16, 21:9`); exact
   pixels live on the native `title` tooltip and in the W/H fields. Ratios
   resolve against the workflow's base resolution, so 16:9 is 1344×768 on Flux
