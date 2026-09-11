@@ -41,6 +41,7 @@ import {
 } from "./completion.ts";
 import { completedProgress, ProgressTracker } from "./progress.ts";
 import { parseSidecar } from "./sidecar.ts";
+import { log, logError, oneLine, seconds } from "../log.ts";
 
 /**
  * The job pipeline (§5): validate, rewrite, persist, submit, follow the
@@ -189,8 +190,18 @@ export class JobRunner {
     // is wrong whether or not ComfyUI happens to be up, and saying so is more
     // use than "not connected".
     const { values } = coerceParams(workflow.manifest, params);
-    this.#assertModelsPresent(workflow.manifest, values);
-    this.#assertConnected();
+    try {
+      this.#assertModelsPresent(workflow.manifest, values);
+      this.#assertConnected();
+    } catch (cause) {
+      // A refusal never reaches a job row, so this is the only record of it.
+      logError(
+        `generate refused for ${workflowId}: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      throw cause;
+    }
     const jobId = ulid();
     const { graph } = rewriteGraph({
       manifest: workflow.manifest,
@@ -304,6 +315,13 @@ export class JobRunner {
       finalized: false,
     });
     this.#broadcastJob(input.jobId);
+    // Before the POST, because the row is what makes it a queued job and
+    // ComfyUI can answer `execution_start` before `/prompt` returns.
+    log(
+      `job ${input.jobId} queued — ${this.#labelFor(input.workflowId)}${
+        this.#promptOf(input.workflowId, input.params)
+      }`,
+    );
 
     try {
       const { prompt_id } = await this.#comfy.client.prompt(
@@ -375,6 +393,7 @@ export class JobRunner {
     await removeStagingDir(this.#paths, id);
     this.#forget(id);
     this.#broadcastJob(id);
+    log(`job ${id} cancelled`);
   }
 
   // ------------------------------------------------------------------ events
@@ -414,6 +433,7 @@ export class JobRunner {
           progress: live.tracker.snapshot(),
         });
         this.#broadcastJob(jobId);
+        log(`job ${jobId} started — ${live.tracker.nodeTotal} nodes`);
         return;
       }
       case "execution_cached": {
@@ -517,6 +537,16 @@ export class JobRunner {
       });
       this.#forget(jobId);
       this.#broadcastJob(jobId);
+      log(
+        `job ${jobId} finished in ${
+          seconds(
+            live?.tracker.totalMs(at) ??
+              at - (job.started_at ?? job.created_at),
+          )
+        } — ${result.outputs.length} output${
+          result.outputs.length === 1 ? "" : "s"
+        }${result.outputs.map((output) => `\n  ${output.path}`).join("")}`,
+      );
       for (const output of result.outputs) {
         this.#hub.broadcast({
           type: "output",
@@ -545,6 +575,11 @@ export class JobRunner {
     });
     this.#forget(jobId);
     this.#broadcastJob(jobId);
+    logError(
+      `job ${jobId} failed — ${error.type}: ${oneLine(error.message, 160)}${
+        error.node_id ? ` (node ${error.node_id})` : ""
+      }`,
+    );
   }
 
   // ------------------------------------------------------------- recovering
@@ -701,6 +736,38 @@ export class JobRunner {
           `Pick one that is, or add the file and rescan.`,
       );
     }
+  }
+
+  /** The workflow's name if it still exists, else the id the job carries. */
+  #labelFor(workflowId: string | null): string {
+    if (!workflowId) return "a frozen graph";
+    return this.#workflows.get(workflowId)?.manifest?.name ?? workflowId;
+  }
+
+  /**
+   * The workflow's first text param, which is the prompt everywhere it
+   * matters. A rerun has no workflow to ask, so it falls back to the names a
+   * prompt goes by.
+   */
+  #promptOf(
+    workflowId: string | null,
+    params: Record<string, unknown>,
+  ): string {
+    const manifest = workflowId
+      ? this.#workflows.get(workflowId)?.manifest
+      : null;
+    const keys = manifest
+      ? manifest.params.filter((param) => param.type === "text").map((param) =>
+        param.key
+      )
+      : ["prompt", "positive", "text"];
+    for (const key of keys) {
+      const value = params[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return `: ${oneLine(value)}`;
+      }
+    }
+    return "";
   }
 
   #assertConnected(): void {

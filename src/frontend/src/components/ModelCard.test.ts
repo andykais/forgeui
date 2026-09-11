@@ -25,11 +25,15 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     mtime: 1_780_000_000_000,
     notes: null,
     tags: [],
+    strength_min: -2,
+    strength_max: 2,
     thumb_path: null,
     thumb_url: null,
     output_count: 12,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
+    hidden: false,
     present: true,
     ...overrides,
   };
@@ -65,6 +69,62 @@ describe("the model card", () => {
 
     expect(onfamily).toHaveBeenCalledTimes(1);
     expect(onfamily.mock.calls[0]?.[1]).toBe("flux");
+  });
+
+  test("a family that is already set can be changed from the card", async () => {
+    // It used to be a plain badge: re-filing a model meant opening its page.
+    const onfamily = vi.fn();
+    render(ModelCard, { model: model({ family: "sd15" }), onfamily });
+
+    await fireEvent.click(screen.getByTitle("Set this model's family"));
+    await fireEvent.click(screen.getByText("sdxl"));
+
+    expect(onfamily.mock.calls[0]?.[1]).toBe("sdxl");
+  });
+
+  test("the list escapes the card, which clips its own overflow", async () => {
+    render(ModelCard, { model: model(), onfamily: vi.fn() });
+    await fireEvent.click(screen.getByTitle("Set this model's family"));
+
+    // Anchored in viewport coordinates: `overflow: hidden` on the card would
+    // otherwise take the list with it, and it never appeared at all.
+    const popover = screen.getByRole("dialog", { name: "Family" });
+    expect(popover.className).toContain("fixed");
+    expect(popover.style.top).not.toBe("");
+    expect(popover.style.left).not.toBe("");
+  });
+
+  test("the search box narrows the families", async () => {
+    render(ModelCard, { model: model(), onfamily: vi.fn() });
+    await fireEvent.click(screen.getByTitle("Set this model's family"));
+
+    const search = screen.getByLabelText("Search families");
+    // The caret is taken on the frame after the click that opened it.
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(document.activeElement).toBe(search);
+    await fireEvent.input(search, { target: { value: "flux" } });
+
+    expect(screen.getByText("flux")).toBeTruthy();
+    expect(screen.getByText("flux2")).toBeTruthy();
+    expect(screen.queryByText("sdxl")).toBeNull();
+  });
+
+  test("the arrow keys walk the list and Enter takes one", async () => {
+    const onfamily = vi.fn();
+    render(ModelCard, { model: model(), onfamily });
+    await fireEvent.click(screen.getByTitle("Set this model's family"));
+
+    const search = screen.getByLabelText("Search families");
+    // Down from nothing takes the first, so three downs reach the third.
+    await fireEvent.keyDown(search, { key: "ArrowDown" });
+    await fireEvent.keyDown(search, { key: "ArrowDown" });
+    await fireEvent.keyDown(search, { key: "ArrowDown" });
+    await fireEvent.keyDown(search, { key: "ArrowUp" });
+    const active = document.querySelector("[data-active='true']");
+    expect(active?.textContent?.trim()).toBe("flux2");
+
+    await fireEvent.keyDown(search, { key: "Enter" });
+    expect(onfamily.mock.calls[0]?.[1]).toBe("flux2");
   });
 });
 

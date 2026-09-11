@@ -51,6 +51,27 @@
       "bind": "6.seed"
     },
     {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "anima"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "12.output",
+          "clip_from": "1.CLIP",
+          "model_to": [
+            "6.model"
+          ],
+          "clip_to": [
+            "5.clip",
+            "7.clip"
+          ]
+        }
+      }
+    },
+    {
       "key": "turbo",
       "label": "Turbo LoRA",
       "type": "bool",

@@ -187,6 +187,9 @@ Deno.test("the launch command carries the three directory flags (§2)", () => {
     "/home/nt/.forgeui/comfy-input",
     "--extra-model-paths-config",
     "/home/nt/.forgeui/extra_model_paths.yaml",
+    // Without this ComfyUI sends no preview frames at all (§5 step 6).
+    "--preview-method",
+    "auto",
   ]);
 
   // Extra args are appended verbatim, for flags like --lowvram.
@@ -230,6 +233,33 @@ Deno.test("Settings shows the same flags, read-only", () => {
   assertEquals(flags[0], "--port 8188");
   assert(flags.some((flag) => flag.startsWith("--output-directory ")));
   assert(flags.some((flag) => flag.startsWith("--extra-model-paths-config ")));
+  // Without this ComfyUI's `--preview-method` is `none` and it sends no
+  // preview frames at all, so the running card waits for one for ever.
+  assert(flags.includes("--preview-method auto"));
+});
+
+Deno.test("the managed child is told to send preview frames", () => {
+  const command = comfyLaunchCommand(
+    config({ path: "/opt/ComfyUI", url: "http://127.0.0.1:8188" }),
+    dataPaths("/home/nt/.forgeui"),
+  );
+  const at = command.args.indexOf("--preview-method");
+  assert(at >= 0, "no --preview-method flag");
+  assertEquals(command.args[at + 1], "auto");
+  // `extra_args` comes after, so a user who wants another method still wins.
+  const custom = comfyLaunchCommand(
+    config({
+      path: "/opt/ComfyUI",
+      url: "http://127.0.0.1:8188",
+      extra_args: ["--preview-method", "taesd"],
+    }),
+    dataPaths("/home/nt/.forgeui"),
+  );
+  assertEquals(
+    custom.args.lastIndexOf("--preview-method"),
+    custom.args.length - 2,
+  );
+  assertEquals(custom.args[custom.args.length - 1], "taesd");
 });
 
 Deno.test("the proxy strips its own prefix and keeps the query", () => {

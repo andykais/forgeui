@@ -95,6 +95,8 @@
 
   .strip {
     flex: 1;
+    /* It scrolls; it does not push its container wider than the screen. */
+    min-width: 0;
     display: flex;
     gap: 6px;
     overflow-x: auto;
@@ -104,6 +106,13 @@
 
   .thumb {
     all: unset;
+    /*
+     * `all: unset` takes `box-sizing` back to its initial `content-box`,
+     * overriding the global `border-box` — so the running tile, the only one
+     * with a border, measured 70px in a 68px strip and had its bottom two
+     * pixels, dashes and all, clipped by the strip's `overflow-y: hidden`.
+     */
+    box-sizing: border-box;
     position: relative;
     flex: 0 0 auto;
     width: 68px;
@@ -133,6 +142,11 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /* A preview frame is tiny; show all of it rather than a crop of it. */
+  .thumb.running img {
+    object-fit: contain;
   }
 
   .pct {

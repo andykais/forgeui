@@ -1,6 +1,7 @@
 import { MODEL_CLASSES, type ModelClass } from "../config/types.ts";
 import {
   type ApiGraph,
+  type BoolSwitch,
   type EnumSource,
   FAMILIES,
   type Family,
@@ -157,6 +158,27 @@ function assertChainTarget(
   }
 }
 
+/**
+ * A checkbox that re-links one input (§4.4). Both sources are validated as
+ * chain sources — they have to name an output that exists — and the input
+ * itself has to be one a link can feed, so a graph that the manifest has
+ * drifted from is rejected at load rather than at submit.
+ */
+function boolSwitch(
+  graph: ApiGraph | null,
+  value: unknown,
+  where: string,
+): BoolSwitch {
+  const raw = record(value, where);
+  const input = nonEmptyStr(raw.input, `${where}.input`);
+  const on = nonEmptyStr(raw.on, `${where}.on`);
+  const off = nonEmptyStr(raw.off, `${where}.off`);
+  assertChainTarget(graph, input, `${where}.input`);
+  assertChainSource(graph, on, `${where}.on`);
+  assertChainSource(graph, off, `${where}.off`);
+  return { input, on, off };
+}
+
 function filter(value: unknown, where: string): ModelFilter | undefined {
   if (value === undefined) return undefined;
   const raw = record(value, where);
@@ -293,15 +315,29 @@ function validateParam(
         ...(step !== undefined ? { step } : {}),
       };
     }
-    case "bool":
+    case "bool": {
+      // A checkbox either sets a widget or picks which of two sources feeds
+      // one input; `bind.switch` is the second (§4.4).
+      const switched = typeof raw.bind === "object" && raw.bind !== null &&
+        !Array.isArray(raw.bind);
+      const bind = switched
+        ? {
+          switch: boolSwitch(
+            graph,
+            (raw.bind as Record<string, unknown>).switch,
+            `${at}.bind.switch`,
+          ),
+        }
+        : scalarBind();
       return {
         ...common,
         type,
-        bind: scalarBind(),
+        bind,
         ...(raw.default !== undefined
           ? { default: bool(raw.default, `${at}.default`) }
           : {}),
       };
+    }
     case "enum": {
       const options = raw.options === undefined
         ? undefined

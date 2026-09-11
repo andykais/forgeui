@@ -9,7 +9,7 @@
    * A job that has no output yet: running (percent, ETA, node, step counter
    * over the streaming preview), queued (a dashed placeholder with its own
    * cancel — the strip does not cancel individual queued jobs), or failed
-   * (the error inline with Retry, Edit in Generate and Copy error) — §11.2.
+   * (the error inline with Retry, Reuse parameters and Copy error) — §11.2.
    */
   interface Props {
     job: Job;
@@ -89,7 +89,7 @@
     <pre class="mono error-text">{job.error?.message ?? "unknown error"}</pre>
     <div class="row actions">
       <button class="retry" onclick={retry}>Retry</button>
-      <button onclick={editInGenerate}>Edit in Generate →</button>
+      <button onclick={editInGenerate}>Reuse parameters →</button>
       <button onclick={copyError}>Copy error</button>
     </div>
   </div>
@@ -112,10 +112,12 @@
     background: var(--raised);
   }
 
-  /* A running card spans two columns so the numbers stay readable (§11.2). */
+  /*
+   * A running card is one tile like every other, so the grid keeps its rhythm
+   * while a job is in flight (§11.2). That leaves the numbers a square to fit
+   * into rather than a 2:1 strip, which is what the sizes below are for.
+   */
   .card.running {
-    grid-column: span 2;
-    aspect-ratio: 2;
     background: var(--canvas);
   }
 
@@ -124,7 +126,12 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /*
+     * Fit, not fill. A preview frame is a handful of pixels to begin with —
+     * cropping it to the card's square and scaling what is left only makes it
+     * harder to read, which is the one thing it is there for.
+     */
+    object-fit: contain;
     opacity: 0.75;
   }
 
@@ -132,6 +139,15 @@
     position: relative;
     padding: 8px;
     font-size: 11px;
+    /* One tile wide, the caption is the first thing with no room; clip it
+       rather than let it wrap the badge onto a second line. */
+    overflow: hidden;
+  }
+
+  .head .dim {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* The preview frame behind this can be any colour, so scrim the text. */
@@ -148,36 +164,46 @@
 
   .numbers {
     align-items: flex-end;
-    gap: 10px;
+    gap: 8px;
   }
 
   .pct {
-    font-size: 30px;
+    font-size: 22px;
     line-height: 1;
     color: var(--text);
   }
 
   .pct small {
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-3);
+  }
+
+  /* The node name is the one part with no length to it; let it be the part
+     that gives way when the tile is narrow, rather than pushing the ETA off. */
+  .node {
+    min-width: 0;
   }
 
   .node-label {
     color: var(--running);
-    font-size: 12px;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .node div,
   .eta div {
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .eta {
     text-align: right;
+    flex: none;
   }
 
   .eta .mono {
-    font-size: 15px;
+    font-size: 13px;
   }
 
   .bar {

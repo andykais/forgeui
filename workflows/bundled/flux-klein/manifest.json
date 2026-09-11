@@ -1,10 +1,10 @@
 {
   "id": "flux-klein",
-  "name": "Flux.2 Klein 4B",
+  "name": "Flux.2 Klein",
   "family": "flux2",
   "kind": "image",
   "category": null,
-  "description": "Text-to-image with the distilled FLUX.2 [klein] 4B: four steps at cfg 1 through the custom sampler chain. Qwen-3 4B encodes the prompt; the negative is ConditioningZeroOut, as the template ships it.",
+  "description": "Text-to-image with the distilled FLUX.2 [klein]: four steps at cfg 1 through the custom sampler chain, with the negative as ConditioningZeroOut, as the template ships it. The text encoder is part of the pairing rather than a detail — FLUX.2 concatenates three Qwen-3 hidden layers, so a 2560-wide encoder feeds a model expecting 7680 and a 4096-wide one feeds 12288. Pick the encoder that goes with your checkpoint or the sampler refuses the shapes.",
   "params": [
     {
       "key": "prompt",
@@ -38,6 +38,26 @@
       }
     },
     {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "flux2"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "9.MODEL",
+          "clip_from": "10.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "13.clip"
+          ]
+        }
+      }
+    },
+    {
       "key": "seed",
       "label": "Seed",
       "type": "seed",
@@ -65,12 +85,11 @@
     },
     {
       "key": "clip",
-      "label": "Text encoder",
+      "label": "Text encoder (must match the model)",
       "type": "model",
       "filter": {
         "class": "clip"
       },
-      "advanced": true,
       "bind": "10.clip_name"
     },
     {

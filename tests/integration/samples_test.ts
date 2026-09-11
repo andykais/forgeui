@@ -289,13 +289,17 @@ Deno.test("a sample can be made the model's thumbnail", async () => {
     assertEquals(wrong.status, 404);
     await wrong.body?.cancel();
 
-    // Clearing it falls back to the newest output, of which there are none.
+    // Clearing it drops back to whatever `ui.model_thumbnail` asks for —
+    // the newest output by default, of which there are none — and then to
+    // the other candidate rather than to an empty plate (§8.1). There is a
+    // sample here, so that is what it lands on; nothing is *chosen*, so
+    // `thumb_path` is still null.
     const cleared = await app.json<ModelDetail>(`/api/models/${hash}`, {
       method: "PATCH",
       body: JSON.stringify({ thumb_sample_id: null }),
     });
     assertEquals(cleared.thumb_path, null);
-    assertEquals(cleared.thumb_url, null);
+    assertEquals(cleared.thumb_url, `/api/media/${sample.path}`);
 
     // Deleting the chosen sample cannot leave the model pointing at nothing.
     await app.json(`/api/models/${hash}`, {

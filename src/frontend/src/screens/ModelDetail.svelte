@@ -2,18 +2,19 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Brain from "@lucide/svelte/icons/brain";
   import Copy from "@lucide/svelte/icons/copy";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import X from "@lucide/svelte/icons/x";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate } from "../router.svelte.ts";
+  import { navigate, opensElsewhere } from "../router.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
-  import { FAMILIES, type ModelDetail, type Output, type Sample } from "../types.ts";
-  import Popover from "../components/Popover.svelte";
+  import type { ModelDetail, Output, Sample } from "../types.ts";
+  import FamilyPicker from "../components/FamilyPicker.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
+  import TagPicker from "../components/TagPicker.svelte";
   import Tile from "../components/Tile.svelte";
   import Viewer from "../components/Viewer.svelte";
 
@@ -32,11 +33,59 @@
   let error = $state<string | null>(null);
   let outputs = $state<Output[]>([]);
   let selectedId = $state<string | null>(null);
-  let familyOpen = $state(false);
   let importing = $state(false);
+  let rereading = $state(false);
+
+  /**
+   * The debugging action of §8.1: when a model is filed as something it
+   * plainly is not, this says whether the file or the cache was wrong.
+   */
+  async function reread() {
+    if (!model) return;
+    rereading = true;
+    const before = model.family;
+    try {
+      model = await api.rescanModel(model.id);
+      await app.refreshModels();
+      toasts.message(
+        model.family === before
+          ? `Re-read it: still ${model.family}`
+          : `Re-read it: ${before} → ${model.family}`,
+      );
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not re-read it");
+    } finally {
+      rereading = false;
+    }
+  }
+  /** Named rather than inline, so `model` is narrowed where it is read. */
+  function toggleHidden() {
+    if (!model) return;
+    void patch({ hidden: !model.hidden });
+  }
+
   let nameDraft = $state("");
   let notesDraft = $state("");
-  let tagDraft = $state("");
+  /**
+   * Where a tag leads: the Models screen, filtered to it, on the tab this
+   * model is on. The screen is tabbed by class and falls back to diffusion,
+   * so a tag on a LoRA that did not name its class landed on a tab the LoRA
+   * was not in and showed nothing.
+   */
+  function tagHref(tag: string): string {
+    const params = new URLSearchParams({ tags: tag });
+    if (model && model.class !== "diffusion") params.set("class", model.class);
+    return `/models?${params}`;
+  }
+
+  /** How many models carry each tag, for the chips beside this model's. */
+  const tagCounts = $derived.by(() => {
+    const totals = new Map<string, number>();
+    for (const entry of app.allModels) {
+      for (const tag of entry.tags) totals.set(tag, (totals.get(tag) ?? 0) + 1);
+    }
+    return totals;
+  });
   /** Family counts for the combo, as frame 05 draws them. */
   let familyCounts = $state<Map<string, number>>(new Map());
 
@@ -100,6 +149,21 @@
    * Only the field that was written gets its draft resynced: a reply that
    * arrives while another field is being typed into must not overwrite it.
    */
+  /** Blank puts the bound back to the default rather than to zero. */
+  function setBound(field: "strength_min" | "strength_max", input: HTMLInputElement) {
+    const raw = input.value.trim();
+    if (raw === "") {
+      void patch({ [field]: null });
+      return;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      input.value = String(model?.[field] ?? "");
+      return;
+    }
+    void patch({ [field]: value });
+  }
+
   async function patch(body: Parameters<typeof api.patchModel>[1]) {
     if (!model) return;
     try {
@@ -129,17 +193,6 @@
     void patch({ notes: notesDraft });
   }
 
-  function addTag() {
-    const tag = tagDraft.trim();
-    if (!model || tag.length === 0) return;
-    tagDraft = "";
-    void patch({ tags: [...model.tags, tag] });
-  }
-
-  function removeTag(tag: string) {
-    if (!model) return;
-    void patch({ tags: model.tags.filter((entry) => entry !== tag) });
-  }
 
   async function copy(text: string, what: string) {
     try {
@@ -285,31 +338,11 @@
               hashing
             </span>
           {:else}
-            <div class="chip-wrap">
-              <button class="family mono" onclick={() => (familyOpen = !familyOpen)}>
-                {model.family}
-                <ChevronDown size={11} />
-              </button>
-              <Popover
-                open={familyOpen}
-                width={150}
-                title="Family"
-                onclose={() => (familyOpen = false)}
-              >
-                {#each [...FAMILIES, "unset"] as family (family)}
-                  <button
-                    class="option family-option"
-                    onclick={() => {
-                      familyOpen = false;
-                      void patch({ family });
-                    }}
-                  >
-                    <span>{family}</span>
-                    <span class="mono dim">{familyCounts.get(family) ?? 0}</span>
-                  </button>
-                {/each}
-              </Popover>
-            </div>
+            <FamilyPicker
+              family={model.family}
+              counts={familyCounts}
+              onchange={(family) => void patch({ family })}
+            />
           {/if}
         </div>
 
@@ -321,6 +354,7 @@
               class="outputs"
               href={`/gallery?models=${model.hash}`}
               onclick={(event) => {
+                if (opensElsewhere(event)) return;
                 event.preventDefault();
                 navigate(`/gallery?models=${model?.hash}`);
               }}
@@ -359,34 +393,123 @@
           {/if}
         </div>
 
+        <!--
+          The sha256 is what these two look a model up by, which is the one
+          identifier that survives being renamed or refiled. Nothing is sent
+          anywhere: they are ordinary links, opened when clicked (§8.1).
+        -->
+        {#if model.hash}
+          <div class="lookups mono dim">
+            <!--
+              Re-reads the file, header and hash both, past the caches the
+              ordinary scan uses to skip files that have not moved — which is
+              exactly why the ordinary Rescan cannot fix a wrong cached
+              answer (§8.1).
+            -->
+            <button
+              class="reread"
+              disabled={rereading}
+              title="Read this file again: its header and its hash, ignoring what was cached"
+              onclick={reread}
+            >
+              {rereading ? "Re-reading…" : "Re-read this file"}
+            </button>
+            <!--
+              Hidden is out of the Generate pickers, not gone: it is still
+              here, still in the Models list behind Show hidden (§8.1).
+            -->
+            <button
+              class="reread"
+              class:on={model.hidden}
+              title={model.hidden
+                ? "Offer this in the Generate inputs again"
+                : "Keep this out of the Generate inputs; it stays listed on Models"}
+              onclick={toggleHidden}
+            >
+              {#if model.hidden}
+                <Eye size={11} /> Hidden
+              {:else}
+                <EyeOff size={11} /> Hide
+              {/if}
+            </button>
+            <span class="spacer"></span>
+            look up
+            <a
+              href={`https://civitaiarchive.com/sha256/${model.hash}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >civitaiarchive</a>
+            <a
+              href={`https://civitai.red/search/models?sortBy=models_v9&query=${model.hash}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >civitai</a>
+          </div>
+        {/if}
+
+        <!--
+          What a LoRA's strength sliders reach in the panel (§8.1). Typed by
+          hand, because only the person who trained or downloaded it knows
+          how far it wants to be pushed; blank is the -2..2 default.
+        -->
+        {#if model.class === "lora"}
+          <div class="strength row">
+            <span class="label">strength range</span>
+            <input
+              class="mono bound"
+              type="number"
+              step="0.1"
+              aria-label="Lowest strength"
+              disabled={hashing}
+              value={model.strength_min}
+              onchange={(event) => setBound("strength_min", event.currentTarget)}
+            />
+            <span class="dim">to</span>
+            <input
+              class="mono bound"
+              type="number"
+              step="0.1"
+              aria-label="Highest strength"
+              disabled={hashing}
+              value={model.strength_max}
+              onchange={(event) => setBound("strength_max", event.currentTarget)}
+            />
+          </div>
+        {/if}
+
+        <!--
+          The same picker the Models screen filters with, so the tags on
+          offer are the ones that exist, with what they already hold beside
+          them; typing a name nothing matches offers to make it. Each tag
+          here is a link into that screen filtered to it — a tag is only
+          worth carrying if it can be followed.
+        -->
         <div class="tags">
           {#each model.tags as tag (tag)}
-            <span class="tag mono">
+            <a
+              class="tag mono"
+              href={tagHref(tag)}
+              title={`Show everything tagged ${tag}`}
+              onclick={(event) => {
+                if (opensElsewhere(event)) return;
+                event.preventDefault();
+                navigate(tagHref(tag));
+              }}
+            >
               {tag}
-              <button
-                class="icon"
-                aria-label={`Remove the tag ${tag}`}
-                disabled={hashing}
-                onclick={() => removeTag(tag)}
-              >
-                <X size={10} />
-              </button>
-            </span>
+              <span class="dim">{tagCounts.get(tag) ?? 1}</span>
+            </a>
           {/each}
-          <input
-            class="tag-input mono"
-            aria-label="Add a tag"
-            placeholder="+ tag"
-            disabled={hashing}
-            value={tagDraft}
-            oninput={(event) =>
-              (tagDraft = (event.currentTarget as HTMLInputElement).value)}
-            onblur={addTag}
-            onkeydown={(event) => {
-              if (event.key === "Enter") addTag();
-              if (event.key === "Escape") tagDraft = "";
-            }}
-          />
+          {#if !hashing}
+            <TagPicker
+              models={app.allModels}
+              selected={model.tags}
+              placeholder="+ tag"
+              mode="edit"
+              allowCreate
+              onchange={(tags: string[]) => void patch({ tags })}
+            />
+          {/if}
         </div>
 
         <textarea
@@ -486,12 +609,6 @@
     background: var(--control);
   }
 
-  .family-option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
 
   .head {
     display: flex;
@@ -574,13 +691,6 @@
     color: var(--text-3);
   }
 
-  .family {
-    font-size: 11px;
-    padding: 2px 7px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
 
   .badge {
     font-size: 10px;
@@ -600,9 +710,6 @@
     color: var(--error);
   }
 
-  .chip-wrap {
-    position: relative;
-  }
 
   .file,
   .hash {
@@ -610,6 +717,39 @@
     align-items: center;
     gap: 6px;
     font-size: 11px;
+  }
+
+  .lookups {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .reread {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .reread.on {
+    background: var(--accent-tint-2);
+    color: var(--accent);
+  }
+
+  .reread:hover:not(:disabled) {
+    color: var(--text-2);
+    background: var(--control);
+  }
+
+  .lookups a {
+    color: var(--accent);
+  }
+
+  .lookups a:hover {
+    text-decoration: underline;
   }
 
   /* Full sha256 on its own line: selectable, never truncated (§11.2). */
@@ -637,6 +777,18 @@
     color: var(--accent);
   }
 
+  .strength {
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .bound {
+    width: 66px;
+    text-align: right;
+    font-size: 12px;
+    padding: 3px 6px;
+  }
+
   .tags {
     display: flex;
     flex-wrap: wrap;
@@ -644,32 +796,23 @@
     align-items: center;
   }
 
+  /* A link now: a tag is worth carrying only if it can be followed. */
   .tag {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 5px;
     font-size: 10px;
-    padding: 1px 4px 1px 7px;
+    padding: 2px 7px;
     border-radius: var(--radius-control);
     background: var(--control);
     color: var(--text-2);
   }
 
-  .tag-input {
-    background: transparent;
-    border: 1px dashed var(--edge-2);
-    border-radius: var(--radius-control);
-    color: var(--text-3);
-    font-size: 10px;
-    padding: 2px 6px;
-    width: 8ch;
+  .tag:hover {
+    background: var(--control-selected);
+    color: var(--text);
   }
 
-  .tag-input:focus {
-    border-style: solid;
-    border-color: var(--edge);
-    width: 14ch;
-  }
 
   .notes {
     background: var(--control);

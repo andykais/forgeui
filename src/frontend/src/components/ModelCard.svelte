@@ -1,37 +1,47 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import { FAMILIES } from "../types.ts";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import type { ModelEntry } from "../types.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
-  import { navigate } from "../router.svelte.ts";
-  import Popover from "./Popover.svelte";
+  import { navigate, opensElsewhere } from "../router.svelte.ts";
+  import FamilyPicker from "./FamilyPicker.svelte";
 
   /**
    * One card of the Models grid (§11.2, frame 04): thumbnail, display name,
-   * family badge or an inline SET FAMILY control when it has none, and the
-   * count of outputs as a link into the gallery filtered to this model.
+   * the family picker (SET FAMILY while it has none), and the count of
+   * outputs as a link into the gallery filtered to this model.
    * There is no multi-select and no bulk edit (MOCK-REVISIONS §8).
    */
   let {
     model,
+    selected = false,
     onfamily,
+    onhidden,
   }: {
     model: ModelEntry;
+    /** Where the arrow keys are, which is not where the mouse is (§11.4). */
+    selected?: boolean;
     onfamily: (model: ModelEntry, family: string) => void;
+    /** Keep it out of the Generate pickers, or put it back (§8.1). */
+    onhidden?: (model: ModelEntry, hidden: boolean) => void;
   } = $props();
-
-  let familyOpen = $state(false);
 
   const href = $derived(`/models/${encodeURIComponent(model.id)}`);
   const galleryHref = $derived(model.hash ? `/gallery?models=${model.hash}` : "/gallery");
 </script>
 
-<article class="card" data-model={model.id} data-hashing={model.hashing}>
+<article
+  class="card"
+  class:selected
+  data-model={model.id}
+  data-hashing={model.hashing}
+>
   <a
     class="thumb"
     {href}
     onclick={(event) => {
+      if (opensElsewhere(event)) return;
       event.preventDefault();
       navigate(href);
     }}
@@ -48,6 +58,7 @@
       class="name"
       {href}
       onclick={(event) => {
+        if (opensElsewhere(event)) return;
         event.preventDefault();
         navigate(href);
       }}
@@ -61,35 +72,37 @@
         <span class="badge hashing mono" title="Reading the file to identify it">
           hashing
         </span>
-      {:else if model.family === "unset"}
-        <div class="chip-wrap">
-          <button class="set-family mono" onclick={() => (familyOpen = !familyOpen)}>
-            SET FAMILY <ChevronDown size={11} />
-          </button>
-          <Popover
-            open={familyOpen}
-            width={150}
-            title="Family"
-            onclose={() => (familyOpen = false)}
-          >
-            {#each FAMILIES as family (family)}
-              <button
-                class="option"
-                onclick={() => {
-                  familyOpen = false;
-                  onfamily(model, family);
-                }}
-              >
-                {family}
-              </button>
-            {/each}
-          </Popover>
-        </div>
+      {:else if model.hash_error}
+        <!-- Not on its way: stopped, and saying why rather than reading
+             "hashing" for ever. -->
+        <span class="badge failed mono" title={`Could not read it: ${model.hash_error}`}>
+          unreadable
+        </span>
       {:else}
-        <span class="badge mono">{model.family}</span>
+        <!-- The card clips its own overflow to round the thumbnail, so this
+             list is anchored in viewport coordinates rather than absolutely
+             positioned inside it. -->
+        <FamilyPicker
+          family={model.family}
+          prompt={model.family === "unset"}
+          onchange={(family) => onfamily(model, family)}
+        />
       {/if}
 
       <span class="spacer"></span>
+
+      {#if onhidden && !model.hashing && model.hash}
+        <button
+          class="hide"
+          title={model.hidden
+            ? "Show this in the Generate inputs again"
+            : "Hide this from the Generate inputs"}
+          aria-label={model.hidden ? `Unhide ${model.display_name}` : `Hide ${model.display_name}`}
+          onclick={() => onhidden(model, !model.hidden)}
+        >
+          {#if model.hidden}<Eye size={12} />{:else}<EyeOff size={12} />{/if}
+        </button>
+      {/if}
 
       {#if model.output_count > 0}
         <a
@@ -97,6 +110,7 @@
           href={galleryHref}
           title="Show these in the gallery"
           onclick={(event) => {
+            if (opensElsewhere(event)) return;
             event.preventDefault();
             navigate(galleryHref);
           }}
@@ -123,6 +137,11 @@
     background: var(--raised);
     border-radius: var(--radius-card);
     overflow: hidden;
+  }
+
+  .card.selected {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   .thumb {
@@ -183,24 +202,22 @@
     color: var(--accent);
   }
 
-  .set-family {
-    font-size: 10px;
-    padding: 1px 6px;
-    background: transparent;
-    border: 1px dashed var(--edge-2);
-    color: var(--text-4);
+  .badge.failed {
+    color: var(--error);
+  }
+
+
+  .hide {
     display: flex;
     align-items: center;
-    gap: 3px;
+    background: transparent;
+    padding: 2px 4px;
+    color: var(--text-4);
   }
 
-  .set-family:hover {
+  .hide:hover {
     color: var(--text-2);
-    border-color: var(--edge);
-  }
-
-  .chip-wrap {
-    position: relative;
+    background: var(--control);
   }
 
   .count {
@@ -216,18 +233,4 @@
     font-size: 11px;
   }
 
-  .option {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    padding: 5px 8px;
-    font-size: 12px;
-    color: var(--text-2);
-  }
-
-  .option:hover {
-    background: var(--control);
-    color: var(--text);
-  }
 </style>

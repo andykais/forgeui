@@ -57,6 +57,10 @@ export function boundInputs(manifest: Manifest | null): Map<string, string> {
         break;
       case "lora_list":
         break;
+      case "bool":
+        // A switched checkbox binds no literal: it moves a link (§4.4).
+        if (typeof param.bind === "string") add(param.bind, param);
+        break;
       default:
         add(param.bind, param);
     }

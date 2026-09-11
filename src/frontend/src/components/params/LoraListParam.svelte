@@ -5,6 +5,11 @@
   import Unlink from "@lucide/svelte/icons/unlink";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import Popover from "../Popover.svelte";
+  import { matcher } from "../../lib/search.ts";
+  import { byChoice } from "../../lib/models.ts";
+  import { focusOnMount } from "../../lib/focus.ts";
+  import { navigate, opensElsewhere } from "../../router.svelte.ts";
+  import TagFilter from "./TagFilter.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
 
@@ -14,44 +19,107 @@
    * sidecar records both values either way. The picker is family-filtered to
    * the workflow by default; "Show all" is one click and does not persist,
    * and already-added LoRAs stay listed, marked "added".
+   *
+   * A LoRA is named here by the path it has under its folder — `krea/glow`,
+   * not `glow` — because a folder tree is how people file these, and the
+   * search box takes a regular expression so `krea.*glow` finds it.
    */
   interface Props {
     param: Param;
     value: LoraRow[];
     models: ModelEntry[];
     onchange: (rows: LoraRow[]) => void;
+    /** Called once a LoRA has been added, so the panel can move the caret. */
+    onpicked?: () => void;
+    /** The panel this picker's list covers, rather than hanging off the row. */
+    fill?: HTMLElement | null;
   }
 
-  let { param, value, models, onchange }: Props = $props();
+  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
 
   let pickerOpen = $state(false);
   let showAll = $state(false);
   let search = $state("");
+  let tags = $state<string[]>([]);
   /** Rows whose two strengths are shown separately. */
   let unlinked = $state<Record<string, boolean>>({});
   let dragging = $state<number | null>(null);
+  /**
+   * Which row the grip has armed for dragging. `draggable` on the whole row
+   * meant a drag that started on the strength slider moved the row instead of
+   * the handle, so only the grip turns it on.
+   */
+  let grabbed = $state<number | null>(null);
 
   const family = $derived(param.filter?.family ?? null);
 
-  const listed = $derived.by(() => {
-    const needle = search.trim().toLowerCase();
-    return models.filter((model) => {
+  /**
+   * Everything the family filter and the search leave, before the tags. One
+   * row per name: a LoRA reachable through two configured folders is one
+   * choice, and the list is keyed on the name it would write.
+   */
+  const candidates = $derived.by(() => {
+    const matches = matcher(search);
+    return byChoice(models).filter((model) => {
       // A model nobody has filed yet is not hidden by a family filter: it
       // has no family because the user has not said, not because it is wrong.
       const familyOk =
         showAll || !family || model.family === family || model.family === "unset";
-      const searchOk =
-        needle === "" ||
-        model.display_name.toLowerCase().includes(needle) ||
-        model.name.toLowerCase().includes(needle);
-      return familyOk && searchOk;
+      return familyOk && matches(model.name, model.display_name);
     });
   });
 
+  const listed = $derived(
+    tags.length === 0
+      ? candidates
+      : candidates.filter((model) => tags.every((tag) => model.tags.includes(tag))),
+  );
+
+  /**
+   * The family of the model this row names — not the workflow's. The badge
+   * used to show `param.filter.family`, which is the same word on every row
+   * regardless of what was added: a LoRA nobody has filed read as KREA2 the
+   * moment it was chosen, having read `unset` in the list a second earlier.
+   */
+  function familyOf(name: string): string | null {
+    const model = models.find((entry) => entry.name === name);
+    if (!model || model.family === "unset") return null;
+    return model.family;
+  }
+
+  /** What the sliders on a row reach, from the model it names (§8.1). */
+  function boundsOf(name: string): { min: number; max: number } {
+    const model = models.find((entry) => entry.name === name);
+    return { min: model?.strength_min ?? -2, max: model?.strength_max ?? 2 };
+  }
+
+  /** A row is a link to its model page once the file has been hashed (§8.1). */
+  function pageOf(name: string): string | null {
+    const model = models.find((entry) => entry.name === name);
+    return model?.hash ? `/models/${model.hash}` : null;
+  }
+
+  /** Typed strengths are clamped to the model's own range before they land. */
+  function typeStrength(
+    index: number,
+    part: "model" | "clip",
+    input: HTMLInputElement,
+    bounds: { min: number; max: number },
+  ) {
+    const typed = Number(input.value);
+    if (!Number.isFinite(typed)) {
+      input.value = String(value[index]?.[`strength_${part}`] ?? 1);
+      return;
+    }
+    setStrength(index, part, Math.min(bounds.max, Math.max(bounds.min, typed)));
+  }
+
   function add(model: ModelEntry) {
-    onchange([...value, { name: model.name, strength_model: 0.8, strength_clip: 0.8 }]);
+    onchange([...value, { name: model.name, strength_model: 1, strength_clip: 1 }]);
     pickerOpen = false;
     search = "";
+    tags = [];
+    onpicked?.();
   }
 
   function remove(index: number) {
@@ -77,40 +145,71 @@
     rows.splice(to, 0, row!);
     onchange(rows);
   }
-
-  function displayName(name: string): string {
-    return (
-      models.find((model) => model.name === name)?.display_name ??
-      name.replace(/\.[^.]+$/, "")
-    );
-  }
 </script>
 
 <div class="lora-list">
   {#each value as row, index (row.name + index)}
     {@const linked = !unlinked[row.name]}
+    {@const bounds = boundsOf(row.name)}
     <div
       class="lora-row"
       class:dragging={dragging === index}
-      draggable="true"
+      draggable={grabbed === index}
       role="listitem"
       ondragstart={() => (dragging = index)}
-      ondragend={() => (dragging = null)}
+      ondragend={() => {
+        dragging = null;
+        grabbed = null;
+      }}
       ondragover={(event) => event.preventDefault()}
       ondrop={() => {
         if (dragging !== null) move(dragging, index);
         dragging = null;
+        grabbed = null;
       }}
     >
       <div class="row head">
-        <span class="grip" title="Drag to reorder"><GripVertical size={13} /></span>
-        <span class="name" title={row.name}>{displayName(row.name)}</span>
-        <span class="spacer"></span>
-        {#if family}<span class="badge accent">{family}</span>{/if}
+        <!-- The only thing that arms the drag, so the sliders stay usable. -->
+        <span
+          class="grip"
+          title="Drag to reorder"
+          role="presentation"
+          onpointerdown={() => (grabbed = index)}
+          onpointerup={() => (grabbed = null)}
+          onpointercancel={() => (grabbed = null)}
+        >
+          <GripVertical size={13} />
+        </span>
+        <!--
+          No spacer beside this: one here and `flex: 1` on the name split the
+          row between them, so the name ellipsised with half the row empty.
+          It now takes everything up to the badge and clips only there.
+        -->
+        {#if pageOf(row.name)}
+          <a
+            class="name link"
+            href={pageOf(row.name)}
+            title={`${row.name} — open its model page`}
+            onclick={(event) => {
+              if (opensElsewhere(event)) return;
+              event.preventDefault();
+              navigate(pageOf(row.name)!);
+            }}
+          >
+            {row.name}
+          </a>
+        {:else}
+          <span class="name" title={row.name}>{row.name}</span>
+        {/if}
+        {#if familyOf(row.name)}
+          <span class="badge accent">{familyOf(row.name)}</span>
+        {:else}
+          <span class="badge" title="Nobody has filed this one">unset</span>
+        {/if}
         <button
           class="icon"
           title="Remove"
-          aria-label={`Remove ${displayName(row.name)}`}
+          aria-label={`Remove ${row.name}`}
           onclick={() => remove(index)}
         >
           <X size={12} />
@@ -122,11 +221,11 @@
           <span class="strength-label">strength</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_model}
-            aria-label={`${displayName(row.name)} strength`}
+            aria-label={`${row.name} strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -134,7 +233,17 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_model.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_model.toFixed(2)}
+            aria-label={`${row.name} strength value`}
+            onchange={(event) =>
+              typeStrength(index, "model", event.currentTarget, bounds)}
+          />
           <button
             class="icon"
             title="Unlink model and clip strengths"
@@ -149,11 +258,11 @@
           <span class="strength-label">model</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_model}
-            aria-label={`${displayName(row.name)} model strength`}
+            aria-label={`${row.name} model strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -161,7 +270,17 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_model.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_model.toFixed(2)}
+            aria-label={`${row.name} strength value`}
+            onchange={(event) =>
+              typeStrength(index, "model", event.currentTarget, bounds)}
+          />
           <button
             class="icon"
             title="Link model and clip strengths"
@@ -179,11 +298,11 @@
           <span class="strength-label">clip</span>
           <input
             type="range"
-            min="-1"
-            max="2"
+            min={bounds.min}
+            max={bounds.max}
             step="0.05"
             value={row.strength_clip}
-            aria-label={`${displayName(row.name)} clip strength`}
+            aria-label={`${row.name} clip strength`}
             oninput={(event) =>
               setStrength(
                 index,
@@ -191,7 +310,16 @@
                 Number((event.currentTarget as HTMLInputElement).value),
               )}
           />
-          <span class="value mono">{row.strength_clip.toFixed(2)}</span>
+          <input
+            class="value mono"
+            type="number"
+            step="0.05"
+            min={bounds.min}
+            max={bounds.max}
+            value={row.strength_clip.toFixed(2)}
+            aria-label={`${row.name} clip strength value`}
+            onchange={(event) => typeStrength(index, "clip", event.currentTarget, bounds)}
+          />
           <span class="icon-spacer"></span>
         </div>
       {/if}
@@ -202,18 +330,24 @@
     <button class="add" onclick={() => (pickerOpen = !pickerOpen)}>
       <Plus size={12} /> Add
     </button>
-    <Popover open={pickerOpen} title="LoRAs" onclose={() => (pickerOpen = false)}>
+    <Popover open={pickerOpen} {fill} title="LoRAs" onclose={() => (pickerOpen = false)}>
       <input
         class="search"
-        placeholder="Search LoRAs…"
+        placeholder="Search LoRAs… (regex ok)"
         bind:value={search}
         aria-label="Search LoRAs"
+        use:focusOnMount
       />
       {#if family}
         <button class="show-all" onclick={() => (showAll = !showAll)}>
           {showAll ? `Filter to ${family}` : "Show all"}
         </button>
       {/if}
+      <TagFilter
+        models={candidates}
+        selected={tags}
+        onchange={(chosen) => (tags = chosen)}
+      />
       {#if models.length === 0}
         <p class="empty">
           No LoRAs found. Point <code class="mono">model_folders.loras</code> at a folder
@@ -233,7 +367,7 @@
               {/if}
             </span>
             <span class="option-text">
-              <span class="option-name">{model.display_name}</span>
+              <span class="option-name" title={model.name}>{model.name}</span>
               <span class="option-line mono dim">
                 {model.output_count > 0
                   ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
@@ -277,12 +411,14 @@
     display: flex;
   }
 
+  /* A path needs the width, so the name takes the row and ellipsises. */
   .name {
+    flex: 1;
+    min-width: 0;
     font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 170px;
   }
 
   .strength {
@@ -302,10 +438,47 @@
     flex: 1;
   }
 
+  /*
+   * A number you can type into, that looks like the number it replaced until
+   * you do: no plate, no border, and no spinner — the arrows are noise at
+   * this size and nobody clicks them.
+   */
   .value {
-    width: 34px;
+    width: 42px;
+    flex: 0 0 auto;
     text-align: right;
     font-size: 11px;
+    padding: 1px 2px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    appearance: textfield;
+  }
+
+  .value::-webkit-outer-spin-button,
+  .value::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  .value:hover {
+    border-color: var(--line-2);
+  }
+
+  .value:focus,
+  .value:focus-visible {
+    background: var(--raised-2);
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  .name.link {
+    color: var(--text);
+  }
+
+  .name.link:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .icon {

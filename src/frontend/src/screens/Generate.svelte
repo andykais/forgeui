@@ -1,6 +1,5 @@
 <script lang="ts">
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
   import Grid2x2 from "@lucide/svelte/icons/grid-2x2";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
@@ -84,14 +83,36 @@
     setQuery({ workflow: id });
   }
 
-  /** Grouped by family and kind, with the last output as the thumbnail. */
+  /** The workflow's inputs are edited here, not in ComfyUI (§4.7). */
+  function editWorkflow() {
+    if (selectedWorkflow) navigate(`/workflows/${selectedWorkflow.id}`);
+  }
+
+  /** One path for the button and for Enter in the prompt: one click is one job. */
+  function generate() {
+    if (!panel.canSubmit) return;
+    void panel.submit();
+  }
+
+  /**
+   * Grouped by family and kind, with the last output as the thumbnail.
+   *
+   * `workflows` already arrives in the order the Workflows screen was dragged
+   * into (§4.6), and both the groups and their contents follow it: a group
+   * sits where its best-placed member does. Sorting the group *keys*
+   * alphabetically instead meant a workflow dragged to the top still sat
+   * below every family whose name came earlier, so the drag appeared to do
+   * nothing. With nothing dragged the order is the list's own — by name —
+   * rather than by family name, which is the order the Workflows screen
+   * shows.
+   */
   const grouped = $derived.by(() => {
     const groups = new Map<string, typeof workflows>();
     for (const workflow of workflows) {
       const key = `${workflow.family ?? "unset"} · ${workflow.kind}`;
       groups.set(key, [...(groups.get(key) ?? []), workflow]);
     }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return [...groups.entries()];
   });
 
   function thumbnailFor(outputId: string | null): string | null {
@@ -105,18 +126,27 @@
     following = sessionOutputs[0]?.id === output.id;
   }
 
+  /**
+   * Back to the grid. The tile stays selected — a soft highlight is all that
+   * means now, and it is where the eye was — but nothing is selected until a
+   * tile has been opened in the first place.
+   */
   function closeFocused() {
-    selectedId = null;
     focusRequested = false;
   }
 
-  async function editInGenerate(output: Output) {
+  /**
+   * Reuse parameters: fill the panel from this output and leave the view
+   * alone. It used to drop back to the grid, which took away the thing you
+   * were looking at while setting up the next run from it — the whole point
+   * of the button is to work from what is on screen.
+   */
+  async function reuseParams(output: Output) {
     const workflowId = output.workflow_id;
     if (!workflowId) return;
     const detail = await api.output(output.id);
     await panel.editWith(workflowId, detail.sidecar?.params ?? output.params);
     setQuery({ workflow: workflowId });
-    closeFocused();
   }
 
   async function rerun(output: Output) {
@@ -127,7 +157,10 @@
 
   async function remove(output: Output) {
     const { undo_window_ms } = await api.deleteOutput(output.id);
-    if (selectedId === output.id) closeFocused();
+    if (selectedId === output.id) {
+      selectedId = null;
+      closeFocused();
+    }
     toasts.undo(output, undo_window_ms);
   }
 
@@ -146,27 +179,36 @@
     const action = app.keyAction(event);
     if (!action) return;
     const columns = tileSize === "large" ? 2 : 3;
-    const index = focused
-      ? sessionOutputs.findIndex((output) => output.id === focused.id)
+    // What the arrows are moving from: the open viewer's output, or the
+    // selected tile when the grid is what is on screen.
+    const current = isFocused
+      ? focused
+      : (sessionOutputs.find((output) => output.id === selectedId) ?? null);
+    const index = current
+      ? sessionOutputs.findIndex((output) => output.id === current.id)
       : -1;
+    /**
+     * The list is newest first and reads left to right, so a step of -1 is
+     * the tile to the left and +1 the one to the right. Arrows move the
+     * selection and nothing else: only a viewer that is already open follows
+     * along, so an arrow key never enlarges anything by itself.
+     */
     const move = (delta: number) => {
-      const next = sessionOutputs[index + delta];
-      if (next) {
-        selectedId = next.id;
-        following = sessionOutputs[0]?.id === next.id;
-        focusRequested = true;
-      } else if (delta < 0 && index === 0) {
-        following = true;
-      }
+      // Nothing chosen yet: the first arrow key takes the newest rather than
+      // jumping into the middle of the grid.
+      const next = index < 0 ? sessionOutputs[0] : sessionOutputs[index + delta];
+      if (!next) return;
+      selectedId = next.id;
+      following = sessionOutputs[0]?.id === next.id;
     };
     switch (action) {
       case "select_prev":
         event.preventDefault();
-        move(1);
+        move(-1);
         break;
       case "select_next":
         event.preventDefault();
-        move(-1);
+        move(1);
         break;
       case "select_down":
         event.preventDefault();
@@ -188,6 +230,19 @@
         break;
     }
   }
+
+  /** Keep the selected tile on screen while the arrows walk the grid. */
+  let gridEl = $state<HTMLDivElement | undefined>(undefined);
+  $effect(() => {
+    const id = selectedId;
+    const grid = gridEl;
+    if (!id || !grid) return;
+    untrack(() => {
+      grid
+        .querySelector(`[data-output-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  });
 
   const sizes: { size: TileSize; icon: typeof List; title: string }[] = [
     { size: "small", icon: Grid3x3, title: "Small tiles" },
@@ -261,6 +316,8 @@
         checkpoints={app.checkpoints}
         modelsOfClass={(c) => app.modelsOfClass(c)}
         warnings={panel.warnings}
+        onedit={selectedWorkflow ? editWorkflow : undefined}
+        onsubmit={generate}
         onchange={(key, value) => panel.set(key, value)}
         onreset={() => panel.resetToDefaults()}
         onseededit={(value) => panel.editSeed(value)}
@@ -287,7 +344,7 @@
             : panel.missingRequired.length > 0
               ? `${panel.missingRequired.join(", ")} required`
               : "Not ready"}
-        onclick={() => panel.submit()}
+        onclick={generate}
       >
         Generate
       </button>
@@ -307,7 +364,7 @@
         following = sessionOutputs[0]?.id === output.id;
       }}
       onclose={closeFocused}
-      onedit={editInGenerate}
+      onedit={reuseParams}
       onrerun={rerun}
       ondelete={remove}
       onfollow={() => {
@@ -342,40 +399,18 @@
             </button>
           {/each}
         </div>
-        {#if selectedWorkflow}
-          <a
-            class="edit-workflow"
-            href={`/comfy?workflow=${selectedWorkflow.id}`}
-            onclick={(event) => {
-              event.preventDefault();
-              navigate(`/comfy?workflow=${selectedWorkflow.id}`);
-            }}
-          >
-            Edit this workflow in ComfyUI <ExternalLink size={12} />
-          </a>
-        {/if}
       </header>
 
       {#if tileSize === "table"}
         <div class="table-wrap scroll">
-          <MediaTable
-            outputs={sessionOutputs}
-            selectedId={focused?.id ?? null}
-            onopen={open}
-          />
+          <MediaTable outputs={sessionOutputs} {selectedId} onopen={open} />
         </div>
       {:else}
-        <div class="grid scroll" class:large={tileSize === "large"}>
+        <div class="grid scroll" class:large={tileSize === "large"} bind:this={gridEl}>
           {#each sessionJobs as job (job.id)}
             {#if job.status === "done"}
               {#each app.jobOutputs(job) as output (output.id)}
-                <Tile
-                  {output}
-                  selected={focused?.id === output.id}
-                  onopen={open}
-                  onedit={editInGenerate}
-                  onrerun={rerun}
-                />
+                <Tile {output} selected={selectedId === output.id} onopen={open} />
               {/each}
             {:else}
               <JobCard
@@ -402,6 +437,8 @@
     flex: 1;
     display: flex;
     min-height: 0;
+    /* The panel and the results share the width; neither may claim more. */
+    min-width: 0;
   }
 
   .panel {
@@ -527,8 +564,16 @@
     color: var(--text-4);
   }
 
+  /*
+   * Solid, because the bar is sticky over a scrolling panel and the gradient
+   * behind it is transparent at the top: a refusal has to be readable over
+   * whatever param it happens to be sitting on.
+   */
   .submit-error {
     margin: 0 0 6px;
+    padding: 6px 8px;
+    border-radius: var(--radius-control);
+    background: #2e1a18;
     font-size: 11px;
     color: var(--error);
   }
@@ -541,6 +586,7 @@
   }
 
   .results-head {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -566,28 +612,18 @@
     color: var(--text);
   }
 
-  .edit-workflow {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    color: var(--text-3);
-    background: var(--raised-2);
-    padding: 4px 8px;
-    border-radius: var(--radius-input);
-  }
-
-  .edit-workflow:hover {
-    color: var(--text);
-  }
-
   .grid {
     flex: 1;
+    /* Without this the grid cannot shrink below its content and the rows
+       spill over each other once the results fill the page. */
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: max-content;
     gap: 8px;
     padding: 0 12px 12px;
     align-content: start;
+    align-items: start;
   }
 
   .grid.large {

@@ -17,6 +17,7 @@ const CHECKPOINT = "v1-5-pruned-emaonly-fp16.safetensors";
 interface ModelsResponse {
   kind: string | null;
   class: string | null;
+  classes: Record<string, string>;
   folders: string[];
   models: ModelView[];
   progress: {
@@ -102,6 +103,26 @@ async function models(
 ): Promise<ModelsResponse> {
   return await app.json<ModelsResponse>(`/api/models${query}`);
 }
+
+Deno.test("the response says what class each configured folder holds", async () => {
+  await withModels(async (app) => {
+    const listed = await models(app);
+    // The Models screen groups its tabs by this rather than by folder: the
+    // four folders a generatable model can sit in are one tab (§8.2).
+    assertEquals(listed.classes.checkpoints, "diffusion");
+    assertEquals(listed.classes.unet, "diffusion");
+    assertEquals(listed.classes.diffusion_models, "diffusion");
+    assertEquals(listed.classes["Stable-Diffusion"], "diffusion");
+    assertEquals(listed.classes.loras, "lora");
+    assertEquals(listed.classes.vae, "vae");
+    assertEquals(listed.classes.text_encoders, "clip");
+    // Every configured folder is in the map, even one with nothing in it.
+    assertEquals(
+      Object.keys(listed.classes).sort(),
+      Object.keys(app.config.config.model_folders).sort(),
+    );
+  });
+});
 
 Deno.test("scanned models are listed before they are hashed", async () => {
   await withModels(async (app) => {
@@ -322,9 +343,11 @@ Deno.test("hashing fills in identity, and only re-reads what changed", async () 
     assertEquals(checkpoint.kind, "checkpoints");
     assertEquals(checkpoint.present, true);
 
-    // A second pass has nothing to do.
+    // A second pass has nothing to do, and says so as 0 of 0 rather than
+    // carrying the last pass's totals forward.
     await scanAndHash(app);
-    assertEquals((await models(app)).progress.hashing.done, 3);
+    assertEquals((await models(app)).progress.hashing.done, 0);
+    assertEquals((await models(app)).progress.hashing.total, 0);
 
     // …until a file changes, which is decided on size and mtime.
     await writeFakeSafetensors(join(fixtures.checkpoints, CHECKPOINT), {
@@ -391,6 +414,109 @@ Deno.test("a hashed model can be named, filed and tagged", async () => {
     assertEquals((await models(app, "?family=sd15")).models.length, 1);
     assertEquals((await models(app, "?family=unset")).models.length, 2);
     assertEquals((await models(app, "?q=nothing")).models.length, 0);
+
+    // `tags` asks for tags and nothing else: `q=film` also matches the
+    // filename, where this only matches the tag.
+    assertEquals((await models(app, "?tags=film")).models.length, 1);
+    assertEquals((await models(app, "?tags=FILM")).models.length, 1);
+    // Several narrow rather than widen.
+    assertEquals((await models(app, "?tags=film,grain")).models.length, 1);
+    assertEquals((await models(app, "?tags=film,nope")).models.length, 0);
+    // A model with no tags is not matched by a tag search.
+    assertEquals((await models(app, "?tags=anything")).models.length, 0);
+    // An empty ask is not a tag everything carries.
+    assertEquals(
+      (await models(app, "?tags=")).models.length,
+      (await models(app)).models.length,
+    );
+    assertEquals(
+      (await models(app, "?tags=%20,%20")).models.length,
+      (await models(app)).models.length,
+    );
+  });
+});
+
+Deno.test("one model can be re-read past the caches", async () => {
+  await withModels(async (app, fixtures) => {
+    // A LoRA whose keys actually say what it is.
+    await writeFakeSafetensors(join(fixtures.loras, "fluxy.safetensors"), {
+      name: "fluxy",
+      tensors: ["lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight"],
+    });
+    await scanAndHash(app);
+    const model = (await models(app, "?kind=loras")).models.find((entry) =>
+      entry.name === "fluxy.safetensors"
+    )!;
+    assertEquals(model.family, "flux");
+
+    // An ordinary rescan reads nothing: its whole job is to skip files that
+    // have not moved, which is exactly why it cannot fix a wrong cached
+    // answer. A pass with nothing to do is 0 of 0 (§8.1).
+    await scanAndHash(app);
+    assertEquals((await models(app)).progress.hashing.total, 0);
+
+    // Re-reading one file does read it, cache or no cache.
+    const reread = await app.json<ModelView>(
+      `/api/models/${model.id}/rescan`,
+      { method: "POST" },
+    );
+    assertEquals(reread.family, "flux");
+    assertEquals(reread.hash, model.hash, "the file did not change");
+    assertEquals(
+      (await models(app)).progress.hashing.total,
+      1,
+      "the re-read should have hashed exactly one file",
+    );
+
+    // A model that is not there is a 404, not a crash.
+    const missing = await app.fetch(`/api/models/${"f".repeat(64)}/rescan`, {
+      method: "POST",
+    });
+    assertEquals(missing.status, 404);
+    await missing.body?.cancel();
+  });
+});
+
+Deno.test("a family the config hides takes its models with it", async () => {
+  await withModels(async (app, fixtures) => {
+    await writeFakeSafetensors(join(fixtures.loras, "fluxy.safetensors"), {
+      name: "fluxy",
+      tensors: ["lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight"],
+    });
+    await scanAndHash(app);
+    const listed = () =>
+      models(app, "?kind=loras").then((body) =>
+        body.models.map((entry) => entry.name)
+      );
+    assert((await listed()).includes("fluxy.safetensors"));
+
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ ui: { hidden_families: ["flux"] } }),
+    });
+
+    // Gone from the list, exactly as a model hidden one at a time would be.
+    assert(!(await listed()).includes("fluxy.safetensors"));
+    // And back under Show hidden, which is what makes this reversible.
+    const hidden = await models(app, "?kind=loras&hidden=1");
+    assert(hidden.models.some((entry) => entry.name === "fluxy.safetensors"));
+    assertEquals(
+      hidden.models.find((entry) => entry.name === "fluxy.safetensors")?.hidden,
+      true,
+    );
+
+    // The family itself is no longer one to file anything as.
+    const families = await app.json<{ families: { family: string }[] }>(
+      "/api/families",
+    );
+    assert(!families.families.some((entry) => entry.family === "flux"));
+
+    // Turning it back on restores it; the per-model flag was never touched.
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ ui: { hidden_families: [] } }),
+    });
+    assert((await listed()).includes("fluxy.safetensors"));
   });
 });
 
@@ -447,9 +573,11 @@ Deno.test("families come back with model and workflow counts", async () => {
         "krea2",
         "ltx",
         "ltx-2",
+        "qwen-image",
         "sd15",
         "sdxl",
         "unset",
+        "wan2",
         "z-image",
       ],
     );
@@ -458,7 +586,9 @@ Deno.test("families come back with model and workflow counts", async () => {
     // One bundled workflow is Flux.1, one FLUX.2, one Krea 2, one sd15 (§4.6).
     assertEquals(byName.get("flux")?.workflows, 1);
     assertEquals(byName.get("flux2")?.workflows, 1);
-    assertEquals(byName.get("krea2")?.workflows, 2); // plain and enhanced
+    // The enhancer is a checkbox on the one Krea 2 workflow, not a second
+    // workflow of its own (§7.1).
+    assertEquals(byName.get("krea2")?.workflows, 1);
     assertEquals(byName.get("sd15")?.workflows, 1);
     assertEquals(byName.get("sd15")?.models, 0);
   });

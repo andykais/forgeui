@@ -40,16 +40,32 @@ CREATE TABLE models (
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT, notes TEXT, tags_json TEXT,
+  strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default (§8.1)
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
   last_used_at INTEGER,           -- derived: max(outputs.created_at) over output_models; same maintenance
+  hidden INTEGER NOT NULL DEFAULT 0,  -- kept out of the Generate pickers (§8.1)
   last_seen_at INTEGER NOT NULL
 );
+
+-- What each *file* hashed to. `models` is keyed by content, so two identical
+-- files at two paths are one row there and the second overwrites the first;
+-- the losing path then had no row at all, which reads as "still hashing" and
+-- got it re-queued on every rescan, for ever. A file is identified by its
+-- path, and this is where that lives (§8.1).
+CREATE TABLE model_files (
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL, mtime INTEGER NOT NULL,  -- re-hash when either moves
+  hash TEXT NOT NULL,
+  hashed_at INTEGER NOT NULL
+);
+CREATE INDEX model_files_hash ON model_files(hash);
 
 CREATE TABLE model_probes (      -- derived: what a file's header says it is
   path TEXT PRIMARY KEY,
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,  -- re-probe when either moves
   arch TEXT,                      -- a FAMILIES entry, or NULL when unrecognised
+  detector INTEGER NOT NULL DEFAULT 0,  -- re-probe when the detector moves too (§6)
   probed_at INTEGER NOT NULL
 );
 

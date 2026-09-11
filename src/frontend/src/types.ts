@@ -210,6 +210,12 @@ export interface Config {
     tile_size: Record<UiScreen, TileSize>;
     sidebar_collapsed: Record<UiScreen, boolean>;
     filmstrip_collapsed: Record<UiScreen, boolean>;
+    /** Workflow ids the user dragged into place, most wanted first (§4.6). */
+    workflow_order: string[];
+    /** What a model tile falls back to when none was chosen (§8.1). */
+    model_thumbnail: "first_sample" | "latest_generated";
+    /** Families kept out of sight entirely; their models read as hidden. */
+    hidden_families: string[];
   };
 }
 
@@ -230,12 +236,19 @@ export interface ModelEntry {
   mtime: number | null;
   notes: string | null;
   tags: string[];
+  /** The ends of this model's strength sliders; always a number (§8.1). */
+  strength_min: number;
+  strength_max: number;
   thumb_path: string | null;
   thumb_url: string | null;
   output_count: number;
   last_used_at: number | null;
   /** True until the background hasher has read the file (§8.1). */
   hashing: boolean;
+  /** Why the hasher could not read it; a file that failed is not waiting. */
+  hash_error: string | null;
+  /** Kept out of the Generate pickers; still listed on Models (§8.1). */
+  hidden: boolean;
   present: boolean;
 }
 
@@ -258,8 +271,27 @@ export interface Sample {
   reusable: boolean;
 }
 
-/** The hardcoded list of §8.1; the app attaches no behaviour to a family. */
-export const FAMILIES = ["flux", "sdxl", "anima", "ltx", "z-image", "sd15"] as const;
+/**
+ * §8.1's list, kept in step with `src/workflows/types.ts` — the server
+ * validates a family against that one, so a name missing here is a family the
+ * UI cannot offer. It is only the fallback: `app.families` reconciles it with
+ * what `/api/families` reports and with what the models on disk are already
+ * filed as.
+ */
+export const FAMILIES = [
+  "flux",
+  "flux2",
+  "krea2",
+  "chroma",
+  "sdxl",
+  "anima",
+  "ltx",
+  "ltx-2",
+  "z-image",
+  "wan2",
+  "qwen-image",
+  "sd15",
+] as const;
 
 export interface FamilyCount {
   family: string;

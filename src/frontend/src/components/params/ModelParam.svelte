@@ -1,5 +1,9 @@
 <script lang="ts">
   import Popover from "../Popover.svelte";
+  import { matcher } from "../../lib/search.ts";
+  import { byChoice } from "../../lib/models.ts";
+  import { focusOnMount } from "../../lib/focus.ts";
+  import TagFilter from "./TagFilter.svelte";
   import type { ModelEntry, Param } from "../../types.ts";
 
   /**
@@ -18,24 +22,34 @@
     value: string;
     models: ModelEntry[];
     onchange: (name: string) => void;
+    /** Called once a model has been chosen, so the panel can move the caret. */
+    onpicked?: () => void;
+    /** The panel this picker's list covers, rather than hanging off the row. */
+    fill?: HTMLElement | null;
   }
 
-  let { param, value, models, onchange }: Props = $props();
+  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
 
   let open = $state(false);
   let search = $state("");
+  let tags = $state<string[]>([]);
 
   const family = $derived(param.filter?.family ?? null);
 
-  const matched = $derived.by(() => {
-    const needle = search.trim().toLowerCase();
-    return models.filter(
-      (model) =>
-        needle === "" ||
-        model.display_name.toLowerCase().includes(needle) ||
-        model.name.toLowerCase().includes(needle),
-    );
+  /**
+   * What the search leaves, before the tag chips narrow it further. One row
+   * per name, because a name is what choosing writes into the workflow.
+   */
+  const candidates = $derived.by(() => {
+    const matches = matcher(search);
+    return byChoice(models).filter((model) => matches(model.name, model.display_name));
   });
+
+  const matched = $derived(
+    tags.length === 0
+      ? candidates
+      : candidates.filter((model) => tags.every((tag) => model.tags.includes(tag))),
+  );
 
   function fits(model: ModelEntry): boolean {
     return !family || model.family === family || model.family === "unset";
@@ -50,14 +64,14 @@
    * are not the filenames on this machine. Saying so in the panel is the
    * whole warning a user gets before the server refuses the job.
    */
-  const missing = $derived(
-    value !== "" && selected === null && models.length > 0,
-  );
+  const missing = $derived(value !== "" && selected === null && models.length > 0);
 
   function pick(model: ModelEntry) {
     onchange(model.name);
     open = false;
     search = "";
+    tags = [];
+    onpicked?.();
   }
 </script>
 
@@ -75,12 +89,18 @@
     {/if}
   </button>
 
-  <Popover {open} title="Models" onclose={() => (open = false)}>
+  <Popover {open} {fill} title="Models" onclose={() => (open = false)}>
     <input
       class="search"
-      placeholder="Search models…"
+      placeholder="Search models… (regex ok)"
       bind:value={search}
       aria-label="Search models"
+      use:focusOnMount
+    />
+    <TagFilter
+      models={candidates}
+      selected={tags}
+      onchange={(chosen) => (tags = chosen)}
     />
     {#if models.length === 0}
       <p class="note">
@@ -89,7 +109,7 @@
     {:else if matched.length === 0}
       <p class="note">Nothing matches “{search}”.</p>
     {:else}
-      {#each preferred as model (model.id)}
+      {#each preferred as model (model.name)}
         <button
           class="option"
           class:current={model.name === value}
@@ -103,7 +123,7 @@
         <!-- Not this workflow's family, but still reachable: the filter
              orders the list, it does not hide half of it. -->
         <p class="divider">Other models</p>
-        {#each others as model (model.id)}
+        {#each others as model (model.name)}
           <button
             class="option"
             class:current={model.name === value}

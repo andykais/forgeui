@@ -702,13 +702,19 @@ export interface ModelRow {
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
+  /** The ends of this model's strength sliders; null means the default. */
+  strength_min: number | null;
+  strength_max: number | null;
   output_count: number;
   last_used_at: number | null;
+  /** Kept out of the Generate pickers, but still listed on Models (§8.1). */
+  hidden: boolean;
   last_seen_at: number;
 }
 
 const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
-  notes, tags_json, thumb_path, output_count, last_used_at, last_seen_at`;
+  notes, tags_json, thumb_path, strength_min, strength_max,
+  output_count, last_used_at, hidden, last_seen_at`;
 
 type ModelRecord = [
   string,
@@ -721,8 +727,11 @@ type ModelRecord = [
   string | null,
   string | null,
   string | null,
+  number | null,
+  number | null,
   number,
   number | null,
+  number,
   number,
 ];
 
@@ -738,9 +747,12 @@ function toModel(record: ModelRecord): ModelRow {
     notes: record[7],
     tags: parse<string[]>(record[8], []),
     thumb_path: record[9],
-    output_count: record[10],
-    last_used_at: record[11],
-    last_seen_at: record[12],
+    strength_min: record[10],
+    strength_max: record[11],
+    output_count: record[12],
+    last_used_at: record[13],
+    hidden: record[14] !== 0,
+    last_seen_at: record[15],
   };
 }
 
@@ -765,25 +777,66 @@ export interface ModelProbeRow {
   size: number;
   mtime: number | null;
   arch: string | null;
+  /** Which detector said so; an older one is re-run (§6). */
+  detector: number;
   probed_at: number;
 }
 
 /** Every probe result, for the family fallback the library applies. */
 export function listModelProbes(db: Database): Map<string, ModelProbeRow> {
   const rows = db.prepare(
-    `SELECT path, size, mtime, arch, probed_at FROM model_probes`,
+    `SELECT path, size, mtime, arch, detector, probed_at FROM model_probes`,
   ).all() as ModelProbeRow[];
   return new Map(rows.map((row) => [row.path, row]));
 }
 
 export function upsertModelProbe(db: Database, probe: ModelProbeRow): void {
   db.prepare(
-    `INSERT INTO model_probes (path, size, mtime, arch, probed_at)
+    `INSERT INTO model_probes (path, size, mtime, arch, detector, probed_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET
+       size = excluded.size, mtime = excluded.mtime,
+       arch = excluded.arch, detector = excluded.detector,
+       probed_at = excluded.probed_at`,
+  ).run(
+    probe.path,
+    probe.size,
+    probe.mtime,
+    probe.arch,
+    probe.detector,
+    probe.probed_at,
+  );
+}
+
+/** What one file on disk hashed to, keyed by its path (§8.1). */
+export interface ModelFileRow {
+  path: string;
+  size: number;
+  mtime: number;
+  hash: string;
+  hashed_at: number;
+}
+
+export function listModelFiles(db: Database): Map<string, ModelFileRow> {
+  const rows = db.prepare(
+    `SELECT path, size, mtime, hash, hashed_at FROM model_files`,
+  ).all() as ModelFileRow[];
+  return new Map(rows.map((row) => [row.path, row]));
+}
+
+export function upsertModelFile(db: Database, file: ModelFileRow): void {
+  db.prepare(
+    `INSERT INTO model_files (path, size, mtime, hash, hashed_at)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(path) DO UPDATE SET
        size = excluded.size, mtime = excluded.mtime,
-       arch = excluded.arch, probed_at = excluded.probed_at`,
-  ).run(probe.path, probe.size, probe.mtime, probe.arch, probe.probed_at);
+       hash = excluded.hash, hashed_at = excluded.hashed_at`,
+  ).run(file.path, file.size, file.mtime, file.hash, file.hashed_at);
+}
+
+/** Drop one file's record, so the next scan hashes it again (§8.1). */
+export function deleteModelFile(db: Database, path: string): void {
+  db.prepare(`DELETE FROM model_files WHERE path = ?`).run(path);
 }
 
 export function upsertModel(db: Database, model: NewModel): void {
@@ -841,6 +894,10 @@ export interface ModelMetaPatch {
   notes?: string | null;
   tags?: string[];
   thumb_path?: string | null;
+  strength_min?: number | null;
+  strength_max?: number | null;
+  /** Kept out of the Generate pickers; still listed on Models (§8.1). */
+  hidden?: boolean;
 }
 
 /** The edit-in-place header of §8.1. Nothing here touches the file. */
@@ -850,7 +907,7 @@ export function updateModelMeta(
   patch: ModelMetaPatch,
 ): boolean {
   const sets: string[] = [];
-  const values: (string | null)[] = [];
+  const values: (string | number | null)[] = [];
   if (patch.display_name !== undefined) {
     sets.push("display_name = ?");
     values.push(patch.display_name);
@@ -870,6 +927,18 @@ export function updateModelMeta(
   if (patch.thumb_path !== undefined) {
     sets.push("thumb_path = ?");
     values.push(patch.thumb_path);
+  }
+  if (patch.hidden !== undefined) {
+    sets.push("hidden = ?");
+    values.push(patch.hidden ? 1 : 0);
+  }
+  if (patch.strength_min !== undefined) {
+    sets.push("strength_min = ?");
+    values.push(patch.strength_min);
+  }
+  if (patch.strength_max !== undefined) {
+    sets.push("strength_max = ?");
+    values.push(patch.strength_max);
   }
   if (sets.length === 0) return false;
   return db.prepare(`UPDATE models SET ${sets.join(", ")} WHERE hash = ?`)
@@ -1011,6 +1080,19 @@ export function clearThumbPath(db: Database, path: string): void {
 }
 
 /** Most recent surviving output per model, for the thumbnail fallback (§8.1). */
+/**
+ * The first sample of each model — the one at the top of its Samples strip,
+ * which is what "first_sample" means on the tile (§8.1). `id` is a ULID, so
+ * the smallest is the earliest.
+ */
+export function firstSamplePathByModel(db: Database): Map<string, string> {
+  const rows = db.prepare(
+    `SELECT model_hash, path FROM samples s
+      WHERE s.id = (SELECT min(id) FROM samples WHERE model_hash = s.model_hash)`,
+  ).values<[string, string]>();
+  return new Map(rows);
+}
+
 export function latestOutputPathByModel(db: Database): Map<string, string> {
   const rows = db.prepare(
     `SELECT om.model_hash, o.path, max(o.created_at)

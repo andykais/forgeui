@@ -171,7 +171,7 @@ Field notes:
 |---|---|---|
 | `text` | textarea | scalar |
 | `int`, `float` | number/slider | scalar |
-| `bool` | toggle | scalar |
+| `bool` | toggle | scalar, or `switch` (graph rewrite, §4.4) |
 | `enum` | dropdown; `options` in manifest, or `source: "checkpoints"` etc. | scalar |
 | `seed` | number + 🎲 + "lock" | scalar; `-1` → random at submit |
 | `size` | width×height with ratio presets/aspect lock; `default` is the workflow's base resolution, optional `step` (16 or 64) snaps ratio results to the model's grid | `{w, h}` |
@@ -181,7 +181,9 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
-### 4.4 `lora_list` graph rewrite
+### 4.4 Graph rewrites
+
+#### `lora_list`
 At submit time the server splices `LoraLoader` nodes into the api graph:
 
 1. Start with `model = chain.model_from`, `clip = chain.clip_from`.
@@ -194,11 +196,39 @@ This avoids depending on third-party stack loader nodes. Workflows using
 model-only LoRAs (no CLIP) set `clip_from`/`clip_to` to null and the rewrite
 uses `LoraLoaderModelOnly`.
 
+#### `bool` with a `switch` bind
+
+A checkbox usually sets a widget, and a widget cannot turn a branch of the
+graph on and off. Some options are a branch: Krea 2's prompt enhancer is four
+nodes that either feed the encoder or do not. Rather than ship the workflow
+twice — which is what it did at first, and which meant every later change to
+Krea 2 had to be made in both copies — a `bool` may bind a `switch`:
+
+```json
+"bind": { "switch": { "input": "4.text", "on": "13.STRING", "off": "10.STRING" } }
+```
+
+At submit the bound `input` is linked to `on` or to `off` accordingly.
+ComfyUI executes only what an output needs, so the side that is not linked
+never runs. Both sources are validated against the graph at load, and `input`
+must already be fed by a link: an input holding a literal means the manifest
+has drifted from its graph, and saying so on load beats a surprise at submit.
+
 ### 4.5 Workflow versions
 Only the **latest** version of each workflow is exposed in the UI. There is no
 version table. Each workflow's content hash (`sha256(api.json + manifest.json)`)
 is stamped into every output sidecar so old outputs can be recognised, but
 nothing in the DB references workflows by foreign key (§7).
+
+The editor is proxied under this app's origin, which makes ComfyUI's
+`localStorage` this origin's too. ComfyUI reopens every tab it had open on
+boot, so a session that has edited twenty workflows opens twenty of them — 
+none of which the app asked for. Opening the editor screen **drops the
+tab-restore keys** before ComfyUI can read them; settings stay, including the
+workflow-shaped ones (`Comfy.Settings.Comfy.Workflow.*`). The app keeps
+nothing in that storage itself. Several app tabs editing different workflows
+are unaffected: this only decides what a fresh editor restores, and each of
+them loads its own graph through `loadGraphData`.
 
 ### 4.6 Bundled workflows
 Shipped under `workflows/bundled/` and overwritten on upgrade. Editing a
@@ -208,13 +238,13 @@ copy shadows the bundled one.
 Initial set:
 | id | family | kind | notes |
 |---|---|---|---|
-| `krea2` | flux | image | prompt, seed, size, loras; steps/cfg advanced |
+| `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
 | `krea2-img2img` | flux | image | `category: img2img`; image (required), prompt, denoise (default 0.5), seed, size, loras; steps/cfg advanced. Image is resized to `size` before encoding |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
 | `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
 | `anima` | anima | image | as above; family-filtered loras |
-| `flux-klein` | flux | image | prompt, seed, size, loras |
-| `z-image-turbo` | z-image | image | prompt, seed, size; few steps by default |
+| `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
+| `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
@@ -264,6 +294,11 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
    messages prefixed with the job id (push; never polled): `uint32` event (1 =
    preview), `uint32` format (1 = JPEG, 2 = PNG, as ComfyUI tags it), `uint32`
    job id length, the job id in UTF-8, then the image bytes.
+   The managed child is launched with **`--preview-method auto`**: ComfyUI's
+   own default is `none`, which sends no preview frames at all, so the
+   running card sat on its dark ground waiting for one that was never
+   coming. A ComfyUI the app did not start (`mode: local_url`) needs the
+   same flag passed to it by whoever did.
    Every (re)connection to ComfyUI is followed by a reconcile pass over the
    jobs the app still thinks are in flight, resolving them from `/queue` and
    `/history`; that is how a dropped socket or a ComfyUI that died before
@@ -388,6 +423,7 @@ CREATE TABLE models (
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT, notes TEXT, tags_json TEXT,
+  strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
   last_used_at INTEGER,           -- derived: max(outputs.created_at) over output_models; same maintenance
@@ -445,6 +481,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   `total` count the files queued for this pass and `current` is the model's
   name. Both are pushed, never polled.
 - A model appears in pickers as soon as it is scanned, identified by `path`.
+  The hash is a streamed sha256 of the whole file, so the pass is bounded by
+  read speed and a folder of multi-gigabyte checkpoints takes minutes. The
+  queue is therefore **smallest first**: a hundred LoRAs behind ten
+  checkpoints would otherwise gain no identity until the checkpoints were
+  done, and nothing about a model needs its hash to be usable.
   Its `models` row (keyed by `hash`) exists only once the background hasher
   has finished it; until then display name, family, notes, tags and thumbnail
   cannot be edited and the UI shows a `hashing` state. At job completion,
@@ -453,17 +494,69 @@ Model hashing runs in a background worker; a model is re-hashed only if
   existing outputs whose sidecar `models[].name` matches and whose `hash` is
   `null`; the sidecar is not rewritten. `reindex` applies the same name-based
   resolution for sidecars with `hash: null`.
-- Each model has: thumbnail (chosen sample or first output), family, notes,
+- **What a model is pictured by**: a thumbnail chosen by hand on its page
+  always wins — "Set as thumbnail" is a decision, not a preference. Failing
+  that it is whichever of its **first sample** or its **latest generation**
+  `ui.model_thumbnail` asks for, with the other as the fallback so a model
+  with only one of the two is still not an empty plate. The setting is in
+  `config.yaml` and on the Settings page, and it applies everywhere a model
+  is pictured.
+- Each model has: thumbnail (as above), family, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
 - **Families are a hardcoded list** in the app — `flux`, `sdxl`, `anima`,
-  `ltx`, `z-image`, `sd15` — served by `GET /api/families` with counts; there is no
+  `ltx`, `z-image`, `wan2`, `qwen-image`, `sd15` — served by
+  `GET /api/families` with counts; there is no
   family CRUD and the app attaches no behaviour to a family, it is only the
-  matching key between a workflow's `family` and a model's. A model's family
+  matching key between a workflow's `family` and a model's. A family can
+  exist with no workflow behind it: filing the models is worth doing before
+  there is anything to run them in. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the
-  list), else set by the user from the same list, else `unset`. Pickers
+  list), else read from the file itself (§6), else set by the user from the
+  same list, else `unset`. A model can also be **hidden**: kept out of the
+  Generate pickers while still listed on Models behind its own filter, for
+  the files you cannot identify and might want to delete later.
+  `ui.hidden_families` hides a whole architecture the same way — gone from
+  the family chips and from every family picker, and every model filed as it
+  reads as hidden. It never touches the per-model flag, so turning a family
+  back on brings its models back exactly as they were. A probe
+  answer records **which detector produced it**, and a scan re-reads any header an older one answered for: a family
+  added in a later build otherwise never reached a model already on disk —
+  the file had not changed, so no rescan ever looked at it again, and adding
+  one did nothing for the people who had those models. `wan2` is one family and not two: ComfyUI builds
+  Wan 2.1 and 2.2 from the same config off the same key, so the files do not
+  draw the line. Pickers
   filter by family; unfiltered view is one click away.
+- **The family is set from the same control everywhere** — the model page,
+  a card in the grid, and the Family column of the table — a chip that opens
+  a searchable list. It is positioned in viewport coordinates rather than
+  absolutely inside its trigger: a card and a table cell both clip their own
+  overflow, which swallowed the list whole.
+- **A file is identified by its path, a model by its content.** `models` is
+  keyed by the sha256, so two identical files at two paths are one model
+  there and only one of them is named on the row; `model_files` records what
+  each *file* hashed to, which is what the re-hash decision reads. Without
+  it the losing path had no row at all — which is what "still hashing" means
+  — so it was queued again on every single rescan, for ever, and the count
+  never reached zero.
+
+  The corollary is that **`ModelView.id` is not unique across a list**: the
+  list walks files, and two files that hashed the same carry one id between
+  them. A keyed `{#each}` over it therefore throws `each_key_duplicate` and
+  renders nothing — which is how the model picker went blank for anyone with
+  one checkpoint reachable through two configured folders. So key a list on
+  what its rows actually mean: a picker writes a model's **name** into the
+  workflow, so it lists one row per name (`byChoice`); the gallery's filter
+  is a **hash**, so it lists one per model (`byModel`); the Models screen
+  lists files, and keys on the path. The id is the identity of a model, not
+  of a row in a list of files.
+- **Hashing progress counts the pass that is running**, not every pass since
+  launch. Carrying the totals forward made each rescan report a window onto
+  nothing — "74/86", the tail of the last pass plus the head of this one.
+  A file the hasher **cannot read** gets no `models` row, and a model with no
+  row is "hashing", so one unreadable file wore that badge for ever and said
+  nothing about why; it now reads `unreadable` and carries the error.
 - **Display name** is editable and separate from the filename. It renders
   everywhere a model is named: model page header and breadcrumb, Models grid
   cards, LoRA/checkpoint pickers, Gallery table MODELS chips, and viewer
@@ -471,6 +564,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   The **filename is immutable** and appears only on the model page metadata
   line. Sidecars keep recording filename + hash, so renames never affect
   reproduction. Display names may collide; the hash is the identity.
+- A LoRA carries the ends of its own strength sliders, `strength_min` and
+  `strength_max`, typed on its model page — only whoever trained or
+  downloaded it knows how far it wants to be pushed. Unset means the default
+  range of -2 to 2, which is wider than the ±1 most LoRAs want and leaves
+  room for the ones that do not. A row added from the picker starts at 1.
 - Model page = header (thumb, display name, family, size, full sha256, tags,
   notes, Civitai link, filename + folder with Copy path) + **Samples** strip +
   the standard gallery filtered to `output_models.model_hash = ?`. Header
@@ -601,6 +699,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   node and streaming previews (ComfyUI binary preview frames). Failed cards
   keep their slot with the error inline plus Retry / Edit in Generate / Copy
   error.
+- The viewer's actions are **Reuse parameters**, **Generate again**, **Save
+  as sample** and Delete. Reuse parameters fills the panel and leaves the
+  view alone — it used to drop back to the grid, taking away the thing you
+  were setting the next run up from. The chip over the media reads **latest**
+  while it is following (a label: nothing happens when clicked, so nothing
+  lights up under the pointer) and **jump to latest** when it is not, which
+  is the way back.
 - **Focused output view**: clicking a result keeps the params panel left
   (360px) and puts the output in the centre, using **the same viewer layout
   as Gallery**: a metadata sidebar on the right (actions, created, duration,
@@ -610,6 +715,35 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   collapsed filmstrip becomes a one-line count bar), and each open/closed
   state persists per screen. There is no separate session rail. Esc returns
   to the full-width grid. See §11.4 for follow-latest behaviour.
+- **Metadata sidebar**: every row sits on its own raised plate, so the eye
+  finds where the prompt stops and the next param starts without reading it.
+  The label sits **above** its value rather than beside it: a label column
+  took a fifth of a 306px sidebar away from the part worth reading.
+  A model-valued param carries the link to its model page itself, and the
+  roles below (unet / clip / vae / loras) list only what no param already
+  named — the same LoRA is never shown twice. Each model is resolved by its
+  filename, which is what a graph binds and what a sidecar records; a role
+  cannot identify one, because a job with three LoRAs has three rows under
+  the one `lora` role. Prompt and seed are
+  `user-select: all`, so one click takes the whole value.
+- **A LoRA row offers itself to the panel.** Each LoRA in the params carries
+  a `+` that adds it to the workflow open in Generate **at the strength this
+  run used** — the number that makes a LoRA worth anything is the one
+  somebody already found for it, and it is sitting right there in the
+  metadata, so it should not have to be read off and typed back in. Model
+  and clip strengths stay apart when they differ. A LoRA the panel already
+  lists is moved to the new strength rather than added a second time, which
+  ComfyUI would apply twice. The `+` is dim rather than hidden — an offer
+  nobody can see is not an offer — and it is absent when no workflow is open
+  or the open one takes no LoRAs. Its title names the workflow, so it is
+  unambiguous from the Gallery, where the panel is off screen.
+- **No `dd` holds a value here**, which is why the rows are plain elements
+  rather than a description list: Firefox's plain-text serialiser indents the
+  contents of a `dd` by four spaces — on every line, blank ones included —
+  whenever the selection spans the element, so a copied prompt arrived
+  indented. It is the `dd` that does it, not the layout and not the nesting;
+  a span inside one is indented too. `Selection.toString()` disagrees with
+  what Ctrl+C produces, so only a clipboard round-trip settles it.
 - Reuse Parameters lands here with the panel filled in.
 
 **Gallery**
@@ -663,22 +797,62 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   `direction: rtl`).
 
 **Models**
-- Tabs: Checkpoints / LoRAs / other kinds. Tiles or table of cards with
+- Tabs: one per model **class** — Diffusion models / LoRAs / Text encoders /
+  VAEs / other classes — not one per folder. The four folders that hold a
+  model you can generate with (`checkpoints`, `Stable-Diffusion`,
+  `diffusion_models`, `unet`, §8.2) are one tab, because looking through four
+  of them for one model is four times the work. Under the tabs, when a class
+  pools more than one folder, a row of folder chips (`All` + each folder key)
+  narrows to one of them; the family chips sit below that, so each row down
+  narrows further. Both views take the keyboard (§11.4): the tiles walk left
+  and right, because an `auto-fill` grid has no column count to step by
+  without measuring it, and the table walks up and down, one model to a
+  line. Enter opens the highlight, Esc drops it. Both are URL params (`?class=`, `?kind=`). Tiles or table
+  of cards with
   thumbnail (chosen sample → most recent output → empty plate), display name,
   family badge (or an inline SET FAMILY control when unset), count of outputs
   (a link into the Gallery filtered to that hash). Search (same matcher as
-  the API `q`) + family filter including an "unset" chip. No multi-select or
-  bulk edits in v1; family is set per card or via "Fetch info".
+  the API `q`) + a **tag picker** beside it + family filter including an
+  "unset" chip. `q` reaches tags, but only mixed in with names and
+  filenames, so `?tags=` is the way to ask for a tag and mean it: comma
+  separated, all of them required, a URL param like every other filter. The
+  picker lists the ten commonest with their counts and narrows as you type,
+  because a text box could only be typed into blind. The model page uses the
+  same picker to *edit* a model's tags — typing a name nothing matches offers
+  to make it, which is where the first tag of a kind comes from — and each
+  tag on that page is a link back to this screen filtered to it, on the tab
+  that model is on. **Show hidden** swaps
+  the list for the models kept out of the Generate pickers; it is one or the
+  other, never both. Every count beside a tab or a chip follows the search,
+  the tags and that switch — a count has to say what clicking it would give
+  you. The row under the filters carries the total size on disk. No
+  multi-select or bulk edits in v1; family is set from the same picker on the
+  card, in the table's Family column, or on the model page.
 - Model detail page as described in §8.1: header with Copy path, full sha256
-  on its own line (`user-select: all`, no truncation, no button), edit-in-place
+  on its own line (`user-select: all`, no truncation, no button), **Hide**
+  (out of the Generate inputs, still listed here — the same toggle the grid
+  card carries), **Re-read this file** and lookups on **civitaiarchive** and **civitai** built from
+  that sha256 — the one identifier that survives a rename or a refiling.
+  Re-read is a debugging action: it reads the header and the hash again
+  past both caches, which is the only way to correct a wrong cached answer,
+  since the ordinary Rescan exists precisely to skip files that have not
+  moved. Nothing is sent anywhere; the lookups are ordinary links.
+  Continuing: edit-in-place
   display name / family combo / tags / notes; Samples strip (with import drop
   zone and Civitai URL field; "Set as thumbnail" on a sample's hover menu);
   filtered gallery beneath.
 
 **Workflows**
-- Table of workflows: thumb (most recent output), name (+ USER COPY badge),
+- Table of workflows: a drag grip, thumb (most recent output), name (+ USER
+  COPY badge),
   family, kind, PARAMS column listing exposed keys with advanced params
-  counted not named, source (bundled/user), last used. Header actions:
+  counted not named, source (bundled/user), last used. **Dragging a row by
+  its grip sets the order**, which `config.yaml` keeps as `ui.workflow_order`
+  and the Generate picker follows — groups included, so a workflow dragged to
+  the top is not left below every family whose name sorts earlier. The list
+  holds only the ids that were moved: anything else follows by name, so a new
+  workflow needs no list updating and a deleted one leaves no hole. The grip
+  alone starts the drag, as on a LoRA row. Header actions:
   **Import .json**, **New in ComfyUI**. Row ⋯ menu: Open in ComfyUI,
   Duplicate, Reset to bundled (only when a user copy exists), Delete (user
   copies only — never shown on bundled rows).
@@ -713,12 +887,60 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   number.
 
 ### 11.3 Interaction notes
+
+- **Model and LoRA pickers** open over the param panel rather than hanging
+  off the row that triggered them, so a picker low in the panel is not half
+  off the bottom of the screen, and the search box takes the caret as it
+  opens. Above the list are chips for the five commonest tags among the
+  models it would show, each with the count it would leave; the rest are
+  behind one `N more` control with its own search. Choosing more than one
+  narrows — a model has to carry all of them. Every picker's list — models,
+  LoRAs, families — answers to the up and down arrows and to Enter, from the
+  search box, so choosing never needs the mouse. The highlight is a ring
+  round the whole option, inset so it cannot shift the row, and it starts
+  again at the top whenever the search narrows the list.
+- A chip that reads as one control — the tag chip is a tag icon, a label and
+  sometimes a ×, all in one rounded box — **lights up whole**. The padding
+  belongs to the buttons inside it, never to the chip: padding on the chip is
+  a band no button can reach, which is how the tag icon came to sit in an
+  unlit margin while the words beside it were highlighted. The hover tint and
+  the focus ring both go on the chip; the buttons inside keep only their own
+  colour.
+- Every in-app link is an `<a href>` whose handler calls `preventDefault()`,
+  which is what makes routing work and what took ctrl-click away with it.
+  Ctrl, ⌘ and the middle button are the browser's, through `opensElsewhere`;
+  shift is left to the caller, because the metadata sidebar gives it a
+  meaning of its own. **The middle button never arrives as a `click`** — no
+  browser fires one for it — so an anchor middle-clicks natively (its handler
+  never runs, so nothing is prevented) while anything that is not an anchor,
+  such as a table row, has to answer `onauxclick` itself and call `newTab`.
+  A row's own controls stop the click from reaching it but stop nothing on an
+  auxclick, so the row skips one whose target sits inside a control.
+- A **LoRA row carries its own model's family**, not the workflow's: they are
+  the same word on every row only by coincidence, and a LoRA nobody has filed
+  read as the workflow's family the moment it was chosen, having said `unset`
+  in the list a second earlier.
+- The pictures in the pickers follow new outputs: a generation gives every
+  model it used a newer latest-generation, so the model lists are refetched
+  once the outputs stop arriving. The server resolves which picture a model
+  gets (§8.1), so the client asks rather than guessing.
 - Param panels are narrow (360px) so results stay visible; textareas
   auto-grow.
+- Picking a **model** hands the caret to the prompt: that is the start of
+  writing one. Adding a **LoRA** does not — you are working in the list and
+  usually about to add another, and being thrown back up to the prompt took
+  the panel's scroll with it.
 - **LoRA rows**: picker with thumbnail + name, remove button, drag to
-  reorder. **Linked is the default**: one `strength` slider drives model and
-  clip together; the ⛓ toggle unlinks and splits it into two sliders. The
-  sidecar always records both values regardless.
+  reorder **from the grip alone** — a row that is draggable everywhere means
+  a drag on the strength slider moves the row instead of the handle.
+  **Linked is the default**: one `strength` slider drives model and clip
+  together; the ⛓ toggle unlinks and splits it into two sliders. The sidecar
+  always records both values regardless. A slider reaches as far as its own
+  model's `strength_min`/`strength_max` say (§8.1), and a row starts at 1.
+  The strength beside the slider is an editable number, for the values a
+  drag cannot land on; it wears no outline until it takes the caret. No
+  number field in the panel shows spin arrows — not these and not the size
+  W/H — they are a pixel-hunt for a step nobody wants.
 - **Size presets are ratios** (`1:1, 2:3, 3:2, 4:3, 16:9, 9:16, 21:9`); exact
   pixels live on the native `title` tooltip and in the W/H fields. Ratios
   resolve against the workflow's base resolution, so 16:9 is 1344×768 on Flux
@@ -729,8 +951,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   re-rolls immediately in either state. **Editing the field auto-locks** to
   the typed value; `-1` always means random (the field unlocks and the hint
   returns).
-- Progress card spans two columns: percent, ETA, node label, step counter over
-  the streaming preview. Failed cards expose the error inline with Retry.
+- Progress card is **one tile like every other**: percent, ETA, node label and
+  step counter over the streaming preview, sized to fit the square. It spanned
+  two columns once, for the numbers' sake; what that actually cost was the
+  grid's rhythm, reflowing every finished tile around it for as long as a job
+  was in flight. The numbers shrank instead. The preview **fits** rather than
+  fills: a frame from the sampler is a handful of pixels to begin with, and
+  cropping it only makes the one thing it is for harder to read. Failed cards
+  expose the error inline with Retry.
 - Video and image tiles are one component; kind only changes the badge and
   hover playback (muted autoplay).
 - Tile actions (Edit in Generate, Rerun now, Use in workflow, Upscale) appear
@@ -774,13 +1002,26 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 
   ```yaml
   keys:
-    select_prev:  [ArrowLeft]
-    select_next:  [ArrowRight]
-    select_up:    [ArrowUp]
-    select_down:  [ArrowDown]
+    select_prev:  [ArrowLeft, a]
+    select_next:  [ArrowRight, d]
+    select_up:    [ArrowUp, w]
+    select_down:  [ArrowDown, s]
     fullscreen:   [f]
     close:        [Escape]
   ```
+
+  A chord is never one of these: a binding is a bare key, and several are
+  plain letters, so an event carrying ctrl, meta or alt matches nothing —
+  otherwise `Ctrl+A` would move the selection on its way to selecting all.
+
+  A first run writes the whole default tree into `config.yaml`, which makes
+  the file self-documenting and also **freezes every value in it**: a default
+  changed later loses the merge to the stored one, which is how these letters
+  reached new installs only. A stored block that still matches a former
+  default was never touched by anybody, so it is brought forward on load and
+  the file rewritten; a block that was edited matches none of them and is
+  left exactly as it is. `SUPERSEDED_KEYS` in `src/config/config.ts` is that
+  history — append to it when a default changes again.
 
   Values are `KeyboardEvent.key` names; a list allows alternates. Adding a
   new shortcut later means adding a key here, not a hardcoded handler.
@@ -842,10 +1083,13 @@ GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&family&q          q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+GET  /api/models?kind&class&family&q&tags&hidden  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+                                        tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
+                                        also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+PATCH /api/models/:hash                 display_name, family, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+POST /api/models/:hash/rescan           re-read this one file's header and hash, past both caches (§8.1); returns the model
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup

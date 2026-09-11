@@ -63,12 +63,37 @@ export type ModelClasses = Record<string, ModelClass>;
 
 export type KeyBindings = Record<KeyAction, string[]>;
 
+/**
+ * What a model tile shows when nobody has picked a thumbnail by hand:
+ * `first_sample` is the earliest sample on its page — a reference image you
+ * put there on purpose — and `latest_generated` is whatever came out of it
+ * most recently (§8.1).
+ */
+export const MODEL_THUMBNAILS = ["first_sample", "latest_generated"] as const;
+export type ModelThumbnail = typeof MODEL_THUMBNAILS[number];
+
 export interface UiConfig {
   /** Icon rail (56px) vs. labelled rail (196px). */
   rail_expanded: boolean;
   tile_size: Record<UiScreen, TileSize>;
   sidebar_collapsed: Record<UiScreen, boolean>;
   filmstrip_collapsed: Record<UiScreen, boolean>;
+  /**
+   * The order the user dragged the workflows into, most wanted first. Ids
+   * only, and only the ones that have been moved: anything absent keeps its
+   * place after them, by name, so adding a workflow does not need this list
+   * touched and deleting one leaves no hole (§4.6).
+   */
+  workflow_order: string[];
+  /** What a model tile falls back to when no thumbnail was chosen (§8.1). */
+  model_thumbnail: ModelThumbnail;
+  /**
+   * Families to keep out of sight entirely: gone from the family chips and
+   * from every family picker, and their models treated as hidden — behind
+   * Show hidden, out of the Generate inputs (§8.1). For the architectures a
+   * given machine simply does not run.
+   */
+  hidden_families: string[];
 }
 
 export interface Config {
@@ -96,4 +121,7 @@ export interface PartialUiConfig {
   tile_size?: Partial<Record<UiScreen, TileSize>>;
   sidebar_collapsed?: Partial<Record<UiScreen, boolean>>;
   filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
+  workflow_order?: string[];
+  model_thumbnail?: ModelThumbnail;
+  hidden_families?: string[];
 }

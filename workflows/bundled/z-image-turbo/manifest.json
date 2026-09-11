@@ -38,6 +38,26 @@
       }
     },
     {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "z-image"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "6.MODEL",
+          "clip_from": "8.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "5.clip"
+          ]
+        }
+      }
+    },
+    {
       "key": "seed",
       "label": "Seed",
       "type": "seed",

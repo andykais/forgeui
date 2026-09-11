@@ -3,7 +3,7 @@
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate } from "../router.svelte.ts";
+  import { navigate, opensElsewhere } from "../router.svelte.ts";
   import type {
     LiteralInput,
     Manifest,
@@ -269,6 +269,7 @@
         class="button-link"
         href={`/comfy?workflow=${id}`}
         onclick={(event) => {
+          if (opensElsewhere(event)) return;
           event.preventDefault();
           navigate(`/comfy?workflow=${id}`);
         }}

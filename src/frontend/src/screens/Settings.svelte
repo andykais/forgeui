@@ -20,6 +20,19 @@
   let copied = $state(false);
 
   const config = $derived(app.config);
+  const hiddenFamilies = $derived(app.hiddenFamilies);
+  /** Every family, hidden ones included — this is where they come back. */
+  const allFamilies = $derived(
+    [...new Set([...app.families, ...hiddenFamilies])].sort(),
+  );
+
+  function toggleFamily(family: string) {
+    app.setHiddenFamilies(
+      hiddenFamilies.includes(family)
+        ? hiddenFamilies.filter((name) => name !== family)
+        : [...hiddenFamilies, family],
+    );
+  }
   const comfy = $derived(app.comfy);
   const managed = $derived(config?.comfy.mode === "managed");
 
@@ -192,6 +205,59 @@
       </div>
     </article>
 
+    <!--
+      The one appearance setting that is not read-only here: it changes what
+      you see on every model tile in the app, so it belongs beside the folders
+      those models came from rather than buried in `config.yaml` (§8.1).
+    -->
+    <article class="card">
+      <div class="row card-head">
+        <h2>Model tiles</h2>
+      </div>
+      <span class="label">Picture a model with</span>
+      <div class="row choices">
+        {#each [["first_sample", "its first sample"], ["latest_generated", "the latest thing it made"]] as const as [value, text] (value)}
+          <button
+            class:active={(config?.ui.model_thumbnail ?? "latest_generated") === value}
+            onclick={() => app.setModelThumbnail(value)}
+          >
+            {text}
+          </button>
+        {/each}
+      </div>
+      <p class="dim note">
+        A thumbnail set by hand on a model's page wins over both; whichever of
+        these a model has none of falls back to the other.
+      </p>
+
+      <!--
+        For the architectures a machine simply does not run: out of the
+        chips, out of every family picker, and their models read as hidden
+        so they are out of the Generate inputs too (§8.1). Reversible — the
+        per-model flag is untouched, so turning one back on brings its
+        models back exactly as they were.
+      -->
+      <span class="label">Families to keep out of sight</span>
+      <div class="row choices wrap">
+        {#each allFamilies as family (family)}
+          <button
+            class:active={hiddenFamilies.includes(family)}
+            title={hiddenFamilies.includes(family)
+              ? `Show ${family} again`
+              : `Hide ${family} and everything filed as it`}
+            onclick={() => toggleFamily(family)}
+          >
+            {family}
+          </button>
+        {/each}
+      </div>
+      <p class="dim note">
+        Hidden families stay in <code class="mono">config.yaml</code> as
+        <code class="mono">ui.hidden_families</code>; their models reappear on
+        the Models screen under <strong>Show hidden</strong>.
+      </p>
+    </article>
+
     <article class="card">
       <div class="row card-head">
         <h2>Data directory</h2>
@@ -281,6 +347,32 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+  }
+
+  .choices {
+    gap: 6px;
+    margin: 4px 0 2px;
+  }
+
+  .choices button {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  .choices button.active {
+    background: var(--accent-tint-2);
+    color: var(--accent);
+  }
+
+  .choices.wrap {
+    flex-wrap: wrap;
+  }
+
+  /* A hidden family reads as struck through: off, not selected. */
+  .choices.wrap button.active {
+    background: var(--control);
+    color: var(--text-4);
+    text-decoration: line-through;
   }
 
   .use-label {

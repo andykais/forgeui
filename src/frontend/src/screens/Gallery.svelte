@@ -9,6 +9,7 @@
   import { panel } from "../stores/panel.svelte.ts";
   import { navigate, router, setQuery } from "../router.svelte.ts";
   import { dayLabel, localDate } from "../lib/format.ts";
+  import { byModel } from "../lib/models.ts";
   import type { Output, TileSize } from "../types.ts";
   import Tile from "../components/Tile.svelte";
   import MediaTable from "../components/MediaTable.svelte";
@@ -123,7 +124,7 @@
     setQuery({ output: output?.id ?? null });
   }
 
-  async function editInGenerate(output: Output) {
+  async function reuseParams(output: Output) {
     if (!output.workflow_id) return;
     const detail = await api.output(output.id);
     await panel.editWith(output.workflow_id, detail.sidecar?.params ?? output.params);
@@ -184,13 +185,14 @@
       if (index + delta >= outputs.length - 2) void loadMore();
     };
     switch (action) {
+      // The list reads left to right, so left is a step back through it.
       case "select_prev":
         event.preventDefault();
-        move(1);
+        move(-1);
         break;
       case "select_next":
         event.preventDefault();
-        move(-1);
+        move(1);
         break;
       case "select_down":
         event.preventDefault();
@@ -222,13 +224,20 @@
   const selectedModels = $derived(filters.models ?? []);
   const modelNames = $derived(selectedModels.map((hash) => app.modelName(hash)));
 
-  /** Checkpoints then LoRAs, each with the count behind it (§11.2). */
+  /**
+   * Checkpoints then LoRAs, each with the count behind it (§11.2). One row
+   * per model, not per file: these rows filter by hash, so two copies of one
+   * file would be the same filter listed twice.
+   */
   const modelGroups = $derived([
     {
       label: "checkpoints",
-      models: app.checkpoints.filter((model) => model.hash !== null),
+      models: byModel(app.checkpoints.filter((model) => model.hash !== null)),
     },
-    { label: "loras", models: app.loras.filter((model) => model.hash !== null) },
+    {
+      label: "loras",
+      models: byModel(app.loras.filter((model) => model.hash !== null)),
+    },
   ]);
 
   /** Selections always AND, so toggling one adds a condition (§11.2). */
@@ -250,7 +259,7 @@
     {selected}
     onselect={select}
     onclose={() => select(null)}
-    onedit={editInGenerate}
+    onedit={reuseParams}
     onrerun={rerun}
     ondelete={remove}
   />
@@ -429,9 +438,8 @@
             <div class="cell" class:large={tileSize === "large"}>
               <Tile
                 output={row.output}
+                selected={selectedId === row.output.id}
                 onopen={select}
-                onedit={editInGenerate}
-                onrerun={rerun}
               />
             </div>
           {/if}
@@ -567,11 +575,17 @@
 
   .body {
     flex: 1;
+    /* The same guard the Generate grid needs: a scrolling grid that cannot
+       shrink below its content overflows its row instead of scrolling. */
+    min-height: 0;
     padding: 0 12px 16px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    /* The same row-collapse guard the Models grid needs. */
+    grid-auto-rows: max-content;
     gap: 8px;
     align-content: start;
+    align-items: start;
   }
 
   /* Day dividers span the grid and stick while scrolling (§11.2). */

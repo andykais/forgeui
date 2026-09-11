@@ -22,6 +22,10 @@ export type ApiLink = [string, number];
  * `flux2`, and for `krea2`, which shares a brand with Flux Krea and nothing
  * else.
  *
+ * `wan2` is one family and not two: ComfyUI builds Wan 2.1 and 2.2 from the
+ * same config off the same `head.modulation` key, so a 2.1/2.2 split would be
+ * a distinction the files themselves do not draw.
+ *
  * Since the picker orders by family (§5), this is no longer decoration: it
  * is what tells a user which of their models a workflow can actually use.
  */
@@ -35,6 +39,8 @@ export const FAMILIES = [
   "ltx",
   "ltx-2",
   "z-image",
+  "wan2",
+  "qwen-image",
   "sd15",
 ] as const;
 export type Family = typeof FAMILIES[number];
@@ -107,9 +113,25 @@ export interface NumberParam extends ParamCommon {
   step?: number;
 }
 
+/**
+ * Which of two sources feeds one input (§4.4). A checkbox that only sets a
+ * widget cannot turn a branch of the graph on and off, and a branch is what
+ * some options are: the prompt enhancer is four nodes that either feed the
+ * encoder or do not. Rather than ship the same workflow twice, one input is
+ * re-linked and the unreached nodes are never executed.
+ */
+export interface BoolSwitch {
+  /** `"<node_id>.<input>"` — the input that changes where it reads from. */
+  input: string;
+  /** `"<node_id>.<output>"` to link when the box is ticked. */
+  on: string;
+  /** And when it is not. */
+  off: string;
+}
+
 export interface BoolParam extends ParamCommon {
   type: "bool";
-  bind: string;
+  bind: string | { switch: BoolSwitch };
   default?: boolean;
 }
 

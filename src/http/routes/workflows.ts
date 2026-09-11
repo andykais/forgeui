@@ -57,9 +57,8 @@ export function workflowRoutes(ctx: AppContext): Route[] {
       handler: () => {
         const usage = workflowUsage(ctx.db);
         return json({
-          workflows: ctx.workflows.list().map((workflow) =>
-            summary(workflow, usage)
-          ),
+          workflows: ctx.workflows.list(ctx.config.config.ui.workflow_order)
+            .map((workflow) => summary(workflow, usage)),
         });
       },
     },

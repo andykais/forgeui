@@ -4,7 +4,13 @@ import schemaSql from "./schema.sql" with { type: "text" };
 export interface Migration {
   version: number;
   name: string;
-  sql: string;
+  sql?: string;
+  /**
+   * For a step SQL cannot express idempotently. `ADD COLUMN` has no
+   * `IF NOT EXISTS`, and every migration also has to be a no-op on a fresh
+   * database, which gets the whole of `schema.sql` as version 1.
+   */
+  apply?: (db: Database) => void;
 }
 
 /**
@@ -26,6 +32,74 @@ export const MIGRATIONS: readonly Migration[] = [
         probed_at INTEGER NOT NULL
       );
     `,
+  },
+  {
+    version: 3,
+    name: "per-model strength range",
+    // Also in schema.sql, so a fresh database already has these and this does
+    // nothing; an existing one gets them here. NULL means the default range,
+    // so nothing has to be backfilled.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(models)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      for (const column of ["strength_min", "strength_max"]) {
+        if (present.has(column)) continue;
+        db.exec(`ALTER TABLE models ADD COLUMN ${column} REAL`);
+      }
+    },
+  },
+  {
+    version: 4,
+    name: "probe detector version",
+    // Existing rows get 0, older than every real detector version, so the
+    // next scan re-reads them — which is the point: a family added after a
+    // file was probed never reached that file otherwise (§6).
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(model_probes)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("detector")) {
+        db.exec(
+          "ALTER TABLE model_probes ADD COLUMN detector INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+    },
+  },
+  {
+    version: 5,
+    name: "per-file hashes and hidden models",
+    // Both are in schema.sql, so a fresh database has them from version 1 and
+    // this does nothing there. `model_files` is backfilled from `models`, so
+    // an existing library is not re-hashed wholesale — only the paths that
+    // never won their hash, which are the ones that were looping.
+    apply: (db) => {
+      const columns = new Set(
+        db.prepare("PRAGMA table_info(models)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!columns.has("hidden")) {
+        db.exec(
+          "ALTER TABLE models ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS model_files (
+          path TEXT PRIMARY KEY,
+          size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+          hash TEXT NOT NULL,
+          hashed_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS model_files_hash ON model_files(hash);
+        INSERT OR IGNORE INTO model_files (path, size, mtime, hash, hashed_at)
+          SELECT path, size, mtime, hash, last_seen_at FROM models;
+      `);
+    },
   },
 ];
 
@@ -61,7 +135,8 @@ export function migrate(db: Database): number {
     if (migration.version <= version) continue;
     db.exec("BEGIN");
     try {
-      db.exec(migration.sql);
+      if (migration.sql) db.exec(migration.sql);
+      migration.apply?.(db);
       db.exec(`PRAGMA user_version = ${migration.version}`);
       db.exec("COMMIT");
     } catch (error) {

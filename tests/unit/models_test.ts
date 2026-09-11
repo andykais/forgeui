@@ -5,7 +5,8 @@ import {
   ModelHasher,
   unchanged,
 } from "../../src/models/hasher.ts";
-import { decodePathId, pathId } from "../../src/models/library.ts";
+import { decodePathId, needsProbe, pathId } from "../../src/models/library.ts";
+import { DETECTOR_VERSION } from "../../src/models/probe.ts";
 import { ModelScanner, type ScannedModel } from "../../src/models/scan.ts";
 import type { ModelRow } from "../../src/db/queries.ts";
 import { openDatabase } from "../../src/db/db.ts";
@@ -121,7 +122,11 @@ Deno.test("re-hashing is skipped unless path, size or mtime changed", async () =
     hasher.start();
     await hasher.idle();
     assertEquals(hashed.map((entry) => entry.fresh), [false, false]);
-    assertEquals(hasher.progress.done, 2, "no new work was queued");
+    // The counters describe the pass that just ran, not every pass ever: a
+    // pass with nothing to do is 0 of 0. Carrying the last pass's totals over
+    // is what made a second rescan report "74/86".
+    assertEquals(hasher.progress.total, 0, "no new work was queued");
+    assertEquals(hasher.progress.done, 0);
 
     // A rewritten file has a new mtime, and is hashed again.
     await writeFakeSafetensors(join(checkpoints, "sd15.safetensors"), {
@@ -136,12 +141,66 @@ Deno.test("re-hashing is skipped unless path, size or mtime changed", async () =
       hashed.filter((entry) => entry.fresh).map((entry) => entry.name),
       ["sd15.safetensors"],
     );
+    // One file changed, so this pass is one of one — not three of three.
+    assertEquals(hasher.progress.done, 1);
+    assertEquals(hasher.progress.total, 1);
 
     // One row per path, even though the hash changed.
     assertEquals(
       db.prepare("SELECT count(*) FROM models").value<[number]>()?.[0],
       2,
     );
+  } finally {
+    db.close();
+    await Deno.remove(dir, { recursive: true });
+    await Deno.remove(dbDir, { recursive: true });
+  }
+});
+
+Deno.test("the queue is smallest first, so small files gain an identity", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-order-" });
+  const dbDir = await Deno.makeTempDir({ prefix: "forgeui-hasher-" });
+  const db = openDatabase(join(dbDir, "app.db"));
+  try {
+    // Folder order would hash the checkpoints first and leave the LoRAs
+    // without an identity for as long as that took; size order does not.
+    await writeFakeSafetensors(join(dir, "checkpoints", "big-a.safetensors"), {
+      name: "big-a",
+      bytes: 64 * 1024,
+    });
+    await writeFakeSafetensors(join(dir, "checkpoints", "big-b.safetensors"), {
+      name: "big-b",
+      bytes: 32 * 1024,
+    });
+    await writeFakeSafetensors(join(dir, "loras", "small-a.safetensors"), {
+      name: "small-a",
+      bytes: 1024,
+    });
+    await writeFakeSafetensors(join(dir, "loras", "small-b.safetensors"), {
+      name: "small-b",
+      bytes: 2048,
+    });
+    const scanner = scannerFor({
+      checkpoints: [join(dir, "checkpoints")],
+      loras: [join(dir, "loras")],
+    });
+    const order: string[] = [];
+    const hasher = new ModelHasher({
+      db,
+      onHashed: ({ model }) => {
+        order.push(model.name);
+      },
+    });
+    hasher.enqueue((await scanner.rescan()).models);
+    hasher.start();
+    await hasher.idle();
+
+    assertEquals(order, [
+      "small-a.safetensors",
+      "small-b.safetensors",
+      "big-b.safetensors",
+      "big-a.safetensors",
+    ]);
   } finally {
     db.close();
     await Deno.remove(dir, { recursive: true });
@@ -200,9 +259,12 @@ Deno.test("the re-hash decision compares path, size and mtime", () => {
     family: null,
     notes: null,
     tags: [],
+    strength_min: null,
+    strength_max: null,
     thumb_path: null,
     output_count: 0,
     last_used_at: null,
+    hidden: false,
     last_seen_at: 0,
   };
   const model: ScannedModel = {
@@ -245,4 +307,80 @@ Deno.test("every folder a diffusion model can live in is one class", () => {
   // The config override wins over the table.
   assertEquals(classOf("gligen", { gligen: "diffusion" }), "diffusion");
   assertEquals(classOf("checkpoints", { checkpoints: "other" }), "other");
+});
+
+Deno.test("two identical files are not re-hashed for ever", async () => {
+  // `models` is keyed by content, so both of these are one row there and the
+  // second overwrites the first. The losing path then had no row at all,
+  // which reads as "still hashing" and got it queued again on every rescan —
+  // a handful of duplicates and the count never reached zero.
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-dupes-" });
+  const checkpoints = join(dir, "checkpoints");
+  const dbDir = await Deno.makeTempDir({ prefix: "forgeui-dupes-db-" });
+  const db = openDatabase(join(dbDir, "app.db"));
+  try {
+    // Byte-identical, which is what a copy or a hard link in a model folder
+    // actually is.
+    for (const name of ["one.safetensors", "two.safetensors"]) {
+      await writeFakeSafetensors(join(checkpoints, name), {
+        name: "same",
+        bytes: 4096,
+      });
+    }
+    const scanner = scannerFor({ checkpoints: [checkpoints] });
+    const hasher = new ModelHasher({ db });
+
+    hasher.enqueue((await scanner.rescan()).models);
+    hasher.start();
+    await hasher.idle();
+    assertEquals(hasher.progress.done, 2);
+    // One row, because they are one model: the same weights twice over.
+    assertEquals(
+      db.prepare("SELECT count(*) FROM models").value<[number]>()?.[0],
+      1,
+    );
+    // Two files, because that is what is on the disk.
+    assertEquals(
+      db.prepare("SELECT count(*) FROM model_files").value<[number]>()?.[0],
+      2,
+    );
+
+    // And the second pass has nothing to do — which is the whole point.
+    assertEquals(hasher.enqueue((await scanner.rescan()).models), 0);
+    assertEquals(hasher.enqueue((await scanner.rescan()).models), 0);
+  } finally {
+    db.close();
+    await Deno.remove(dir, { recursive: true });
+    await Deno.remove(dbDir, { recursive: true });
+  }
+});
+
+Deno.test("a header is re-read when the file moves or the detector does", () => {
+  const file = { size: 4096, mtime: 1_780_000_000_000 };
+  const probed = {
+    path: "/models/checkpoints/sd15.safetensors",
+    size: file.size,
+    mtime: file.mtime,
+    arch: "sd15",
+    detector: DETECTOR_VERSION,
+    probed_at: 1_780_000_000_000,
+  };
+
+  // Nothing has moved: the cached answer stands, which is what keeps a
+  // rescan of a full model folder cheap.
+  assertEquals(needsProbe(probed, file), false);
+  // Never read at all.
+  assertEquals(needsProbe(undefined, file), true);
+  // The file changed under us.
+  assertEquals(needsProbe(probed, { ...file, size: 8192 }), true);
+  assertEquals(needsProbe(probed, { ...file, mtime: 1 }), true);
+  // The file is the same, but the answer came from a detector that had not
+  // heard of the families this one knows. Without this a family added in a
+  // later build never reached a model already on disk: the user rescanned,
+  // and nothing changed.
+  assertEquals(needsProbe({ ...probed, detector: 0 }, file), true);
+  assertEquals(
+    needsProbe({ ...probed, detector: DETECTOR_VERSION - 1 }, file),
+    true,
+  );
 });

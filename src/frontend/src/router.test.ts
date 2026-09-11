@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseRoute } from "./router.svelte.ts";
+import { opensElsewhere, parseRoute } from "./router.svelte.ts";
 
 /**
  * The URL is the state (§11.2), so a route has to survive being written into
@@ -12,7 +12,10 @@ describe("the router", () => {
       screen: "gallery",
       id: null,
     });
-    expect(parseRoute("/models", "")).toMatchObject({ screen: "models", id: null });
+    expect(parseRoute("/models", "")).toMatchObject({
+      screen: "models",
+      id: null,
+    });
     expect(parseRoute("/models/deadbeef", "")).toMatchObject({
       screen: "model",
       id: "deadbeef",
@@ -31,5 +34,28 @@ describe("the router", () => {
     const route = parseRoute(`/models/${encodeURIComponent(id)}`, "");
     expect(route.screen).toBe("model");
     expect(route.id).toBe(id);
+  });
+});
+
+/**
+ * What counts as "the browser's, not the app's". The middle button only ever
+ * reaches a handler as an `auxclick` — `click` is not fired for it — so a row
+ * that is not a link has to listen for that event and ask this.
+ */
+describe("a click that belongs to the browser", () => {
+  const click = (init: MouseEventInit) => new MouseEvent("click", init);
+
+  test("ctrl, ⌘ and the middle button all mean elsewhere", () => {
+    expect(opensElsewhere(click({ ctrlKey: true }))).toBe(true);
+    expect(opensElsewhere(click({ metaKey: true }))).toBe(true);
+    expect(opensElsewhere(click({ button: 1 }))).toBe(true);
+  });
+
+  test("a plain or shifted left click is the app's own", () => {
+    // Shift is left to the caller: the sidebar gives it a meaning of its own.
+    expect(opensElsewhere(click({ button: 0 }))).toBe(false);
+    expect(opensElsewhere(click({ button: 0, shiftKey: true }))).toBe(false);
+    // The right button opens a menu; it is nobody's navigation.
+    expect(opensElsewhere(click({ button: 2 }))).toBe(false);
   });
 });

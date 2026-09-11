@@ -43,6 +43,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         [
           "inputs",
           "jobs",
+          "model_files",
           "model_probes",
           "models",
           "node_timings",
@@ -54,6 +55,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         ],
       );
       assertEquals(names(db, "index"), [
+        "model_files_hash",
         "output_models_model",
         "outputs_created",
         "outputs_workflow",
@@ -91,7 +93,7 @@ Deno.test("a database from before the probes table gains it, keeping its rows", 
   await withDbDir((path) => {
     // A version-1 database: the schema as it shipped, with no model_probes.
     const old = new Database(path, DATABASE_OPTIONS);
-    old.exec(MIGRATIONS[0]!.sql);
+    old.exec(MIGRATIONS[0]!.sql!);
     old.exec("DROP TABLE model_probes");
     old.exec("PRAGMA user_version = 1");
     old.exec(
@@ -116,6 +118,36 @@ Deno.test("a database from before the probes table gains it, keeping its rows", 
       assertEquals(
         migrated.prepare("SELECT arch FROM model_probes").value<[string]>(),
         ["flux"],
+      );
+    } finally {
+      migrated.close();
+    }
+  });
+});
+
+Deno.test("an existing library gains the strength columns, keeping its rows", async () => {
+  await withDbDir((path) => {
+    // A version-2 database: the models table before it had a strength range.
+    const old = new Database(path, DATABASE_OPTIONS);
+    old.exec(MIGRATIONS[0]!.sql!);
+    old.exec("ALTER TABLE models DROP COLUMN strength_min");
+    old.exec("ALTER TABLE models DROP COLUMN strength_max");
+    old.exec("PRAGMA user_version = 2");
+    old.exec(
+      `INSERT INTO models (hash, path, kind, size, mtime, display_name, last_seen_at)
+       VALUES ('abc', '/models/loras/a.safetensors', 'loras', 1, 1, 'A', 1)`,
+    );
+    old.close();
+
+    const migrated = openDatabase(path);
+    try {
+      assertEquals(schemaVersion(migrated), SCHEMA_VERSION);
+      // The range arrives empty, which is what "use the default" looks like.
+      assertEquals(
+        migrated.prepare(
+          "SELECT display_name, strength_min, strength_max FROM models",
+        ).value<[string, number | null, number | null]>(),
+        ["A", null, null],
       );
     } finally {
       migrated.close();

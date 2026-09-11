@@ -4,6 +4,7 @@ import { defaultConfig } from "./defaults.ts";
 import { type DataPaths, dataPaths, ensureDataDirs } from "./paths.ts";
 import { ConfigError, validatePartialConfig } from "./validate.ts";
 import type { Config, PartialConfig, PartialUiConfig } from "./types.ts";
+import { log } from "../log.ts";
 
 export const DATA_DIR_ENV = "FORGEUI_DATA_DIR";
 const DEFAULT_DATA_DIR = ".forgeui";
@@ -228,6 +229,61 @@ export interface LoadedConfig {
  * Create `<appdata>` if needed, read `config.yaml` (writing a default one on
  * first run) and layer the CLI overrides on top.
  */
+/**
+ * Key blocks that earlier builds wrote into `config.yaml` as *their*
+ * defaults. A first run persists the whole default tree, which makes the
+ * file self-documenting but also freezes every value in it: a default
+ * changed later never reaches anyone who has already run the app, because
+ * their stored value wins the merge. That is how `a`/`d` and `w`/`s` reached
+ * new installs only.
+ *
+ * A block that still matches one of these was never touched by anybody, so
+ * adopting the current default is what the user would have got had they
+ * installed today. A block they edited matches none of these and is left
+ * exactly as it is.
+ *
+ * Append to this when the default bindings change again; do not edit the
+ * entries, which are history.
+ */
+const SUPERSEDED_KEYS: readonly Record<string, string[]>[] = [
+  {
+    select_prev: ["ArrowLeft"],
+    select_next: ["ArrowRight"],
+    select_up: ["ArrowUp"],
+    select_down: ["ArrowDown"],
+    fullscreen: ["f"],
+    close: ["Escape"],
+  },
+];
+
+function sameBlock(
+  a: Record<string, string[] | undefined>,
+  b: Record<string, string[]>,
+): boolean {
+  const mine = Object.keys(a).sort();
+  const theirs = Object.keys(b).sort();
+  if (mine.length !== theirs.length) return false;
+  if (mine.some((key, at) => key !== theirs[at])) return false;
+  return theirs.every((key) => {
+    const left = a[key] ?? [];
+    const right = b[key]!;
+    return left.length === right.length &&
+      left.every((value, at) => value === right[at]);
+  });
+}
+
+/**
+ * Bring a stored config forward over defaults that have since changed.
+ * Returns whether anything moved, so the caller can rewrite the file.
+ */
+export function migrateStoredConfig(onDisk: PartialConfig): boolean {
+  if (!onDisk.keys) return false;
+  const stored = onDisk.keys as Record<string, string[] | undefined>;
+  if (!SUPERSEDED_KEYS.some((old) => sameBlock(stored, old))) return false;
+  onDisk.keys = { ...defaultConfig().keys };
+  return true;
+}
+
 export async function loadConfig(
   options: LoadConfigOptions,
 ): Promise<LoadedConfig> {
@@ -243,11 +299,13 @@ export async function loadConfig(
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
 
+  let migrated = false;
   if (text === null) {
     onDisk = defaultConfig();
     created = true;
   } else {
     onDisk = parseConfigDocument(text, "config.yaml");
+    migrated = migrateStoredConfig(onDisk);
   }
 
   const store = new ConfigStore({
@@ -255,7 +313,8 @@ export async function loadConfig(
     onDisk,
     overrides: options.overrides ?? {},
   });
-  if (created) await store.write();
+  if (created || migrated) await store.write();
+  if (migrated) log("config: adopted the current key bindings");
   return { store, created };
 }
 

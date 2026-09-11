@@ -273,15 +273,23 @@ has a repeatable picker for exactly this (§4.4), so the chain replaces it.
 Anima's turbo LoRA is the exception: it is kept behind the template's own
 switch, because it is a different set of sampler defaults rather than a style.
 
-**The prompt enhancer gets its own workflow rather than a switch.** Krea 2
-pipes the prompt through a `TextGenerate` node — a language model that
-rewrites it before encoding, using the same Qwen3-VL encoder the workflow
-already loads, so it costs no extra download. Whether it earns its place is a
-question about output, not architecture, so both exist: `krea2` without it
-and `krea2-enhanced` with it, sharing every input so one prompt can be run
-through each. Two workflows rather than one toggle because a workflow is how
-this app already expresses "the same recipe, wired differently", and because
-the enhanced one records a different graph in its sidecar.
+**The prompt enhancer is a switch on one workflow, not a workflow of its
+own.** Krea 2 can pipe the prompt through a `TextGenerate` node — a language
+model that rewrites it before encoding, using the same Qwen3-VL encoder the
+workflow already loads, so it costs no extra download. This shipped as two
+workflows at first, `krea2` and `krea2-enhanced`, on the reasoning that a
+workflow is how this app expresses "the same recipe, wired differently".
+
+That reasoning does not survive contact with the pair: everything except one
+link was duplicated, so every later change to Krea 2 had to be made twice,
+and the workflow list carried two entries that differ by a checkbox. It is
+now one workflow with an `enhance` bool whose bind is a `switch` (§4.4): the
+prompt always lands in a `PrimitiveStringMultiline`, and the box decides
+whether `CLIPTextEncode.text` reads from that node or from the enhancer's
+output. ComfyUI executes only what an output needs, so the enhancer's four
+nodes cost nothing when the box is clear. The two concerns that argued for a
+split are both met anyway — the sidecar records the rewritten graph, which
+really is a different graph each way.
 
 `TextGenerate`'s `sampling_mode` is a `DynamicCombo`: one declared input that
 expands into as many widgets as the selected option carries, named

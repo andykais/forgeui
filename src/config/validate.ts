@@ -2,6 +2,7 @@ import {
   KEY_ACTIONS,
   type KeyAction,
   MODEL_CLASSES,
+  MODEL_THUMBNAILS,
   type ModelClass,
   type PartialConfig,
   type PartialUiConfig,
@@ -112,6 +113,9 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
     "tile_size",
     "sidebar_collapsed",
     "filmstrip_collapsed",
+    "workflow_order",
+    "model_thumbnail",
+    "hidden_families",
   ]);
   const ui: PartialUiConfig = {};
   pick(raw, "rail_expanded", ui, bool, where);
@@ -136,7 +140,40 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       bool,
     );
   }
+  if ("model_thumbnail" in raw) {
+    ui.model_thumbnail = oneOf(
+      raw.model_thumbnail,
+      `${where}.model_thumbnail`,
+      MODEL_THUMBNAILS,
+    );
+  }
+  if ("hidden_families" in raw) {
+    ui.hidden_families = stringList(
+      raw.hidden_families,
+      `${where}.hidden_families`,
+    );
+  }
+  if ("workflow_order" in raw) {
+    ui.workflow_order = stringList(
+      raw.workflow_order,
+      `${where}.workflow_order`,
+    );
+  }
   return ui;
+}
+
+/** A list of ids, deduplicated: the same workflow cannot be in two places. */
+function stringList(value: unknown, where: string): string[] {
+  if (!Array.isArray(value)) throw new ConfigError(`${where}: expected a list`);
+  const out: string[] = [];
+  for (const [i, entry] of value.entries()) {
+    if (typeof entry !== "string") {
+      throw new ConfigError(`${where}[${i}]: expected a string`);
+    }
+    const trimmed = entry.trim();
+    if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
 }
 
 /**

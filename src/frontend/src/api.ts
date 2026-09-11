@@ -162,13 +162,29 @@ export const api = {
       method: "POST",
     }),
 
-  models: (query: { kind?: string; family?: string; q?: string } = {}) => {
+  models: (
+    query: {
+      kind?: string;
+      class?: string;
+      family?: string;
+      q?: string;
+      tags?: string;
+      /** Only the hidden ones; absent or false means only the visible. */
+      hidden?: boolean;
+    } = {},
+  ) => {
     const params = new URLSearchParams();
     if (query.kind) params.set("kind", query.kind);
+    if (query.class) params.set("class", query.class);
     if (query.family) params.set("family", query.family);
     if (query.q) params.set("q", query.q);
+    if (query.tags) params.set("tags", query.tags);
+    if (query.hidden) params.set("hidden", "1");
     return request<{
       kind: string | null;
+      class: string | null;
+      /** The class each configured folder kind holds (§8.2). */
+      classes: Record<string, string>;
       folders: string[];
       models: ModelEntry[];
       progress: { rescan: RescanProgress; hashing: HashingProgress };
@@ -184,6 +200,11 @@ export const api = {
       (body) => body.models,
     ),
   model: (id: string) => request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
+  /** Re-read one model's file from scratch (§8.1); a debugging action. */
+  rescanModel: (id: string) =>
+    request<ModelDetail>(`/api/models/${encodeURIComponent(id)}/rescan`, {
+      method: "POST",
+    }),
   patchModel: (
     id: string,
     patch: {
@@ -191,7 +212,10 @@ export const api = {
       family?: string | null;
       notes?: string | null;
       tags?: string[];
+      strength_min?: number | null;
+      strength_max?: number | null;
       thumb_sample_id?: string | null;
+      hidden?: boolean;
     },
   ) =>
     request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`, {

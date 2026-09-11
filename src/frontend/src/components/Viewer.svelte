@@ -56,16 +56,23 @@
   const index = $derived(outputs.findIndex((output) => output.id === selected.id));
   const isNewest = $derived(index === 0);
 
-  /** The sidecar comes from the detail route (§12). */
+  /**
+   * The sidecar comes from the detail route (§12). The sidebar that is up
+   * stays up while the next one loads: clearing it first swaps in a
+   * placeholder, which unmounts and remounts the whole sidebar and reads as a
+   * flicker on every step through the strip. Only a failed load empties it,
+   * so a stale panel is never left standing for an output that has none.
+   */
   $effect(() => {
     const id = selected.id;
-    detail = null;
     api
       .output(id)
       .then((loaded) => {
         if (selected.id === id) detail = loaded;
       })
-      .catch(() => {});
+      .catch(() => {
+        if (selected.id === id) detail = null;
+      });
   });
 
   $effect(() => {
@@ -154,10 +161,15 @@
     </header>
 
     <div class="media" class:one-to-one={!fit} bind:this={mediaBox}>
-      {#if following !== null}
-        <button class="follow-chip" class:pinned={!following} onclick={onfollow}>
-          {following ? "following latest" : `pinned · ${selected.id.slice(-7)}`}
-        </button>
+      <!--
+        Two different things wearing one shape before: while it is following,
+        the chip is a label and does nothing when clicked, so it no longer
+        offers itself as a button; pinned, it is the way back, and says so.
+      -->
+      {#if following === true}
+        <span class="follow-chip">latest</span>
+      {:else if following === false}
+        <button class="follow-chip jump" onclick={onfollow}>jump to latest</button>
       {/if}
       {#if following && isNewest}
         <span class="newest badge accent">newest</span>
@@ -211,6 +223,15 @@
     flex: 1;
     display: flex;
     min-height: 0;
+    /*
+     * Load-bearing. Without it this is a flex item at `min-width: auto`, so
+     * its min-content width wins over the flex basis — and its min-content is
+     * the filmstrip laid out in full, which grows with every result. The row
+     * then overflows, the filmstrip's `scrollIntoView` scrolls the whole
+     * screen sideways to follow the selection, and the sidebar walks off the
+     * right edge until it is gone.
+     */
+    min-width: 0;
     background: var(--canvas);
   }
 
@@ -308,9 +329,20 @@
     color: var(--accent);
   }
 
-  .follow-chip.pinned {
+  /* A label, not a control: nothing happens on click, so nothing lights up. */
+  span.follow-chip {
+    border-radius: var(--radius-control);
+    cursor: default;
+  }
+
+  .follow-chip.jump {
     background: var(--raised-2);
-    color: var(--text-4);
+    color: var(--text-2);
+  }
+
+  .follow-chip.jump:hover {
+    background: var(--control);
+    color: var(--text);
   }
 
   .newest {
