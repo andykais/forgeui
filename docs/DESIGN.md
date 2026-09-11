@@ -857,6 +857,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   search box, so choosing never needs the mouse. The highlight is a ring
   round the whole option, inset so it cannot shift the row, and it starts
   again at the top whenever the search narrows the list.
+- A chip that reads as one control — the tag chip is a tag icon, a label and
+  sometimes a ×, all in one rounded box — **lights up whole**. The padding
+  belongs to the buttons inside it, never to the chip: padding on the chip is
+  a band no button can reach, which is how the tag icon came to sit in an
+  unlit margin while the words beside it were highlighted. The hover tint and
+  the focus ring both go on the chip; the buttons inside keep only their own
+  colour.
 - Every in-app link is an `<a href>` whose handler calls `preventDefault()`,
   which is what makes routing work and what took ctrl-click away with it.
   Ctrl, ⌘ and the middle button are the browser's, through `opensElsewhere`;

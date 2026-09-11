@@ -161,14 +161,32 @@
 </span>
 
 <style>
+  /*
+   * The chip is one control to look at, so it is one surface to light up.
+   * The buttons inside it own the padding rather than the chip: anything the
+   * chip padded itself by would be a band the highlight could not reach, and
+   * the tag icon sat in exactly such a band.
+   */
   .wrap {
     position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 2px;
     background: var(--control);
     border-radius: var(--radius-input);
-    padding: 0 4px 0 8px;
+  }
+
+  .wrap:hover {
+    background: var(--control-selected);
+  }
+
+  /* Focus lands on a button inside; the ring belongs round the whole chip. */
+  .wrap:has(:focus-visible) {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .wrap :focus-visible {
+    outline: none;
   }
 
   .trigger {
@@ -176,7 +194,7 @@
     align-items: center;
     gap: 6px;
     background: transparent;
-    padding: 5px 0;
+    padding: 5px 8px;
     font-size: 12px;
     color: var(--text-4);
     max-width: 190px;
@@ -195,8 +213,14 @@
   .clear {
     display: flex;
     background: transparent;
-    padding: 2px;
+    padding: 5px 8px 5px 0;
     color: var(--text-4);
+  }
+
+  /* The chip is already lit; these two only have their own colour to give. */
+  .trigger:hover:not(:disabled),
+  .clear:hover:not(:disabled) {
+    background: transparent;
   }
 
   .clear:hover {
