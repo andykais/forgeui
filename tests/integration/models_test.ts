@@ -602,6 +602,7 @@ Deno.test("storage reports what the data dir holds", async () => {
       inputs: { files: number; bytes: number };
       samples: { files: number; bytes: number };
       db: { files: number; bytes: number };
+      telemetry: { files: number; bytes: number };
       total: { files: number; bytes: number };
     }>("/api/system/storage");
 
@@ -609,7 +610,13 @@ Deno.test("storage reports what the data dir holds", async () => {
     assertEquals(storage.outputs, { files: 0, bytes: 0 });
     assertEquals(storage.samples, { files: 0, bytes: 0 });
     assert(storage.db.bytes > 0, "app.db is on disk");
-    assertEquals(storage.total.files, storage.db.files);
+    // The health log is counted on its own line: it grows by itself and is
+    // safe to delete, which is not true of anything else here (§7.1).
+    assert(storage.telemetry.bytes > 0, "telemetry.db is on disk");
+    assertEquals(
+      storage.total.files,
+      storage.db.files + storage.telemetry.files,
+    );
 
     await Deno.writeFile(
       join(app.paths.outputs, "2026", "09", "05", "one.png"),

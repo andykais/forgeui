@@ -622,6 +622,18 @@ export function countLiveOutputsForSidecar(
   ).value<[number]>(sidecarPath, excludeId)?.[0] ?? 0;
 }
 
+/**
+ * Every output still on the books, oldest first — what the telemetry
+ * backfill walks to give the size report the history it predates (§7.1).
+ * Soft-deleted rows are left out: their bytes are going or gone.
+ */
+export function listLiveOutputs(db: Database): OutputRow[] {
+  return db.prepare(
+    `SELECT ${OUTPUT_COLUMNS} FROM outputs WHERE deleted_at IS NULL
+      ORDER BY outputs.created_at ASC, outputs.id ASC`,
+  ).values<OutputRecord>().map(toOutput);
+}
+
 export function allOutputIds(db: Database): string[] {
   return db.prepare(`SELECT id FROM outputs`).values<[string]>().map(([id]) =>
     id

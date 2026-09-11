@@ -11,6 +11,7 @@
   import Workflows from "./screens/Workflows.svelte";
   import WorkflowDetail from "./screens/WorkflowDetail.svelte";
   import Comfy from "./screens/Comfy.svelte";
+  import Telemetry from "./screens/Telemetry.svelte";
   import Settings from "./screens/Settings.svelte";
 
   /**
@@ -50,6 +51,8 @@
       <WorkflowDetail id={router.current.id} />
     {:else if screen === "comfy"}
       <Comfy />
+    {:else if screen === "telemetry"}
+      <Telemetry />
     {:else if screen === "settings"}
       <Settings />
     {/if}

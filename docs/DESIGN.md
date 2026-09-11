@@ -68,6 +68,7 @@ app to ComfyUI's lifecycle for no benefit.
 ```
 <appdata>/
   app.db                    SQLite (derived index; rebuildable — see §7)
+  telemetry.db              SQLite (the health log; not an index, see §7.1)
   config.yaml
   extra_model_paths.yaml    generated
   workflows/
@@ -468,6 +469,123 @@ CREATE TABLE node_timings (       -- for progress estimation
 Model hashing runs in a background worker; a model is re-hashed only if
 `path+size+mtime` changed. Until hashed, a model is identified by path.
 
+### 7.1 Telemetry database
+
+Health reporting lives in its own file, `<appdata>/telemetry.db`, opened with
+the same options and pragmas as `app.db` and migrated on its own
+`user_version` chain. It is **not** part of the derived index: nothing
+reconstructs it, `reindex` does not touch it, and deleting the file costs
+history and nothing else. Keeping it separate means a write on every API
+request never contends with the WAL the generation loop is using, and the log
+can be truncated without touching anything the app needs to run.
+
+Every report is one shape — a number at a point in time, plus the dimensions
+that report can be filtered by — so one table holds all of them. The
+dimension columns are sparse: each report fills in only its own, and the
+raw entry the UI's sidebar shows is kept verbatim in `data_json`.
+
+```sql
+CREATE TABLE entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report TEXT NOT NULL,        -- api_requests|output_size|model_size|memory|telemetry_size
+  at INTEGER NOT NULL,         -- epoch ms, when the thing happened
+  value REAL NOT NULL,         -- what the graph plots: ms for durations, bytes for sizes
+  label TEXT,                  -- the row's name: the path, the output id, the model
+  method TEXT,                 -- api_requests
+  route TEXT,                  -- api_requests: the route pattern, not the path
+  status INTEGER,              -- api_requests
+  family TEXT,                 -- output_size, model_size
+  model_class TEXT,            -- model_size: diffusion|lora|vae|…
+  change TEXT,                 -- model_size: added|deleted
+  series TEXT,                 -- memory: vram|ram — one report, two lines
+  data_json TEXT NOT NULL      -- the raw entry, verbatim, for the sidebar
+);
+CREATE INDEX entries_report_at ON entries(report, at DESC, id DESC);
+
+CREATE TABLE model_sizes (     -- what the last model pass saw, so the next one can diff
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  model_class TEXT NOT NULL,
+  family TEXT,
+  kind TEXT NOT NULL,
+  display_name TEXT NOT NULL
+);
+```
+
+The five reports, and what makes an entry:
+
+| report           | title                | value          | shape  | filters                             | recorded                                                                                |
+| ---------------- | -------------------- | -------------- | ------ | ----------------------------------- | --------------------------------------------------------------------------------------- |
+| `api_requests`   | API Request Duration | duration in ms | events | method, route, status, min duration | every routed `/api/*` request, once it has answered                                      |
+| `output_size`    | Output Size          | bytes          | total  | family                              | one entry per output file a job produced                                                 |
+| `model_size`     | Model Size           | bytes          | total  | model class, family                 | one entry per model added or removed, per scan — startup and every Rescan                |
+| `memory`         | Memory Usage         | bytes in use   | gauge  | none                                | at the start of a generation, every 10s while one is running, and when it finishes       |
+| `telemetry_size` | Telemetry Log Size   | bytes          | gauge  | none                                | every insert into this database **except** its own (§7.1 would otherwise not terminate)  |
+
+**The shape is what an entry *is*, and it decides how the graph reads.**
+
+- **`events`** — something happened, and the value is how it went. Where there
+  are no entries, nothing happened, and the line says so: it returns to the
+  floor across an idle stretch rather than stepping over an hour of quiet as
+  though it were one long request. "Idle" is measured against the report's own
+  rhythm — a gap several times the usual one — so a report that only ever
+  fires twice an hour is not perforated for it (§11.2).
+- **`gauge`** — a level, sampled. A gap is the app not looking, not the level
+  falling to nothing, so the line carries straight across it.
+- **`total`** — a change: bytes arriving or leaving. The graph plots the
+  running total, because the question is what those changes come to: how much
+  disk the outputs take, how much the model folders hold. A `deleted` entry
+  subtracts, so a model that is removed takes its bytes back out of the line,
+  and a model whose file was replaced is recorded as both a deletion and an
+  addition so the total moves by the difference rather than counting the file
+  twice. The running total is accumulated in SQL rather than in the browser,
+  so a series that hits the cap starts at the height the dropped entries left
+  it at instead of at zero.
+
+The table underneath is the entries either way: one row each, because *which*
+request, output or model is exactly what a table is for.
+
+**A report may draw more than one line.** `memory` records VRAM and RAM at the
+same instant, as two entries that share a timestamp and differ in `series`.
+Two lines always carry a legend, and the two colours are assigned in a fixed
+order from `--series-1` / `--series-2` (§11.5) — never cycled, never
+re-assigned when one line has no data yet.
+
+Four of those are worth spelling out:
+
+- **`api_requests` records the route pattern**, `/api/outputs/:id`, not the
+  path it matched. The pattern is a closed set, so the url filter is a list to
+  pick from rather than free text, and one output's id cannot crowd out the
+  rest. The path the client asked for is in `data_json`. Requests to
+  `/api/telemetry/*` are not recorded: looking at the report would otherwise
+  be most of what the report shows.
+- **`model_size` entries are changes, not an inventory.** Each pass diffs what
+  is on disk against `model_sizes`, writes an `added` or `deleted` entry per
+  difference, and replaces the table. A rescan that finds nothing new writes
+  nothing. Hidden models (§8.1) are diffed too: hiding one is a decision about
+  the pickers, not about the disk.
+- **`output_size` can be given the history it predates.** Every output in
+  `outputs` is an entry that was never written, and the row plus the file on
+  disk is all it takes to write it now — stamped with the output's own
+  `created_at`, so the line climbs where the generations happened rather than
+  all at once at boot. It runs in the background on every launch and is a
+  diff, not a one-shot: an output already in the report is skipped, so it is
+  safe to repeat and also picks up whatever `reindex` found. An output whose
+  file is gone is left alone; a report of sizes does not guess at one. This
+  makes the report's history as good as `app.db`'s, which is the most that
+  can be said of it.
+- **`memory` needs both halves of a pair.** "In use" is the total minus the
+  free bytes, so a machine that reports one without the other gets no line
+  rather than a row of nulls — and a machine that reports RAM but no VRAM
+  still gets its RAM line.
+- **`telemetry_size` reads `page_count * page_size`** rather than stat-ing the
+  file, so the insert that triggers it stays in-process. `data_json` carries
+  the report that caused it and the row count.
+
+No report is rolled up, downsampled or expired: a point is a point, the graph
+asks for all of them for all time, and the table pages through them with the
+same keyset cursor the gallery uses.
+
 ---
 
 ## 8. Models, LoRAs, samples
@@ -661,7 +779,7 @@ with an `image` param.
 ### 11.1 Global layout
 Left nav rail, with Lucide icons: **Generate** `pencil-sparkles`,
 **Gallery** `images`, **Models** `brain`, **Workflows** `workflow`,
-**ComfyUI** `server`, **Settings** `settings`. The rail is a **56px icon
+**ComfyUI** `server`, **Telemetry** `activity`, **Settings** `settings`. The rail is a **56px icon
 rail by default**,
 collapsible to 196px labelled; the state persists. There are no keyboard
 shortcuts for switching screens. A persistent **queue strip** pinned to the bottom shows the running
@@ -870,6 +988,43 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   a Workflows row, the current workflow's `ui.json` is loaded and the
   **Save & return / Discard** toolbar is shown; from the rail item it is
   raw ComfyUI with no toolbar.
+
+**Telemetry**
+- One screen per report (§7.1), picked from a row of tabs; the report and
+  every filter are URL params, so a view is a link. What an entry is and
+  when one is written is on an `info` icon beside the report's title, as its
+  `title` — a note for the moment somebody asks, not a line of prose over
+  every graph.
+- **Two shapes, always both.** A timeline across the top and a table of the
+  recorded entries underneath it. The graph holds **every point for all
+  time** squeezed into the width available — there is no zoom, no range
+  picker and no paging; the table is an endless scroll on the same keyset
+  cursor the gallery uses.
+- **What the graph plots depends on the report's shape** (§7.1): the entries
+  themselves for `events` and `gauge`, the running total for `total`, one
+  line per `series` for a report that records more than one thing at a time,
+  and — on an `events` report alone — a drop to the floor across a stretch
+  with no entries in it. The table always lists the entries themselves.
+- The y axis is scaled to the data: its top is rounded up inside the unit it
+  is labelled in, and stays within a fifth of the tallest mark — a peak of
+  11.2 GB reads 12 GB, never 1.0 TB.
+- The timeline is **bars or a line**, toggled in the graph's header and
+  remembered in the URL. Bars draw one mark per data point. The line is a
+  smoothed mean over a window that follows the point count, so a thousand API
+  requests read as a trend rather than as noise — and only the trend is
+  drawn, because the bars are already the view that holds every point.
+- The table's columns are the graphed value plus whatever that report can be
+  filtered by, so the thing a filter narrows is always visible in the rows.
+  **Clicking a row opens a right-hand sidebar with the raw entry** — the
+  verbatim `data_json` of §7.1 — and Esc closes it.
+- Reports that have filters carry them as chips above the graph
+  (`api_requests`: method, url, status, min duration; `output_size`: family;
+  `model_size`: model class, family). `memory` and `telemetry_size` have
+  none.
+  Options come from the data: a filter lists the values actually recorded,
+  with how many entries each has.
+- The graph and the table read the same filters, so narrowing is one
+  operation over both halves.
 
 **Settings**
 - ComfyUI connection (managed child process vs. local URL as two radio
@@ -1097,8 +1252,12 @@ POST /api/inputs                        upload → {sha256}
 GET  /api/system/status                 comfy state (starting|running|disconnected|failed), pid, uptime, VRAM free (ComfyUI /system_stats)
 POST /api/system/comfy/restart          managed mode only
 GET  /api/system/comfy/log              tail of the child process log
-GET  /api/system/storage                counts + bytes for outputs, inputs, samples, app.db
+GET  /api/system/storage                counts + bytes for outputs, inputs, samples, app.db, telemetry.db
 GET  /ws                                job/progress/output events, system_status, hashing_progress, rescan_progress (JSON) + preview frames (binary, job-id-prefixed)
+GET  /api/telemetry/reports             the catalogue: id, title, the value's unit, and each filter with its options and counts
+GET  /api/telemetry/:report/series      the lines to draw: [{key, points:[{id, at, value}]}], oldest first, running totals already
+                                        accumulated for a cumulative report; `truncated` when the cap bit
+GET  /api/telemetry/:report/entries     the table: keyset paginated on (at, id) newest first, each row carrying its raw `data`
 POST /api/maintenance/reindex
 POST /api/maintenance/sweep-staging
 POST /api/maintenance/sweep-inputs      {dry_run: bool} → {count, bytes, files[]}; dry_run feeds the preview

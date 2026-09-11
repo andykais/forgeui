@@ -22,9 +22,7 @@
   const config = $derived(app.config);
   const hiddenFamilies = $derived(app.hiddenFamilies);
   /** Every family, hidden ones included — this is where they come back. */
-  const allFamilies = $derived(
-    [...new Set([...app.families, ...hiddenFamilies])].sort(),
-  );
+  const allFamilies = $derived([...new Set([...app.families, ...hiddenFamilies])].sort());
 
   function toggleFamily(family: string) {
     app.setHiddenFamilies(
@@ -226,8 +224,8 @@
         {/each}
       </div>
       <p class="dim note">
-        A thumbnail set by hand on a model's page wins over both; whichever of
-        these a model has none of falls back to the other.
+        A thumbnail set by hand on a model's page wins over both; whichever of these a
+        model has none of falls back to the other.
       </p>
 
       <!--
@@ -253,8 +251,8 @@
       </div>
       <p class="dim note">
         Hidden families stay in <code class="mono">config.yaml</code> as
-        <code class="mono">ui.hidden_families</code>; their models reappear on
-        the Models screen under <strong>Show hidden</strong>.
+        <code class="mono">ui.hidden_families</code>; their models reappear on the Models
+        screen under <strong>Show hidden</strong>.
       </p>
     </article>
 
@@ -273,7 +271,7 @@
       </p>
       {#if storage}
         <div class="storage">
-          {#each [["outputs", storage.outputs], ["samples", storage.samples], ["inputs", storage.inputs], ["staging", storage.staging], ["app.db", storage.db]] as const as [label, use] (label)}
+          {#each [["outputs", storage.outputs], ["samples", storage.samples], ["inputs", storage.inputs], ["staging", storage.staging], ["app.db", storage.db], ["telemetry.db", storage.telemetry]] as const as [label, use] (label)}
             <div class="use">
               <span class="use-label mono dim">{label}</span>
               <span class="use-bytes mono">{bytes(use.bytes)}</span>

@@ -27,6 +27,21 @@ describe("the router", () => {
     expect(parseRoute("/", "")).toMatchObject({ screen: "generate" });
   });
 
+  test("carries a telemetry report and its filters in the query", () => {
+    // Every part of a telemetry view is a URL param (§11.2), so the whole
+    // thing — report, graph shape, filters and the open entry — is a link.
+    const route = parseRoute(
+      "/telemetry",
+      "?report=api_requests&graph=line&method=GET,POST&entry=42",
+    );
+    expect(route.screen).toBe("telemetry");
+    expect(route.id).toBe(null);
+    expect(route.query.get("report")).toBe("api_requests");
+    expect(route.query.get("graph")).toBe("line");
+    expect(route.query.get("method")).toBe("GET,POST");
+    expect(route.query.get("entry")).toBe("42");
+  });
+
   test("decodes an id that was escaped to fit in the path", () => {
     // A model with no hash yet is addressed by its path (§8.1), which is
     // base64url behind a `path:` prefix — and the colon is escaped in a link.

@@ -26,6 +26,15 @@
   --text-4: #8a8a8a;
   --mark: #585858;
 
+  /*
+   * Chart series, assigned in this order and never cycled (§11.2). The pair
+   * was checked for colour-vision separation against the panel behind it —
+   * ΔE 18.8 at worst (deutan), 19.3 for normal vision, where 8 is the floor —
+   * and the legend carries the identity either way.
+   */
+  --series-1: #6fb6c8;
+  --series-2: #c9a227;
+
   --accent: #6fb6c8;
   --accent-tint: #15292f;
   --accent-tint-2: #1f3238;

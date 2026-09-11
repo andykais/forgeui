@@ -16,6 +16,7 @@ import {
   jobsInFlight,
   listOutputsForJob,
   nodeTimingsFor,
+  type OutputRow,
   type Progress,
   setJobPromptId,
   type SidecarModelRef,
@@ -24,6 +25,8 @@ import {
 } from "../db/queries.ts";
 import type { WsHub } from "../http/ws.ts";
 import type { OutputStore } from "../outputs/store.ts";
+import type { TelemetryStore } from "../telemetry/store.ts";
+import type { MemoryMonitor } from "../telemetry/memory.ts";
 import { isOutputNodeType } from "../workflows/nodes.ts";
 import { coerceParams } from "../workflows/coerce.ts";
 import { rewriteGraph } from "../workflows/rewrite.ts";
@@ -120,6 +123,10 @@ export interface JobRunnerOptions {
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Whether a model of this class is on disk under this name (§5.1). */
   modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  /** The output-size report; absent in tests that do not care (§7.1). */
+  telemetry?: TelemetryStore;
+  /** Opens and closes the Memory Usage report's sampling window (§7.1). */
+  memory?: MemoryMonitor;
   now?: () => number;
 }
 
@@ -132,6 +139,8 @@ export class JobRunner {
   #outputs: OutputStore;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  #telemetry?: TelemetryStore;
+  #memory?: MemoryMonitor;
   #now: () => number;
   #live = new Map<string, LiveJob>();
   #byPrompt = new Map<string, string>();
@@ -148,6 +157,8 @@ export class JobRunner {
     this.#outputs = options.outputs;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
+    this.#telemetry = options.telemetry;
+    this.#memory = options.memory;
     this.#now = options.now ?? Date.now;
   }
 
@@ -427,6 +438,9 @@ export class JobRunner {
         const live = this.#ensureLive(jobId);
         live.tracker.start();
         this.#currentJobId = jobId;
+        // A generation is under way: the Memory Usage report samples now,
+        // every ten seconds, and again when this closes (§7.1).
+        this.#memory?.generationStarted(jobId);
         updateJobStatus(this.#db, jobId, {
           status: "running",
           started_at: this.#now(),
@@ -553,6 +567,7 @@ export class JobRunner {
           data: this.#outputs.view(output),
         });
       }
+      await this.#recordOutputSizes(result.outputs);
     } catch (cause) {
       await this.#failAndClean(jobId, {
         type: "completion_failed",
@@ -809,7 +824,36 @@ export class JobRunner {
     return live;
   }
 
+  /**
+   * One entry per file the job produced (§7.1). The size is read from disk
+   * because the row does not carry one, and a file that has already moved on
+   * is simply not reported.
+   */
+  async #recordOutputSizes(outputs: OutputRow[]): Promise<void> {
+    const telemetry = this.#telemetry;
+    if (!telemetry || outputs.length === 0) return;
+    for (const output of outputs) {
+      let bytes: number;
+      try {
+        bytes = (await Deno.stat(join(this.#paths.root, output.path))).size;
+      } catch {
+        continue;
+      }
+      telemetry.recordOutput({
+        output_id: output.id,
+        path: output.path,
+        bytes,
+        kind: output.kind,
+        family: output.family,
+        workflow_id: output.workflow_id,
+        job_id: output.job_id,
+        created_at: output.created_at,
+      });
+    }
+  }
+
   #forget(jobId: string): void {
+    this.#memory?.generationFinished(jobId);
     const live = this.#live.get(jobId);
     if (live?.promptId) this.#byPrompt.delete(live.promptId);
     this.#live.delete(jobId);

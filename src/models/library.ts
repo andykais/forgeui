@@ -23,6 +23,7 @@ import {
 import { mediaUrl } from "../outputs/store.ts";
 import type { SampleStore, SampleView } from "../samples/store.ts";
 import type { WsHub } from "../http/ws.ts";
+import type { TelemetryStore } from "../telemetry/store.ts";
 import { classOf } from "../config/defaults.ts";
 import type { ModelClass, ModelThumbnail } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
@@ -193,6 +194,8 @@ export interface ModelLibraryOptions {
   hub: WsHub;
   /** The Samples strip and "Set as thumbnail" (§8.3). */
   samples?: SampleStore;
+  /** The model-size report, written once per scan pass (§7.1). */
+  telemetry?: TelemetryStore;
   scanner?: ModelScanner;
   now?: () => number;
 }
@@ -205,6 +208,7 @@ export class ModelLibrary {
   #config: ConfigStore;
   #hub: WsHub;
   #samples?: SampleStore;
+  #telemetry?: TelemetryStore;
   #index: SidecarModelIndex | null = null;
   #scanning: Promise<void> | null = null;
   #probes = new Map<string, ModelProbeRow>();
@@ -218,6 +222,7 @@ export class ModelLibrary {
     this.#config = options.config;
     this.#hub = options.hub;
     this.#samples = options.samples;
+    this.#telemetry = options.telemetry;
     this.#now = options.now ?? Date.now;
     this.#probes = listModelProbes(options.db);
     this.scanner = options.scanner ??
@@ -250,6 +255,9 @@ export class ModelLibrary {
       // A pass over new files may find sidecars to link, so the index the
       // last pass built is stale.
       this.#index = null;
+      // What this pass added or lost, against what the last one saw (§7.1).
+      // Probing first means the entries carry the family the headers named.
+      this.#recordModelSizes();
       const queued = this.hasher.enqueue(result.models);
       this.hasher.start();
       log(
@@ -572,6 +580,30 @@ export class ModelLibrary {
         console.error(`could not record the probe of ${model.name}:`, error);
       }
     }
+  }
+
+  /**
+   * The model-size report (§7.1): the models on disk now, as this library
+   * sees them — display name, class and family included — handed to the
+   * telemetry store, which writes one entry per difference. A row whose file
+   * has gone is not on disk, so it counts as a deletion.
+   */
+  #recordModelSizes(): void {
+    if (!this.#telemetry) return;
+    // Both piles: hiding a model is a decision about the pickers (§8.1), not
+    // about the disk, and a report of what the folders hold that lost a
+    // model the moment it was hidden would be reporting the wrong thing.
+    const models = [...this.list(), ...this.list({ hidden: true })]
+      .filter((model) => model.present)
+      .map((model) => ({
+        path: model.path,
+        size: model.size,
+        model_class: model.class,
+        family: model.family === "unset" ? null : model.family,
+        kind: model.kind,
+        display_name: model.display_name,
+      }));
+    this.#telemetry.recordModelPass(models);
   }
 
   #broadcastRescan(progress: RescanProgress): void {

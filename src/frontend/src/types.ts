@@ -328,6 +328,8 @@ export interface Storage {
   samples: StorageUse;
   staging: StorageUse;
   db: StorageUse;
+  /** The health log of §7.1, which nothing else needs to run. */
+  telemetry: StorageUse;
   total: StorageUse;
 }
 
@@ -335,4 +337,99 @@ export interface LoraRow {
   name: string;
   strength_model: number;
   strength_clip: number;
+}
+
+// ------------------------------------------------------- telemetry (§7.1)
+
+export type TelemetryUnit = "ms" | "bytes";
+
+export interface TelemetryColumn {
+  key: string;
+  label: string;
+  kind: "time" | "value" | "text" | "number";
+}
+
+export interface TelemetryFilterOption {
+  value: string | number;
+  entries: number;
+}
+
+export interface TelemetryFilter {
+  /** The URL param, which is also the column it narrows. */
+  key: string;
+  label: string;
+  /** `enum` is picked from `options`; `min` is a number the user types. */
+  kind: "enum" | "min";
+  column?: string;
+  numeric?: boolean;
+  unit?: "ms";
+  options?: TelemetryFilterOption[];
+}
+
+/** One line of a report that draws more than one (§11.2). */
+export interface TelemetrySeriesDef {
+  key: string;
+  label: string;
+}
+
+export interface TelemetryReport {
+  id: string;
+  title: string;
+  description: string;
+  unit: TelemetryUnit;
+  value_label: string;
+  columns: TelemetryColumn[];
+  filters: TelemetryFilter[];
+  /**
+   * What an entry is, which is how the graph reads it (§7.1): `events` is
+   * something that happened, `gauge` a level that was sampled, `total` a
+   * change whose running sum is the line.
+   */
+  shape: "events" | "gauge" | "total";
+  /** The lines the graph draws; absent when it draws one. */
+  series?: TelemetrySeriesDef[];
+  entries: number;
+}
+
+export interface TelemetryPoint {
+  id: number;
+  at: number;
+  value: number;
+}
+
+/** One line's points, oldest first; `key` is null for a single-line report. */
+export interface TelemetryLine {
+  key: string | null;
+  points: TelemetryPoint[];
+}
+
+export interface TelemetrySeries {
+  report: string;
+  series: TelemetryLine[];
+  /** True when the oldest points were left out to stay under the cap. */
+  truncated: boolean;
+  total: number;
+}
+
+export interface TelemetryEntry {
+  id: number;
+  report: string;
+  at: number;
+  value: number;
+  label: string | null;
+  method: string | null;
+  route: string | null;
+  status: number | null;
+  family: string | null;
+  model_class: string | null;
+  change: string | null;
+  series: string | null;
+  /** The raw entry the sidebar shows (§11.2). */
+  data: Record<string, unknown>;
+}
+
+export interface TelemetryEntryPage {
+  report: string;
+  entries: TelemetryEntry[];
+  cursor: string | null;
 }

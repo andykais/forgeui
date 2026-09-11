@@ -20,7 +20,12 @@ import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
 import { ModelLibrary } from "./models/library.ts";
 import { SampleStore } from "./samples/store.ts";
+import { backfillOutputSizes } from "./telemetry/backfill.ts";
+import { openTelemetryDatabase } from "./telemetry/db.ts";
+import { TelemetryStore } from "./telemetry/store.ts";
+import { MemoryMonitor } from "./telemetry/memory.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
+import { logError } from "./log.ts";
 import { APP_VERSION } from "./version.ts";
 
 export interface StartAppOptions {
@@ -40,6 +45,10 @@ export interface App {
   port: number;
   config: ConfigStore;
   db: Database;
+  /** `telemetry.db` (§7.1), opened beside `app.db` and closed with it. */
+  telemetry: TelemetryStore;
+  /** The sampler behind the Memory Usage report (§7.1). */
+  memory: MemoryMonitor;
   paths: DataPaths;
   workflows: WorkflowStore;
   comfy: ComfyManager;
@@ -68,12 +77,28 @@ async function startAppWith(
   args: CliArgs,
   options: StartAppOptions,
 ): Promise<App> {
-  const { store, db, paths, created, workflows } = await bootstrap(
+  const { store, db, telemetryDb, paths, created, workflows } = await bootstrap(
     args,
     options.env,
   );
 
   const hub = new WsHub();
+  const telemetry = new TelemetryStore({ db: telemetryDb });
+  // Reads ComfyUI's own numbers; nothing is sampled while the app is idle.
+  const memory = new MemoryMonitor({
+    store: telemetry,
+    read: async () => {
+      const stats = await comfy.refreshStats(0);
+      if (!stats) return null;
+      return {
+        vram_free: stats.vram_free,
+        vram_total: stats.vram_total,
+        ram_free: stats.ram_free,
+        ram_total: stats.ram_total,
+        device: stats.device ?? null,
+      };
+    },
+  });
   const comfy = new ComfyManager({
     config: store,
     paths,
@@ -88,7 +113,14 @@ async function startAppWith(
   });
   const outputs = new OutputStore({ db, paths, hub });
   const samples = new SampleStore({ db, paths });
-  const models = new ModelLibrary({ db, paths, config: store, hub, samples });
+  const models = new ModelLibrary({
+    db,
+    paths,
+    config: store,
+    hub,
+    samples,
+    telemetry,
+  });
   const jobs = new JobRunner({
     db,
     paths,
@@ -98,6 +130,8 @@ async function startAppWith(
     outputs,
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
+    telemetry,
+    memory,
   });
   hub.onHello(() => [
     { type: "system_status", data: comfy.status() },
@@ -116,6 +150,7 @@ async function startAppWith(
     models,
     samples,
     hub,
+    telemetry,
   };
   let server: HttpServer;
   try {
@@ -126,6 +161,7 @@ async function startAppWith(
     server = await startHttpServer(ctx);
   } catch (cause) {
     db.close();
+    telemetryDb.close();
     throw cause;
   }
   if (!options.skipComfy) comfy.start();
@@ -136,6 +172,17 @@ async function startAppWith(
   // durations the ETA wants, so read them rather than start from nothing.
   seedNodeTimingsIfEmpty({ db, paths }).catch((error) => {
     console.error("could not seed the node timings:", error);
+  });
+  // The size report can be given the history it predates: every output
+  // already indexed, at the size it is on disk and the time it was made
+  // (§7.1). In the background, because it stats a file per output and the
+  // UI must not wait for a gallery-sized walk.
+  backfillOutputSizes({ db, telemetry, paths }).catch((error) => {
+    logError(
+      `could not backfill the output sizes: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
   });
 
   if (!options.quiet) {
@@ -157,6 +204,8 @@ async function startAppWith(
     port: server.port,
     config: store,
     db,
+    telemetry,
+    memory,
     paths,
     workflows,
     comfy,
@@ -169,11 +218,15 @@ async function startAppWith(
     async shutdown() {
       models.stop();
       outputs.close();
+      memory.stop();
       hub.close();
       await comfy.close();
       await models.idle();
+      // A sample already in flight still has a database to write to.
+      await memory.idle();
       await server.shutdown();
       db.close();
+      telemetryDb.close();
     },
   };
 }
@@ -190,7 +243,8 @@ async function bootstrap(args: CliArgs, env?: EnvSource) {
   await syncBundledWorkflows(store.paths.bundledWorkflows);
   const workflows = await WorkflowStore.load(store.paths);
   const db = openDatabase(store.paths.db);
-  return { store, db, paths: store.paths, created, workflows };
+  const telemetryDb = openTelemetryDatabase(store.paths.telemetryDb);
+  return { store, db, telemetryDb, paths: store.paths, created, workflows };
 }
 
 async function main(argv: string[]): Promise<number> {
