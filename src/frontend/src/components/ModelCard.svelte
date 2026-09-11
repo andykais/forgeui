@@ -1,16 +1,14 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import { app } from "../stores/app.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { navigate } from "../router.svelte.ts";
-  import Popover from "./Popover.svelte";
+  import FamilyPicker from "./FamilyPicker.svelte";
 
   /**
    * One card of the Models grid (§11.2, frame 04): thumbnail, display name,
-   * family badge or an inline SET FAMILY control when it has none, and the
-   * count of outputs as a link into the gallery filtered to this model.
+   * the family picker (SET FAMILY while it has none), and the count of
+   * outputs as a link into the gallery filtered to this model.
    * There is no multi-select and no bulk edit (MOCK-REVISIONS §8).
    */
   let {
@@ -20,8 +18,6 @@
     model: ModelEntry;
     onfamily: (model: ModelEntry, family: string) => void;
   } = $props();
-
-  let familyOpen = $state(false);
 
   const href = $derived(`/models/${encodeURIComponent(model.id)}`);
   const galleryHref = $derived(model.hash ? `/gallery?models=${model.hash}` : "/gallery");
@@ -61,32 +57,15 @@
         <span class="badge hashing mono" title="Reading the file to identify it">
           hashing
         </span>
-      {:else if model.family === "unset"}
-        <div class="chip-wrap">
-          <button class="set-family mono" onclick={() => (familyOpen = !familyOpen)}>
-            SET FAMILY <ChevronDown size={11} />
-          </button>
-          <Popover
-            open={familyOpen}
-            width={150}
-            title="Family"
-            onclose={() => (familyOpen = false)}
-          >
-            {#each app.families as family (family)}
-              <button
-                class="option"
-                onclick={() => {
-                  familyOpen = false;
-                  onfamily(model, family);
-                }}
-              >
-                {family}
-              </button>
-            {/each}
-          </Popover>
-        </div>
       {:else}
-        <span class="badge mono">{model.family}</span>
+        <!-- The card clips its own overflow to round the thumbnail, so this
+             list is anchored in viewport coordinates rather than absolutely
+             positioned inside it. -->
+        <FamilyPicker
+          family={model.family}
+          prompt={model.family === "unset"}
+          onchange={(family) => onfamily(model, family)}
+        />
       {/if}
 
       <span class="spacer"></span>
@@ -183,25 +162,6 @@
     color: var(--accent);
   }
 
-  .set-family {
-    font-size: 10px;
-    padding: 1px 6px;
-    background: transparent;
-    border: 1px dashed var(--edge-2);
-    color: var(--text-4);
-    display: flex;
-    align-items: center;
-    gap: 3px;
-  }
-
-  .set-family:hover {
-    color: var(--text-2);
-    border-color: var(--edge);
-  }
-
-  .chip-wrap {
-    position: relative;
-  }
 
   .count {
     font-size: 11px;
@@ -216,18 +176,4 @@
     font-size: 11px;
   }
 
-  .option {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    padding: 5px 8px;
-    font-size: 12px;
-    color: var(--text-2);
-  }
-
-  .option:hover {
-    background: var(--control);
-    color: var(--text);
-  }
 </style>

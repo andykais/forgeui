@@ -2,7 +2,6 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Brain from "@lucide/svelte/icons/brain";
   import Copy from "@lucide/svelte/icons/copy";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
@@ -12,7 +11,7 @@
   import { toasts } from "../stores/toasts.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import type { ModelDetail, Output, Sample } from "../types.ts";
-  import Popover from "../components/Popover.svelte";
+  import FamilyPicker from "../components/FamilyPicker.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
   import Tile from "../components/Tile.svelte";
   import Viewer from "../components/Viewer.svelte";
@@ -32,7 +31,6 @@
   let error = $state<string | null>(null);
   let outputs = $state<Output[]>([]);
   let selectedId = $state<string | null>(null);
-  let familyOpen = $state(false);
   let importing = $state(false);
   let nameDraft = $state("");
   let notesDraft = $state("");
@@ -300,31 +298,11 @@
               hashing
             </span>
           {:else}
-            <div class="chip-wrap">
-              <button class="family mono" onclick={() => (familyOpen = !familyOpen)}>
-                {model.family}
-                <ChevronDown size={11} />
-              </button>
-              <Popover
-                open={familyOpen}
-                width={150}
-                title="Family"
-                onclose={() => (familyOpen = false)}
-              >
-                {#each [...app.families, "unset"] as family (family)}
-                  <button
-                    class="option family-option"
-                    onclick={() => {
-                      familyOpen = false;
-                      void patch({ family });
-                    }}
-                  >
-                    <span>{family}</span>
-                    <span class="mono dim">{familyCounts.get(family) ?? 0}</span>
-                  </button>
-                {/each}
-              </Popover>
-            </div>
+            <FamilyPicker
+              family={model.family}
+              counts={familyCounts}
+              onchange={(family) => void patch({ family })}
+            />
           {/if}
         </div>
 
@@ -531,12 +509,6 @@
     background: var(--control);
   }
 
-  .family-option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
 
   .head {
     display: flex;
@@ -619,13 +591,6 @@
     color: var(--text-3);
   }
 
-  .family {
-    font-size: 11px;
-    padding: 2px 7px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
 
   .badge {
     font-size: 10px;
@@ -645,9 +610,6 @@
     color: var(--error);
   }
 
-  .chip-wrap {
-    position: relative;
-  }
 
   .file,
   .hash {

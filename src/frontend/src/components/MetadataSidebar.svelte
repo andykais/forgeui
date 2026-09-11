@@ -32,18 +32,30 @@
    * shift-click filters the grid to it instead (§11.2). Before hashing there
    * is only a name, so the row is plain text.
    */
-  const models = $derived(
-    (sidecar?.models ?? []).map((model) => {
-      const hash =
-        output.models.find((link) => link.role === model.role)?.model_hash ?? null;
+  const models = $derived.by(() => {
+    // `output_models` is keyed by role, and a job with three LoRAs has three
+    // rows under the one `lora` role, so looking a hash up by role handed
+    // every LoRA the first of those three: the right number of rows, all
+    // wearing one name. A filename identifies a file where a role cannot,
+    // so the library resolves it, the sidecar's own hash is the fallback,
+    // and the role is trusted only where it names a single model.
+    const byRole = new Map<string, string[]>();
+    for (const link of output.models) {
+      byRole.set(link.role, [...(byRole.get(link.role) ?? []), link.model_hash]);
+    }
+    return (sidecar?.models ?? []).map((model) => {
+      const known = app.modelByName(model.name);
+      const sole = byRole.get(model.role);
+      const hash = known?.hash ?? model.hash ??
+        (sole?.length === 1 ? sole[0]! : null);
       return {
         role: model.role,
         name: model.name,
         hash,
-        label: hash ? app.modelName(hash) : model.name,
+        label: known?.display_name ?? (hash ? app.modelName(hash) : model.name),
       };
-    }),
-  );
+    });
+  });
 
   /**
    * Promote to sample (§8.3): the models popover, restricted to the models
@@ -95,8 +107,13 @@
   const hashOfName = $derived(new Map(models.map((model) => [model.name, model.hash])));
 
   function linkTo(name: string) {
-    const hash = hashOfName.get(name) ?? null;
-    return { name, hash, label: hash ? app.modelName(hash) : name };
+    const known = app.modelByName(name);
+    const hash = known?.hash ?? hashOfName.get(name) ?? null;
+    return {
+      name,
+      hash,
+      label: known?.display_name ?? (hash ? app.modelName(hash) : name),
+    };
   }
 
   /** A LoRA row as the panel wrote it: a name and one or two strengths. */
@@ -261,9 +278,17 @@
           {:else if typeof value === "string" && hashOfName.has(value)}
             <dd class="mono">{@render modelLink(linkTo(value))}</dd>
           {:else}
-            <dd class="mono value" class:selectable={selectable(key)}>
-              {render(value)}
-            </dd>
+            <!--
+              The value sits in a span of its own so that copying it gives
+              back what it says. Firefox's plain-text serialiser indents the
+              contents of a `dd` by four spaces — on every line, blank ones
+              included — whenever the selection spans the element, which is
+              exactly what `user-select: all` makes. A span inside the `dd`
+              keeps the description-list semantics and copies clean.
+            -->
+            <dd class="mono value"><span
+                class:selectable={selectable(key)}
+              >{render(value)}</span></dd>
           {/if}
         </div>
       {/each}
@@ -428,7 +453,7 @@
   }
 
   /* One click takes the whole value, which is the point of showing it. */
-  dd.selectable {
+  .selectable {
     user-select: all;
   }
 

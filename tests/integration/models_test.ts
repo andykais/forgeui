@@ -468,9 +468,11 @@ Deno.test("families come back with model and workflow counts", async () => {
         "krea2",
         "ltx",
         "ltx-2",
+        "qwen-image",
         "sd15",
         "sdxl",
         "unset",
+        "wan2",
         "z-image",
       ],
     );

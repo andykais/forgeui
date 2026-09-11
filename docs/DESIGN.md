@@ -464,12 +464,23 @@ Model hashing runs in a background worker; a model is re-hashed only if
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
 - **Families are a hardcoded list** in the app — `flux`, `sdxl`, `anima`,
-  `ltx`, `z-image`, `sd15` — served by `GET /api/families` with counts; there is no
+  `ltx`, `z-image`, `wan2`, `qwen-image`, `sd15` — served by
+  `GET /api/families` with counts; there is no
   family CRUD and the app attaches no behaviour to a family, it is only the
-  matching key between a workflow's `family` and a model's. A model's family
+  matching key between a workflow's `family` and a model's. A family can
+  exist with no workflow behind it: filing the models is worth doing before
+  there is anything to run them in. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the
-  list), else set by the user from the same list, else `unset`. Pickers
+  list), else read from the file itself (§6), else set by the user from the
+  same list, else `unset`. `wan2` is one family and not two: ComfyUI builds
+  Wan 2.1 and 2.2 from the same config off the same key, so the files do not
+  draw the line. Pickers
   filter by family; unfiltered view is one click away.
+- **The family is set from the same control everywhere** — the model page,
+  a card in the grid, and the Family column of the table — a chip that opens
+  a searchable list. It is positioned in viewport coordinates rather than
+  absolutely inside its trigger: a card and a table cell both clip their own
+  overflow, which swallowed the list whole.
 - **Display name** is editable and separate from the filename. It renders
   everywhere a model is named: model page header and breadcrumb, Models grid
   cards, LoRA/checkpoint pickers, Gallery table MODELS chips, and viewer
@@ -625,8 +636,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   finds where the prompt stops and the next param starts without reading it.
   A model-valued param carries the link to its model page itself, and the
   roles below (unet / clip / vae / loras) list only what no param already
-  named — the same LoRA is never shown twice. Prompt and seed are
-  `user-select: all`, so one click takes the whole value.
+  named — the same LoRA is never shown twice. Each model is resolved by its
+  filename, which is what a graph binds and what a sidecar records; a role
+  cannot identify one, because a job with three LoRAs has three rows under
+  the one `lora` role. Prompt and seed are
+  `user-select: all`, so one click takes the whole value — and each such
+  value sits in a span of its own inside its `dd`, because Firefox's
+  plain-text serialiser indents the contents of a `dd` by four spaces on
+  every line when the selection spans the element.
 - Reuse Parameters lands here with the panel filled in.
 
 **Gallery**
@@ -745,7 +762,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   opens. Above the list are chips for the five commonest tags among the
   models it would show, each with the count it would leave; the rest are
   behind one `N more` control with its own search. Choosing more than one
-  narrows — a model has to carry all of them.
+  narrows — a model has to carry all of them. Every picker's list — models,
+  LoRAs, families — answers to the up and down arrows and to Enter, from the
+  search box, so choosing never needs the mouse. The highlight starts again
+  at the top whenever the search narrows the list.
 - Param panels are narrow (360px) so results stay visible; textareas
   auto-grow.
 - **LoRA rows**: picker with thumbnail + name, remove button, drag to

@@ -12,6 +12,7 @@
   import { toasts } from "../stores/toasts.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import ModelCard from "../components/ModelCard.svelte";
+  import FamilyPicker from "../components/FamilyPicker.svelte";
 
   /**
    * Models (§11.2, frame 04): a tab per model class, tiles or table, search
@@ -378,7 +379,19 @@
                 {/if}
                 <div class="mono dim file">{model.name}</div>
               </td>
-              <td class="mono dim">{model.family}</td>
+              <td class="family-cell">
+                {#if model.hashing}
+                  <span class="mono dim">—</span>
+                {:else}
+                  <!-- The same control as the card and the model page; the
+                       row navigates on click, so the picker stops its own. -->
+                  <FamilyPicker
+                    family={model.family}
+                    counts={perFamily}
+                    onchange={(family) => setFamily(model, family)}
+                  />
+                {/if}
+              </td>
               <td class="mono">{model.output_count || "—"}</td>
               <td class="mono dim">{bytes(model.size)}</td>
               <td class="mono dim">
@@ -563,6 +576,11 @@
 
   .thumb-cell {
     width: 40px;
+  }
+
+  /* Wide enough that the longest family name does not reflow the column. */
+  .family-cell {
+    width: 130px;
   }
 
   .thumb-cell img,

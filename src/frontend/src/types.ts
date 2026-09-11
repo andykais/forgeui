@@ -278,6 +278,8 @@ export const FAMILIES = [
   "ltx",
   "ltx-2",
   "z-image",
+  "wan2",
+  "qwen-image",
   "sd15",
 ] as const;
 

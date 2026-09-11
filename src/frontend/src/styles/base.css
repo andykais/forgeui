@@ -149,3 +149,15 @@ a {
   padding: 24px;
   text-align: center;
 }
+
+/*
+ * The arrow-key highlight in a picker (§11.3). It is global because the
+ * options belong to whichever component passed them into the popover, so a
+ * scoped rule in the popover would never reach them. The inset line rather
+ * than a fill, so the highlight reads apart from the `current` option the
+ * pickers already shade.
+ */
+.option[data-active="true"] {
+  background: var(--control);
+  box-shadow: inset 2px 0 0 var(--accent);
+}

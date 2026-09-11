@@ -170,6 +170,20 @@ class AppState {
     );
   }
 
+  /**
+   * The model a workflow's filename refers to — `name` is the path under the
+   * model folder, which is exactly what a graph binds and what a sidecar
+   * records, so it identifies a file where a role does not.
+   */
+  modelByName(name: string | null | undefined): ModelEntry | null {
+    if (!name) return null;
+    return (
+      [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes].find(
+        (model) => model.name === name,
+      ) ?? null
+    );
+  }
+
   /** A model's display name, wherever one is named (§8.1). */
   modelName(hash: string | null | undefined): string {
     const model = this.model(hash);

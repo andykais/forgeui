@@ -656,7 +656,9 @@ describe("the LoRA search box", () => {
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
 
     const popover = screen.getByRole("dialog", { name: "LoRAs" });
-    expect(popover.className).toContain("filled");
+    // `fixed` is the viewport-positioned class; `height` is what says this
+    // one is covering the panel rather than hanging off its trigger.
+    expect(popover.className).toContain("fixed");
     expect(popover.style.top).not.toBe("");
     expect(popover.style.left).not.toBe("");
     expect(popover.style.height).not.toBe("");

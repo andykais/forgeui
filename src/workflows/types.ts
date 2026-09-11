@@ -22,6 +22,10 @@ export type ApiLink = [string, number];
  * `flux2`, and for `krea2`, which shares a brand with Flux Krea and nothing
  * else.
  *
+ * `wan2` is one family and not two: ComfyUI builds Wan 2.1 and 2.2 from the
+ * same config off the same `head.modulation` key, so a 2.1/2.2 split would be
+ * a distinction the files themselves do not draw.
+ *
  * Since the picker orders by family (§5), this is no longer decoration: it
  * is what tells a user which of their models a workflow can actually use.
  */
@@ -35,6 +39,8 @@ export const FAMILIES = [
   "ltx",
   "ltx-2",
   "z-image",
+  "wan2",
+  "qwen-image",
   "sd15",
 ] as const;
 export type Family = typeof FAMILIES[number];

@@ -164,6 +164,19 @@ export function detectFamily(header: Header): string | null {
     return shape("cap_embedder.1.weight")?.[0] === 3840 ? "z-image" : null;
   }
 
+  // Wan. `head.modulation` is the whole test in ComfyUI, and it is the same
+  // test for 2.1 and 2.2 — one family, as §8.1 says.
+  if (has("head.modulation")) return "wan2";
+
+  // Qwen-Image. `txt_norm.weight` alone is the tell, which is why ComfyUI
+  // asks it near-last; Mage-Flow carries the same key at a narrower width,
+  // and the two shapes are what separate them.
+  if (has("txt_norm.weight")) {
+    const mageFlow = shape("txt_norm.weight")?.[0] === 2560 &&
+      shape("proj_out.weight")?.[0] === 128;
+    if (!mageFlow) return "qwen-image";
+  }
+
   // The original UNet line. SDXL carries the size-conditioning embedding
   // that SD 1.5 has no use for.
   if (has("input_blocks.0.0.weight")) {
@@ -206,6 +219,8 @@ const DECLARED_ARCHITECTURES: readonly [RegExp, string][] = [
   [/ltx[\W_]?(video[\W_]?)?2/, "ltx-2"],
   [/ltx/, "ltx"],
   [/z[\W_]?image/, "z-image"],
+  [/wan[\W_]?(video|x)?[\W_]?2|wan[\W_]?(video|x)/, "wan2"],
+  [/qwen/, "qwen-image"],
   [/anima|cosmos/, "anima"],
   [/(stable[\W_]?diffusion[\W_]?xl)|sdxl/, "sdxl"],
   [/(stable[\W_]?diffusion[\W_]?v?1)|sd[\W_]?1[\W_]?5|sd_v1/, "sd15"],
@@ -249,6 +264,13 @@ export function detectLoraFamily(header: Header): string | null {
     return some("audio_adaln_single") ? "ltx-2" : "ltx";
   }
   if (some("cap_embedder", "noise_refiner")) return "z-image";
+  // Wan's image-conditioned blocks carry `k_img`/`v_img`, which nothing else
+  // here does. Its plainer tell — `self_attn` beside `cross_attn` — waits
+  // until after the UNet line, below.
+  if (some("k_img", "v_img")) return "wan2";
+  // Qwen-Image modulates the image and text streams separately, and that
+  // pair of names is not shared by anything else in this list.
+  if (some("img_mod") && some("txt_mod")) return "qwen-image";
 
   // The UNet line. Both generations name their blocks the same way, so the
   // tell is elsewhere: SDXL has two text encoders where SD 1.5 has one, and
@@ -262,6 +284,12 @@ export function detectLoraFamily(header: Header): string | null {
     );
     return twoEncoders || deepAttention || some("label_emb") ? "sdxl" : "sd15";
   }
+
+  // The broader tells, last, so a narrower family always answers first: an
+  // SD text encoder carries `self_attn` of its own, and Mage-Flow shares
+  // Qwen's `txt_norm`, so neither may be asked before the lines above.
+  if (some("cross_attn") && some("self_attn")) return "wan2";
+  if (some("txt_norm")) return "qwen-image";
 
   return null;
 }

@@ -86,6 +86,39 @@ Deno.test("Z-Image is Lumina 2 at a wider hidden size", () => {
   );
 });
 
+Deno.test("Wan 2.1 and 2.2 are the one family the files describe", () => {
+  // ComfyUI builds both generations from this one key, so §8.1 files both
+  // under `wan2` rather than inventing a split the headers cannot support.
+  assertEquals(detectFamily(header(["head.modulation"])), "wan2");
+  assertEquals(
+    detectFamily(
+      header(["head.modulation", "blocks.0.cross_attn.k_img.weight"]),
+    ),
+    "wan2",
+  );
+  assertEquals(
+    detectFamily(header(["model.diffusion_model.head.modulation"])),
+    "wan2",
+  );
+});
+
+Deno.test("Qwen-Image is told from Mage-Flow by its two widths", () => {
+  const qwen = {
+    "txt_norm.weight": [3584],
+    "proj_out.weight": [64],
+    "img_in.weight": [3072, 64],
+  };
+  assertEquals(detectFamily(header(qwen)), "qwen-image");
+  // The same key at Mage-Flow's widths is not Qwen, and Mage-Flow is not a
+  // family ForgeUI knows, so it stays unfiled.
+  assertEquals(
+    detectFamily(
+      header({ ...qwen, "txt_norm.weight": [2560], "proj_out.weight": [128] }),
+    ),
+    null,
+  );
+});
+
 Deno.test("an all-in-one checkpoint is read through its nested prefix", () => {
   // SDXL carries the size-conditioning embedding SD 1.5 has no use for.
   assertEquals(
@@ -194,6 +227,59 @@ Deno.test("a LoRA's family comes from the modules it patches", () => {
       ]),
     ),
     "ltx-2",
+  );
+});
+
+Deno.test("Wan and Qwen LoRAs are read off the modules they patch", () => {
+  assertEquals(
+    detectLoraFamily(
+      loraHeader([
+        "lora_unet_blocks_0_self_attn_q.lora_up.weight",
+        "lora_unet_blocks_0_cross_attn_k.lora_down.weight",
+      ]),
+    ),
+    "wan2",
+  );
+  // An image-to-video LoRA, which trains only the image-conditioned half.
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(["lora_unet_blocks_0_cross_attn_k_img.lora_up.weight"]),
+    ),
+    "wan2",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader([
+        "transformer.transformer_blocks.0.img_mod.1.lora_A.weight",
+        "transformer.transformer_blocks.0.txt_mod.1.lora_B.weight",
+      ]),
+    ),
+    "qwen-image",
+  );
+  // Declared, as the trainers write it.
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(["lora_unet_blah.lora_up.weight"], {
+        "modelspec.architecture": "Qwen-Image/lora",
+      }),
+    ),
+    "qwen-image",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(["lora_unet_blah.lora_up.weight"], {
+        ss_base_model_version: "Wan2.2-I2V-A14B",
+      }),
+    ),
+    "wan2",
+  );
+  assertEquals(
+    detectLoraFamily(
+      loraHeader(["lora_unet_blah.lora_up.weight"], {
+        "modelspec.architecture": "wanvideo/lora",
+      }),
+    ),
+    "wan2",
   );
 });
 
