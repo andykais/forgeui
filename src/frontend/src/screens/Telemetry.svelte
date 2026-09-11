@@ -409,7 +409,7 @@
           unit={report.unit}
           valueLabel={report.value_label}
           {mode}
-          aggregate={report.cumulative ? "last" : "max"}
+          shape={report.shape}
           loading={loadingSeries}
         />
       </div>

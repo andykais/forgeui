@@ -407,15 +407,15 @@ Deno.test("the catalogue offers the values a report has actually recorded", asyn
       "memory",
       "telemetry_size",
     ]);
-    // The two shapes the graph reads off the catalogue (§7.1).
+    // What each report's entries are, which is how the graph reads them.
     assertEquals(
-      catalogue.map((report) => [report.id, report.cumulative]),
+      catalogue.map((report) => [report.id, report.shape]),
       [
-        ["api_requests", false],
-        ["output_size", true],
-        ["model_size", true],
-        ["memory", false],
-        ["telemetry_size", false],
+        ["api_requests", "events"],
+        ["output_size", "total"],
+        ["model_size", "total"],
+        ["memory", "gauge"],
+        ["telemetry_size", "gauge"],
       ],
     );
     assertEquals(

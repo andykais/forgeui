@@ -514,25 +514,36 @@ CREATE TABLE model_sizes (     -- what the last model pass saw, so the next one 
 
 The five reports, and what makes an entry:
 
-| report           | title                     | value          | graph      | filters                             | recorded                                                                                |
-| ---------------- | ------------------------- | -------------- | ---------- | ----------------------------------- | --------------------------------------------------------------------------------------- |
-| `api_requests`   | API request duration      | duration in ms | entries    | method, route, status, min duration | every routed `/api/*` request, once it has answered                                      |
-| `output_size`    | Output size               | bytes          | cumulative | family                              | one entry per output file a job produced                                                 |
-| `model_size`     | Model size                | bytes          | cumulative | model class, family                 | one entry per model added or removed, per scan — startup and every Rescan                |
-| `memory`         | Memory Usage              | bytes in use   | two lines  | none                                | at the start of a generation, every 10s while one is running, and when it finishes       |
-| `telemetry_size` | Size of the telemetry log | bytes          | entries    | none                                | every insert into this database **except** its own (§7.1 would otherwise not terminate)  |
+| report           | title                | value          | shape  | filters                             | recorded                                                                                |
+| ---------------- | -------------------- | -------------- | ------ | ----------------------------------- | --------------------------------------------------------------------------------------- |
+| `api_requests`   | API Request Duration | duration in ms | events | method, route, status, min duration | every routed `/api/*` request, once it has answered                                      |
+| `output_size`    | Output Size          | bytes          | total  | family                              | one entry per output file a job produced                                                 |
+| `model_size`     | Model Size           | bytes          | total  | model class, family                 | one entry per model added or removed, per scan — startup and every Rescan                |
+| `memory`         | Memory Usage         | bytes in use   | gauge  | none                                | at the start of a generation, every 10s while one is running, and when it finishes       |
+| `telemetry_size` | Telemetry Log Size   | bytes          | gauge  | none                                | every insert into this database **except** its own (§7.1 would otherwise not terminate)  |
 
-**A cumulative report's graph is the running total, not the entries.** An
-entry there is a *change* — an output written, a model added — and the
-question the graph answers is what those changes come to: how much disk the
-outputs take, how much the model folders hold. A `deleted` entry subtracts, so
-a model that is removed takes its bytes back out of the line, and a model
-whose file was replaced is recorded as both a deletion and an addition so the
-total moves by the difference rather than counting the file twice. The table
-underneath is unchanged: one row per entry, because *which* output or model
-is exactly what the table is for. The running total is accumulated in SQL
-rather than in the browser, so a series that hits the cap starts at the height
-the dropped entries left it at instead of at zero.
+**The shape is what an entry *is*, and it decides how the graph reads.**
+
+- **`events`** — something happened, and the value is how it went. Where there
+  are no entries, nothing happened, and the line says so: it returns to the
+  floor across an idle stretch rather than stepping over an hour of quiet as
+  though it were one long request. "Idle" is measured against the report's own
+  rhythm — a gap several times the usual one — so a report that only ever
+  fires twice an hour is not perforated for it (§11.2).
+- **`gauge`** — a level, sampled. A gap is the app not looking, not the level
+  falling to nothing, so the line carries straight across it.
+- **`total`** — a change: bytes arriving or leaving. The graph plots the
+  running total, because the question is what those changes come to: how much
+  disk the outputs take, how much the model folders hold. A `deleted` entry
+  subtracts, so a model that is removed takes its bytes back out of the line,
+  and a model whose file was replaced is recorded as both a deletion and an
+  addition so the total moves by the difference rather than counting the file
+  twice. The running total is accumulated in SQL rather than in the browser,
+  so a series that hits the cap starts at the height the dropped entries left
+  it at instead of at zero.
+
+The table underneath is the entries either way: one row each, because *which*
+request, output or model is exactly what a table is for.
 
 **A report may draw more than one line.** `memory` records VRAM and RAM at the
 same instant, as two entries that share a timestamp and differ in `series`.
@@ -553,6 +564,16 @@ Four of those are worth spelling out:
   difference, and replaces the table. A rescan that finds nothing new writes
   nothing. Hidden models (§8.1) are diffed too: hiding one is a decision about
   the pickers, not about the disk.
+- **`output_size` can be given the history it predates.** Every output in
+  `outputs` is an entry that was never written, and the row plus the file on
+  disk is all it takes to write it now — stamped with the output's own
+  `created_at`, so the line climbs where the generations happened rather than
+  all at once at boot. It runs in the background on every launch and is a
+  diff, not a one-shot: an output already in the report is skipped, so it is
+  safe to repeat and also picks up whatever `reindex` found. An output whose
+  file is gone is left alone; a report of sizes does not guess at one. This
+  makes the report's history as good as `app.db`'s, which is the most that
+  can be said of it.
 - **`memory` needs both halves of a pair.** "In use" is the total minus the
   free bytes, so a machine that reports one without the other gets no line
   rather than a row of nulls — and a machine that reports RAM but no VRAM
@@ -979,10 +1000,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   time** squeezed into the width available — there is no zoom, no range
   picker and no paging; the table is an endless scroll on the same keyset
   cursor the gallery uses.
-- **What the graph plots depends on the report** (§7.1): the entries
-  themselves for a measurement, the running total for a report whose entries
-  are changes, and one line per `series` for a report that records more than
-  one thing at a time. The table always lists the entries themselves.
+- **What the graph plots depends on the report's shape** (§7.1): the entries
+  themselves for `events` and `gauge`, the running total for `total`, one
+  line per `series` for a report that records more than one thing at a time,
+  and — on an `events` report alone — a drop to the floor across a stretch
+  with no entries in it. The table always lists the entries themselves.
 - The y axis is scaled to the data: its top is rounded up inside the unit it
   is labelled in, and stays within a fifth of the tallest mark — a peak of
   11.2 GB reads 12 GB, never 1.0 TB.

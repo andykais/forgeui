@@ -299,6 +299,17 @@ export function listEntries(
   );
 }
 
+/**
+ * Every `label` this report has already recorded — what a backfill diffs
+ * against so it can run on every boot without writing an entry twice (§7.1).
+ */
+export function recordedLabels(db: Database, report: string): Set<string> {
+  const rows = db.prepare(
+    `SELECT DISTINCT label FROM entries WHERE report = ? AND label IS NOT NULL`,
+  ).values<[string]>(report);
+  return new Set(rows.map(([label]) => label));
+}
+
 export function countEntries(
   db: Database,
   report: string,

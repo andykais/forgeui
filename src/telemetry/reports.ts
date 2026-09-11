@@ -58,23 +58,32 @@ export interface SeriesDef {
   label: string;
 }
 
+/**
+ * What an entry *is*, which is what decides how the graph reads (§7.1):
+ *
+ * - `events` — something happened, and the value is how it went. Where there
+ *   are no entries, nothing happened: the line returns to zero rather than
+ *   stepping over an idle hour as though it were one long request.
+ * - `gauge` — a level, sampled. A gap is the app not looking, not the level
+ *   falling, so the line carries across it.
+ * - `total` — a change: bytes arriving or leaving. The graph plots the
+ *   running total of those changes, because what the question is about is
+ *   what they add up to; `change: "deleted"` subtracts. The table still
+ *   lists the entries one by one (§11.2).
+ */
+export type ReportShape = "events" | "gauge" | "total";
+
 export interface ReportDef {
   id: ReportId;
   title: string;
-  /** One line under the title: what an entry is and when one is written. */
+  /** The note on the title's info icon: what an entry is, and when. */
   description: string;
   /** How `value` reads. */
   unit: "ms" | "bytes";
   valueLabel: string;
+  shape: ReportShape;
   columns: ColumnDef[];
   filters: FilterDef[];
-  /**
-   * The graph plots the running total rather than the entries themselves: an
-   * entry is a change (a model added, an output written), and what the
-   * question is about is what those changes add up to. The table still lists
-   * the entries one by one (§11.2). `change: "deleted"` subtracts.
-   */
-  cumulative?: boolean;
   /** The lines this report draws, when it draws more than one. */
   series?: SeriesDef[];
 }
@@ -88,11 +97,12 @@ const WHEN: ColumnDef = { key: "at", label: "When", kind: "time" };
 export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   {
     id: "api_requests",
-    title: "API request duration",
+    title: "API Request Duration",
     description:
       "One entry per answered /api request. Requests to the telemetry reports themselves are not recorded.",
     unit: "ms",
     valueLabel: "Duration",
+    shape: "events",
     columns: [
       WHEN,
       { key: "value", label: "Duration", kind: "value" },
@@ -115,12 +125,12 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   },
   {
     id: "output_size",
-    title: "Output size",
+    title: "Output Size",
     description:
       "One entry per output file a generation produced; the graph is what they add up to.",
     unit: "bytes",
     valueLabel: "Size on disk",
-    cumulative: true,
+    shape: "total",
     columns: [
       WHEN,
       { key: "value", label: "Size", kind: "value" },
@@ -133,12 +143,12 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   },
   {
     id: "model_size",
-    title: "Model size",
+    title: "Model Size",
     description:
       "One entry per model added or removed, written on startup and on every rescan; the graph is what the folders hold.",
     unit: "bytes",
     valueLabel: "Size on disk",
-    cumulative: true,
+    shape: "total",
     columns: [
       WHEN,
       { key: "value", label: "Size", kind: "value" },
@@ -164,6 +174,7 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
       "VRAM and RAM in use, as ComfyUI reports them: sampled when a generation starts, every 10 seconds while one runs, and when it finishes.",
     unit: "bytes",
     valueLabel: "In use",
+    shape: "gauge",
     series: [
       { key: "vram", label: "VRAM" },
       { key: "ram", label: "RAM" },
@@ -178,11 +189,12 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
   },
   {
     id: "telemetry_size",
-    title: "Size of the telemetry log",
+    title: "Telemetry Log Size",
     description:
       "Written on every insert into telemetry.db except its own, so this report never feeds itself.",
     unit: "bytes",
     valueLabel: "Log size",
+    shape: "gauge",
     columns: [
       WHEN,
       { key: "value", label: "Log size", kind: "value" },

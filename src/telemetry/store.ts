@@ -24,6 +24,7 @@ import {
   type ColumnDef,
   type FilterDef,
   type ReportDef,
+  type ReportShape,
   type SeriesDef,
   TELEMETRY_REPORTS,
 } from "./reports.ts";
@@ -50,8 +51,8 @@ export interface ReportView {
   value_label: string;
   columns: ColumnDef[];
   filters: (FilterDef & { options?: DimensionOption[] })[];
-  /** The graph plots a running total of the entries (§7.1). */
-  cumulative: boolean;
+  /** What an entry is, which is how the graph reads it (§7.1). */
+  shape: ReportShape;
   /** The lines the graph draws; absent when it draws one. */
   series?: SeriesDef[];
   entries: number;
@@ -76,6 +77,8 @@ export interface OutputSample {
   workflow_id: string | null;
   job_id: string | null;
   created_at?: number;
+  /** True when this is history read back rather than a job's own report. */
+  backfilled?: boolean;
 }
 
 export type MemoryPhase = "start" | "tick" | "end";
@@ -286,7 +289,7 @@ export class TelemetryStore {
       unit: report.unit,
       value_label: report.valueLabel,
       columns: [...report.columns],
-      cumulative: report.cumulative === true,
+      shape: report.shape,
       series: report.series ? [...report.series] : undefined,
       filters: report.filters.map((filter) =>
         filter.column
@@ -314,7 +317,7 @@ export class TelemetryStore {
     const def = TELEMETRY_REPORTS.find((entry) => entry.id === report);
     return listSeries(this.#db, report, {
       filters,
-      cumulative: def?.cumulative === true,
+      cumulative: def?.shape === "total",
       bySeries: (def?.series?.length ?? 0) > 0,
     });
   }

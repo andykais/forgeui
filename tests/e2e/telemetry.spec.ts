@@ -15,11 +15,11 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
 
   // One tab per report, and the log's own size in the corner.
   for (const title of [
-    "API request duration",
-    "Output size",
-    "Model size",
+    "API Request Duration",
+    "Output Size",
+    "Model Size",
     "Memory Usage",
-    "Size of the telemetry log",
+    "Telemetry Log Size",
   ]) {
     await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
   }
@@ -79,7 +79,7 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
   await expect(page.getByRole("button", { name: /^Method: GET/ })).toBeVisible();
 
   // Another report, with no filters of its own and nothing recorded yet.
-  await page.getByRole("button", { name: /Model size/ }).click();
+  await page.getByRole("button", { name: /Model Size/ }).click();
   await expect(page).toHaveURL(/report=model_size/);
   await expect(page.getByRole("button", { name: /^Model type:/ })).toBeVisible();
   // The method filter does not travel between reports (§7.1).
@@ -92,7 +92,7 @@ test("both shapes of a report, its filters, and a raw entry", async ({ page }) =
   await expect(page.locator(".chart .legend")).toContainText("RAM");
   await expect(page.getByRole("columnheader", { name: "Memory" })).toBeVisible();
 
-  await page.getByRole("button", { name: /Size of the telemetry log/ }).click();
+  await page.getByRole("button", { name: /Telemetry Log Size/ }).click();
   await expect(page.getByRole("columnheader", { name: "Log size" })).toBeVisible();
   // The log records every report but itself, so no row here names it.
   const causes = await page.locator("tbody tr td:nth-child(3)").allInnerTexts();

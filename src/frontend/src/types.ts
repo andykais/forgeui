@@ -380,8 +380,12 @@ export interface TelemetryReport {
   value_label: string;
   columns: TelemetryColumn[];
   filters: TelemetryFilter[];
-  /** The graph plots the running total of the entries (§7.1). */
-  cumulative: boolean;
+  /**
+   * What an entry is, which is how the graph reads it (§7.1): `events` is
+   * something that happened, `gauge` a level that was sampled, `total` a
+   * change whose running sum is the line.
+   */
+  shape: "events" | "gauge" | "total";
   /** The lines the graph draws; absent when it draws one. */
   series?: TelemetrySeriesDef[];
   entries: number;

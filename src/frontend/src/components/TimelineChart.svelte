@@ -26,11 +26,12 @@
     valueLabel: string;
     mode: "bars" | "line";
     /**
-     * What a column stands for when more points land in it than there are
-     * pixels: the tallest of them, or the last. A running total is read as
-     * "where the line had got to", so it takes the last (§7.1).
+     * What an entry is (§7.1), which decides two things here: what a column
+     * stands for when more points land in it than there are pixels — the
+     * tallest of them, or, for a running total, where the line had got to —
+     * and what an idle stretch means.
      */
-    aggregate?: "max" | "last";
+    shape?: "events" | "gauge" | "total";
     /** Dimmed rather than blanked while a reload is in flight. */
     loading?: boolean;
   }
@@ -40,9 +41,11 @@
     unit,
     valueLabel,
     mode,
-    aggregate = "max",
+    shape = "gauge",
     loading = false,
   }: Props = $props();
+
+  const aggregate = $derived(shape === "total" ? "last" : "max");
 
   const HEIGHT = 212;
   const PAD = { top: 14, right: 14, bottom: 22, left: 68 };
@@ -204,43 +207,86 @@
     Math.max(1, Math.min(31, 2 * Math.floor(slots.length / 24) + 1)),
   );
 
+  interface Mark {
+    /** Where on the plot, in px. */
+    x: number;
+    value: number;
+  }
+
   interface Drawn {
-    /** Slot indexes this line actually has a value in. */
-    at: number[];
-    /** The value drawn at each of them, smoothed when there is enough to. */
-    smoothed: number[];
+    /** Where the line goes, with the floor written in across idle gaps. */
+    path: Mark[];
+    /** The points that are entries; the injected zeros are not marked. */
+    marks: Mark[];
+  }
+
+  /**
+   * An idle stretch on an `events` report is not one request that took an
+   * hour — it is no requests at all, and the line says so by going to the
+   * floor and staying there until the next one (§11.2). A `gauge` and a
+   * running `total` both carry across a gap instead: the level did not fall
+   * to nothing because the app stopped looking, and a total that nothing was
+   * added to is unchanged, not zero.
+   *
+   * "Idle" is measured against the report's own rhythm rather than a fixed
+   * clock, so a report that only ever fires twice an hour is not perforated
+   * for it. The floor of three columns keeps a one-column stutter from
+   * drawing a notch.
+   */
+  const GAP_FLOOR_COLUMNS = 3;
+  const GAP_MULTIPLE = 6;
+
+  function withFloor(marks: Mark[]): Mark[] {
+    if (shape !== "events" || marks.length < 2) return marks;
+    const steps: number[] = [];
+    for (let i = 1; i < marks.length; i++) {
+      steps.push((marks[i]!.x - marks[i - 1]!.x) / slotWidth);
+    }
+    const median = [...steps].sort((a, b) => a - b)[Math.floor(steps.length / 2)] ?? 1;
+    const threshold = Math.max(GAP_FLOOR_COLUMNS, median * GAP_MULTIPLE);
+
+    const path: Mark[] = [];
+    for (let i = 0; i < marks.length; i++) {
+      const previous = marks[i - 1];
+      if (previous && (marks[i]!.x - previous.x) / slotWidth > threshold) {
+        // Down one column after the last entry, along the floor, and up one
+        // column before the next: the flat between them is the quiet.
+        path.push({ x: previous.x + slotWidth, value: 0 });
+        path.push({ x: marks[i]!.x - slotWidth, value: 0 });
+      }
+      path.push(marks[i]!);
+    }
+    return path;
   }
 
   const drawn = $derived.by<Drawn[]>(() =>
     lines.map((_line, index) => {
-      const at: number[] = [];
+      const marks: Mark[] = [];
       const raw: number[] = [];
-      slots.forEach((slot, slotIndex) => {
+      for (const slot of slots) {
         const cell = slot.cells[index];
-        if (!cell) return;
-        at.push(slotIndex);
+        if (!cell) continue;
+        marks.push({ x: centre(slot), value: cell.value });
         raw.push(cell.value);
-      });
-      const smoothed = raw.map((value, position) => {
-        if (smoothWindow === 1) return value;
+      }
+      const smoothed = marks.map((mark, position) => {
+        if (smoothWindow === 1) return mark;
         const half = (smoothWindow - 1) / 2;
         const from = Math.max(0, position - half);
         const to = Math.min(raw.length - 1, position + half);
         let total = 0;
         for (let i = from; i <= to; i++) total += raw[i]!;
-        return total / (to - from + 1);
+        return { x: mark.x, value: total / (to - from + 1) };
       });
-      return { at, smoothed };
+      return { path: withFloor(smoothed), marks: smoothed };
     }),
   );
 
-  function path(line: Drawn, values: number[]): string {
-    return line.at
+  function path(marks: Mark[]): string {
+    return marks
       .map(
-        (slotIndex, position) =>
-          `${position === 0 ? "M" : "L"}${centre(slots[slotIndex]!).toFixed(1)} ${y(
-            values[position]!,
-          ).toFixed(1)}`,
+        (mark, position) =>
+          `${position === 0 ? "M" : "L"}${mark.x.toFixed(1)} ${y(mark.value).toFixed(1)}`,
       )
       .join(" ");
   }
@@ -386,26 +432,26 @@
       {/each}
     {:else}
       {#each drawn as line, index (lines[index]?.key ?? index)}
-        {#if line.at.length > 0}
+        {#if line.path.length > 0}
           {#if showArea}
             <path
               class="area"
               data-series={index}
-              d={`${path(line, line.smoothed)} L${centre(
-                slots[line.at[line.at.length - 1]!]!,
-              ).toFixed(1)} ${PAD.top + plotHeight} L${centre(
-                slots[line.at[0]!]!,
-              ).toFixed(1)} ${PAD.top + plotHeight} Z`}
+              d={`${path(line.path)} L${line.path[line.path.length - 1]!.x.toFixed(
+                1,
+              )} ${PAD.top + plotHeight} L${line.path[0]!.x.toFixed(1)} ${
+                PAD.top + plotHeight
+              } Z`}
             />
           {/if}
-          <path class="line" data-series={index} d={path(line, line.smoothed)} />
+          <path class="line" data-series={index} d={path(line.path)} />
           {#if showMarkers}
-            {#each line.at as slotIndex, position (slotIndex)}
+            {#each line.marks as mark (mark.x)}
               <circle
                 class="marker"
                 data-series={index}
-                cx={centre(slots[slotIndex]!)}
-                cy={y(line.smoothed[position]!)}
+                cx={mark.x}
+                cy={y(mark.value)}
                 r="4"
               />
             {/each}

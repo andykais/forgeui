@@ -20,10 +20,12 @@ import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
 import { ModelLibrary } from "./models/library.ts";
 import { SampleStore } from "./samples/store.ts";
+import { backfillOutputSizes } from "./telemetry/backfill.ts";
 import { openTelemetryDatabase } from "./telemetry/db.ts";
 import { TelemetryStore } from "./telemetry/store.ts";
 import { MemoryMonitor } from "./telemetry/memory.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
+import { logError } from "./log.ts";
 import { APP_VERSION } from "./version.ts";
 
 export interface StartAppOptions {
@@ -170,6 +172,17 @@ async function startAppWith(
   // durations the ETA wants, so read them rather than start from nothing.
   seedNodeTimingsIfEmpty({ db, paths }).catch((error) => {
     console.error("could not seed the node timings:", error);
+  });
+  // The size report can be given the history it predates: every output
+  // already indexed, at the size it is on disk and the time it was made
+  // (§7.1). In the background, because it stats a file per output and the
+  // UI must not wait for a gallery-sized walk.
+  backfillOutputSizes({ db, telemetry, paths }).catch((error) => {
+    logError(
+      `could not backfill the output sizes: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
   });
 
   if (!options.quiet) {

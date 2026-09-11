@@ -4,6 +4,7 @@ import { startTestApp, type TestApp, withTestApp } from "../fixtures/app.ts";
 import { writeFakeSafetensors } from "../fixtures/models.ts";
 import type { ReportView } from "../../src/telemetry/store.ts";
 import type { TelemetryEntryRow } from "../../src/telemetry/queries.ts";
+import { backfillOutputSizes } from "../../src/telemetry/backfill.ts";
 
 /**
  * The telemetry reports through their routes (§7.1, §12). Every assertion
@@ -89,11 +90,11 @@ Deno.test("the catalogue names five reports and what each one can be filtered by
       "telemetry_size",
     ]);
     assertEquals(body.reports.map((report) => report.title), [
-      "API request duration",
-      "Output size",
-      "Model size",
+      "API Request Duration",
+      "Output Size",
+      "Model Size",
       "Memory Usage",
-      "Size of the telemetry log",
+      "Telemetry Log Size",
     ]);
     assert(body.bytes > 0, "the log has a size");
 
@@ -122,11 +123,12 @@ Deno.test("the catalogue names five reports and what each one can be filtered by
     assertEquals(byId.get("api_requests")!.unit, "ms");
     assertEquals(byId.get("output_size")!.unit, "bytes");
 
-    // The graph reads both of these off the catalogue (§7.1): what a line
-    // plots, and how many lines there are.
-    assertEquals(byId.get("output_size")!.cumulative, true);
-    assertEquals(byId.get("model_size")!.cumulative, true);
-    assertEquals(byId.get("api_requests")!.cumulative, false);
+    // The graph reads both of these off the catalogue (§7.1): what an entry
+    // is, and how many lines there are.
+    assertEquals(byId.get("output_size")!.shape, "total");
+    assertEquals(byId.get("model_size")!.shape, "total");
+    assertEquals(byId.get("api_requests")!.shape, "events");
+    assertEquals(byId.get("memory")!.shape, "gauge");
     assertEquals(byId.get("memory")!.series, [
       { key: "vram", label: "VRAM" },
       { key: "ram", label: "RAM" },
@@ -408,4 +410,101 @@ Deno.test("a model scan records what it added, and a later one what it lost", as
     await app.dispose();
     await Deno.remove(folders, { recursive: true });
   }
+});
+
+Deno.test("outputs from before the report existed are backfilled at boot", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "forgeui-backfill-" });
+  try {
+    // One app generates, and then its telemetry log is thrown away — which
+    // is the state every library that predates this report is in (§7.1).
+    const first = await startTestApp({
+      dataDir,
+      comfy: true,
+      keepDataDir: true,
+    });
+    const submitted = await first.json<{ id: string }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "krea2",
+        params: { prompt: "a backfill test", size: [64, 64] },
+      }),
+    });
+    const done = await awaitJob(first, submitted.id);
+    assertEquals(done.status, "done");
+    const before = await entries(first, "output_size", "limit=50");
+    assertEquals(before.entries.length, done.outputs.length);
+    const size = before.entries[0]!.value;
+    const at = before.entries[0]!.at;
+    await first.dispose();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await Deno.remove(join(dataDir, `telemetry.db${suffix}`)).catch(() => {});
+    }
+
+    // The next boot reads the outputs back and writes the entries the log
+    // never had, stamped with when the generation actually happened.
+    const second = await startTestApp({ dataDir, keepDataDir: true });
+    try {
+      const deadline = Date.now() + 5000;
+      let page = await entries(second, "output_size", "limit=50");
+      while (page.entries.length === 0) {
+        if (Date.now() > deadline) throw new Error("the backfill never ran");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        page = await entries(second, "output_size", "limit=50");
+      }
+      assertEquals(page.entries.length, done.outputs.length);
+      const entry = page.entries[0]!;
+      assertEquals(entry.label, before.entries[0]!.label);
+      assertEquals(entry.value, size);
+      // The entry sits where the output was made, not where the boot was.
+      assertEquals(entry.at, at);
+      assertEquals(entry.data.backfilled, true);
+      assertEquals(entry.family, "krea2");
+
+      // Booting again does not record any of it twice.
+      const backfilled = await backfillOutputSizes({
+        db: second.db,
+        telemetry: second.telemetry,
+        paths: second.paths,
+      });
+      assertEquals(backfilled.recorded, 0);
+      assertEquals(
+        (await entries(second, "output_size", "limit=50")).entries.length,
+        done.outputs.length,
+      );
+    } finally {
+      await second.dispose();
+    }
+  } finally {
+    await Deno.remove(dataDir, { recursive: true });
+  }
+});
+
+Deno.test("an output whose file is gone is not given a size", async () => {
+  await withTestApp(async (app) => {
+    const submitted = await app.json<{ id: string }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "krea2",
+        params: { prompt: "a missing file", size: [64, 64] },
+      }),
+    });
+    const done = await awaitJob(app, submitted.id);
+    assertEquals(done.status, "done");
+
+    // The row outlives the file until `reindex` settles it; a report of
+    // sizes does not guess at one (§7.1).
+    const output = await app.json<{ path: string }>(
+      `/api/outputs/${done.outputs[0]}`,
+    );
+    await Deno.remove(join(app.paths.root, output.path));
+    app.telemetry.db.exec("DELETE FROM entries WHERE report = 'output_size'");
+
+    const result = await backfillOutputSizes({
+      db: app.db,
+      telemetry: app.telemetry,
+      paths: app.paths,
+    });
+    assertEquals(result.recorded, done.outputs.length - 1);
+    assertEquals(result.missing, 1);
+  }, { comfy: true });
 });
