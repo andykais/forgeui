@@ -3,6 +3,7 @@ import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
 import { delay } from "@std/async/delay";
 import {
+  deleteModelFile,
   listModelFiles,
   markModelSeen,
   type ModelFileRow,
@@ -171,6 +172,17 @@ export class ModelHasher {
       this.#publish();
     }
     return queued;
+  }
+
+  /**
+   * Forget what this path hashed to, so the next `enqueue` reads it again.
+   * The re-hash decision is deliberately a cache — an untouched file keeps
+   * its hash, which is what makes a restart cheap — so re-reading one on
+   * purpose means dropping its record first (§8.1).
+   */
+  forget(path: string): void {
+    this.#files.delete(path);
+    deleteModelFile(this.#db, path);
   }
 
   /** Back to an empty pass: counted work, bytes, and what failed last time. */

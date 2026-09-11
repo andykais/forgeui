@@ -776,7 +776,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   multi-select or bulk edits in v1; family is set from the same picker on the
   card, in the table's Family column, or on the model page.
 - Model detail page as described in §8.1: header with Copy path, full sha256
-  on its own line (`user-select: all`, no truncation, no button), edit-in-place
+  on its own line (`user-select: all`, no truncation, no button), **Re-read
+  this file** and lookups on **civitaiarchive** and **civitai** built from
+  that sha256 — the one identifier that survives a rename or a refiling.
+  Re-read is a debugging action: it reads the header and the hash again
+  past both caches, which is the only way to correct a wrong cached answer,
+  since the ordinary Rescan exists precisely to skip files that have not
+  moved. Nothing is sent anywhere; the lookups are ordinary links.
+  Continuing: edit-in-place
   display name / family combo / tags / notes; Samples strip (with import drop
   zone and Civitai URL field; "Set as thumbnail" on a sample's hover menu);
   filtered gallery beneath.
@@ -835,8 +842,17 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   behind one `N more` control with its own search. Choosing more than one
   narrows — a model has to carry all of them. Every picker's list — models,
   LoRAs, families — answers to the up and down arrows and to Enter, from the
-  search box, so choosing never needs the mouse. The highlight starts again
-  at the top whenever the search narrows the list.
+  search box, so choosing never needs the mouse. The highlight is a ring
+  round the whole option, inset so it cannot shift the row, and it starts
+  again at the top whenever the search narrows the list.
+- A **LoRA row carries its own model's family**, not the workflow's: they are
+  the same word on every row only by coincidence, and a LoRA nobody has filed
+  read as the workflow's family the moment it was chosen, having said `unset`
+  in the list a second earlier.
+- The pictures in the pickers follow new outputs: a generation gives every
+  model it used a newer latest-generation, so the model lists are refetched
+  once the outputs stop arriving. The server resolves which picture a model
+  gets (§8.1), so the client asks rather than guessing.
 - Param panels are narrow (360px) so results stay visible; textareas
   auto-grow.
 - Picking a **model** hands the caret to the prompt: that is the start of
@@ -977,11 +993,13 @@ GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q     q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+GET  /api/models?kind&class&family&q&tags&hidden  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+                                        tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+PATCH /api/models/:hash                 display_name, family, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+POST /api/models/:hash/rescan           re-read this one file's header and hash, past both caches (§8.1); returns the model
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup

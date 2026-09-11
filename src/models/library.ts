@@ -333,6 +333,34 @@ export class ModelLibrary {
     };
   }
 
+  /**
+   * Read one model's file again from scratch: the header and the hash, both
+   * of them, ignoring every cache that would otherwise say "nothing has
+   * changed here". That is the point — it exists for when a cached answer is
+   * wrong, which no amount of re-running the ordinary scan would fix, since
+   * the ordinary scan's whole job is to skip files that have not moved.
+   *
+   * The hash can come back different (the file really was edited), so the
+   * model is resolved by path afterwards rather than by the id it came in
+   * as, which may no longer name anything.
+   */
+  async rescanOne(id: string): Promise<ModelDetail> {
+    const view = this.require(id);
+    const scanned = this.scanner.registry.get(view.path);
+    if (!scanned) throw new ModelNotFoundError(id);
+
+    await this.#probe([scanned], true);
+    this.hasher.forget(scanned.path);
+    this.hasher.enqueue([scanned]);
+    this.hasher.start();
+    await this.hasher.idle();
+
+    const after = this.get(pathId(scanned.path));
+    if (!after) throw new ModelNotFoundError(id);
+    log(`models: re-read ${scanned.name} — ${after.family}`);
+    return after;
+  }
+
   require(id: string): ModelDetail {
     const view = this.get(id);
     if (!view) throw new ModelNotFoundError(id);
@@ -489,12 +517,15 @@ export class ModelLibrary {
    * every one of them sat at `unset` forever — there is nothing else to
    * infer it from, and nobody is going to file a hundred of them by hand.
    */
-  async #probe(models: readonly ScannedModel[]): Promise<void> {
+  async #probe(
+    models: readonly ScannedModel[],
+    force = false,
+  ): Promise<void> {
     const overrides = this.#config.config.model_classes;
     for (const model of models) {
       const modelClass = classOf(model.kind, overrides);
       if (modelClass !== "diffusion" && modelClass !== "lora") continue;
-      if (!needsProbe(this.#probes.get(model.path), model)) continue;
+      if (!force && !needsProbe(this.#probes.get(model.path), model)) continue;
       let arch: string | null = null;
       try {
         arch = await probeFamily(model.path);

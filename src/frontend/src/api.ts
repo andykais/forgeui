@@ -200,6 +200,11 @@ export const api = {
       (body) => body.models,
     ),
   model: (id: string) => request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
+  /** Re-read one model's file from scratch (§8.1); a debugging action. */
+  rescanModel: (id: string) =>
+    request<ModelDetail>(`/api/models/${encodeURIComponent(id)}/rescan`, {
+      method: "POST",
+    }),
   patchModel: (
     id: string,
     patch: {

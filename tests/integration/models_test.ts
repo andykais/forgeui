@@ -436,6 +436,47 @@ Deno.test("a hashed model can be named, filed and tagged", async () => {
   });
 });
 
+Deno.test("one model can be re-read past the caches", async () => {
+  await withModels(async (app, fixtures) => {
+    // A LoRA whose keys actually say what it is.
+    await writeFakeSafetensors(join(fixtures.loras, "fluxy.safetensors"), {
+      name: "fluxy",
+      tensors: ["lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight"],
+    });
+    await scanAndHash(app);
+    const model = (await models(app, "?kind=loras")).models.find((entry) =>
+      entry.name === "fluxy.safetensors"
+    )!;
+    assertEquals(model.family, "flux");
+
+    // An ordinary rescan reads nothing: its whole job is to skip files that
+    // have not moved, which is exactly why it cannot fix a wrong cached
+    // answer. A pass with nothing to do is 0 of 0 (§8.1).
+    await scanAndHash(app);
+    assertEquals((await models(app)).progress.hashing.total, 0);
+
+    // Re-reading one file does read it, cache or no cache.
+    const reread = await app.json<ModelView>(
+      `/api/models/${model.id}/rescan`,
+      { method: "POST" },
+    );
+    assertEquals(reread.family, "flux");
+    assertEquals(reread.hash, model.hash, "the file did not change");
+    assertEquals(
+      (await models(app)).progress.hashing.total,
+      1,
+      "the re-read should have hashed exactly one file",
+    );
+
+    // A model that is not there is a 404, not a crash.
+    const missing = await app.fetch(`/api/models/${"f".repeat(64)}/rescan`, {
+      method: "POST",
+    });
+    assertEquals(missing.status, 404);
+    await missing.body?.cancel();
+  });
+});
+
 Deno.test("a bad family or an unknown model is refused", async () => {
   await withModels(async (app) => {
     await scanAndHash(app);

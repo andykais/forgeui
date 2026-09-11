@@ -96,6 +96,9 @@
 
   .surface {
     all: unset;
+    /* `all` resets `box-sizing` to `content-box`; keep the global border-box
+       so anything bordered here stays inside its 100% box. */
+    box-sizing: border-box;
     display: block;
     width: 100%;
     height: 100%;

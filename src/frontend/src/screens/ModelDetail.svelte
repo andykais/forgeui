@@ -32,6 +32,30 @@
   let outputs = $state<Output[]>([]);
   let selectedId = $state<string | null>(null);
   let importing = $state(false);
+  let rereading = $state(false);
+
+  /**
+   * The debugging action of §8.1: when a model is filed as something it
+   * plainly is not, this says whether the file or the cache was wrong.
+   */
+  async function reread() {
+    if (!model) return;
+    rereading = true;
+    const before = model.family;
+    try {
+      model = await api.rescanModel(model.id);
+      await app.refreshModels();
+      toasts.message(
+        model.family === before
+          ? `Re-read it: still ${model.family}`
+          : `Re-read it: ${before} → ${model.family}`,
+      );
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not re-read it");
+    } finally {
+      rereading = false;
+    }
+  }
   let nameDraft = $state("");
   let notesDraft = $state("");
   let tagDraft = $state("");
@@ -353,6 +377,42 @@
         </div>
 
         <!--
+          The sha256 is what these two look a model up by, which is the one
+          identifier that survives being renamed or refiled. Nothing is sent
+          anywhere: they are ordinary links, opened when clicked (§8.1).
+        -->
+        {#if model.hash}
+          <div class="lookups mono dim">
+            <!--
+              Re-reads the file, header and hash both, past the caches the
+              ordinary scan uses to skip files that have not moved — which is
+              exactly why the ordinary Rescan cannot fix a wrong cached
+              answer (§8.1).
+            -->
+            <button
+              class="reread"
+              disabled={rereading}
+              title="Read this file again: its header and its hash, ignoring what was cached"
+              onclick={reread}
+            >
+              {rereading ? "Re-reading…" : "Re-read this file"}
+            </button>
+            <span class="spacer"></span>
+            look up
+            <a
+              href={`https://civitaiarchive.com/sha256/${model.hash}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >civitaiarchive</a>
+            <a
+              href={`https://civitai.red/search/models?sortBy=models_v9&query=${model.hash}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >civitai</a>
+          </div>
+        {/if}
+
+        <!--
           What a LoRA's strength sliders reach in the panel (§8.1). Typed by
           hand, because only the person who trained or downloaded it knows
           how far it wants to be pushed; blank is the -2..2 default.
@@ -617,6 +677,31 @@
     align-items: center;
     gap: 6px;
     font-size: 11px;
+  }
+
+  .lookups {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .reread {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .reread:hover:not(:disabled) {
+    color: var(--text-2);
+    background: var(--control);
+  }
+
+  .lookups a {
+    color: var(--accent);
+  }
+
+  .lookups a:hover {
+    text-decoration: underline;
   }
 
   /* Full sha256 on its own line: selectable, never truncated (§11.2). */

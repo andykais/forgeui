@@ -70,6 +70,18 @@
       : candidates.filter((model) => tags.every((tag) => model.tags.includes(tag))),
   );
 
+  /**
+   * The family of the model this row names — not the workflow's. The badge
+   * used to show `param.filter.family`, which is the same word on every row
+   * regardless of what was added: a LoRA nobody has filed read as KREA2 the
+   * moment it was chosen, having read `unset` in the list a second earlier.
+   */
+  function familyOf(name: string): string | null {
+    const model = models.find((entry) => entry.name === name);
+    if (!model || model.family === "unset") return null;
+    return model.family;
+  }
+
   /** What the sliders on a row reach, from the model it names (§8.1). */
   function boundsOf(name: string): { min: number; max: number } {
     const model = models.find((entry) => entry.name === name);
@@ -183,7 +195,11 @@
         {:else}
           <span class="name" title={row.name}>{row.name}</span>
         {/if}
-        {#if family}<span class="badge accent">{family}</span>{/if}
+        {#if familyOf(row.name)}
+          <span class="badge accent">{familyOf(row.name)}</span>
+        {:else}
+          <span class="badge" title="Nobody has filed this one">unset</span>
+        {/if}
         <button
           class="icon"
           title="Remove"

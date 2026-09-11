@@ -834,6 +834,11 @@ export function upsertModelFile(db: Database, file: ModelFileRow): void {
   ).run(file.path, file.size, file.mtime, file.hash, file.hashed_at);
 }
 
+/** Drop one file's record, so the next scan hashes it again (§8.1). */
+export function deleteModelFile(db: Database, path: string): void {
+  db.prepare(`DELETE FROM model_files WHERE path = ?`).run(path);
+}
+
 export function upsertModel(db: Database, model: NewModel): void {
   db.prepare(`DELETE FROM models WHERE path = ? AND hash != ?`).run(
     model.path,

@@ -59,6 +59,8 @@ class AppState {
 
   #socket: WebSocket | null = null;
   #reconnect: ReturnType<typeof setTimeout> | null = null;
+  /** Coalesces the model refetch a burst of finished outputs would ask for. */
+  #modelRefresh: ReturnType<typeof setTimeout> | null = null;
 
   get comfyReady(): boolean {
     return this.comfy?.state === "running";
@@ -268,10 +270,28 @@ class AppState {
             lastJobAt: output.created_at,
             lastOutputId: output.id,
           });
+          // Every model this output used has a newer latest-generation, so
+          // the picture beside it in the pickers is out of date (§8.1).
+          if (output.models.length > 0) this.#refreshModelsSoon();
         }
         break;
       }
     }
+  }
+
+  /**
+   * Refetch the model lists once the outputs stop arriving. The thumbnail a
+   * model is pictured by is resolved on the server — which of its sample and
+   * its latest generation, and whether one was chosen by hand — so the
+   * client asks rather than guessing, and asking once after a batch beats
+   * four requests per image.
+   */
+  #refreshModelsSoon(): void {
+    if (this.#modelRefresh !== null) clearTimeout(this.#modelRefresh);
+    this.#modelRefresh = setTimeout(() => {
+      this.#modelRefresh = null;
+      void this.refreshModels();
+    }, 600);
   }
 
   #mergeJob(job: Job): void {

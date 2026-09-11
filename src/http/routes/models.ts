@@ -177,6 +177,14 @@ export function modelRoutes(ctx: AppContext): Route[] {
       handler: (_req, { params }) => json(ctx.models.require(params.hash!)),
     },
     {
+      // Re-read one model's file, header and hash both, ignoring the caches
+      // that would otherwise skip it. For when a cached answer is wrong.
+      method: "POST",
+      path: "/api/models/:hash/rescan",
+      handler: async (_req, { params }) =>
+        json(await ctx.models.rescanOne(params.hash!)),
+    },
+    {
       method: "PATCH",
       path: "/api/models/:hash",
       handler: async (req, { params }) => {

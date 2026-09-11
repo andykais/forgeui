@@ -106,6 +106,13 @@
 
   .thumb {
     all: unset;
+    /*
+     * `all: unset` takes `box-sizing` back to its initial `content-box`,
+     * overriding the global `border-box` — so the running tile, the only one
+     * with a border, measured 70px in a 68px strip and had its bottom two
+     * pixels, dashes and all, clipped by the strip's `overflow-y: hidden`.
+     */
+    box-sizing: border-box;
     position: relative;
     flex: 0 0 auto;
     width: 68px;
