@@ -5,7 +5,8 @@ import {
   ModelHasher,
   unchanged,
 } from "../../src/models/hasher.ts";
-import { decodePathId, pathId } from "../../src/models/library.ts";
+import { decodePathId, needsProbe, pathId } from "../../src/models/library.ts";
+import { DETECTOR_VERSION } from "../../src/models/probe.ts";
 import { ModelScanner, type ScannedModel } from "../../src/models/scan.ts";
 import type { ModelRow } from "../../src/db/queries.ts";
 import { openDatabase } from "../../src/db/db.ts";
@@ -121,7 +122,11 @@ Deno.test("re-hashing is skipped unless path, size or mtime changed", async () =
     hasher.start();
     await hasher.idle();
     assertEquals(hashed.map((entry) => entry.fresh), [false, false]);
-    assertEquals(hasher.progress.done, 2, "no new work was queued");
+    // The counters describe the pass that just ran, not every pass ever: a
+    // pass with nothing to do is 0 of 0. Carrying the last pass's totals over
+    // is what made a second rescan report "74/86".
+    assertEquals(hasher.progress.total, 0, "no new work was queued");
+    assertEquals(hasher.progress.done, 0);
 
     // A rewritten file has a new mtime, and is hashed again.
     await writeFakeSafetensors(join(checkpoints, "sd15.safetensors"), {
@@ -136,6 +141,9 @@ Deno.test("re-hashing is skipped unless path, size or mtime changed", async () =
       hashed.filter((entry) => entry.fresh).map((entry) => entry.name),
       ["sd15.safetensors"],
     );
+    // One file changed, so this pass is one of one — not three of three.
+    assertEquals(hasher.progress.done, 1);
+    assertEquals(hasher.progress.total, 1);
 
     // One row per path, even though the hash changed.
     assertEquals(
@@ -298,4 +306,34 @@ Deno.test("every folder a diffusion model can live in is one class", () => {
   // The config override wins over the table.
   assertEquals(classOf("gligen", { gligen: "diffusion" }), "diffusion");
   assertEquals(classOf("checkpoints", { checkpoints: "other" }), "other");
+});
+
+Deno.test("a header is re-read when the file moves or the detector does", () => {
+  const file = { size: 4096, mtime: 1_780_000_000_000 };
+  const probed = {
+    path: "/models/checkpoints/sd15.safetensors",
+    size: file.size,
+    mtime: file.mtime,
+    arch: "sd15",
+    detector: DETECTOR_VERSION,
+    probed_at: 1_780_000_000_000,
+  };
+
+  // Nothing has moved: the cached answer stands, which is what keeps a
+  // rescan of a full model folder cheap.
+  assertEquals(needsProbe(probed, file), false);
+  // Never read at all.
+  assertEquals(needsProbe(undefined, file), true);
+  // The file changed under us.
+  assertEquals(needsProbe(probed, { ...file, size: 8192 }), true);
+  assertEquals(needsProbe(probed, { ...file, mtime: 1 }), true);
+  // The file is the same, but the answer came from a detector that had not
+  // heard of the families this one knows. Without this a family added in a
+  // later build never reached a model already on disk: the user rescanned,
+  // and nothing changed.
+  assertEquals(needsProbe({ ...probed, detector: 0 }, file), true);
+  assertEquals(
+    needsProbe({ ...probed, detector: DETECTOR_VERSION - 1 }, file),
+    true,
+  );
 });

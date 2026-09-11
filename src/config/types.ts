@@ -69,6 +69,13 @@ export interface UiConfig {
   tile_size: Record<UiScreen, TileSize>;
   sidebar_collapsed: Record<UiScreen, boolean>;
   filmstrip_collapsed: Record<UiScreen, boolean>;
+  /**
+   * The order the user dragged the workflows into, most wanted first. Ids
+   * only, and only the ones that have been moved: anything absent keeps its
+   * place after them, by name, so adding a workflow does not need this list
+   * touched and deleting one leaves no hole (§4.6).
+   */
+  workflow_order: string[];
 }
 
 export interface Config {
@@ -96,4 +103,5 @@ export interface PartialUiConfig {
   tile_size?: Partial<Record<UiScreen, TileSize>>;
   sidebar_collapsed?: Partial<Record<UiScreen, boolean>>;
   filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
+  workflow_order?: string[];
 }

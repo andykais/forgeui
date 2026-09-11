@@ -57,6 +57,12 @@
         <span class="badge hashing mono" title="Reading the file to identify it">
           hashing
         </span>
+      {:else if model.hash_error}
+        <!-- Not on its way: stopped, and saying why rather than reading
+             "hashing" for ever. -->
+        <span class="badge failed mono" title={`Could not read it: ${model.hash_error}`}>
+          unreadable
+        </span>
       {:else}
         <!-- The card clips its own overflow to round the thumbnail, so this
              list is anchored in viewport coordinates rather than absolutely
@@ -160,6 +166,10 @@
   .badge.hashing {
     background: var(--accent-tint);
     color: var(--accent);
+  }
+
+  .badge.failed {
+    color: var(--error);
   }
 
 

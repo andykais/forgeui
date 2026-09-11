@@ -1,5 +1,6 @@
 <script lang="ts">
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import FileJson from "@lucide/svelte/icons/file-json";
   import Plus from "@lucide/svelte/icons/plus";
   import { api } from "../api.ts";
@@ -17,6 +18,30 @@
   let menuFor = $state<string | null>(null);
   let importing = $state(false);
   let fileInput: HTMLInputElement | undefined;
+  /**
+   * Reordering (§4.6): the row drags only from its grip, the same rule the
+   * LoRA rows follow — a row draggable everywhere means every click on a
+   * button in it starts a drag instead.
+   */
+  let dragging = $state<string | null>(null);
+  let over = $state<string | null>(null);
+  let grabbed = $state<string | null>(null);
+
+  /** Move the dragged row to where it was dropped, and save that order. */
+  function drop(onto: string) {
+    const from = dragging;
+    dragging = null;
+    over = null;
+    grabbed = null;
+    if (!from || from === onto) return;
+    const ids = workflows.map((workflow) => workflow.id);
+    const at = ids.indexOf(from);
+    const to = ids.indexOf(onto);
+    if (at < 0 || to < 0) return;
+    ids.splice(at, 1);
+    ids.splice(to, 0, from);
+    app.reorderWorkflows(ids);
+  }
 
   const workflows = $derived(app.workflows);
   const bundled = $derived(workflows.filter((w) => w.source === "bundled").length);
@@ -108,6 +133,7 @@
     <table>
       <thead>
         <tr>
+          <th class="grip-col"></th>
           <th class="thumb-col"></th>
           <th>Name</th>
           <th>Family</th>
@@ -121,12 +147,41 @@
       <tbody>
         {#each workflows as workflow (workflow.id)}
           <tr
+            class:dragging={dragging === workflow.id}
+            class:over={over === workflow.id && dragging !== workflow.id}
+            draggable={grabbed === workflow.id}
             onclick={() => navigate(`/workflows/${workflow.id}`)}
             tabindex="0"
             onkeydown={(event) => {
               if (event.key === "Enter") navigate(`/workflows/${workflow.id}`);
             }}
+            ondragstart={() => (dragging = workflow.id)}
+            ondragend={() => {
+              dragging = null;
+              over = null;
+              grabbed = null;
+            }}
+            ondragover={(event) => {
+              event.preventDefault();
+              over = workflow.id;
+            }}
+            ondrop={() => drop(workflow.id)}
           >
+            <td class="grip-col">
+              <!-- The only thing that arms the drag, so the row's own
+                   buttons and its click-through still work. -->
+              <span
+                class="grip"
+                title="Drag to reorder · this is the order the Generate picker uses"
+                role="presentation"
+                onpointerdown={() => (grabbed = workflow.id)}
+                onpointerup={() => (grabbed = null)}
+                onpointercancel={() => (grabbed = null)}
+                onclick={(event) => event.stopPropagation()}
+              >
+                <GripVertical size={13} />
+              </span>
+            </td>
             <td class="thumb-col">
               <span class="thumb">
                 {#if thumbnail(workflow.last_output_id)}
@@ -182,22 +237,49 @@
                     align="right"
                     onclose={() => (menuFor = null)}
                   >
+                    <!--
+                      Every one of these stops the click: the row navigates to
+                      the manifest page on click, and a menu option that let
+                      it through was overridden by it — "Open in ComfyUI"
+                      landed on the manifest page instead of the editor.
+                    -->
                     <button
                       class="option"
-                      onclick={() => navigate(`/comfy?workflow=${workflow.id}`)}
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        navigate(`/comfy?workflow=${workflow.id}`);
+                      }}
                     >
                       Open in ComfyUI
                     </button>
-                    <button class="option" onclick={() => duplicate(workflow.id)}>
+                    <button
+                      class="option"
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        duplicate(workflow.id);
+                      }}
+                    >
                       Duplicate
                     </button>
                     {#if workflow.source === "user" && workflow.has_bundled}
-                      <button class="option" onclick={() => reset(workflow.id)}>
+                      <button
+                        class="option"
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          reset(workflow.id);
+                        }}
+                      >
                         Reset to bundled
                       </button>
                     {/if}
                     {#if workflow.source === "user" && !workflow.has_bundled}
-                      <button class="option danger" onclick={() => remove(workflow.id)}>
+                      <button
+                        class="option danger"
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          remove(workflow.id);
+                        }}
+                      >
                         Delete
                       </button>
                     {/if}
@@ -291,6 +373,31 @@
 
   .thumb-col {
     width: 46px;
+  }
+
+  .grip-col {
+    width: 22px;
+    padding-right: 0;
+  }
+
+  .grip {
+    display: flex;
+    align-items: center;
+    color: var(--text-4);
+    cursor: grab;
+  }
+
+  .grip:hover {
+    color: var(--text-2);
+  }
+
+  tr.dragging {
+    opacity: 0.4;
+  }
+
+  /* Where it would land, rather than a row that merely looks hovered. */
+  tr.over td {
+    box-shadow: inset 0 2px 0 var(--accent);
   }
 
   .thumb {

@@ -13,6 +13,19 @@
  * something it depends on.
  */
 
+/**
+ * Bumped whenever anything below changes what a file is called. A probe row
+ * records the version that wrote it, so a scan re-reads every header the old
+ * detector answered rather than trusting a cache the new one disagrees with.
+ * Without it, adding a family fixed nothing for anybody who already had those
+ * models: their answers were decided once, by a build that had never heard of
+ * it, and no rescan would look again.
+ *
+ * 1. the families through `sd15`
+ * 2. `wan2` and `qwen-image`
+ */
+export const DETECTOR_VERSION = 2;
+
 /** Tensor names, the shape of each, and what the file says about itself. */
 export interface Header {
   names: Set<string>;

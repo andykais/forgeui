@@ -213,9 +213,18 @@
     <button class="danger" onclick={ondelete}>Delete</button>
   </div>
 
+  <!--
+    Rows, not a description list. Two reasons, and they point the same way.
+    The label sat in a 74px column that took a fifth of a 306px sidebar away
+    from the value, which is the part worth reading; it goes above instead,
+    and the value gets the whole width. And Firefox's plain-text serialiser
+    indents the contents of a `dd` by four spaces — every line, blank ones
+    included — whenever the selection spans the element, which is what a
+    drag across the sidebar does, so a copied prompt came back indented.
+  -->
   <section>
     <div class="label">Params</div>
-    <dl>
+    <div class="rows">
       {#snippet modelLink(link: { name: string; label: string; hash: string | null })}
         {#if link.hash}
           <a
@@ -231,42 +240,42 @@
         {/if}
       {/snippet}
 
-      <div class="row">
-        <dt>created</dt>
-        <dd class="mono">
+      <div class="field">
+        <div class="key">created</div>
+        <div class="mono">
           {absoluteTime(output.created_at)}
           <span class="dim">· {relativeTime(output.created_at)}</span>
-        </dd>
+        </div>
       </div>
-      <div class="row">
-        <dt>duration</dt>
-        <dd class="mono">
+      <div class="field">
+        <div class="key">duration</div>
+        <div class="mono">
           {duration(output.generation_ms ?? sidecar?.timing.total_ms ?? null)}
-        </dd>
+        </div>
       </div>
-      <div class="row">
-        <dt>workflow</dt>
-        <dd>
+      <div class="field">
+        <div class="key">workflow</div>
+        <div>
           {sidecar?.workflow?.name ?? output.workflow_id ?? "—"}
           {#if output.workflow_hash}
             <span class="dim mono">· {output.workflow_hash.slice(7, 13)}</span>
           {/if}
-        </dd>
+        </div>
       </div>
 
       <!-- Only the roles no param already names; the rest appear once, below. -->
       {#each otherModels as model (model.role + model.name)}
-        <div class="row">
-          <dt>{model.role}</dt>
-          <dd class="mono">{@render modelLink(model)}</dd>
+        <div class="field">
+          <div class="key">{model.role}</div>
+          <div class="mono">{@render modelLink(model)}</div>
         </div>
       {/each}
 
       {#each params as [key, value] (key)}
-        <div class="row">
-          <dt>{key}</dt>
+        <div class="field">
+          <div class="key">{key}</div>
           {#if isLoraList(value)}
-            <dd class="loras">
+            <div class="loras">
               {#each value as Record<string, unknown>[] as entry (entry.name)}
                 {@const lora = loraOf(entry)}
                 <span class="lora">
@@ -274,25 +283,18 @@
                   <span class="lora-strength mono dim">{lora.strength}</span>
                 </span>
               {/each}
-            </dd>
+            </div>
           {:else if typeof value === "string" && hashOfName.has(value)}
-            <dd class="mono">{@render modelLink(linkTo(value))}</dd>
+            <div class="mono">{@render modelLink(linkTo(value))}</div>
           {:else}
-            <!--
-              The value sits in a span of its own so that copying it gives
-              back what it says. Firefox's plain-text serialiser indents the
-              contents of a `dd` by four spaces — on every line, blank ones
-              included — whenever the selection spans the element, which is
-              exactly what `user-select: all` makes. A span inside the `dd`
-              keeps the description-list semantics and copies clean.
-            -->
-            <dd class="mono value"><span
-                class:selectable={selectable(key)}
-              >{render(value)}</span></dd>
+            <div
+              class="mono value"
+              class:selectable={selectable(key)}
+            >{render(value)}</div>
           {/if}
         </div>
       {/each}
-    </dl>
+    </div>
   </section>
 
   <section>
@@ -413,7 +415,7 @@
     color: var(--error);
   }
 
-  dl {
+  .rows {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -426,29 +428,31 @@
    * where a long prompt ends and the next param begins is a line you can see
    * rather than one you have to work out.
    */
-  .row {
-    display: grid;
-    grid-template-columns: 74px 1fr;
-    gap: 8px;
+  /*
+   * Not `.row`: that is a global utility meaning a flex row, and it laid the
+   * label and the value side by side again.
+   */
+  .field {
     background: var(--raised);
     border-radius: var(--radius-control);
-    padding: 4px 7px;
+    padding: 3px 7px 5px;
+    min-width: 0;
   }
 
-  dt {
+  /* Above its value, not beside it: the value is what is worth the width. */
+  .key {
     color: var(--text-4);
-    font-size: 11px;
-    padding-top: 1px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
   }
 
-  dd {
-    margin: 0;
+  .field > :not(.key) {
     color: var(--text-2);
     overflow-wrap: anywhere;
     min-width: 0;
   }
 
-  dd.value {
+  .value {
     white-space: pre-wrap;
   }
 

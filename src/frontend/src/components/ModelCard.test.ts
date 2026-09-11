@@ -32,6 +32,7 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     output_count: 12,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
     present: true,
     ...overrides,
   };

@@ -163,13 +163,20 @@ export const api = {
     }),
 
   models: (
-    query: { kind?: string; class?: string; family?: string; q?: string } = {},
+    query: {
+      kind?: string;
+      class?: string;
+      family?: string;
+      q?: string;
+      tags?: string;
+    } = {},
   ) => {
     const params = new URLSearchParams();
     if (query.kind) params.set("kind", query.kind);
     if (query.class) params.set("class", query.class);
     if (query.family) params.set("family", query.family);
     if (query.q) params.set("q", query.q);
+    if (query.tags) params.set("tags", query.tags);
     return request<{
       kind: string | null;
       class: string | null;

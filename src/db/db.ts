@@ -51,6 +51,25 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 4,
+    name: "probe detector version",
+    // Existing rows get 0, older than every real detector version, so the
+    // next scan re-reads them — which is the point: a family added after a
+    // file was probed never reached that file otherwise (§6).
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(model_probes)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("detector")) {
+        db.exec(
+          "ALTER TABLE model_probes ADD COLUMN detector INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

@@ -112,6 +112,7 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
     "tile_size",
     "sidebar_collapsed",
     "filmstrip_collapsed",
+    "workflow_order",
   ]);
   const ui: PartialUiConfig = {};
   pick(raw, "rail_expanded", ui, bool, where);
@@ -136,7 +137,27 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       bool,
     );
   }
+  if ("workflow_order" in raw) {
+    ui.workflow_order = stringList(
+      raw.workflow_order,
+      `${where}.workflow_order`,
+    );
+  }
   return ui;
+}
+
+/** A list of ids, deduplicated: the same workflow cannot be in two places. */
+function stringList(value: unknown, where: string): string[] {
+  if (!Array.isArray(value)) throw new ConfigError(`${where}: expected a list`);
+  const out: string[] = [];
+  for (const [i, entry] of value.entries()) {
+    if (typeof entry !== "string") {
+      throw new ConfigError(`${where}[${i}]: expected a string`);
+    }
+    const trimmed = entry.trim();
+    if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
 }
 
 /**

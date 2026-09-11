@@ -135,6 +135,10 @@ export class ModelHasher {
    * here rather than in the worker, so `total` counts only real work.
    */
   enqueue(models: readonly ScannedModel[]): number {
+    // A finished pass leaves its own totals behind. Adding to them made the
+    // next rescan read "74/86" — the tail of the last pass plus the head of
+    // this one — which describes no pass that ever ran.
+    if (!this.#running && this.#queue.length === 0) this.#reset();
     let queued = 0;
     for (const model of models) {
       if (this.#queued.has(model.path)) continue;
@@ -159,6 +163,15 @@ export class ModelHasher {
       this.#publish();
     }
     return queued;
+  }
+
+  /** Back to an empty pass: counted work, bytes, and what failed last time. */
+  #reset(): void {
+    this.#done = 0;
+    this.#total = 0;
+    this.#bytesDone = 0;
+    this.#bytesTotal = 0;
+    this.failures.clear();
   }
 
   /** Start the worker if it is not already going. Never throws. */

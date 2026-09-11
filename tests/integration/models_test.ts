@@ -343,9 +343,11 @@ Deno.test("hashing fills in identity, and only re-reads what changed", async () 
     assertEquals(checkpoint.kind, "checkpoints");
     assertEquals(checkpoint.present, true);
 
-    // A second pass has nothing to do.
+    // A second pass has nothing to do, and says so as 0 of 0 rather than
+    // carrying the last pass's totals forward.
     await scanAndHash(app);
-    assertEquals((await models(app)).progress.hashing.done, 3);
+    assertEquals((await models(app)).progress.hashing.done, 0);
+    assertEquals((await models(app)).progress.hashing.total, 0);
 
     // …until a file changes, which is decided on size and mtime.
     await writeFakeSafetensors(join(fixtures.checkpoints, CHECKPOINT), {
@@ -412,6 +414,25 @@ Deno.test("a hashed model can be named, filed and tagged", async () => {
     assertEquals((await models(app, "?family=sd15")).models.length, 1);
     assertEquals((await models(app, "?family=unset")).models.length, 2);
     assertEquals((await models(app, "?q=nothing")).models.length, 0);
+
+    // `tags` asks for tags and nothing else: `q=film` also matches the
+    // filename, where this only matches the tag.
+    assertEquals((await models(app, "?tags=film")).models.length, 1);
+    assertEquals((await models(app, "?tags=FILM")).models.length, 1);
+    // Several narrow rather than widen.
+    assertEquals((await models(app, "?tags=film,grain")).models.length, 1);
+    assertEquals((await models(app, "?tags=film,nope")).models.length, 0);
+    // A model with no tags is not matched by a tag search.
+    assertEquals((await models(app, "?tags=anything")).models.length, 0);
+    // An empty ask is not a tag everything carries.
+    assertEquals(
+      (await models(app, "?tags=")).models.length,
+      (await models(app)).models.length,
+    );
+    assertEquals(
+      (await models(app, "?tags=%20,%20")).models.length,
+      (await models(app)).models.length,
+    );
   });
 });
 

@@ -157,6 +157,7 @@ export function modelRoutes(ctx: AppContext): Route[] {
             class: modelClass,
             family: url.searchParams.get("family") ?? undefined,
             q: url.searchParams.get("q") ?? undefined,
+            tags: splitTags(url.searchParams.get("tags")),
           }),
           progress: ctx.models.progress,
         });
@@ -176,4 +177,17 @@ export function modelRoutes(ctx: AppContext): Route[] {
       },
     },
   ];
+}
+
+/**
+ * `?tags=portrait,anime` — comma separated, every one of them required. A
+ * lone comma or a stray space asks for nothing, so both are dropped rather
+ * than being matched as an empty tag that everything carries.
+ */
+function splitTags(raw: string | null): string[] | undefined {
+  if (raw === null) return undefined;
+  const tags = raw.split(",").map((tag) => tag.trim()).filter((tag) =>
+    tag.length > 0
+  );
+  return tags.length > 0 ? tags : undefined;
 }

@@ -51,6 +51,7 @@ CREATE TABLE model_probes (      -- derived: what a file's header says it is
   path TEXT PRIMARY KEY,
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,  -- re-probe when either moves
   arch TEXT,                      -- a FAMILIES entry, or NULL when unrecognised
+  detector INTEGER NOT NULL DEFAULT 0,  -- re-probe when the detector moves too (§6)
   probed_at INTEGER NOT NULL
 );
 

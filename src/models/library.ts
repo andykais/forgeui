@@ -26,7 +26,7 @@ import type { ModelClass } from "../config/types.ts";
 import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
-import { probeFamily } from "./probe.ts";
+import { DETECTOR_VERSION, probeFamily } from "./probe.ts";
 import { log, seconds } from "../log.ts";
 import {
   ModelScanner,
@@ -86,6 +86,13 @@ export interface ModelView {
   last_used_at: number | null;
   /** True until the hash lands; the UI shows the `hashing` badge (§8.1). */
   hashing: boolean;
+  /**
+   * Why the hasher could not read this file, when it could not. A failed
+   * read leaves no `models` row, and a model with no row is "hashing" — so
+   * without this a file the hasher will never get through wears the badge
+   * for ever and says nothing about why (§8.1).
+   */
+  hash_error: string | null;
   /** False when the row survives but the file is no longer on disk. */
   present: boolean;
 }
@@ -101,6 +108,12 @@ export interface ModelListFilters {
   class?: ModelClass;
   family?: string;
   q?: string;
+  /**
+   * Tags, all of which a model must carry. `q` reaches tags too, but only
+   * mixed in with names — asking for a tag and meaning it is a different
+   * question, and one a name that happens to contain the word cannot answer.
+   */
+  tags?: string[];
 }
 
 export interface FamilyCount {
@@ -115,6 +128,22 @@ export interface FamilyCount {
  */
 export const DEFAULT_STRENGTH_MIN = -2;
 export const DEFAULT_STRENGTH_MAX = 2;
+
+/**
+ * Whether a file's header has to be read again. The file must be unchanged
+ * *and* the cached answer must have come from the detector running now: a
+ * family added since is a different answer to the same question, and a cache
+ * that cannot tell those apart is why adding one changed nothing for models
+ * already on disk — no rescan would ever look at them again (§6).
+ */
+export function needsProbe(
+  seen: ModelProbeRow | undefined,
+  model: Pick<ScannedModel, "size" | "mtime">,
+): boolean {
+  if (!seen) return true;
+  if (seen.size !== model.size || seen.mtime !== model.mtime) return true;
+  return seen.detector !== DETECTOR_VERSION;
+}
 
 /** Which folder kinds a sidecar's role is likely to have come from. */
 const ROLE_KINDS: Record<string, string[]> = {
@@ -262,6 +291,7 @@ export class ModelLibrary {
     const filtered = views.filter((view) =>
       matchesClass(view, filters.class) &&
       matchesFamily(view, filters.family) &&
+      matchesTags(view, filters.tags) &&
       matchesQuery(view, filters.q)
     );
     filtered.sort((a, b) =>
@@ -378,6 +408,7 @@ export class ModelLibrary {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
     const name = scanned?.name ?? filename;
+    const failure = this.hasher.failures.get(path);
     const kind = scanned?.kind ?? row!.kind;
     return {
       id: row ? row.hash : pathId(path),
@@ -402,7 +433,10 @@ export class ModelLibrary {
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
       last_used_at: row?.last_used_at ?? null,
-      hashing: row === null,
+      // Still waiting only while nothing has gone wrong: a file that failed
+      // to read is not on its way, it is stopped.
+      hashing: row === null && !failure,
+      hash_error: row === null ? failure ?? null : null,
       present: scanned !== null,
     };
   }
@@ -423,12 +457,7 @@ export class ModelLibrary {
     for (const model of models) {
       const modelClass = classOf(model.kind, overrides);
       if (modelClass !== "diffusion" && modelClass !== "lora") continue;
-      const seen = this.#probes.get(model.path);
-      if (
-        seen && seen.size === model.size && seen.mtime === model.mtime
-      ) {
-        continue;
-      }
+      if (!needsProbe(this.#probes.get(model.path), model)) continue;
       let arch: string | null = null;
       try {
         arch = await probeFamily(model.path);
@@ -442,6 +471,7 @@ export class ModelLibrary {
         size: model.size,
         mtime: model.mtime,
         arch,
+        detector: DETECTOR_VERSION,
         probed_at: this.#now(),
       };
       this.#probes.set(model.path, row);
@@ -551,6 +581,20 @@ function matchesClass(view: ModelView, modelClass?: ModelClass): boolean {
 function matchesFamily(view: ModelView, family?: string): boolean {
   if (!family) return true;
   return view.family === family;
+}
+
+/**
+ * Every asked-for tag, matched as a case-insensitive substring of one of the
+ * model's own. Several narrow rather than widen: a model has to carry all of
+ * them, the way the tag chips over the pickers already behave (§11.3).
+ */
+function matchesTags(view: ModelView, tags?: string[]): boolean {
+  if (!tags || tags.length === 0) return true;
+  const mine = view.tags.map((tag) => tag.toLowerCase());
+  return tags.every((tag) => {
+    const needle = tag.trim().toLowerCase();
+    return needle.length === 0 || mine.some((own) => own.includes(needle));
+  });
 }
 
 /** §12's `q`: substring, case-insensitive, over display name, file and tags. */

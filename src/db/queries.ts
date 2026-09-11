@@ -773,25 +773,35 @@ export interface ModelProbeRow {
   size: number;
   mtime: number | null;
   arch: string | null;
+  /** Which detector said so; an older one is re-run (§6). */
+  detector: number;
   probed_at: number;
 }
 
 /** Every probe result, for the family fallback the library applies. */
 export function listModelProbes(db: Database): Map<string, ModelProbeRow> {
   const rows = db.prepare(
-    `SELECT path, size, mtime, arch, probed_at FROM model_probes`,
+    `SELECT path, size, mtime, arch, detector, probed_at FROM model_probes`,
   ).all() as ModelProbeRow[];
   return new Map(rows.map((row) => [row.path, row]));
 }
 
 export function upsertModelProbe(db: Database, probe: ModelProbeRow): void {
   db.prepare(
-    `INSERT INTO model_probes (path, size, mtime, arch, probed_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO model_probes (path, size, mtime, arch, detector, probed_at)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(path) DO UPDATE SET
        size = excluded.size, mtime = excluded.mtime,
-       arch = excluded.arch, probed_at = excluded.probed_at`,
-  ).run(probe.path, probe.size, probe.mtime, probe.arch, probe.probed_at);
+       arch = excluded.arch, detector = excluded.detector,
+       probed_at = excluded.probed_at`,
+  ).run(
+    probe.path,
+    probe.size,
+    probe.mtime,
+    probe.arch,
+    probe.detector,
+    probe.probed_at,
+  );
 }
 
 export function upsertModel(db: Database, model: NewModel): void {

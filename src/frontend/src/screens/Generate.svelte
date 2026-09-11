@@ -94,14 +94,25 @@
     void panel.submit();
   }
 
-  /** Grouped by family and kind, with the last output as the thumbnail. */
+  /**
+   * Grouped by family and kind, with the last output as the thumbnail.
+   *
+   * `workflows` already arrives in the order the Workflows screen was dragged
+   * into (§4.6), and both the groups and their contents follow it: a group
+   * sits where its best-placed member does. Sorting the group *keys*
+   * alphabetically instead meant a workflow dragged to the top still sat
+   * below every family whose name came earlier, so the drag appeared to do
+   * nothing. With nothing dragged the order is the list's own — by name —
+   * rather than by family name, which is the order the Workflows screen
+   * shows.
+   */
   const grouped = $derived.by(() => {
     const groups = new Map<string, typeof workflows>();
     for (const workflow of workflows) {
       const key = `${workflow.family ?? "unset"} · ${workflow.kind}`;
       groups.set(key, [...(groups.get(key) ?? []), workflow]);
     }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return [...groups.entries()];
   });
 
   function thumbnailFor(outputId: string | null): string | null {

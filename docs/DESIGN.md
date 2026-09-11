@@ -200,6 +200,16 @@ version table. Each workflow's content hash (`sha256(api.json + manifest.json)`)
 is stamped into every output sidecar so old outputs can be recognised, but
 nothing in the DB references workflows by foreign key (§7).
 
+The editor is proxied under this app's origin, which makes ComfyUI's
+`localStorage` this origin's too. ComfyUI reopens every tab it had open on
+boot, so a session that has edited twenty workflows opens twenty of them — 
+none of which the app asked for. Opening the editor screen **drops the
+tab-restore keys** before ComfyUI can read them; settings stay, including the
+workflow-shaped ones (`Comfy.Settings.Comfy.Workflow.*`). The app keeps
+nothing in that storage itself. Several app tabs editing different workflows
+are unaffected: this only decides what a fresh editor restores, and each of
+them loads its own graph through `loadGraphData`.
+
 ### 4.6 Bundled workflows
 Shipped under `workflows/bundled/` and overwritten on upgrade. Editing a
 bundled workflow in the app copies it to `workflows/user/<id>/` first; the user
@@ -213,7 +223,7 @@ Initial set:
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
 | `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
 | `anima` | anima | image | as above; family-filtered loras |
-| `flux-klein` | flux | image | prompt, seed, size, loras |
+| `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, seed, size; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 
@@ -472,7 +482,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   there is anything to run them in. A model's family
   is inferred from Civitai `baseModel` when available (mapped onto the
   list), else read from the file itself (§6), else set by the user from the
-  same list, else `unset`. `wan2` is one family and not two: ComfyUI builds
+  same list, else `unset`. A probe answer records **which detector produced
+  it**, and a scan re-reads any header an older one answered for: a family
+  added in a later build otherwise never reached a model already on disk —
+  the file had not changed, so no rescan ever looked at it again, and adding
+  one did nothing for the people who had those models. `wan2` is one family and not two: ComfyUI builds
   Wan 2.1 and 2.2 from the same config off the same key, so the files do not
   draw the line. Pickers
   filter by family; unfiltered view is one click away.
@@ -481,6 +495,12 @@ Model hashing runs in a background worker; a model is re-hashed only if
   a searchable list. It is positioned in viewport coordinates rather than
   absolutely inside its trigger: a card and a table cell both clip their own
   overflow, which swallowed the list whole.
+- **Hashing progress counts the pass that is running**, not every pass since
+  launch. Carrying the totals forward made each rescan report a window onto
+  nothing — "74/86", the tail of the last pass plus the head of this one.
+  A file the hasher **cannot read** gets no `models` row, and a model with no
+  row is "hashing", so one unreadable file wore that badge for ever and said
+  nothing about why; it now reads `unreadable` and carries the error.
 - **Display name** is editable and separate from the filename. It renders
   everywhere a model is named: model page header and breadcrumb, Models grid
   cards, LoRA/checkpoint pickers, Gallery table MODELS chips, and viewer
@@ -634,16 +654,22 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   to the full-width grid. See §11.4 for follow-latest behaviour.
 - **Metadata sidebar**: every row sits on its own raised plate, so the eye
   finds where the prompt stops and the next param starts without reading it.
+  The label sits **above** its value rather than beside it: a label column
+  took a fifth of a 306px sidebar away from the part worth reading.
   A model-valued param carries the link to its model page itself, and the
   roles below (unet / clip / vae / loras) list only what no param already
   named — the same LoRA is never shown twice. Each model is resolved by its
   filename, which is what a graph binds and what a sidecar records; a role
   cannot identify one, because a job with three LoRAs has three rows under
   the one `lora` role. Prompt and seed are
-  `user-select: all`, so one click takes the whole value — and each such
-  value sits in a span of its own inside its `dd`, because Firefox's
-  plain-text serialiser indents the contents of a `dd` by four spaces on
-  every line when the selection spans the element.
+  `user-select: all`, so one click takes the whole value.
+- **No `dd` holds a value here**, which is why the rows are plain elements
+  rather than a description list: Firefox's plain-text serialiser indents the
+  contents of a `dd` by four spaces — on every line, blank ones included —
+  whenever the selection spans the element, so a copied prompt arrived
+  indented. It is the `dd` that does it, not the layout and not the nesting;
+  a span inside one is indented too. `Selection.toString()` disagrees with
+  what Ctrl+C produces, so only a clipboard round-trip settles it.
 - Reuse Parameters lands here with the panel filled in.
 
 **Gallery**
@@ -709,8 +735,12 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   thumbnail (chosen sample → most recent output → empty plate), display name,
   family badge (or an inline SET FAMILY control when unset), count of outputs
   (a link into the Gallery filtered to that hash). Search (same matcher as
-  the API `q`) + family filter including an "unset" chip. No multi-select or
-  bulk edits in v1; family is set per card or via "Fetch info".
+  the API `q`) + a **tags** box beside it + family filter including an
+  "unset" chip. `q` reaches tags, but only mixed in with names and
+  filenames, so `?tags=` is the way to ask for a tag and mean it: comma
+  separated, all of them required, a URL param like every other filter. No
+  multi-select or bulk edits in v1; family is set from the same picker on the
+  card, in the table's Family column, or on the model page.
 - Model detail page as described in §8.1: header with Copy path, full sha256
   on its own line (`user-select: all`, no truncation, no button), edit-in-place
   display name / family combo / tags / notes; Samples strip (with import drop
@@ -718,9 +748,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   filtered gallery beneath.
 
 **Workflows**
-- Table of workflows: thumb (most recent output), name (+ USER COPY badge),
+- Table of workflows: a drag grip, thumb (most recent output), name (+ USER
+  COPY badge),
   family, kind, PARAMS column listing exposed keys with advanced params
-  counted not named, source (bundled/user), last used. Header actions:
+  counted not named, source (bundled/user), last used. **Dragging a row by
+  its grip sets the order**, which `config.yaml` keeps as `ui.workflow_order`
+  and the Generate picker follows — groups included, so a workflow dragged to
+  the top is not left below every family whose name sorts earlier. The list
+  holds only the ids that were moved: anything else follows by name, so a new
+  workflow needs no list updating and a deleted one leaves no hole. The grip
+  alone starts the drag, as on a LoRA row. Header actions:
   **Import .json**, **New in ComfyUI**. Row ⋯ menu: Open in ComfyUI,
   Duplicate, Reset to bundled (only when a user copy exists), Delete (user
   copies only — never shown on bundled rows).

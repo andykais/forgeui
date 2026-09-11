@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "../api.ts";
+  import { forgetOpenTabs } from "../lib/comfy-storage.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate, router } from "../router.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
@@ -16,6 +17,22 @@
   let saving = $state(false);
   let ready = $state(false);
   let unreachable = $state<string | null>(null);
+
+  /**
+   * Open the editor on the one workflow being edited, and nothing else: the
+   * tab list ComfyUI would otherwise restore goes before it can read it.
+   * Several ForgeUI tabs editing different workflows are unaffected — this
+   * only decides what a fresh editor restores, and each of those tabs loads
+   * its own workflow explicitly.
+   *
+   * At init, so it has happened before the iframe is in the document at all;
+   * by its `load` event ComfyUI has long since read its own storage.
+   */
+  try {
+    forgetOpenTabs(globalThis.localStorage);
+  } catch {
+    // Storage can be disabled outright, which is not worth a broken screen.
+  }
 
   /** How long ComfyUI's frontend may take to put itself on the window. */
   const FRONTEND_TIMEOUT_MS = 60_000;

@@ -49,6 +49,7 @@ function lora(name: string, hash: string): ModelEntry {
     output_count: 0,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
     present: true,
   };
 }
@@ -152,26 +153,35 @@ describe("the metadata sidebar", () => {
     expect(names).toEqual(["glow.safetensors", "grain.safetensors"]);
   });
 
-  test("a copyable value is a span inside its dd, never the dd", () => {
+  test("no value sits in a dd, whatever the selection covers", () => {
     // Firefox's plain-text serialiser indents the contents of a `dd` by four
-    // spaces whenever the selection spans the element — which is exactly what
-    // `user-select: all` makes — so the prompt came back off the clipboard
-    // indented on every line, blank ones included.
+    // spaces — every line, blank ones included — whenever the selection spans
+    // the element, which a drag across the sidebar does. Wrapping the value
+    // in a span was not enough: the `dd` is the thing that indents, so there
+    // is no `dd` here any more.
     mount();
-    for (const el of document.querySelectorAll(".selectable")) {
-      expect(el.tagName).toBe("SPAN");
-      expect(el.parentElement?.tagName).toBe("DD");
-    }
-    const keys = [...document.querySelectorAll(".row")]
+    expect(document.querySelectorAll("dd")).toHaveLength(0);
+    expect(document.querySelectorAll("dl")).toHaveLength(0);
+    const keys = [...document.querySelectorAll(".field")]
       .filter((row) => row.querySelector(".selectable"))
-      .map((row) => row.querySelector("dt")?.textContent?.trim());
+      .map((row) => row.querySelector(".key")?.textContent?.trim());
     expect(keys).toEqual(["prompt", "seed"]);
+  });
+
+  test("the label sits above its value, not beside it", () => {
+    // A 74px label column took a fifth of the sidebar away from the value.
+    mount();
+    const row = [...document.querySelectorAll(".field")]
+      .find((r) => r.querySelector(".key")?.textContent?.trim() === "prompt");
+    expect(row?.children).toHaveLength(2);
+    expect(row?.children[0]?.className).toContain("key");
+    expect(getComputedStyle(row!).display).toBe("block");
   });
 
   test("the prompt is shown exactly as it was written", () => {
     mount();
-    const prompt = [...document.querySelectorAll(".row")]
-      .find((row) => row.querySelector("dt")?.textContent?.trim() === "prompt")
+    const prompt = [...document.querySelectorAll(".field")]
+      .find((row) => row.querySelector(".key")?.textContent?.trim() === "prompt")
       ?.querySelector(".selectable");
     expect(prompt?.textContent).toBe("a red firetruck\n\non a wet street");
   });

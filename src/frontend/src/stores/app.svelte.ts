@@ -362,6 +362,21 @@ class AppState {
     });
   }
 
+  /**
+   * The order the Workflows screen was dragged into (§4.6). Applied to the
+   * list held here as well as saved, so the Generate picker follows on the
+   * same frame rather than after the next fetch.
+   */
+  reorderWorkflows(ids: string[]): void {
+    const at = new Map(ids.map((id, index) => [id, index]));
+    this.workflows = [...this.workflows].sort((a, b) =>
+      (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity)
+    );
+    this.#patchUi({ workflow_order: ids }, (ui) => {
+      ui.workflow_order = ids;
+    });
+  }
+
   /** Optimistic locally, then persisted: Settings has no save button (§11.2). */
   #patchUi(patch: unknown, apply: (ui: Config["ui"]) => void): void {
     if (!this.config) return;

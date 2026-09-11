@@ -1,5 +1,6 @@
 <script lang="ts">
   import Search from "@lucide/svelte/icons/search";
+  import Tag from "@lucide/svelte/icons/tag";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -34,6 +35,7 @@
   let classes = $state<Record<string, string>>({});
   let loading = $state(false);
   let searchDraft = $state("");
+  let tagsDraft = $state("");
   let rescanning = $state(false);
 
   const query = $derived(router.current.query);
@@ -42,8 +44,12 @@
   const kind = $derived(query.get("kind") ?? "");
   const family = $derived(query.get("family") ?? "");
   const q = $derived(query.get("q") ?? "");
+  /** Comma separated, all required; a URL param like every other filter. */
+  const tags = $derived(query.get("tags") ?? "");
   const view = $derived(query.get("view") === "table" ? "table" : "tiles");
-  const filterKey = $derived(`${modelClass}\u0000${kind}\u0000${family}\u0000${q}`);
+  const filterKey = $derived(
+    `${modelClass}\u0000${kind}\u0000${family}\u0000${q}\u0000${tags}`,
+  );
 
   /** What a class is called on a tab; anything else is shown as it is named. */
   const CLASS_LABELS: Record<string, string> = {
@@ -131,12 +137,14 @@
         class: kind ? undefined : modelClass,
         family: family || undefined,
         q: q || undefined,
+        tags: tags || undefined,
       });
       if (mine !== request) return;
       models = body.models;
       folders = body.folders;
       classes = body.classes;
       searchDraft = q;
+      tagsDraft = tags;
       const everything = await api.models({});
       if (mine !== request) return;
       all = everything.models;
@@ -244,6 +252,28 @@
           }
         }}
         onblur={() => setQuery({ q: searchDraft || null })}
+      />
+    </label>
+
+    <!--
+      Tags, asked for as tags. `q` reaches them too, but only mixed in with
+      every name and filename, so a tag whose word appears in a filename
+      cannot be asked for on its own.
+    -->
+    <label class="search tags" title="Comma separated; a model must carry all of them">
+      <Tag size={13} />
+      <input
+        placeholder="Tags…"
+        value={tagsDraft}
+        oninput={(event) => (tagsDraft = (event.currentTarget as HTMLInputElement).value)}
+        onkeydown={(event) => {
+          if (event.key === "Enter") setQuery({ tags: tagsDraft || null });
+          if (event.key === "Escape") {
+            tagsDraft = "";
+            setQuery({ tags: null });
+          }
+        }}
+        onblur={() => setQuery({ tags: tagsDraft || null })}
       />
     </label>
 
@@ -376,11 +406,16 @@
                 {model.display_name}
                 {#if model.hashing}
                   <span class="badge hashing mono">hashing</span>
+                {:else if model.hash_error}
+                  <span
+                    class="badge failed mono"
+                    title={`Could not read it: ${model.hash_error}`}
+                  >unreadable</span>
                 {/if}
                 <div class="mono dim file">{model.name}</div>
               </td>
               <td class="family-cell">
-                {#if model.hashing}
+                {#if model.hashing || model.hash_error}
                   <span class="mono dim">—</span>
                 {:else}
                   <!-- The same control as the card and the model page; the
@@ -499,6 +534,11 @@
     width: 180px;
   }
 
+  /* Narrower: a tag is a word, where a model search is a path. */
+  .search.tags input {
+    width: 120px;
+  }
+
   .spacer {
     flex: 1;
   }
@@ -597,13 +637,19 @@
     font-size: 11px;
   }
 
-  .badge.hashing {
+  .badge.hashing,
+  .badge.failed {
     font-size: 10px;
     padding: 1px 5px;
     border-radius: var(--radius-control);
     background: var(--accent-tint);
     color: var(--accent);
     margin-left: 6px;
+  }
+
+  .badge.failed {
+    background: var(--control);
+    color: var(--error);
   }
 
   .empty {

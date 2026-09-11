@@ -96,6 +96,7 @@ export function defaultConfig(): Config {
       tile_size: { generate: "small", gallery: "small", models: "small" },
       sidebar_collapsed: { generate: false, gallery: false, models: false },
       filmstrip_collapsed: { generate: false, gallery: false, models: false },
+      workflow_order: [],
     },
   };
 }

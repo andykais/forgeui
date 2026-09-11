@@ -45,7 +45,7 @@ const KREA2_SAVE = "9";
 const BUNDLED = [
   ["anima", "Anima"],
   ["krea2-img2img", "Flux Krea 2 (img2img)"],
-  ["flux-klein", "Flux.2 Klein 4B"],
+  ["flux-klein", "Flux.2 Klein"],
   ["illustrious", "Illustrious XL"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-enhanced", "Krea 2 Turbo (enhanced)"],
@@ -91,6 +91,44 @@ Deno.test("the bundled workflows load and list", async () => {
       if (entry.isDirectory) onDisk.push(entry.name);
     }
     assertEquals(onDisk.sort(), [...BUNDLED.map(([id]) => id)].sort());
+  });
+});
+
+Deno.test("the workflow order is the one the user dragged into place", async () => {
+  await withTestApp(async (app) => {
+    const names = () => app.workflows.list([]).map((workflow) => workflow.id);
+    const byName = names();
+    // Nothing moved: display name, as it has always been.
+    assertEquals(
+      [...byName].sort((a, b) => byName.indexOf(a) - byName.indexOf(b)),
+      byName,
+    );
+
+    // Two ids pulled to the front. Everything else keeps its place behind
+    // them, still by name, so a workflow added later needs no list updating
+    // and a deleted one leaves no hole (§4.6).
+    const moved = app.workflows.list(["sd15", "ltx"]).map((w) => w.id);
+    assertEquals(moved.slice(0, 2), ["sd15", "ltx"]);
+    assertEquals(
+      moved.slice(2),
+      byName.filter((id) => id !== "sd15" && id !== "ltx"),
+    );
+
+    // An id for a workflow that is not there is simply not a position.
+    assertEquals(
+      app.workflows.list(["nope", "ltx"]).map((w) => w.id).slice(0, 1),
+      ["ltx"],
+    );
+
+    // And it reaches the API the Generate picker reads.
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ ui: { workflow_order: ["sd15", "ltx"] } }),
+    });
+    assertEquals((await list(app)).map((w) => w.id).slice(0, 2), [
+      "sd15",
+      "ltx",
+    ]);
   });
 });
 
@@ -141,11 +179,20 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "loras",
     ]);
-    // Rebuilt from the official template (§7): the distilled 4B variant,
-    // through the custom sampler chain rather than KSampler.
-    assertEquals(keys("flux-klein"), ["prompt", "model", "size", "seed"]);
-    // steps, cfg, and the text encoder and VAE it loads (§7.1).
-    assertEquals(byId.get("flux-klein")!.params.advanced, 4);
+    // Rebuilt from the official template (§7), through the custom sampler
+    // chain rather than KSampler. Not tied to one size of Klein: the text
+    // encoder is a visible param because picking the wrong one is how this
+    // workflow fails, and it fails deep inside the sampler.
+    assertEquals(keys("flux-klein"), [
+      "prompt",
+      "model",
+      "size",
+      "loras",
+      "seed",
+      "clip",
+    ]);
+    // steps, cfg and the VAE; the encoder is no longer among them (§7.1).
+    assertEquals(byId.get("flux-klein")!.params.advanced, 3);
     // Anima keeps the template's own Turbo LoRA switch as a bool param.
     assertEquals(keys("anima"), [
       "prompt",

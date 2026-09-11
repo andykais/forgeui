@@ -46,6 +46,7 @@ const loras: ModelEntry[] = [
     output_count: 0,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
     present: true,
   },
   {
@@ -69,6 +70,7 @@ const loras: ModelEntry[] = [
     output_count: 0,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
     present: true,
   },
 ];
@@ -105,6 +107,7 @@ function diffusionModel(name: string, family: string, kind = "checkpoints"): Mod
     output_count: 0,
     last_used_at: null,
     hashing: false,
+    hash_error: null,
     present: true,
   };
 }

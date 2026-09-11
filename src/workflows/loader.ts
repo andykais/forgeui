@@ -230,11 +230,24 @@ export class WorkflowStore {
     this.#byId = byId;
   }
 
-  /** Sorted by display name, which is the order the Workflows screen shows. */
-  list(): Workflow[] {
-    return [...this.#byId.values()].sort((a, b) =>
-      (a.manifest?.name ?? a.id).localeCompare(b.manifest?.name ?? b.id)
-    );
+  /**
+   * The order the Workflows screen shows, and with it the Generate picker:
+   * whatever the user dragged into place first, in that order, then
+   * everything else by display name.
+   *
+   * `order` holds only the ids that were moved, so a workflow added later
+   * falls in among the names rather than at the end of a list nobody
+   * updated, and one that is deleted leaves nothing behind (§4.6).
+   */
+  list(order: readonly string[] = []): Workflow[] {
+    const placed = new Map(order.map((id, at) => [id, at]));
+    const name = (workflow: Workflow) => workflow.manifest?.name ?? workflow.id;
+    return [...this.#byId.values()].sort((a, b) => {
+      const at = placed.get(a.id) ?? Infinity;
+      const bt = placed.get(b.id) ?? Infinity;
+      if (at !== bt) return at - bt;
+      return name(a).localeCompare(name(b));
+    });
   }
 
   get(id: string): Workflow | undefined {

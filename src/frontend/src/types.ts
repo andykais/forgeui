@@ -210,6 +210,8 @@ export interface Config {
     tile_size: Record<UiScreen, TileSize>;
     sidebar_collapsed: Record<UiScreen, boolean>;
     filmstrip_collapsed: Record<UiScreen, boolean>;
+    /** Workflow ids the user dragged into place, most wanted first (§4.6). */
+    workflow_order: string[];
   };
 }
 
@@ -239,6 +241,8 @@ export interface ModelEntry {
   last_used_at: number | null;
   /** True until the background hasher has read the file (§8.1). */
   hashing: boolean;
+  /** Why the hasher could not read it; a file that failed is not waiting. */
+  hash_error: string | null;
   present: boolean;
 }
 
