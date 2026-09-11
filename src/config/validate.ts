@@ -115,6 +115,7 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
     "filmstrip_collapsed",
     "workflow_order",
     "model_thumbnail",
+    "hidden_families",
   ]);
   const ui: PartialUiConfig = {};
   pick(raw, "rail_expanded", ui, bool, where);
@@ -144,6 +145,12 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       raw.model_thumbnail,
       `${where}.model_thumbnail`,
       MODEL_THUMBNAILS,
+    );
+  }
+  if ("hidden_families" in raw) {
+    ui.hidden_families = stringList(
+      raw.hidden_families,
+      `${where}.hidden_families`,
     );
   }
   if ("workflow_order" in raw) {

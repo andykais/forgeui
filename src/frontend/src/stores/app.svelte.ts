@@ -145,7 +145,23 @@ class AppState {
     ]) {
       if (model.family && model.family !== "unset") names.add(model.family);
     }
-    return [...names];
+    // A family the config hides is not one to offer, file a model as, or
+    // filter by: it is out of sight entirely (§8.1).
+    const hidden = new Set(this.config?.ui.hidden_families ?? []);
+    return [...names].filter((name) => !hidden.has(name));
+  }
+
+  /** Which architectures this machine has been told it does not run (§8.1). */
+  get hiddenFamilies(): string[] {
+    return this.config?.ui.hidden_families ?? [];
+  }
+
+  setHiddenFamilies(families: string[]): void {
+    this.#patchUi({ hidden_families: families }, (ui) => {
+      ui.hidden_families = families;
+    });
+    // Which models are listed changes with it, so the lists are refetched.
+    void this.refreshModels();
   }
 
   /** The list a `model` param of this class picks from. */
@@ -160,6 +176,11 @@ class AppState {
       default:
         return this.checkpoints;
     }
+  }
+
+  /** Every model the app knows about, for counts that span the library. */
+  get allModels(): ModelEntry[] {
+    return [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes];
   }
 
   /** Everything the pickers and the models filter name, by hash. */

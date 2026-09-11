@@ -228,6 +228,70 @@ Deno.test("an empty config.yaml means all defaults", () => {
   assertEquals(effectiveConfig({}), defaultConfig());
 });
 
+Deno.test("a default that changed reaches a config already on disk", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-config-" });
+  try {
+    // What an earlier build wrote as its own defaults. A first run persists
+    // the whole tree, so every value in it is frozen against later changes:
+    // the stored array wins the merge, and `a`/`d` never arrived.
+    await Deno.writeTextFile(
+      dataPaths(dir).configFile,
+      [
+        "keys:",
+        "  select_prev: [ArrowLeft]",
+        "  select_next: [ArrowRight]",
+        "  select_up: [ArrowUp]",
+        "  select_down: [ArrowDown]",
+        "  fullscreen: [f]",
+        "  close: [Escape]",
+        "",
+      ].join("\n"),
+    );
+    const { store } = await loadConfig({ dataDir: dir });
+    assertEquals(store.config.keys.select_prev, ["ArrowLeft", "a"]);
+    assertEquals(store.config.keys.select_next, ["ArrowRight", "d"]);
+    assertEquals(store.config.keys.select_up, ["ArrowUp", "w"]);
+    assertEquals(store.config.keys.select_down, ["ArrowDown", "s"]);
+
+    // And it is written back, so the file says what the app is doing.
+    const after = parseYaml(
+      await Deno.readTextFile(dataPaths(dir).configFile),
+    ) as Record<string, unknown>;
+    assertEquals(
+      (after.keys as Record<string, string[]>).select_prev,
+      ["ArrowLeft", "a"],
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("bindings somebody chose are left exactly as they are", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-config-" });
+  try {
+    // One binding differs from every default this app has shipped, so the
+    // block was edited and none of it is ours to move.
+    await Deno.writeTextFile(
+      dataPaths(dir).configFile,
+      [
+        "keys:",
+        "  select_prev: [h]",
+        "  select_next: [ArrowRight]",
+        "  select_up: [ArrowUp]",
+        "  select_down: [ArrowDown]",
+        "  fullscreen: [f]",
+        "  close: [Escape]",
+        "",
+      ].join("\n"),
+    );
+    const { store } = await loadConfig({ dataDir: dir });
+    assertEquals(store.config.keys.select_prev, ["h"]);
+    assertEquals(store.config.keys.select_next, ["ArrowRight"]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("layers merge per key, deepest last", () => {
   const merged = mergePartialConfig(
     {

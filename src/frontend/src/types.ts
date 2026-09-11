@@ -214,6 +214,8 @@ export interface Config {
     workflow_order: string[];
     /** What a model tile falls back to when none was chosen (§8.1). */
     model_thumbnail: "first_sample" | "latest_generated";
+    /** Families kept out of sight entirely; their models read as hidden. */
+    hidden_families: string[];
   };
 }
 

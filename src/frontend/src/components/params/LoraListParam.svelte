@@ -7,7 +7,7 @@
   import Popover from "../Popover.svelte";
   import { matcher } from "../../lib/search.ts";
   import { focusOnMount } from "../../lib/focus.ts";
-  import { navigate } from "../../router.svelte.ts";
+  import { navigate, opensElsewhere } from "../../router.svelte.ts";
   import TagFilter from "./TagFilter.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
@@ -186,6 +186,7 @@
             href={pageOf(row.name)}
             title={`${row.name} — open its model page`}
             onclick={(event) => {
+              if (opensElsewhere(event)) return;
               event.preventDefault();
               navigate(pageOf(row.name)!);
             }}

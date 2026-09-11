@@ -4,17 +4,17 @@
   import Copy from "@lucide/svelte/icons/copy";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
-  import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate } from "../router.svelte.ts";
+  import { navigate, opensElsewhere } from "../router.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import type { ModelDetail, Output, Sample } from "../types.ts";
   import FamilyPicker from "../components/FamilyPicker.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
+  import TagPicker from "../components/TagPicker.svelte";
   import Tile from "../components/Tile.svelte";
   import Viewer from "../components/Viewer.svelte";
 
@@ -66,7 +66,26 @@
 
   let nameDraft = $state("");
   let notesDraft = $state("");
-  let tagDraft = $state("");
+  /**
+   * Where a tag leads: the Models screen, filtered to it, on the tab this
+   * model is on. The screen is tabbed by class and falls back to diffusion,
+   * so a tag on a LoRA that did not name its class landed on a tab the LoRA
+   * was not in and showed nothing.
+   */
+  function tagHref(tag: string): string {
+    const params = new URLSearchParams({ tags: tag });
+    if (model && model.class !== "diffusion") params.set("class", model.class);
+    return `/models?${params}`;
+  }
+
+  /** How many models carry each tag, for the chips beside this model's. */
+  const tagCounts = $derived.by(() => {
+    const totals = new Map<string, number>();
+    for (const entry of app.allModels) {
+      for (const tag of entry.tags) totals.set(tag, (totals.get(tag) ?? 0) + 1);
+    }
+    return totals;
+  });
   /** Family counts for the combo, as frame 05 draws them. */
   let familyCounts = $state<Map<string, number>>(new Map());
 
@@ -174,17 +193,6 @@
     void patch({ notes: notesDraft });
   }
 
-  function addTag() {
-    const tag = tagDraft.trim();
-    if (!model || tag.length === 0) return;
-    tagDraft = "";
-    void patch({ tags: [...model.tags, tag] });
-  }
-
-  function removeTag(tag: string) {
-    if (!model) return;
-    void patch({ tags: model.tags.filter((entry) => entry !== tag) });
-  }
 
   async function copy(text: string, what: string) {
     try {
@@ -346,6 +354,7 @@
               class="outputs"
               href={`/gallery?models=${model.hash}`}
               onclick={(event) => {
+                if (opensElsewhere(event)) return;
                 event.preventDefault();
                 navigate(`/gallery?models=${model?.hash}`);
               }}
@@ -468,34 +477,39 @@
           </div>
         {/if}
 
+        <!--
+          The same picker the Models screen filters with, so the tags on
+          offer are the ones that exist, with what they already hold beside
+          them; typing a name nothing matches offers to make it. Each tag
+          here is a link into that screen filtered to it — a tag is only
+          worth carrying if it can be followed.
+        -->
         <div class="tags">
           {#each model.tags as tag (tag)}
-            <span class="tag mono">
+            <a
+              class="tag mono"
+              href={tagHref(tag)}
+              title={`Show everything tagged ${tag}`}
+              onclick={(event) => {
+                if (opensElsewhere(event)) return;
+                event.preventDefault();
+                navigate(tagHref(tag));
+              }}
+            >
               {tag}
-              <button
-                class="icon"
-                aria-label={`Remove the tag ${tag}`}
-                disabled={hashing}
-                onclick={() => removeTag(tag)}
-              >
-                <X size={10} />
-              </button>
-            </span>
+              <span class="dim">{tagCounts.get(tag) ?? 1}</span>
+            </a>
           {/each}
-          <input
-            class="tag-input mono"
-            aria-label="Add a tag"
-            placeholder="+ tag"
-            disabled={hashing}
-            value={tagDraft}
-            oninput={(event) =>
-              (tagDraft = (event.currentTarget as HTMLInputElement).value)}
-            onblur={addTag}
-            onkeydown={(event) => {
-              if (event.key === "Enter") addTag();
-              if (event.key === "Escape") tagDraft = "";
-            }}
-          />
+          {#if !hashing}
+            <TagPicker
+              models={app.allModels}
+              selected={model.tags}
+              placeholder="+ tag"
+              mode="edit"
+              allowCreate
+              onchange={(tags: string[]) => void patch({ tags })}
+            />
+          {/if}
         </div>
 
         <textarea
@@ -782,32 +796,23 @@
     align-items: center;
   }
 
+  /* A link now: a tag is worth carrying only if it can be followed. */
   .tag {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 5px;
     font-size: 10px;
-    padding: 1px 4px 1px 7px;
+    padding: 2px 7px;
     border-radius: var(--radius-control);
     background: var(--control);
     color: var(--text-2);
   }
 
-  .tag-input {
-    background: transparent;
-    border: 1px dashed var(--edge-2);
-    border-radius: var(--radius-control);
-    color: var(--text-3);
-    font-size: 10px;
-    padding: 2px 6px;
-    width: 8ch;
+  .tag:hover {
+    background: var(--control-selected);
+    color: var(--text);
   }
 
-  .tag-input:focus {
-    border-style: solid;
-    border-color: var(--edge);
-    width: 14ch;
-  }
 
   .notes {
     background: var(--control);

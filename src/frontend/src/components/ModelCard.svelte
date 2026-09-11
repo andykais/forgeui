@@ -4,7 +4,7 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import type { ModelEntry } from "../types.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
-  import { navigate } from "../router.svelte.ts";
+  import { navigate, opensElsewhere } from "../router.svelte.ts";
   import FamilyPicker from "./FamilyPicker.svelte";
 
   /**
@@ -41,6 +41,7 @@
     class="thumb"
     {href}
     onclick={(event) => {
+      if (opensElsewhere(event)) return;
       event.preventDefault();
       navigate(href);
     }}
@@ -57,6 +58,7 @@
       class="name"
       {href}
       onclick={(event) => {
+        if (opensElsewhere(event)) return;
         event.preventDefault();
         navigate(href);
       }}
@@ -108,6 +110,7 @@
           href={galleryHref}
           title="Show these in the gallery"
           onclick={(event) => {
+            if (opensElsewhere(event)) return;
             event.preventDefault();
             navigate(galleryHref);
           }}

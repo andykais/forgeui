@@ -20,6 +20,19 @@
   let copied = $state(false);
 
   const config = $derived(app.config);
+  const hiddenFamilies = $derived(app.hiddenFamilies);
+  /** Every family, hidden ones included — this is where they come back. */
+  const allFamilies = $derived(
+    [...new Set([...app.families, ...hiddenFamilies])].sort(),
+  );
+
+  function toggleFamily(family: string) {
+    app.setHiddenFamilies(
+      hiddenFamilies.includes(family)
+        ? hiddenFamilies.filter((name) => name !== family)
+        : [...hiddenFamilies, family],
+    );
+  }
   const comfy = $derived(app.comfy);
   const managed = $derived(config?.comfy.mode === "managed");
 
@@ -216,6 +229,33 @@
         A thumbnail set by hand on a model's page wins over both; whichever of
         these a model has none of falls back to the other.
       </p>
+
+      <!--
+        For the architectures a machine simply does not run: out of the
+        chips, out of every family picker, and their models read as hidden
+        so they are out of the Generate inputs too (§8.1). Reversible — the
+        per-model flag is untouched, so turning one back on brings its
+        models back exactly as they were.
+      -->
+      <span class="label">Families to keep out of sight</span>
+      <div class="row choices wrap">
+        {#each allFamilies as family (family)}
+          <button
+            class:active={hiddenFamilies.includes(family)}
+            title={hiddenFamilies.includes(family)
+              ? `Show ${family} again`
+              : `Hide ${family} and everything filed as it`}
+            onclick={() => toggleFamily(family)}
+          >
+            {family}
+          </button>
+        {/each}
+      </div>
+      <p class="dim note">
+        Hidden families stay in <code class="mono">config.yaml</code> as
+        <code class="mono">ui.hidden_families</code>; their models reappear on
+        the Models screen under <strong>Show hidden</strong>.
+      </p>
     </article>
 
     <article class="card">
@@ -322,6 +362,17 @@
   .choices button.active {
     background: var(--accent-tint-2);
     color: var(--accent);
+  }
+
+  .choices.wrap {
+    flex-wrap: wrap;
+  }
+
+  /* A hidden family reads as struck through: off, not selected. */
+  .choices.wrap button.active {
+    background: var(--control);
+    color: var(--text-4);
+    text-decoration: line-through;
   }
 
   .use-label {

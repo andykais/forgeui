@@ -496,7 +496,11 @@ Model hashing runs in a background worker; a model is re-hashed only if
   list), else read from the file itself (§6), else set by the user from the
   same list, else `unset`. A model can also be **hidden**: kept out of the
   Generate pickers while still listed on Models behind its own filter, for
-  the files you cannot identify and might want to delete later. A probe
+  the files you cannot identify and might want to delete later.
+  `ui.hidden_families` hides a whole architecture the same way — gone from
+  the family chips and from every family picker, and every model filed as it
+  reads as hidden. It never touches the per-model flag, so turning a family
+  back on brings its models back exactly as they were. A probe
   answer records **which detector produced it**, and a scan re-reads any header an older one answered for: a family
   added in a later build otherwise never reached a model already on disk —
   the file had not changed, so no rescan ever looked at it again, and adding
@@ -771,7 +775,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   filenames, so `?tags=` is the way to ask for a tag and mean it: comma
   separated, all of them required, a URL param like every other filter. The
   picker lists the ten commonest with their counts and narrows as you type,
-  because a text box could only be typed into blind. **Show hidden** swaps
+  because a text box could only be typed into blind. The model page uses the
+  same picker to *edit* a model's tags — typing a name nothing matches offers
+  to make it, which is where the first tag of a kind comes from — and each
+  tag on that page is a link back to this screen filtered to it, on the tab
+  that model is on. **Show hidden** swaps
   the list for the models kept out of the Generate pickers; it is one or the
   other, never both. Every count beside a tab or a chip follows the search,
   the tags and that switch — a count has to say what clicking it would give
@@ -849,6 +857,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   search box, so choosing never needs the mouse. The highlight is a ring
   round the whole option, inset so it cannot shift the row, and it starts
   again at the top whenever the search narrows the list.
+- Every in-app link is an `<a href>` whose handler calls `preventDefault()`,
+  which is what makes routing work and what took ctrl-click away with it.
+  Ctrl, ⌘ and the middle button are the browser's, through `opensElsewhere`;
+  shift is left to the caller, because the metadata sidebar gives it a
+  meaning of its own.
 - A **LoRA row carries its own model's family**, not the workflow's: they are
   the same word on every row only by coincidence, and a LoRA nobody has filed
   read as the workflow's family the moment it was chosen, having said `unset`
@@ -942,6 +955,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   A chord is never one of these: a binding is a bare key, and several are
   plain letters, so an event carrying ctrl, meta or alt matches nothing —
   otherwise `Ctrl+A` would move the selection on its way to selecting all.
+
+  A first run writes the whole default tree into `config.yaml`, which makes
+  the file self-documenting and also **freezes every value in it**: a default
+  changed later loses the merge to the stored one, which is how these letters
+  reached new installs only. A stored block that still matches a former
+  default was never touched by anybody, so it is brought forward on load and
+  the file rewritten; a block that was edited matches none of them and is
+  left exactly as it is. `SUPERSEDED_KEYS` in `src/config/config.ts` is that
+  history — append to it when a default changes again.
 
   Values are `KeyboardEvent.key` names; a list allows alternates. Adding a
   new shortcut later means adding a key here, not a hardcoded handler.

@@ -64,6 +64,20 @@ function apply(url: string, replace: boolean): void {
   router.current = parseRoute(location.pathname, location.search);
 }
 
+/**
+ * Whether the browser should handle this click on a link rather than the
+ * app. Every in-app link is an `<a href>` whose handler calls
+ * `preventDefault()`, which is what makes routing work — and what took
+ * ctrl-click away with it, so a model could never be opened beside the list
+ * it was in.
+ *
+ * Ctrl, ⌘ and the middle button are the browser's. Shift is left to the
+ * caller: the metadata sidebar gives it a meaning of its own (§11.2).
+ */
+export function opensElsewhere(event: MouseEvent): boolean {
+  return event.ctrlKey || event.metaKey || event.button === 1;
+}
+
 export function navigate(url: string, options: { replace?: boolean } = {}): void {
   if (url === `${location.pathname}${location.search}`) return;
   apply(url, options.replace ?? false);

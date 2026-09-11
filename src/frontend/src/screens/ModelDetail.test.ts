@@ -111,7 +111,9 @@ describe("the model page header", () => {
     const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.disabled).toBe(true);
     expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Add a tag") as HTMLInputElement).disabled).toBe(true);
+    // Tags are edited through the picker, which is not offered at all until
+    // the model has an identity to hang them off.
+    expect(screen.queryByTitle(/Add a tag/)).toBeNull();
     // No hash to show, and no samples strip to hang media off.
     expect(screen.getByText("still being read")).toBeTruthy();
     expect(screen.queryByText("Samples")).toBeNull();
@@ -128,20 +130,35 @@ describe("the model page header", () => {
     expect(hash.closest("button")).toBeNull();
   });
 
-  test("a tag is added on Enter and removed from its chip", async () => {
+  test("a tag nothing matches can be made from the picker", async () => {
+    // The same picker the Models screen filters with, so the tags on offer
+    // are the ones that exist — and the first of a kind has to be made
+    // somewhere (§8.1).
     model.mockResolvedValue(detail());
     patchModel.mockResolvedValue(detail({ tags: ["film", "grain"] }));
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const tags = await screen.findByLabelText("Add a tag");
-    await fireEvent.input(tags, { target: { value: "grain" } });
-    await fireEvent.keyDown(tags, { key: "Enter" });
+    await fireEvent.click(await screen.findByTitle(/Add a tag/));
+    const search = await screen.findByLabelText("Search tags");
+    await fireEvent.input(search, { target: { value: "grain" } });
+    await fireEvent.click(await screen.findByText(/Create “grain”/));
+
     await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(1));
     expect(patchModel.mock.calls[0]?.[1]).toEqual({ tags: ["film", "grain"] });
+  });
 
-    await fireEvent.click(screen.getByLabelText("Remove the tag film"));
-    await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(2));
-    expect(patchModel.mock.calls[1]?.[1]).toEqual({ tags: ["grain"] });
+  test("each tag is a link into the models list filtered to it", async () => {
+    model.mockResolvedValue(detail({ tags: ["film", "grain"] }));
+    render(ModelDetail, { id: "a".repeat(64) });
+
+    // On this model's own tab: the Models screen is tabbed by class and
+    // falls back to diffusion, so a tag on a LoRA that did not say so
+    // landed where no LoRA is and showed nothing.
+    const links = await screen.findAllByTitle(/^Show everything tagged /);
+    expect(links.map((el) => el.getAttribute("href"))).toEqual([
+      "/models?tags=film&class=lora",
+      "/models?tags=grain&class=lora",
+    ]);
   });
 
   test("a reply to one field does not overwrite another being typed into", async () => {
@@ -159,9 +176,10 @@ describe("the model page header", () => {
     });
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const tags = await screen.findByLabelText("Add a tag");
-    await fireEvent.input(tags, { target: { value: "grain" } });
-    await fireEvent.keyDown(tags, { key: "Enter" });
+    await fireEvent.click(await screen.findByTitle(/Add a tag/));
+    const search = await screen.findByLabelText("Search tags");
+    await fireEvent.input(search, { target: { value: "grain" } });
+    await fireEvent.click(await screen.findByText(/Create “grain”/));
 
     const notes = screen.getByLabelText("Notes") as HTMLTextAreaElement;
     await fireEvent.input(notes, { target: { value: "typed while the tag was saving" } });

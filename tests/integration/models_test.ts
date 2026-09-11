@@ -477,6 +477,49 @@ Deno.test("one model can be re-read past the caches", async () => {
   });
 });
 
+Deno.test("a family the config hides takes its models with it", async () => {
+  await withModels(async (app, fixtures) => {
+    await writeFakeSafetensors(join(fixtures.loras, "fluxy.safetensors"), {
+      name: "fluxy",
+      tensors: ["lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight"],
+    });
+    await scanAndHash(app);
+    const listed = () =>
+      models(app, "?kind=loras").then((body) =>
+        body.models.map((entry) => entry.name)
+      );
+    assert((await listed()).includes("fluxy.safetensors"));
+
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ ui: { hidden_families: ["flux"] } }),
+    });
+
+    // Gone from the list, exactly as a model hidden one at a time would be.
+    assert(!(await listed()).includes("fluxy.safetensors"));
+    // And back under Show hidden, which is what makes this reversible.
+    const hidden = await models(app, "?kind=loras&hidden=1");
+    assert(hidden.models.some((entry) => entry.name === "fluxy.safetensors"));
+    assertEquals(
+      hidden.models.find((entry) => entry.name === "fluxy.safetensors")?.hidden,
+      true,
+    );
+
+    // The family itself is no longer one to file anything as.
+    const families = await app.json<{ families: { family: string }[] }>(
+      "/api/families",
+    );
+    assert(!families.families.some((entry) => entry.family === "flux"));
+
+    // Turning it back on restores it; the per-model flag was never touched.
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ ui: { hidden_families: [] } }),
+    });
+    assert((await listed()).includes("fluxy.safetensors"));
+  });
+});
+
 Deno.test("a bad family or an unknown model is refused", async () => {
   await withModels(async (app) => {
     await scanAndHash(app);

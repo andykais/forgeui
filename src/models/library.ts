@@ -391,9 +391,15 @@ export class ModelLibrary {
   }
 
   familyCounts(): FamilyCount[] {
+    const hidden = this.#hiddenFamilies();
     const counts = new Map<string, number>([["unset", 0]]);
-    for (const family of FAMILIES) counts.set(family, 0);
+    for (const family of FAMILIES) {
+      if (!hidden.has(family)) counts.set(family, 0);
+    }
+    // `list()` leaves out the hidden ones, and a hidden family's models are
+    // hidden, so they are already gone from these counts.
     for (const view of this.list()) {
+      if (hidden.has(view.family)) continue;
       counts.set(view.family, (counts.get(view.family) ?? 0) + 1);
     }
     return [...counts].map(([family, models]) => ({ family, models }));
@@ -442,6 +448,19 @@ export class ModelLibrary {
     }
   }
 
+  /** The families `config.yaml` keeps out of sight entirely (§8.1). */
+  #hiddenFamilies(): Set<string> {
+    return new Set(this.#config.config.ui.hidden_families);
+  }
+
+  /**
+   * Every family worth offering: the hardcoded list minus the ones the
+   * config hides. A family nobody can see is not one to file a model as.
+   */
+  familyIsHidden(family: string): boolean {
+    return this.#hiddenFamilies().has(family);
+  }
+
   /** Both candidate pictures, plus which the user asked for (§8.1). */
   #thumbs(): ModelThumbs {
     return {
@@ -473,6 +492,9 @@ export class ModelLibrary {
     const filename = scanned?.filename ?? basename(path);
     const name = scanned?.name ?? filename;
     const failure = this.hasher.failures.get(path);
+    // What the user filed it as wins; the header is the fallback, so a fresh
+    // library sorts sensibly without anyone tagging anything (§6).
+    const family = row?.family ?? this.#probes.get(path)?.arch ?? "unset";
     const kind = scanned?.kind ?? row!.kind;
     return {
       id: row ? row.hash : pathId(path),
@@ -486,9 +508,7 @@ export class ModelLibrary {
       mtime: scanned?.mtime ?? row?.mtime ?? null,
       // Unset, a display name falls back to the filename minus its extension.
       display_name: row?.display_name ?? basename(filename, extname(filename)),
-      // What the user filed it as wins; the header is the fallback, so a
-      // fresh library sorts sensibly without anyone tagging anything (§6).
-      family: row?.family ?? this.#probes.get(path)?.arch ?? "unset",
+      family,
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
       strength_min: row?.strength_min ?? DEFAULT_STRENGTH_MIN,
@@ -497,7 +517,10 @@ export class ModelLibrary {
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
       last_used_at: row?.last_used_at ?? null,
-      hidden: row?.hidden ?? false,
+      // A family the config hides makes every model in it hidden, without
+      // touching the per-model flag: turning the family back on brings them
+      // all back exactly as they were (§8.1).
+      hidden: (row?.hidden ?? false) || this.#hiddenFamilies().has(family),
       // Still waiting only while nothing has gone wrong: a file that failed
       // to read is not on its way, it is stopped.
       hashing: row === null && !failure,

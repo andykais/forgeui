@@ -9,7 +9,7 @@
   import ChevronsRight from "@lucide/svelte/icons/chevrons-right";
   import ChevronsLeft from "@lucide/svelte/icons/chevrons-left";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate, router, type ScreenName } from "../router.svelte.ts";
+  import { navigate, opensElsewhere, router, type ScreenName } from "../router.svelte.ts";
 
   /**
    * The 56px icon rail, collapsible to 196px labelled, state persisted in
@@ -34,6 +34,7 @@
   const current = $derived(router.current.screen);
 
   function go(event: MouseEvent, href: string) {
+    if (opensElsewhere(event)) return;
     event.preventDefault();
     navigate(href);
   }

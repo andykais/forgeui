@@ -87,6 +87,13 @@ export interface UiConfig {
   workflow_order: string[];
   /** What a model tile falls back to when no thumbnail was chosen (§8.1). */
   model_thumbnail: ModelThumbnail;
+  /**
+   * Families to keep out of sight entirely: gone from the family chips and
+   * from every family picker, and their models treated as hidden — behind
+   * Show hidden, out of the Generate inputs (§8.1). For the architectures a
+   * given machine simply does not run.
+   */
+  hidden_families: string[];
 }
 
 export interface Config {
@@ -116,4 +123,5 @@ export interface PartialUiConfig {
   filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
   workflow_order?: string[];
   model_thumbnail?: ModelThumbnail;
+  hidden_families?: string[];
 }

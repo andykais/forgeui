@@ -102,6 +102,7 @@ export function defaultConfig(): Config {
       workflow_order: [],
       // What was already happening before this was a setting.
       model_thumbnail: "latest_generated",
+      hidden_families: [],
     },
   };
 }

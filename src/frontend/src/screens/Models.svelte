@@ -300,11 +300,13 @@
    * accepts, or that a model on disk is already filed as, has to be filterable
    * even when this build's constant has not caught up (§8.1).
    */
-  const families = $derived(
-    [...new Set([...app.families, ...all.map((model) => model.family)])].filter(
-      (name) => name !== "unset",
-    ),
-  );
+  const families = $derived.by(() => {
+    // `all` is whichever pile is on screen, so while Show hidden is on it
+    // carries the hidden families' models and their chips belong with them.
+    const offered = new Set([...app.families, ...all.map((m) => m.family)]);
+    const gone = new Set(hidden ? [] : app.hiddenFamilies);
+    return [...offered].filter((name) => name !== "unset" && !gone.has(name));
+  });
   const perKind = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const model of searched) {
@@ -510,8 +512,19 @@
             <tr
               class:selected={selectedId === model.id}
               data-model={model.id}
-              onclick={() => {
+              onclick={(event) => {
                 selectedId = model.id;
+                // Ctrl/⌘ or the middle button means a new tab, the way it
+                // does on a link — a row that always navigates in place
+                // cannot be opened beside what you are already looking at.
+                if (event.ctrlKey || event.metaKey) {
+                  globalThis.open(
+                    `/models/${encodeURIComponent(model.id)}`,
+                    "_blank",
+                    "noopener",
+                  );
+                  return;
+                }
                 navigate(`/models/${encodeURIComponent(model.id)}`);
               }}
             >
