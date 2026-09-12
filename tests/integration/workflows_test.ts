@@ -163,8 +163,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
     ]);
     assertEquals(byId.get("krea2-upscale")!.category, "upscale");
-    // steps, cfg, the scaler, the text encoder, the VAE and the model.
-    assertEquals(byId.get("krea2-upscale")!.params.advanced, 6);
+    // The upscale-model path, the sampling overrides, and the loaders.
+    assertEquals(byId.get("krea2-upscale")!.params.advanced, 11);
     assertEquals(keys("krea2-img2img"), [
       "image",
       "prompt",
@@ -689,5 +689,29 @@ Deno.test("a user workflow shadows the bundled one it was copied from", async ()
       }),
       "workflows/user/krea2/workflow.api.json": "{}",
     },
+  });
+});
+
+Deno.test("the upscale workflow names no upscale model it cannot promise", async () => {
+  await withTestApp(async (app) => {
+    const detail = await app.json<WorkflowDetail>(
+      "/api/workflows/krea2-upscale",
+    );
+    const param = detail.manifest!.params.find((p) =>
+      p.key === "upscale_model"
+    );
+    // A placeholder filename here is refused for anyone who has an
+    // `upscale_models` folder without that exact file in it — the presence
+    // check only waves a name through when nothing of the class is scanned
+    // at all (§8.1). Empty is skipped, so the workflow runs on the pixel
+    // path until somebody picks a model for the other one.
+    // Empty, and from the graph rather than the manifest — §4.6's rule that
+    // a scalar-bound param's default is whatever the graph holds.
+    assertEquals((param as { default?: string }).default, "");
+    const loader = Object.values(
+      app.workflows.require("krea2-upscale").apiGraph,
+    )
+      .find((node) => node.class_type === "UpscaleModelLoader");
+    assertEquals(loader?.inputs.model_name, "");
   });
 });

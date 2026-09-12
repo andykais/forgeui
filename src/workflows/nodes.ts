@@ -245,9 +245,38 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["upscale_method", "scale_by"],
     outputs: ["IMAGE"],
   },
+  // A real upscale model (ESRGAN and friends) rather than a pixel filter. It
+  // scales by whatever factor it was trained at, so what follows brings the
+  // result back to the factor that was asked for (§10).
+  UpscaleModelLoader: {
+    widgets: ["model_name"],
+    outputs: ["UPSCALE_MODEL"],
+  },
+  ImageUpscaleWithModel: {
+    inputs: ["upscale_model", "image"],
+    outputs: ["IMAGE"],
+  },
   VAEEncode: {
     inputs: ["pixels", "vae"],
     outputs: ["LATENT"],
+  },
+  /*
+   * The advanced sampling set (§10). A partial re-sample has to be expressed
+   * as a slice of the model's *own* schedule, not as `KSampler.denoise`:
+   * denoise builds a schedule of `steps/denoise` and keeps the tail, which
+   * is a step spacing a distilled model was never trained on. These four
+   * build the native schedule and cut it; `KSamplerSelect`, `RandomNoise`,
+   * `CFGGuider` and `SamplerCustomAdvanced` above already sample what is left.
+   */
+  BasicScheduler: {
+    inputs: ["model"],
+    widgets: ["scheduler", "steps", "denoise"],
+    outputs: ["SIGMAS"],
+  },
+  SplitSigmasDenoise: {
+    inputs: ["sigmas"],
+    widgets: ["denoise"],
+    outputs: ["high_sigmas", "low_sigmas"],
   },
   VAEDecode: {
     inputs: ["samples", "vae"],

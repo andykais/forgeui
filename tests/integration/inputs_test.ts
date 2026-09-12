@@ -214,7 +214,11 @@ Deno.test("an upscale run uploads its input and records what it came from", asyn
       { inputs: Record<string, unknown> }
     >;
     assertEquals(graph["6"]!.inputs.image, input.filename);
-    assertEquals(graph["9"]!.inputs.denoise, 0.4);
+    // Creativity is the slice of the model's own schedule to re-run (§10),
+    // so it lands on the sigma split rather than on a sampler's `denoise`.
+    assertEquals(graph["13"]!.inputs.denoise, 0.4);
+    assertEquals(graph["12"]!.inputs.steps, 8);
+    assertEquals(graph["17"]!.inputs.sigmas, ["13", 1]);
   }, { comfy: true });
 });
 

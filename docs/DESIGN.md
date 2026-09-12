@@ -777,12 +777,37 @@ with an `image` param.
   It was going to be the `img2img` workflow with `denoise` and `size` preset
   on the way in. Making it **its own workflow** instead is what lets it be
   tweaked like everything else: the numbers that make it an upscale are the
-  workflow's own params — `creativity` defaulting to **0.4**, `scale` to
+  workflow's own params — `creativity` defaulting to **0.2**, `scale` to
   **2** — so nothing is preset, both are visible and adjustable before
   generating, and a user who wants a different upscale saves a copy and
   changes it. Size is relative (`ImageScaleBy`) rather than absolute, so the
   result follows whatever was handed in and there is no source resolution to
   read off and snap.
+
+  **`creativity` is a slice of the model's own schedule, not `KSampler`'s
+  `denoise`.** This shipped bound to `denoise` first, and the results were
+  grainy and full of invented detail. ComfyUI's `denoise` builds a schedule
+  of `int(steps/denoise)` steps and keeps the tail
+  (`comfy/samplers.py`, `KSampler.set_steps`), which does two unwanted
+  things: the model walks a step spacing it was never distilled for — fatal
+  for an 8-step turbo model — and the step *count* never falls as the
+  strength does, so a gentle setting still gets eight full steps to redraw
+  in. SwarmUI never uses `denoise` for this; every "how much may this
+  change" control it has, refiner and init-image alike, is
+  `start_at_step = round(steps * (1 - x))` on the model's own schedule.
+  The workflow does the same with `BasicScheduler` → `SplitSigmasDenoise` →
+  `SamplerCustomAdvanced`, which is that arithmetic exactly. On Krea 2 at 8
+  steps the old binding started at sigma 0.434 with 8 steps; the new one at
+  0.2 starts at 0.277 with 2. `tests/unit/upscale_schedule_test.ts` pins it.
+
+  **Scaling can use a real upscale model.** `use_upscale_model` (a `switch`
+  bind, §4.4) sends the picture through `UpscaleModelLoader` →
+  `ImageUpscaleWithModel` instead of a pixel filter, then `model_scale`
+  brings the model's own factor back to the `scale` asked for — 0.5 turns a
+  4× model into a 2× upscale. Lanczos hands the sampler a blur and every
+  detail in the result is invented; an upscale model hands it real edges, so
+  less is. Off by default, because it needs a file in `upscale_models/`;
+  SwarmUI's default is `pixel-lanczos` too.
 
   Prompt, seed and LoRAs are prefilled from the source output's sidecar,
   **narrowed to the keys the upscale workflow actually exposes** — the

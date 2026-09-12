@@ -37,6 +37,8 @@ class AppState {
    */
   clips = $state<ModelEntry[]>([]);
   vaes = $state<ModelEntry[]>([]);
+  /** ESRGAN and friends, for a workflow that scales with a model (§10). */
+  upscalers = $state<ModelEntry[]>([]);
   /** The model library's two background passes (§8.1), pushed on `/ws`. */
   rescan = $state<RescanProgress | null>(null);
   hashing = $state<HashingProgress | null>(null);
@@ -131,17 +133,20 @@ class AppState {
   }
 
   async refreshModels(): Promise<void> {
-    const [loras, checkpoints, clips, vaes, families] = await Promise.all([
-      api.modelsOfKind("loras").catch(() => []),
-      api.modelsOfClass("diffusion").catch(() => []),
-      api.modelsOfClass("clip").catch(() => []),
-      api.modelsOfClass("vae").catch(() => []),
-      api.families().catch(() => []),
-    ]);
+    const [loras, checkpoints, clips, vaes, upscalers, families] = await Promise
+      .all([
+        api.modelsOfKind("loras").catch(() => []),
+        api.modelsOfClass("diffusion").catch(() => []),
+        api.modelsOfClass("clip").catch(() => []),
+        api.modelsOfClass("vae").catch(() => []),
+        api.modelsOfClass("upscale").catch(() => []),
+        api.families().catch(() => []),
+      ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
     this.clips = clips;
     this.vaes = vaes;
+    this.upscalers = upscalers;
     this.serverFamilies = families
       .map((count) => count.family)
       .filter((family) => family !== "unset");
@@ -155,12 +160,7 @@ class AppState {
    */
   get families(): string[] {
     const names = new Set<string>([...this.serverFamilies, ...FAMILIES]);
-    for (const model of [
-      ...this.checkpoints,
-      ...this.loras,
-      ...this.clips,
-      ...this.vaes,
-    ]) {
+    for (const model of this.allModels) {
       if (model.family && model.family !== "unset") names.add(model.family);
     }
     // A family the config hides is not one to offer, file a model as, or
@@ -191,6 +191,8 @@ class AppState {
         return this.vaes;
       case "lora":
         return this.loras;
+      case "upscale":
+        return this.upscalers;
       default:
         return this.checkpoints;
     }
@@ -198,14 +200,20 @@ class AppState {
 
   /** Every model the app knows about, for counts that span the library. */
   get allModels(): ModelEntry[] {
-    return [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes];
+    return [
+      ...this.checkpoints,
+      ...this.loras,
+      ...this.clips,
+      ...this.vaes,
+      ...this.upscalers,
+    ];
   }
 
   /** Everything the pickers and the models filter name, by hash. */
   model(hash: string | null | undefined): ModelEntry | null {
     if (!hash) return null;
     return (
-      [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes].find(
+      this.allModels.find(
         (model) => model.hash === hash || model.id === hash,
       ) ?? null
     );
@@ -219,9 +227,7 @@ class AppState {
   modelByName(name: string | null | undefined): ModelEntry | null {
     if (!name) return null;
     return (
-      [...this.checkpoints, ...this.loras, ...this.clips, ...this.vaes].find(
-        (model) => model.name === name,
-      ) ?? null
+      this.allModels.find((model) => model.name === name) ?? null
     );
   }
 

@@ -5,17 +5,17 @@ The nine workflows of DESIGN §4.6, shipped with the app and copied into
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
 
-| id              | name                   | family  | kind  | exposed params                                                                                                               |
-| --------------- | ---------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `krea2`         | Krea 2 Turbo           | krea2   | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, enhancer length advanced                                  |
-| `krea2-upscale` | Krea 2 Turbo (upscale) | krea2   | image | `category: upscale`; image, creativity (0.4), scale (2), prompt, seed, loras · steps, cfg, scaler, clip, vae, model advanced |
-| `krea2-img2img` | Flux Krea 2 (img2img)  | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced                                                              |
-| `illustrious`   | Illustrious XL         | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                             |
-| `anima`         | Anima                  | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced                                                  |
-| `flux-klein`    | Flux.2 Klein           | flux2   | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                            |
-| `z-image-turbo` | Z-Image Turbo          | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                          |
-| `ltx`           | LTX Video              | ltx     | video | prompt, size, frames, fps, seed, loras                                                                                       |
-| `sd15`          | Stable Diffusion 1.5   | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                    |
+| id              | name                   | family  | kind  | exposed params                                                                                                                       |
+| --------------- | ---------------------- | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `krea2`         | Krea 2 Turbo           | krea2   | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, enhancer length advanced                                          |
+| `krea2-upscale` | Krea 2 Turbo (upscale) | krea2   | image | `category: upscale`; image, creativity (0.2), scale (2), prompt, seed, loras · upscale model, sampling and loader overrides advanced |
+| `krea2-img2img` | Flux Krea 2 (img2img)  | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced                                                                      |
+| `illustrious`   | Illustrious XL         | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                                     |
+| `anima`         | Anima                  | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced                                                          |
+| `flux-klein`    | Flux.2 Klein           | flux2   | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                                    |
+| `z-image-turbo` | Z-Image Turbo          | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                  |
+| `ltx`           | LTX Video              | ltx     | video | prompt, size, frames, fps, seed, loras                                                                                               |
+| `sd15`          | Stable Diffusion 1.5   | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                            |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
@@ -51,8 +51,9 @@ Flux graph and keeps its old name; it is a Flux workflow that happens to be
 called Krea, and rebuilding it on Krea 2 is a separate job.
 
 `krea2-upscale` was written here rather than imported: it is `krea2`'s loaders
-and sampler with `LoadImage` → `ImageScaleBy` → `VAEEncode` in front, so it
-names the same real model files the rebuilt `krea2` does.
+with `LoadImage` → `ImageScaleBy` → `VAEEncode` in front and the advanced
+sampling set behind, so it names the same real model files the rebuilt `krea2`
+does.
 
 `ltx` is also still the old graph, LTX-Video 0.9.5 rather than LTX-2.3.
 Rebuilding it waits on video outputs.
