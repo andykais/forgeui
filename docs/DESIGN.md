@@ -178,7 +178,7 @@ Field notes:
 | `size` | width×height with ratio presets/aspect lock; `default` is the workflow's base resolution, optional `step` (16 or 64) snaps ratio results to the model's grid | `{w, h}` |
 | `checkpoint` | model picker (filtered by family) | scalar (filename) |
 | `lora_list` | repeatable rows: lora picker + strength(s) | `chain` (graph rewrite, §4.4) |
-| `image` | upload / pick from gallery / paste | scalar (`LoadImage.image`), content-addressed (§9) |
+| `image` | file picker / drop / paste, thumbnail with the stored size | scalar (`LoadImage.image`), content-addressed (§9) |
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
@@ -737,6 +737,22 @@ On submit:
 the store as needed. Inputs are ref-counted through `output_inputs`; an orphan
 sweep removes unreferenced files (user-triggered, with a dry-run preview).
 
+**What a param holds is `<sha256>.<ext>`**, not a bare hash and not a path.
+That is both the store's address and the name ComfyUI knows the file by, so
+one value answers every question anyone asks of it later: the panel finds the
+thumbnail from it, the graph binds it verbatim, and the upload step finds what
+to send by **matching the filename in the graph** rather than by walking the
+manifest — which is the only thing that works for a rerun, where the frozen
+graph has no manifest behind it any more and `comfy-input/` may have been
+swept since. The upload happens before the job row exists: an input the store
+has lost is as much a bad request as an empty prompt, and neither should leave
+a failed job behind to explain itself.
+
+The extension and the recorded dimensions come from the **first bytes of the
+file**, never from its name or the browser's `Content-Type`. A `.png` that is
+really a JPEG otherwise fails inside ComfyUI's load step, well past the point
+where anything useful can be said about it. PNG, JPEG and WebP only.
+
 The "edit this image" vs. "use as inspiration" distinction is not a storage
 concept — it is which workflow the image is sent to and a `denoise`/`strength`
 param on the img2img-style workflows.
@@ -752,22 +768,32 @@ with an `image` param.
   (+ optional `mask`) + `prompt` — and are added as user workflows later.
 - Every output has **Use image in workflow** (video: **Use video in
   workflow**) listing workflows with a matching `image`/`video` param.
-- **Upscale image** sits beside it. It is not a separate workflow: it routes
-  to the `category: img2img` workflow in the **same family** as the output's
-  workflow (no menu when exactly one matches, the popover filtered to
-  `category: img2img` when several do, hidden when none; **image outputs
-  only** — never shown on videos in v1), attaches the image,
-  and presets `denoise` to **0.4** and `size` to **2× the source**, snapped
-  down to a multiple of 16. Prompt, seed and LoRAs are prefilled from the
-  source output's sidecar, not from whatever is currently selected. The
-  user lands in Generate with the panel filled and can adjust before
-  generating. Mechanically identical to "use in workflow": the input is
-  hashed into the content-addressed store and `derived_from_output`
-  recorded. An upscale is an ordinary derived output, not a special case.
-  Resolution is client-side: `GET /api/workflows` carries `category` and
-  `family`, `GET /api/outputs/:id` carries the output's workflow family and
-  pixel size; the client picks the target and presets `denoise`/`size`
-  before navigating to Generate. No upscale-specific route.
+- **Upscale image** sits beside it, and routes to the `category: upscale`
+  workflow in the **same family** as the output (no menu when exactly one
+  matches, a popover when several do, hidden when none; **image outputs
+  only** — never shown on videos, because none of these graphs upscale one).
+  `krea2-upscale` ships first.
+
+  It was going to be the `img2img` workflow with `denoise` and `size` preset
+  on the way in. Making it **its own workflow** instead is what lets it be
+  tweaked like everything else: the numbers that make it an upscale are the
+  workflow's own params — `creativity` defaulting to **0.4**, `scale` to
+  **2** — so nothing is preset, both are visible and adjustable before
+  generating, and a user who wants a different upscale saves a copy and
+  changes it. Size is relative (`ImageScaleBy`) rather than absolute, so the
+  result follows whatever was handed in and there is no source resolution to
+  read off and snap.
+
+  Prompt, seed and LoRAs are prefilled from the source output's sidecar,
+  **narrowed to the keys the upscale workflow actually exposes** — the
+  "ignored: …" warning `editWith` shows is right when a workflow changed
+  under a saved run and noise on every upscale. Mechanically identical to
+  "use in workflow": the input is hashed into the content-addressed store and
+  `derived_from_output` recorded. An upscale is an ordinary derived output,
+  not a special case. Resolution is client-side: `GET /api/workflows` carries
+  `category` and `family`, `GET /api/outputs/:id` the output's family and
+  kind; the client picks the target, `POST /api/inputs` adopts the output,
+  and the panel is filled. No upscale-specific route.
 - The `mask` widget is a simple brush/erase canvas over the bound image,
   producing a PNG that goes through §9.
 - Provenance chain via `derived_from_output` gives a "lineage" view.
@@ -1286,6 +1312,11 @@ Content-addressed inputs, `image`/`video` params, "Use in workflow" + "Upscale i
 orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
 Civitai fetch-info and URL import (raw only).
 
+Landed so far: the store and `POST /api/inputs`, the `image` param widget
+(picker, drop, paste), `krea2-upscale` and the Upscale action, `output_inputs`
+provenance. Still to come in this phase: `video` params, "Use image in
+workflow", the orphan sweep, the lineage view, and the rest of the list.
+
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows, lineage view.
 
@@ -1377,9 +1408,12 @@ If it fails, update the fake; never make the default suite depend on it.
 ---
 
 ## 15. Open questions (from the mock pass)
-1. *(Resolved)* Upscale is the same-family `img2img` workflow with denoise
-   0.4 and 2× size; only `krea2-img2img` ships in v1, so Upscale is hidden on
-   sdxl/anima/ltx/z-image outputs until their img2img workflows exist.
+1. *(Resolved, then revised)* Upscale is the same-family **`category:
+   upscale`** workflow, which carries `creativity` 0.4 and `scale` 2 as its
+   own defaults (§10). It was going to be the `img2img` workflow with those
+   two preset by the client; a workflow of its own is what makes it
+   adjustable and copyable like every other workflow. `krea2-upscale` ships
+   first, so Upscale is hidden on outputs of families that have none yet.
 2. *(Resolved)* `display_name` collisions allowed; hash is the identity
    (§8.1).
 3. Should notes / Civitai description be searchable anywhere, given they are

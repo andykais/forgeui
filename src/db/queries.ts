@@ -1245,3 +1245,82 @@ export function workflowUsage(db: Database): Map<string, WorkflowUsage> {
 
   return usage;
 }
+
+// ---------------------------------------------------------------- inputs §9
+
+/** One file in the content-addressed input store. */
+export interface InputRow {
+  sha256: string;
+  /** Relative to the data dir, so the row survives the dir being moved. */
+  path: string;
+  ext: string;
+  kind: string;
+  width: number | null;
+  height: number | null;
+  original_name: string | null;
+  /** The output this was adopted from, when it came out of the app itself. */
+  derived_from_output: string | null;
+  created_at: number;
+}
+
+const INPUT_COLUMNS =
+  `sha256, path, ext, kind, width, height, original_name, derived_from_output, created_at`;
+
+export function getInput(db: Database, sha256: string): InputRow | null {
+  return db.prepare(
+    `SELECT ${INPUT_COLUMNS} FROM inputs WHERE sha256 = ?`,
+  ).get<InputRow>(sha256) ?? null;
+}
+
+/**
+ * The same bytes uploaded twice are one row: the second arrival keeps what
+ * the first recorded rather than overwriting the name and provenance of a
+ * file that other outputs already point at (§9).
+ */
+export function insertInput(db: Database, row: InputRow): void {
+  db.prepare(
+    `INSERT INTO inputs
+       (sha256, path, ext, kind, width, height, original_name,
+        derived_from_output, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(sha256) DO NOTHING`,
+  ).run(
+    row.sha256,
+    row.path,
+    row.ext,
+    row.kind,
+    row.width,
+    row.height,
+    row.original_name,
+    row.derived_from_output,
+    row.created_at,
+  );
+}
+
+/** What an output was generated from, per param (§9's ref counting). */
+export function insertOutputInput(
+  db: Database,
+  outputId: string,
+  sha256: string,
+  paramKey: string,
+): void {
+  db.prepare(
+    `INSERT INTO output_inputs (output_id, input_sha256, param_key)
+     VALUES (?, ?, ?)
+     ON CONFLICT(output_id, input_sha256, param_key) DO NOTHING`,
+  ).run(outputId, sha256, paramKey);
+}
+
+export interface OutputInputRow {
+  input_sha256: string;
+  param_key: string;
+}
+
+export function listOutputInputs(
+  db: Database,
+  outputId: string,
+): OutputInputRow[] {
+  return db.prepare(
+    `SELECT input_sha256, param_key FROM output_inputs WHERE output_id = ?`,
+  ).all<OutputInputRow>(outputId);
+}

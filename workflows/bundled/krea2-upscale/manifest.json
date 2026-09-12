@@ -1,0 +1,135 @@
+{
+  "id": "krea2-upscale",
+  "name": "Krea 2 Turbo (upscale)",
+  "family": "krea2",
+  "kind": "image",
+  "category": "upscale",
+  "description": "Upscale an image with Krea 2 Turbo: the image is scaled up, then re-sampled at low denoise so the model puts detail into what the scaler could only interpolate. Creativity is how far it may stray from the original.",
+  "params": [
+    {
+      "key": "image",
+      "label": "Image",
+      "type": "image",
+      "required": true,
+      "bind": "6.image"
+    },
+    {
+      "key": "creativity",
+      "label": "Creativity",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "default": 0.4,
+      "description": "How far the model may stray from the original. Low keeps the picture and adds detail; high reinvents it.",
+      "bind": "9.denoise"
+    },
+    {
+      "key": "scale",
+      "label": "Scale",
+      "type": "float",
+      "min": 1,
+      "max": 4,
+      "step": 0.25,
+      "default": 2,
+      "description": "How many times larger than the source.",
+      "bind": "7.scale_by"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "description": "What the picture is. Leave it empty to let the image speak for itself.",
+      "bind": "4.text"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "9.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "krea2"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": null,
+          "model_to": [
+            "9.model"
+          ],
+          "clip_to": null
+        }
+      }
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "min": 1,
+      "max": 50,
+      "advanced": true,
+      "bind": "9.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "9.cfg"
+    },
+    {
+      "key": "upscale_method",
+      "label": "Scaler",
+      "type": "enum",
+      "options": [
+        "nearest-exact",
+        "bilinear",
+        "area",
+        "bicubic",
+        "lanczos"
+      ],
+      "advanced": true,
+      "bind": "7.upscale_method"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "2.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "3.vae_name"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "krea2"
+      },
+      "advanced": true,
+      "bind": "1.unet_name"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "11",
+      "kind": "image"
+    }
+  ]
+}

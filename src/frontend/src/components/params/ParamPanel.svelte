@@ -7,6 +7,7 @@
   import SizeParam from "./SizeParam.svelte";
   import LoraListParam from "./LoraListParam.svelte";
   import ModelParam from "./ModelParam.svelte";
+  import ImageParam from "./ImageParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param } from "../../types.ts";
 
   /**
@@ -374,15 +375,21 @@
           onpicked={focusPrompt}
           fill={pickerFill}
         />
+      {:else if param.type === "image"}
+        <ImageParam
+          {param}
+          value={(values[param.key] as string) ?? ""}
+          onchange={(filename) => onchange(param.key, filename)}
+        />
       {:else}
         <!--
-          image / mask / video: the content-addressed input store is Phase 3,
-          so the panel says so rather than pretending to accept a file.
+          mask and video: the mask canvas is Phase 4 and video inputs wait on
+          the same store's video half, so the panel says so rather than
+          pretending to accept a file.
         -->
         <p class="note">
           <TriangleAlert size={12} />
-          {param.type} inputs arrive with the content-addressed input store in a later phase,
-          so this workflow cannot run yet.
+          {param.type} inputs arrive in a later phase, so this workflow cannot run yet.
         </p>
       {/if}
     </div>

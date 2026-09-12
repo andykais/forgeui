@@ -48,6 +48,7 @@ const BUNDLED = [
   ["flux-klein", "Flux.2 Klein"],
   ["illustrious", "Illustrious XL"],
   ["krea2", "Krea 2 Turbo"],
+  ["krea2-upscale", "Krea 2 Turbo (upscale)"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["z-image-turbo", "Z-Image Turbo"],
@@ -151,6 +152,19 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     // steps, cfg, the text encoder and VAE, and the enhancer's own length.
     assertEquals(byId.get("krea2")!.params.advanced, 5);
+    // Upscale is an ordinary workflow, so its knobs are ordinary params
+    // (§10): the image, how far the model may stray, and how much bigger.
+    assertEquals(keys("krea2-upscale"), [
+      "image",
+      "creativity",
+      "scale",
+      "prompt",
+      "seed",
+      "loras",
+    ]);
+    assertEquals(byId.get("krea2-upscale")!.category, "upscale");
+    // steps, cfg, the scaler, the text encoder, the VAE and the model.
+    assertEquals(byId.get("krea2-upscale")!.params.advanced, 6);
     assertEquals(keys("krea2-img2img"), [
       "image",
       "prompt",
@@ -232,6 +246,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "flux",
         "flux2",
         "sdxl",
+        "krea2",
+        // The upscale workflow is Krea 2 as well (§10).
         "krea2",
         "ltx",
         "sd15",

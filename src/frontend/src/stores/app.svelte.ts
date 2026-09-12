@@ -79,6 +79,24 @@ class AppState {
     return this.workflows.find((workflow) => workflow.id === id) ?? null;
   }
 
+  /**
+   * The upscale workflows that could take this output (§10): same family,
+   * `category: upscale`, and images only — an upscale of a video is not what
+   * any of these graphs do.
+   *
+   * A list rather than one answer, because a user may keep several: the
+   * caller runs the only match outright and offers a choice when there are
+   * more.
+   */
+  upscalersFor(output: { family: string | null; kind: string } | null): WorkflowSummary[] {
+    if (!output || output.kind !== "image") return [];
+    return this.workflows.filter((workflow) =>
+      workflow.category === "upscale" &&
+      workflow.family === output.family &&
+      workflow.runnable
+    );
+  }
+
   jobOutputs(job: Job): Output[] {
     return job.outputs
       .map((id) => this.outputs[id])

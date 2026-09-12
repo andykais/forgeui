@@ -354,11 +354,23 @@ describe("each param type renders from the manifest", () => {
     expect(screen.getByText("illustriousXL")).toBeTruthy();
   });
 
-  test("image says why it cannot run yet, rather than faking an upload", () => {
+  test("image offers all three ways of having a picture to hand", () => {
+    // The picker, a drop, and a paste: a screenshot only ever lives on the
+    // clipboard, and making somebody save it to disk first serves nothing.
     mount([
       { key: "image", label: "Image", type: "image", required: true, bind: "10.image" },
     ]);
-    expect(screen.getByText(/inputs arrive with the content-addressed/)).toBeTruthy();
+    expect(screen.getByText(/Choose, drop or paste an image/)).toBeTruthy();
+    expect(
+      screen.getByLabelText("Image: choose, drop or paste an image"),
+    ).toBeTruthy();
+  });
+
+  test("mask and video still say why they cannot run yet", () => {
+    mount([
+      { key: "mask", label: "Mask", type: "mask", bind: "11.mask" },
+    ]);
+    expect(screen.getByText(/arrive in a later phase/)).toBeTruthy();
   });
 });
 

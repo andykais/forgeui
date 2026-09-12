@@ -238,6 +238,13 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["upscale_method", "width", "height", "crop"],
     outputs: ["IMAGE"],
   },
+  // Scale relative to whatever came in, which is what an upscale means: the
+  // output size follows the source rather than being stated up front (§10).
+  ImageScaleBy: {
+    inputs: ["image"],
+    widgets: ["upscale_method", "scale_by"],
+    outputs: ["IMAGE"],
+  },
   VAEEncode: {
     inputs: ["pixels", "vae"],
     outputs: ["LATENT"],

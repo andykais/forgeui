@@ -588,7 +588,8 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(byName.get("flux2")?.workflows, 1);
     // The enhancer is a checkbox on the one Krea 2 workflow, not a second
     // workflow of its own (§7.1).
-    assertEquals(byName.get("krea2")?.workflows, 1);
+    // The plain workflow and the upscale one (§10).
+    assertEquals(byName.get("krea2")?.workflows, 2);
     assertEquals(byName.get("sd15")?.workflows, 1);
     assertEquals(byName.get("sd15")?.models, 0);
   });

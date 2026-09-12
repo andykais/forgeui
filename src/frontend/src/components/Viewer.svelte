@@ -28,6 +28,8 @@
     onedit: (output: Output) => void;
     onrerun: (output: Output) => void;
     ondelete: (output: Output) => void;
+    /** Upscale this output with the named workflow (§10). */
+    onupscale?: (output: Output, workflowId: string) => void;
     onfollow?: () => void;
   }
 
@@ -42,6 +44,7 @@
     onedit,
     onrerun,
     ondelete,
+    onupscale,
     onfollow,
   }: Props = $props();
 
@@ -203,6 +206,9 @@
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}
         ondelete={() => ondelete(selected)}
+        onupscale={onupscale
+          ? (workflowId) => onupscale(selected, workflowId)
+          : undefined}
       />
     {:else}
       <aside class="sidebar-loading"><span class="dim">loading metadata…</span></aside>

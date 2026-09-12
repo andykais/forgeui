@@ -1,20 +1,21 @@
 # Bundled workflows
 
-The eight workflows of DESIGN §4.6, shipped with the app and copied into
+The nine workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
 
-| id              | name                  | family  | kind  | exposed params                                                                              |
-| --------------- | --------------------- | ------- | ----- | ------------------------------------------------------------------------------------------- |
-| `krea2`         | Krea 2 Turbo          | krea2   | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, enhancer length advanced |
-| `krea2-img2img` | Flux Krea 2 (img2img) | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced                             |
-| `illustrious`   | Illustrious XL        | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                            |
-| `anima`         | Anima                 | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced                 |
-| `flux-klein`    | Flux.2 Klein          | flux2   | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                           |
-| `z-image-turbo` | Z-Image Turbo         | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                         |
-| `ltx`           | LTX Video             | ltx     | video | prompt, size, frames, fps, seed, loras                                                      |
-| `sd15`          | Stable Diffusion 1.5  | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                                   |
+| id              | name                   | family  | kind  | exposed params                                                                                                               |
+| --------------- | ---------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `krea2`         | Krea 2 Turbo           | krea2   | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, enhancer length advanced                                  |
+| `krea2-upscale` | Krea 2 Turbo (upscale) | krea2   | image | `category: upscale`; image, creativity (0.4), scale (2), prompt, seed, loras · steps, cfg, scaler, clip, vae, model advanced |
+| `krea2-img2img` | Flux Krea 2 (img2img)  | flux    | image | image, prompt, denoise, size, seed, loras · steps, cfg advanced                                                              |
+| `illustrious`   | Illustrious XL         | sdxl    | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                             |
+| `anima`         | Anima                  | anima   | image | prompt, negative, model, size, seed, turbo · steps, cfg, clip, vae advanced                                                  |
+| `flux-klein`    | Flux.2 Klein           | flux2   | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                            |
+| `z-image-turbo` | Z-Image Turbo          | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                          |
+| `ltx`           | LTX Video              | ltx     | video | prompt, size, frames, fps, seed, loras                                                                                       |
+| `sd15`          | Stable Diffusion 1.5   | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                    |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
@@ -46,12 +47,15 @@ rest are still the placeholders described below.
 a Flux-family model; the page it is named after covers **Krea 2**, which runs on
 a Qwen3-VL text encoder and is a different architecture. Deriving from the
 source made the workflow match its name. `krea2-img2img` still holds the old
-Flux graph and keeps its old name; it needs image inputs before it can run at
-all, so it is left for that phase.
+Flux graph and keeps its old name; it is a Flux workflow that happens to be
+called Krea, and rebuilding it on Krea 2 is a separate job.
+
+`krea2-upscale` was written here rather than imported: it is `krea2`'s loaders
+and sampler with `LoadImage` → `ImageScaleBy` → `VAEEncode` in front, so it
+names the same real model files the rebuilt `krea2` does.
 
 `ltx` is also still the old graph, LTX-Video 0.9.5 rather than LTX-2.3.
-Text-to-video without image-to-video is not much use, and image inputs are a
-later phase, so rebuilding it waits for them.
+Rebuilding it waits on video outputs.
 
 A template holding several variants ships all but one bypassed, so
 `--subgraph <n>` picks which one to import — `flux-klein` is variant 1, the
@@ -63,7 +67,7 @@ distilled 4B, which the template ships switched off in favour of the base.
 (`v1-5-pruned-emaonly-fp16.safetensors`), so it runs as shipped and is what the
 contract check generates with (`docs/HARDWARE-CHECKLIST.md`).
 
-The other seven have never been run: this repository has no GPU and none of
+The other eight have never been run: this repository has no GPU and none of
 their weights. Every model filename below is a **placeholder** and will not
 resolve on your machine until you point it at a file you actually have.
 
@@ -97,7 +101,12 @@ saving replaces it with the editor's own.
   `frames` snaps to 8n+1, which is what LTX requires.
 - **`krea2-img2img`** resizes the input image to `size` with `ImageScale` before
   encoding, so `size` means the same thing as it does everywhere else.
+- **`krea2-upscale`** scales with `ImageScaleBy` instead, so the result is a
+  multiple of whatever was handed in rather than a size stated up front — which
+  is what an upscale means. It then re-samples at `creativity` (the KSampler's
+  denoise, 0.4 by default) so the model puts detail into what the scaler could
+  only interpolate. Everything about it is an ordinary param: save a copy and
+  change the numbers, or the scaler, or the model.
 - Only core ComfyUI nodes are used, so nothing here depends on custom nodes.
-- Two of these cannot be generated from yet: `krea2-img2img` needs the
-  content-addressed input store behind `image` params, and `ltx` writes a video.
-  Both are later phases; the workflows load, list and rewrite today.
+- One of these cannot be generated from yet: `ltx` writes a video, and video
+  outputs are a later phase; it loads, lists and rewrites today.

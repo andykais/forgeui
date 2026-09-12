@@ -433,3 +433,19 @@ export interface TelemetryEntryPage {
   entries: TelemetryEntry[];
   cursor: string | null;
 }
+
+/**
+ * One file in the content-addressed input store (§9). `filename` is what an
+ * `image` param holds and what the graph binds; `url` is what the panel and
+ * the viewer show.
+ */
+export interface InputMedia {
+  sha256: string;
+  ext: string;
+  filename: string;
+  width: number;
+  height: number;
+  bytes: number;
+  url: string;
+  derived_from_output: string | null;
+}

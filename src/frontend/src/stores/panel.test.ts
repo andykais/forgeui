@@ -8,7 +8,21 @@ import type { LoraRow, Manifest, WorkflowDetail } from "../types.ts";
  * as it stands rather than read off and typed back in.
  */
 
-vi.mock("../api.ts", () => ({ api: {} }));
+const fakeApi = {
+  adoptOutput: vi.fn(async (id: string) => ({
+    sha256: "a".repeat(64),
+    ext: "png",
+    filename: `${"a".repeat(64)}.png`,
+    width: 1024,
+    height: 1024,
+    bytes: 1,
+    url: "/api/media/inputs/aa/x.png",
+    derived_from_output: id,
+  })),
+  workflow: vi.fn(async () => ({ id: "up", name: "Up", manifest: upscaleManifest })),
+  jobs: vi.fn(async () => []),
+};
+vi.mock("../api.ts", () => ({ api: fakeApi }));
 vi.mock("./app.svelte.ts", () => ({ app: { comfyReady: true } }));
 
 const { panel } = await import("./panel.svelte.ts");
@@ -96,5 +110,64 @@ describe("adding a LoRA to the panel", () => {
     expect(panel.loraParam).toBeNull();
     expect(panel.addLora(row("glow.safetensors", 1))).toBeNull();
     expect(panel.values.loras).toBeUndefined();
+  });
+});
+
+/**
+ * Upscale (§10) is `editWith` with the picture attached, so what it has to
+ * get right is which values come across and which do not.
+ */
+const upscaleManifest = {
+  id: "up",
+  name: "Krea 2 Turbo (upscale)",
+  family: "krea2",
+  kind: "image",
+  category: "upscale",
+  description: null,
+  params: [
+    { key: "image", type: "image", required: true, bind: "6.image" },
+    { key: "creativity", type: "float", default: 0.4, bind: "9.denoise" },
+    { key: "scale", type: "float", default: 2, bind: "7.scale_by" },
+    { key: "prompt", type: "text", bind: "4.text" },
+    { key: "seed", type: "seed", default: -1, bind: "9.seed" },
+  ],
+  outputs: [{ node: "11", kind: "image" }],
+} as unknown as Manifest;
+
+describe("upscaling an output", () => {
+  test("the picture is attached and the run that made it fills the rest", async () => {
+    await panel.upscale("up", { id: "01JOUT" }, {
+      prompt: "a granite bowl of figs",
+      seed: 42,
+      // The source's own knobs, which this workflow does not have: an
+      // upscale takes its size from the picture (§10).
+      size: [1024, 1024],
+      enhance: true,
+    });
+
+    expect(fakeApi.adoptOutput).toHaveBeenCalledWith("01JOUT");
+    expect(panel.values.image).toBe(`${"a".repeat(64)}.png`);
+    expect(panel.values.prompt).toBe("a granite bowl of figs");
+    expect(panel.values.seed).toBe(42);
+    // From the workflow, not from the source: this is what makes it one
+    // click rather than a preset applied on the way in.
+    expect(panel.values.creativity).toBe(0.4);
+    expect(panel.values.scale).toBe(2);
+    // And nothing is said about the keys this workflow never had. That
+    // warning is for a workflow that changed under a saved run; here it
+    // would fire on every single upscale.
+    expect(panel.values.size).toBeUndefined();
+    expect(panel.warnings).toEqual([]);
+  });
+
+  test("a workflow with no image param refuses rather than half-filling", async () => {
+    fakeApi.workflow.mockResolvedValueOnce({
+      id: "up",
+      name: "Up",
+      manifest: { ...upscaleManifest, params: [] } as unknown as Manifest,
+    });
+    await expect(panel.upscale("up", { id: "01JOUT" }, {})).rejects.toThrow(
+      /no image param/,
+    );
   });
 });
