@@ -7,6 +7,7 @@ import type { ComfyStatus } from "../../src/comfy/manager.ts";
 interface StatusResponse {
   comfy: ComfyStatus;
   data_dir: string;
+  started_at: number;
 }
 
 Deno.test("GET /api/system/status reports the connection and the device", async () => {
@@ -24,6 +25,23 @@ Deno.test("GET /api/system/status reports the connection and the device", async 
     assertEquals(status.comfy.pid, null);
     assertEquals(status.data_dir, app.paths.root);
   }, { comfy: true });
+});
+
+Deno.test("the status says when this run of the app began", async () => {
+  const before = Date.now();
+  await withTestApp(async (app) => {
+    const status = await app.json<StatusResponse>("/api/system/status");
+    // Generate calls its results "this session's" (§11.2); this is the line
+    // it draws them at, so it has to be this process and not some earlier
+    // one — a restart is a new session and a page reload is not.
+    assert(
+      status.started_at >= before && status.started_at <= Date.now(),
+      `${status.started_at} is not within this test's run`,
+    );
+    // And it does not move while the app is up.
+    const again = await app.json<StatusResponse>("/api/system/status");
+    assertEquals(again.started_at, status.started_at);
+  });
 });
 
 Deno.test("without ComfyUI the app still serves, and says it is not connected", async () => {

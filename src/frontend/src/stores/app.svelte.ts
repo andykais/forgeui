@@ -22,10 +22,20 @@ import { plain } from "../lib/state.svelte.ts";
  * refresh rebuilds the same view (§5 step 6, §7).
  */
 
+/** How far back the session grid reads; the route's own ceiling is 500. */
+const SESSION_JOBS = 200;
+
 class AppState {
   config = $state<Config | null>(null);
   comfy = $state<ComfyStatus | null>(null);
   dataDir = $state<string>("");
+  /**
+   * When the server came up. Generate shows "this session's jobs" (§11.2),
+   * and that is the line: a browser reload is the same session, a restart of
+   * the app is a new one. Zero until the first status lands, which lets
+   * everything through rather than hiding the session while it loads.
+   */
+  startedAt = $state<number>(0);
   workflows = $state<WorkflowSummary[]>([]);
   loras = $state<ModelEntry[]>([]);
   /** Everything that can drive a generation, from every diffusion folder. */
@@ -61,11 +71,24 @@ class AppState {
 
   #socket: WebSocket | null = null;
   #reconnect: ReturnType<typeof setTimeout> | null = null;
+  /** So a socket opening can tell a first connection from a reconnection. */
+  #everConnected = false;
   /** Coalesces the model refetch a burst of finished outputs would ask for. */
   #modelRefresh: ReturnType<typeof setTimeout> | null = null;
 
   get comfyReady(): boolean {
     return this.comfy?.state === "running";
+  }
+
+  /**
+   * The jobs Generate calls "this session's": the ones this run of the app
+   * has queued (§11.2). Before `started_at` lands there is no line to draw,
+   * so everything is in — a list that flashes empty on every load would be
+   * worse than one that settles a moment later.
+   */
+  get sessionJobs(): Job[] {
+    if (this.startedAt === 0) return this.jobs;
+    return this.jobs.filter((job) => job.created_at >= this.startedAt);
   }
 
   get activeJobs(): Job[] {
@@ -90,12 +113,15 @@ class AppState {
    * caller runs the only match outright and offers a choice when there are
    * more.
    */
-  upscalersFor(output: { family: string | null; kind: string } | null): WorkflowSummary[] {
+  upscalersFor(
+    output: { family: string | null; kind: string } | null,
+  ): WorkflowSummary[] {
     if (!output || output.kind !== "image") return [];
-    return this.workflows.filter((workflow) =>
-      workflow.category === "upscale" &&
-      workflow.family === output.family &&
-      workflow.runnable
+    return this.workflows.filter(
+      (workflow) =>
+        workflow.category === "upscale" &&
+        workflow.family === output.family &&
+        workflow.runnable,
     );
   }
 
@@ -113,12 +139,16 @@ class AppState {
         api.config(),
         api.systemStatus(),
         api.workflows(),
-        api.jobs({ status: "all", limit: 40 }),
+        // A session's worth, because the results grid is now scoped to the
+        // session and its count is shown beside the time it began (§11.2):
+        // forty would have made a busy session read as forty jobs for ever.
+        api.jobs({ status: "all", limit: SESSION_JOBS }),
         api.outputs({ limit: 120 }),
       ]);
       this.config = config;
       this.comfy = status.comfy;
       this.dataDir = status.data_dir;
+      this.startedAt = status.started_at ?? 0;
       this.workflows = workflows;
       this.jobs = jobs;
       this.outputs = Object.fromEntries(
@@ -132,16 +162,32 @@ class AppState {
     }
   }
 
-  async refreshModels(): Promise<void> {
-    const [loras, checkpoints, clips, vaes, upscalers, families] = await Promise
-      .all([
-        api.modelsOfKind("loras").catch(() => []),
-        api.modelsOfClass("diffusion").catch(() => []),
-        api.modelsOfClass("clip").catch(() => []),
-        api.modelsOfClass("vae").catch(() => []),
-        api.modelsOfClass("upscale").catch(() => []),
-        api.families().catch(() => []),
+  /** After a reconnection: where this session starts, and what is in it. */
+  async #resync(): Promise<void> {
+    try {
+      const [status, jobs] = await Promise.all([
+        api.systemStatus(),
+        api.jobs({ status: "all", limit: SESSION_JOBS }),
       ]);
+      this.comfy = status.comfy;
+      this.dataDir = status.data_dir;
+      this.startedAt = status.started_at ?? 0;
+      this.jobs = jobs;
+    } catch {
+      // The socket is up; the next status message will carry ComfyUI's state
+      // either way, and a failed resync is not worth an error banner.
+    }
+  }
+
+  async refreshModels(): Promise<void> {
+    const [loras, checkpoints, clips, vaes, upscalers, families] = await Promise.all([
+      api.modelsOfKind("loras").catch(() => []),
+      api.modelsOfClass("diffusion").catch(() => []),
+      api.modelsOfClass("clip").catch(() => []),
+      api.modelsOfClass("vae").catch(() => []),
+      api.modelsOfClass("upscale").catch(() => []),
+      api.families().catch(() => []),
+    ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
     this.clips = clips;
@@ -213,9 +259,7 @@ class AppState {
   model(hash: string | null | undefined): ModelEntry | null {
     if (!hash) return null;
     return (
-      this.allModels.find(
-        (model) => model.hash === hash || model.id === hash,
-      ) ?? null
+      this.allModels.find((model) => model.hash === hash || model.id === hash) ?? null
     );
   }
 
@@ -226,9 +270,7 @@ class AppState {
    */
   modelByName(name: string | null | undefined): ModelEntry | null {
     if (!name) return null;
-    return (
-      this.allModels.find((model) => model.name === name) ?? null
-    );
+    return this.allModels.find((model) => model.name === name) ?? null;
   }
 
   /** A model's display name, wherever one is named (§8.1). */
@@ -251,7 +293,14 @@ class AppState {
     socket.binaryType = "arraybuffer";
     this.#socket = socket;
     socket.onopen = () => {
+      const reconnected = this.#everConnected;
       this.connected = true;
+      this.#everConnected = true;
+      // The app is local, so a socket that comes back is usually a server
+      // that restarted — which is a new session, and the jobs of the old one
+      // are no longer this one's (§11.2). Nothing else notices a restart, so
+      // without this the boundary stays where the last page load put it.
+      if (reconnected) void this.#resync();
     };
     socket.onmessage = (event) => this.#onMessage(event);
     socket.onclose = () => {
@@ -434,8 +483,8 @@ class AppState {
    */
   reorderWorkflows(ids: string[]): void {
     const at = new Map(ids.map((id, index) => [id, index]));
-    this.workflows = [...this.workflows].sort((a, b) =>
-      (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity)
+    this.workflows = [...this.workflows].sort(
+      (a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity),
     );
     this.#patchUi({ workflow_order: ids }, (ui) => {
       ui.workflow_order = ids;

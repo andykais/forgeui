@@ -135,13 +135,18 @@ Deno.test("scanned models are listed before they are hashed", async () => {
       before.models.every((model) => model.id.startsWith("path:")),
       "an unhashed model is addressed by its path",
     );
-    assertEquals(before.models[0]?.display_name, "film-grain-35mm");
-    assertEquals(before.models[0]?.family, "unset");
-    assertEquals(before.models[0]?.output_count, 0);
+    // By name, not by position: the list comes back newest-added first
+    // (§8.1), which is not an order this test is about.
+    const grain = before.models.find(
+      (model) => model.display_name === "film-grain-35mm",
+    );
+    assert(grain, "the LoRA on disk is listed");
+    assertEquals(grain.family, "unset");
+    assertEquals(grain.output_count, 0);
     assertEquals(before.folders.length, 1);
 
     // Editing has to wait for the hash (§8.1).
-    const rejected = await app.fetch(`/api/models/${before.models[0]!.id}`, {
+    const rejected = await app.fetch(`/api/models/${grain.id}`, {
       method: "PATCH",
       body: JSON.stringify({ display_name: "Film grain" }),
     });
@@ -803,3 +808,50 @@ function dayOf(createdAt: number): string {
     `${date.getUTCMonth() + 1}`.padStart(2, "0")
   }/${`${date.getUTCDate()}`.padStart(2, "0")}`;
 }
+
+Deno.test("the list is newest added first, and says so either way", async () => {
+  await withModels(async (app, fixtures) => {
+    // A file that plainly arrived later than the fixtures. The gap is
+    // explicit because `added_at` has millisecond resolution and two writes
+    // in the same tick are the same instant — which is a tie, not an order.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await writeFakeSafetensors(
+      join(fixtures.loras, "arrived-last.safetensors"),
+      { name: "last" },
+    );
+
+    const newest = await models(app, "?kind=loras");
+    assertEquals(newest.models[0]?.display_name, "arrived-last");
+    // Every model carries the date the order is read from, and it really is
+    // descending — not just right at the top of the list.
+    const dates = newest.models.map((model) => model.added_at);
+    assert(
+      dates.every((at) => typeof at === "number"),
+      `every model has an added date: ${JSON.stringify(dates)}`,
+    );
+    assertEquals([...dates].sort((a, b) => b! - a!), dates);
+
+    const oldest = await models(app, "?kind=loras&sort=oldest");
+    assertEquals(
+      oldest.models.at(-1)?.display_name,
+      "arrived-last",
+      "oldest first puts the newcomer at the end",
+    );
+    // Ascending, and not merely the other list backwards: two files written
+    // in the same millisecond tie, and a tie falls back to the name in both
+    // directions rather than flipping with them.
+    const ascending = oldest.models.map((model) => model.added_at);
+    assertEquals([...ascending].sort((a, b) => a! - b!), ascending);
+
+    // The alphabetical order this screen used to have is still on offer.
+    const byName = await models(app, "?kind=loras&sort=name");
+    assertEquals(byName.models.map((model) => model.display_name), [
+      "arrived-last",
+      "film-grain-35mm",
+      "soft-studio-light",
+    ]);
+
+    const bad = await app.fetch("/api/models?sort=sideways");
+    assertEquals(bad.status, 400);
+  });
+});

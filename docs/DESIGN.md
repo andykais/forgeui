@@ -911,7 +911,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   "this session's jobs," with in-progress cards showing percent/ETA/current
   node and streaming previews (ComfyUI binary preview frames). Failed cards
   keep their slot with the error inline plus Retry / Edit in Generate / Copy
-  error.
+  error. **A session is one run of the app**: `GET /api/system/status`
+  carries `started_at`, and the header reads `N jobs · since 14:32` so the
+  boundary is visible rather than guessed at. A browser reload is the same
+  session and a restart is a new one — it used to mean "the last forty jobs
+  in the database", which left the previous run's pictures on screen under a
+  heading that said they were new. Everything ever made is on Gallery, which
+  is where the empty state points. The filmstrip under an open result shows
+  **every job still in flight**, the running one and the queue behind it, not
+  the running one alone. Queue positions count from the job that runs next:
+  ComfyUI runs oldest-first while every list in the UI reads newest-first.
 - The viewer's actions are **Reuse parameters**, **Generate again**, **Save
   as sample** and Delete. Reuse parameters fills the panel and leaves the
   view alone — it used to drop back to the grid, taking away the thing you
@@ -984,7 +993,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   media centre with Fit / 1:1 and a size+zoom chip (video: transport bar),
   metadata sidebar right, filmstrip bottom that walks the same filtered set.
   Sidebar and filmstrip are collapsible, state persisted per screen; this is
-  the one viewer component, shared with Generate's focused view.
+  the one viewer component, shared with Generate's focused view. Esc returns
+  the grid **to the offset it was left at**, not to the top; when the viewer
+  was walked somewhere else first (← / → or a lineage node), the grid lands on
+  that output instead. `?output=` is a real link: an output the current
+  filters never loaded is fetched on its own rather than closing the viewer.
   Sidebar order: actions, then created (absolute + relative), duration,
   params, FILES, inputs, lineage. Checkpoint and LoRA rows are links to their
   model pages; shift-click filters the grid to them.
@@ -993,7 +1006,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   put), **Use image in workflow** / **Use video in workflow**, **Upscale
   image**, **Promote to sample**, **Delete**. No favorites in v1.
 - **Delete** has no confirmation: the item disappears and an undo toast
-  (~8s) restores it. The row is soft-deleted (`deleted_at`) at once; the
+  (~8s) restores it. Deleting from inside the viewer **steps to the next
+  oldest** rather than dropping back to the grid — working through a batch
+  means deleting the ones that did not come off, and losing the view each
+  time makes the next delete a click and a scroll. It falls back to the newer
+  one when the oldest goes, and only the last one left closes the viewer. The row is soft-deleted (`deleted_at`) at once; the
   media and sidecar are removed from disk only after the undo window
   closes. A deleted output that is the parent of others appears in their
   LINEAGE as an orphan marker ("?"), not a link; bytes hard-linked into
@@ -1333,8 +1350,9 @@ GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q&tags&hidden  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at, added_at
                                         tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
+                                        sort: added (newest first, default) | oldest | name; added_at is the file's creation time, else its mtime
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
@@ -1345,6 +1363,7 @@ DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}
 GET  /api/system/status                 comfy state (starting|running|disconnected|failed), pid, uptime, VRAM free (ComfyUI /system_stats)
+                                        plus started_at: when this run of the app began, which is where Generate's session starts (§11.2)
 POST /api/system/comfy/restart          managed mode only
 GET  /api/system/comfy/log              tail of the child process log
 GET  /api/system/storage                counts + bytes for outputs, inputs, samples, app.db, telemetry.db
@@ -1383,11 +1402,11 @@ Civitai fetch-info and URL import (raw only).
 
 Landed so far: the store and `POST /api/inputs`, the `image` param widget
 (picker, drop, paste), `krea2-upscale` and the Upscale action, `output_inputs`
-provenance. Still to come in this phase: `video` params, "Use image in
-workflow", the orphan sweep, the lineage view, and the rest of the list.
+provenance, and the lineage view. Still to come in this phase: `video` params,
+"Use image in workflow", the orphan sweep, and the rest of the list.
 
 **Phase 4 — editing**
-`mask` widget, inpaint/edit bundled workflows, lineage view.
+`mask` widget, inpaint/edit bundled workflows.
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,

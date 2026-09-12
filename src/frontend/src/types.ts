@@ -242,6 +242,8 @@ export interface ModelEntry {
   class: string;
   size: number;
   mtime: number | null;
+  /** When the file appeared here: what the newest-first sort reads (§8.1). */
+  added_at: number | null;
   notes: string | null;
   tags: string[];
   /** The ends of this model's strength sliders; always a number (§8.1). */
@@ -456,4 +458,24 @@ export interface InputMedia {
   bytes: number;
   url: string;
   derived_from_output: string | null;
+}
+
+/**
+ * One output in another's provenance chain (§11.2). A node the app can no
+ * longer resolve carries `deleted` and nothing else: it is the "?" marker
+ * rather than a link, because the chain still has to say something was there.
+ */
+export interface LineageNode {
+  id: string;
+  family: string | null;
+  kind: string | null;
+  media_url: string | null;
+  created_at: number | null;
+  deleted: boolean;
+}
+
+/** Parents above, children below (§11.2). */
+export interface Lineage {
+  parents: LineageNode[];
+  children: LineageNode[];
 }

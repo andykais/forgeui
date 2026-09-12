@@ -10,6 +10,7 @@
   import { navigate, router, setQuery } from "../router.svelte.ts";
   import { dayLabel, localDate } from "../lib/format.ts";
   import { byModel } from "../lib/models.ts";
+  import { afterRemoval } from "../lib/neighbour.ts";
   import type { Output, TileSize } from "../types.ts";
   import Tile from "../components/Tile.svelte";
   import MediaTable from "../components/MediaTable.svelte";
@@ -46,7 +47,36 @@
   });
   const filterKey = $derived(JSON.stringify(filters));
   const selectedId = $derived(query.get("output"));
-  const selected = $derived(outputs.find((output) => output.id === selectedId) ?? null);
+  /**
+   * `?output=` is a link to one output, and a lineage node is exactly that:
+   * a parent generated last week is not on the page the filters loaded. So
+   * one that is not in the list is fetched on its own rather than silently
+   * closing the viewer.
+   */
+  let fetched = $state<Output | null>(null);
+  const inList = $derived(outputs.find((output) => output.id === selectedId) ?? null);
+  const selected = $derived(inList ?? (fetched?.id === selectedId ? fetched : null));
+  $effect(() => {
+    const id = selectedId;
+    if (!id || inList) return;
+    untrack(() => {
+      if (fetched?.id === id) return;
+      api
+        .output(id)
+        .then((detail) => {
+          if (router.current.query.get("output") === id) fetched = detail;
+        })
+        .catch(() => {
+          if (router.current.query.get("output") === id) setQuery({ output: null });
+        });
+    });
+  });
+  /**
+   * An output the filters never loaded has no neighbours to walk, so the
+   * viewer is given the set of one it is actually showing rather than a list
+   * it is not in — which would leave ← / → stepping from nowhere.
+   */
+  const viewerOutputs = $derived(inList ? outputs : selected ? [selected] : outputs);
   const tileSize = $derived(app.tileSize("gallery"));
   const hasFilters = $derived(
     Boolean(filters.workflow || filters.kind || filters.q || filters.models?.length),
@@ -120,8 +150,55 @@
     if (remaining < 600) void loadMore();
   }
 
+  /**
+   * Opening the viewer replaces the grid, so the scroller is unmounted and
+   * its offset goes with it: without this, Esc came back to the top of the
+   * gallery rather than to the row you were looking at (§11.2).
+   */
+  let savedScroll: number | null = null;
+  /** The tile that was opened, and where the viewer ended up. */
+  let openedFrom: string | null = null;
+  let lastViewed = $state<string | null>(null);
+  $effect(() => {
+    if (selectedId) lastViewed = selectedId;
+  });
+
   function select(output: Output | null) {
+    if (output && !selectedId && scroller) {
+      savedScroll = scroller.scrollTop;
+      openedFrom = output.id;
+    }
     setQuery({ output: output?.id ?? null });
+  }
+
+  /**
+   * Back where you were.
+   *
+   * Only when the viewer was walked somewhere else — ← / → through the
+   * filmstrip, or a lineage node — does the grid go looking for that output
+   * instead: `scrollIntoView` on the tile you opened would undo the restore,
+   * because a tile can be on screen at the offset you left and still not be
+   * what `nearest` scrolls to.
+   */
+  $effect(() => {
+    const el = scroller;
+    if (!el || selectedId !== null || savedScroll === null) return;
+    const top = savedScroll;
+    const landOn = lastViewed !== openedFrom ? lastViewed : null;
+    savedScroll = null;
+    openedFrom = null;
+    untrack(() => {
+      el.scrollTop = top;
+      if (!landOn) return;
+      el.querySelector(`[data-output-id="${CSS.escape(landOn)}"]`)?.scrollIntoView({
+        block: "nearest",
+      });
+    });
+  });
+
+  /** A lineage node (§11.2): the gallery can show any output there is. */
+  function openOutput(id: string) {
+    setQuery({ output: id });
   }
 
   async function reuseParams(output: Output) {
@@ -140,11 +217,7 @@
   async function upscale(output: Output, workflowId: string) {
     const detail = await api.output(output.id);
     try {
-      await panel.upscale(
-        workflowId,
-        output,
-        detail.sidecar?.params ?? output.params,
-      );
+      await panel.upscale(workflowId, output, detail.sidecar?.params ?? output.params);
     } catch (cause) {
       toasts.message(
         `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
@@ -160,9 +233,16 @@
   }
 
   async function remove(output: Output) {
+    // Worked out before the tile leaves the list, because afterwards there is
+    // no position left to step from (§11.2).
+    const next = afterRemoval(outputs, output.id, {
+      oldestFirst: filters.sort === "oldest",
+    });
     const { undo_window_ms } = await api.deleteOutput(output.id);
     outputs = outputs.filter((entry) => entry.id !== output.id);
-    if (selectedId === output.id) select(null);
+    // Deleting from the viewer steps to the next oldest rather than dropping
+    // back to the grid; only the last one left closes it.
+    if (selectedId === output.id) setQuery({ output: next?.id ?? null });
     if (total !== null) total -= 1;
     // The day divider's count has to follow the tile that just left.
     void loadDayCounts();
@@ -278,7 +358,7 @@
   <Viewer
     bind:this={viewer}
     screen="gallery"
-    {outputs}
+    outputs={viewerOutputs}
     {selected}
     onselect={select}
     onclose={() => select(null)}
@@ -286,6 +366,7 @@
     onrerun={rerun}
     ondelete={remove}
     onupscale={upscale}
+    onopenoutput={openOutput}
   />
 {:else}
   <section class="gallery">

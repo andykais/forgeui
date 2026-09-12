@@ -1324,3 +1324,44 @@ export function listOutputInputs(
     `SELECT input_sha256, param_key FROM output_inputs WHERE output_id = ?`,
   ).all<OutputInputRow>(outputId);
 }
+
+// --------------------------------------------------------------- lineage §10
+
+/**
+ * The outputs this one was made from: its inputs, narrowed to the ones the
+ * app adopted from an output of its own. An upscale has exactly one; an
+ * uploaded file has none, because a file from outside has no history here.
+ *
+ * A parent id is kept even when nothing in `outputs` answers to it — the row
+ * may have been deleted and swept. Resolving it is the caller's job, and a
+ * parent it cannot resolve is the orphan marker §11.2 asks for.
+ */
+export function outputParentIds(db: Database, outputId: string): string[] {
+  return db.prepare(
+    `SELECT DISTINCT i.derived_from_output
+       FROM output_inputs oi
+       JOIN inputs i ON i.sha256 = oi.input_sha256
+      WHERE oi.output_id = ?
+        AND i.derived_from_output IS NOT NULL
+        AND i.derived_from_output <> ?`,
+  ).values<[string]>(outputId, outputId).map(([id]) => id);
+}
+
+/**
+ * The outputs made from this one: every input adopted from it, and every
+ * output that ran with one of those. Deleted children are left out — a
+ * deleted output is not a thing to click through to, and unlike a parent it
+ * leaves no gap in the chain when it goes.
+ */
+export function outputChildIds(db: Database, outputId: string): string[] {
+  return db.prepare(
+    `SELECT DISTINCT oi.output_id
+       FROM inputs i
+       JOIN output_inputs oi ON oi.input_sha256 = i.sha256
+       JOIN outputs o ON o.id = oi.output_id
+      WHERE i.derived_from_output = ?
+        AND oi.output_id <> ?
+        AND o.deleted_at IS NULL
+      ORDER BY o.created_at ASC, o.id ASC`,
+  ).values<[string]>(outputId, outputId).map(([id]) => id);
+}

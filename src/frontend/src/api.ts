@@ -3,6 +3,7 @@ import type {
   FamilyCount,
   HashingProgress,
   Job,
+  Lineage,
   LiteralInput,
   Manifest,
   ModelDetail,
@@ -157,6 +158,7 @@ export const api = {
     );
   },
   output: (id: string) => request<OutputDetail>(`/api/outputs/${id}`),
+  lineage: (id: string) => request<Lineage>(`/api/outputs/${id}/lineage`),
   deleteOutput: (id: string) =>
     request<{ output: Output; undo_window_ms: number }>(`/api/outputs/${id}`, {
       method: "DELETE",
@@ -175,6 +177,8 @@ export const api = {
       tags?: string;
       /** Only the hidden ones; absent or false means only the visible. */
       hidden?: boolean;
+      /** `added` (newest first, the default), `oldest` or `name` (§8.1). */
+      sort?: "added" | "oldest" | "name";
     } = {},
   ) => {
     const params = new URLSearchParams();
@@ -184,6 +188,7 @@ export const api = {
     if (query.q) params.set("q", query.q);
     if (query.tags) params.set("tags", query.tags);
     if (query.hidden) params.set("hidden", "1");
+    if (query.sort) params.set("sort", query.sort);
     return request<{
       kind: string | null;
       class: string | null;
@@ -316,9 +321,12 @@ export const api = {
   },
 
   systemStatus: () =>
-    request<{ comfy: import("./types.ts").ComfyStatus; data_dir: string }>(
-      "/api/system/status",
-    ),
+    request<{
+      comfy: import("./types.ts").ComfyStatus;
+      data_dir: string;
+      /** When the server came up: where "this session" starts (§11.2). */
+      started_at: number;
+    }>("/api/system/status"),
   comfyLog: () =>
     request<{ mode: string; lines: string[]; available: boolean }>(
       "/api/system/comfy/log",

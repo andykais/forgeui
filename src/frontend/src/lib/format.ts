@@ -42,6 +42,14 @@ export function absoluteTime(at: number): string {
   });
 }
 
+/** Just the time of day: what "this session" started at, on one line. */
+export function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** `…ZM4T-0`: the last five characters of the ULID plus the index (§11.2). */
 export function shortId(id: string): string {
   const dash = id.lastIndexOf("-");

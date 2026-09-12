@@ -237,3 +237,115 @@ Deno.test("a job naming an input the store has lost says so", async () => {
     assertStringIncludes(body.error.message, "attach the image again");
   }, { comfy: true });
 });
+
+interface LineageNode {
+  id: string;
+  family: string | null;
+  kind: string | null;
+  media_url: string | null;
+  deleted: boolean;
+}
+
+Deno.test("an upscale can be walked back to the image it came from", async () => {
+  await withTestApp(async (app) => {
+    await generate(app, "krea2", { prompt: "a granite bowl of figs" });
+    const { outputs } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const source = outputs[0]!;
+    const input = await app.json<InputView>("/api/inputs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ output_id: source.id }),
+    });
+    await generate(app, "krea2-upscale", {
+      image: input.filename,
+      creativity: 0.4,
+    });
+    const { outputs: after } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const upscaled = after[0]!;
+
+    // Up from the upscale: the render it was made from, with something to
+    // show for it, because the chain is how you get back to the original.
+    const up = await app.json<
+      { parents: LineageNode[]; children: LineageNode[] }
+    >(
+      `/api/outputs/${upscaled.id}/lineage`,
+    );
+    assertEquals(up.parents.map((node) => node.id), [source.id]);
+    assertEquals(up.parents[0]!.deleted, false);
+    assertEquals(up.parents[0]!.family, "krea2");
+    assert(up.parents[0]!.media_url !== null);
+    assertEquals(up.children, []);
+
+    // And down from the original: the upscale, which it has no other record
+    // of — nothing on the source output itself says it was ever used.
+    const down = await app.json<
+      { parents: LineageNode[]; children: LineageNode[] }
+    >(
+      `/api/outputs/${source.id}/lineage`,
+    );
+    assertEquals(down.parents, []);
+    assertEquals(down.children.map((node) => node.id), [upscaled.id]);
+  }, { comfy: true });
+});
+
+Deno.test("a deleted parent stays in the chain as an orphan", async () => {
+  await withTestApp(async (app) => {
+    await generate(app, "krea2", { prompt: "a granite bowl of figs" });
+    const { outputs } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const source = outputs[0]!;
+    const input = await app.json<InputView>("/api/inputs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ output_id: source.id }),
+    });
+    await generate(app, "krea2-upscale", {
+      image: input.filename,
+      creativity: 0.4,
+    });
+    const { outputs: after } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const upscaled = after[0]!;
+
+    await app.fetch(`/api/outputs/${source.id}`, { method: "DELETE" });
+
+    // §11.2: the parent is a "?" marker, not a link and not a silence — the
+    // upscale still came from somewhere.
+    const up = await app.json<{ parents: LineageNode[] }>(
+      `/api/outputs/${upscaled.id}/lineage`,
+    );
+    assertEquals(up.parents.length, 1);
+    assertEquals(up.parents[0]!.id, source.id);
+    assertEquals(up.parents[0]!.deleted, true);
+    assertEquals(up.parents[0]!.media_url, null);
+
+    // The other way round, a deleted output is simply gone: there is no tile
+    // left to hang its children off.
+    const down = await app.json<{ children: LineageNode[] }>(
+      `/api/outputs/${source.id}/lineage`,
+    );
+    assertEquals(down.children.map((node) => node.id), [upscaled.id]);
+  }, { comfy: true });
+});
+
+Deno.test("an output with no history has an empty chain, not an error", async () => {
+  await withTestApp(async (app) => {
+    await generate(app, "krea2", { prompt: "a granite bowl of figs" });
+    const { outputs } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const lineage = await app.json<{ parents: unknown[]; children: unknown[] }>(
+      `/api/outputs/${outputs[0]!.id}/lineage`,
+    );
+    assertEquals(lineage, { parents: [], children: [] });
+
+    const missing = await app.fetch("/api/outputs/01JNOPE-0/lineage");
+    assertEquals(missing.status, 404);
+  }, { comfy: true });
+});
