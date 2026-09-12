@@ -5,6 +5,7 @@ import type {
   Param,
   SizeParam,
 } from "./types.ts";
+import { applicableParams } from "./visibility.ts";
 
 export class ParamError extends Error {
   override readonly name = "ParamError";
@@ -180,10 +181,6 @@ export function coerceParams(
     const provided = input[param.key];
     const raw = provided === undefined ? defaultValue(param) : provided;
 
-    if (param.required && isEmpty(raw) && param.type !== "seed") {
-      throw new ParamError(param.key, "is required");
-    }
-
     switch (param.type) {
       case "text":
         values[param.key] = typeof raw === "string" ? raw : String(raw ?? "");
@@ -231,6 +228,18 @@ export function coerceParams(
       case "video":
         values[param.key] = raw ?? null;
         break;
+    }
+  }
+
+  // Required is checked afterwards, against the values rather than as they
+  // arrive: whether a param applies can depend on another one's value (§4.3),
+  // and that value is not known until every param has been read. A field the
+  // workflow is ignoring must not be able to refuse the job — the panel does
+  // not show it, so there would be nothing to go and fill in.
+  for (const param of applicableParams(manifest, values)) {
+    if (!param.required || param.type === "seed") continue;
+    if (isEmpty(values[param.key])) {
+      throw new ParamError(param.key, "is required");
     }
   }
 

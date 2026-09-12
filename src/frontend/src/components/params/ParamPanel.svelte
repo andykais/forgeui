@@ -9,6 +9,7 @@
   import ModelParam from "./ModelParam.svelte";
   import ImageParam from "./ImageParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param } from "../../types.ts";
+  import { applicableParams } from "../../lib/applies.ts";
 
   /**
    * The param panel is rendered from the manifest alone (§4.2, §11.2):
@@ -66,8 +67,16 @@
     paramsEl?.closest<HTMLElement>(".scroll") ?? paramsEl ?? null,
   );
 
-  const main = $derived(manifest.params.filter((param) => !param.advanced));
-  const advanced = $derived(manifest.params.filter((param) => param.advanced));
+  /**
+   * What this workflow is actually using right now (§4.3). A switch in the
+   * graph can leave a field doing nothing — Anima's Turbo routes steps and
+   * cfg elsewhere, the enhancer's length matters only while the enhancer
+   * runs — and a field that silently does nothing cannot be told apart from
+   * one that works.
+   */
+  const applies = $derived(applicableParams(manifest, values));
+  const main = $derived(applies.filter((param) => !param.advanced));
+  const advanced = $derived(applies.filter((param) => param.advanced));
   /** Required first, then optional, keeping manifest order within each group. */
   const ordered = $derived([
     ...main.filter((param) => param.required),
@@ -247,7 +256,7 @@
 
 <div class="panel-head row">
   <span class="label">Parameters</span>
-  <span class="mono dim count">{manifest.params.length}</span>
+  <span class="mono dim count">{applies.length}</span>
   <span class="spacer"></span>
   {#if onedit}
     <button class="link" onclick={onedit} title="Edit this workflow's inputs">

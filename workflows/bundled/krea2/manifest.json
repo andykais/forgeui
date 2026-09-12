@@ -116,7 +116,11 @@
       "min": 32,
       "max": 4096,
       "advanced": true,
-      "bind": "13.max_length"
+      "bind": "13.max_length",
+      "when": {
+        "param": "enhance",
+        "is": true
+      }
     }
   ],
   "outputs": [

@@ -211,7 +211,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
       "turbo",
     ]);
-    assertEquals(byId.get("anima")!.params.advanced, 4); // steps, cfg, clip, vae
+    // steps/cfg and the turbo pair that replaces them, plus clip and vae.
+    // Only four ever show at once: each pair is behind Turbo (§4.3).
+    assertEquals(byId.get("anima")!.params.advanced, 6);
     // Rebuilt from the official ComfyUI template (§7): three loaders for a
     // split-file model, and a model param to swap it.
     assertEquals(keys("z-image-turbo"), [

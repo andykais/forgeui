@@ -93,6 +93,27 @@ export const ENUM_SOURCES = [
 /** A class name, or a `model_folders` key. */
 export type EnumSource = string;
 
+/**
+ * When a param applies at all (§4.3).
+ *
+ * A switch in a graph leaves some of the panel meaningless: Anima's Turbo
+ * routes steps and cfg to a different pair of primitives, so the `steps` and
+ * `cfg` fields go on sitting there doing nothing the moment it is on, and
+ * Krea 2's enhancer length matters only while the enhancer is running. A
+ * field that silently does nothing is worse than no field, because there is
+ * no way to tell it apart from one that does.
+ *
+ * Equality against another param's value, and nothing cleverer: every case
+ * so far is "when this checkbox is on", and an expression language here
+ * would be a second thing to learn for no more reach.
+ */
+export interface ParamWhen {
+  /** The key whose value decides it. */
+  param: string;
+  /** The value it has to equal. */
+  is: string | number | boolean;
+}
+
 export interface ParamCommon {
   key: string;
   label?: string;
@@ -100,6 +121,8 @@ export interface ParamCommon {
   required?: boolean;
   /** Renders inside the collapsed Advanced section (§11.2). */
   advanced?: boolean;
+  /** Only applies while another param holds a given value (§4.3). */
+  when?: ParamWhen;
 }
 
 export interface TextParam extends ParamCommon {
