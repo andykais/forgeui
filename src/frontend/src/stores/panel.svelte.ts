@@ -219,6 +219,40 @@ class PanelState {
     this.seedLocked = false;
   }
 
+  /**
+   * Upscale (§10): take one of the app's own outputs into the input store,
+   * then fill this workflow from the run that made it.
+   *
+   * Upscaling is not a special case in the pipeline and is not one here
+   * either — it is `editWith` with the picture attached. What makes it one
+   * click is that the workflow already carries the numbers that matter: a
+   * creativity of 0.4 and a scale of 2 are its manifest defaults, so nothing
+   * has to be preset on the way in and both are there to be changed before
+   * generating.
+   */
+  async upscale(
+    workflowId: string,
+    output: { id: string },
+    sourceParams: Record<string, unknown>,
+  ): Promise<void> {
+    const media = await api.adoptOutput(output.id);
+    const manifest = (await api.workflow(workflowId)).manifest;
+    const imageKey = manifest?.params.find((param) => param.type === "image")?.key;
+    if (!imageKey) {
+      throw new Error(`"${workflowId}" has no image param to upscale into`);
+    }
+    // Only the keys this workflow actually has. `editWith` warns about the
+    // rest, which is right when a workflow has changed under a saved run and
+    // wrong here: an upscale workflow has no `size` because it takes that
+    // from the picture, and saying so on every upscale is noise.
+    const shared: Record<string, unknown> = {};
+    for (const param of manifest?.params ?? []) {
+      if (param.key in sourceParams) shared[param.key] = sourceParams[param.key];
+    }
+    // The picture last: it is the one thing the source run cannot supply.
+    await this.editWith(workflowId, { ...shared, [imageKey]: media.filename });
+  }
+
   // -------------------------------------------------------------- the LoRAs
 
   /** The `lora_list` param, if this workflow has one at all. */

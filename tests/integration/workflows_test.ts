@@ -44,13 +44,18 @@ const KREA2_SAVE = "9";
 /** Listed by display name, which is how `GET /api/workflows` orders them. */
 const BUNDLED = [
   ["anima", "Anima"],
-  ["krea2-img2img", "Flux Krea 2 (img2img)"],
+  ["anima-upscale", "Anima (upscale)"],
   ["flux-klein", "Flux.2 Klein"],
+  ["flux-klein-upscale", "Flux.2 Klein (upscale)"],
   ["illustrious", "Illustrious XL"],
+  ["illustrious-upscale", "Illustrious XL (upscale)"],
   ["krea2", "Krea 2 Turbo"],
+  ["krea2-upscale", "Krea 2 Turbo (upscale)"],
   ["ltx", "LTX Video"],
   ["sd15", "Stable Diffusion 1.5"],
+  ["sd15-upscale", "Stable Diffusion 1.5 (upscale)"],
   ["z-image-turbo", "Z-Image Turbo"],
+  ["z-image-upscale", "Z-Image Turbo (upscale)"],
 ] as const;
 
 async function list(app: { fetch: (p: string) => Promise<Response> }) {
@@ -151,15 +156,19 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     // steps, cfg, the text encoder and VAE, and the enhancer's own length.
     assertEquals(byId.get("krea2")!.params.advanced, 5);
-    assertEquals(keys("krea2-img2img"), [
+    // Upscale is an ordinary workflow, so its knobs are ordinary params
+    // (§10): the image, how far the model may stray, and how much bigger.
+    assertEquals(keys("krea2-upscale"), [
       "image",
+      "creativity",
+      "scale",
       "prompt",
-      "denoise",
-      "size",
       "seed",
       "loras",
     ]);
-    assertEquals(byId.get("krea2-img2img")!.category, "img2img");
+    assertEquals(byId.get("krea2-upscale")!.category, "upscale");
+    // The upscale-model path, the sampling overrides, and the loaders.
+    assertEquals(byId.get("krea2-upscale")!.params.advanced, 11);
     // No official ComfyUI page for this SDXL finetune, so its graph is
     // unchanged (§7); it gains the model param like the rest.
     assertEquals(keys("illustrious"), [
@@ -227,14 +236,21 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
+      // Every family that can upscale has two: the workflow and its
+      // upscale sibling, in display-name order (§10).
       [
         "anima",
-        "flux",
+        "anima",
+        "flux2",
         "flux2",
         "sdxl",
+        "sdxl",
+        "krea2",
         "krea2",
         "ltx",
         "sd15",
+        "sd15",
+        "z-image",
         "z-image",
       ],
     );
@@ -673,5 +689,100 @@ Deno.test("a user workflow shadows the bundled one it was copied from", async ()
       }),
       "workflows/user/krea2/workflow.api.json": "{}",
     },
+  });
+});
+
+Deno.test("the upscale workflow names no upscale model it cannot promise", async () => {
+  await withTestApp(async (app) => {
+    const detail = await app.json<WorkflowDetail>(
+      "/api/workflows/krea2-upscale",
+    );
+    const param = detail.manifest!.params.find((p) =>
+      p.key === "upscale_model"
+    );
+    // A placeholder filename here is refused for anyone who has an
+    // `upscale_models` folder without that exact file in it — the presence
+    // check only waves a name through when nothing of the class is scanned
+    // at all (§8.1). Empty is skipped, so the workflow runs on the pixel
+    // path until somebody picks a model for the other one.
+    // Empty, and from the graph rather than the manifest — §4.6's rule that
+    // a scalar-bound param's default is whatever the graph holds.
+    assertEquals((param as { default?: string }).default, "");
+    const loader = Object.values(
+      app.workflows.require("krea2-upscale").apiGraph,
+    )
+      .find((node) => node.class_type === "UpscaleModelLoader");
+    assertEquals(loader?.inputs.model_name, "");
+  });
+});
+
+Deno.test("every image family has an upscale workflow, all the same shape", async () => {
+  await withTestApp(async (app) => {
+    const workflows = await list(app);
+    const upscalers = workflows.filter((w) => w.category === "upscale");
+
+    // One per image family, and none for LTX — it writes a video, and none of
+    // these graphs upscale one (§10). An Upscale button with nowhere to go is
+    // what this is here to prevent.
+    const imageFamilies = new Set(
+      workflows.filter((w) => w.kind === "image" && w.category === null)
+        .map((w) => w.family),
+    );
+    assertEquals(
+      [...upscalers.map((w) => w.family)].sort(),
+      [...imageFamilies].sort(),
+    );
+    assert(!upscalers.some((w) => w.family === "ltx"));
+
+    for (const workflow of upscalers) {
+      const detail = await app.json<WorkflowDetail>(
+        `/api/workflows/${workflow.id}`,
+      );
+      const params = detail.manifest!.params;
+      const byKey = new Map(params.map((param) => [param.key, param]));
+      const where = `${workflow.id}`;
+
+      // The four that make it an upscale rather than a generation, and the
+      // two numbers that make it a *good* one (§10).
+      for (const key of ["image", "creativity", "scale", "seed", "prompt"]) {
+        assert(byKey.has(key), `${where}: no ${key} param`);
+      }
+      assertEquals(byKey.get("image")!.required, true, where);
+      assertEquals(
+        (byKey.get("creativity") as { default: number }).default,
+        0.2,
+        where,
+      );
+      assertEquals(
+        (byKey.get("scale") as { default: number }).default,
+        2,
+        where,
+      );
+      assertEquals(workflow.kind, "image", where);
+
+      // Creativity cuts the model's own schedule; binding it to a sampler's
+      // `denoise` is the bug this whole shape exists to avoid.
+      const graph = app.workflows.require(workflow.id).apiGraph;
+      const classes = Object.values(graph).map((node) => node.class_type);
+      assert(
+        classes.includes("SplitSigmasDenoise"),
+        `${where}: no sigma split`,
+      );
+      assert(
+        classes.includes("SamplerCustomAdvanced"),
+        `${where}: no custom sampler`,
+      );
+      assert(
+        !classes.includes("KSampler"),
+        `${where}: a plain KSampler is back`,
+      );
+
+      // And the loader for the other scaling path names no file it cannot
+      // promise is there.
+      const loader = Object.values(graph).find(
+        (node) => node.class_type === "UpscaleModelLoader",
+      );
+      assertEquals(loader?.inputs.model_name, "", where);
+    }
   });
 });

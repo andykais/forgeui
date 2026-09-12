@@ -18,6 +18,7 @@ import { JobRunner } from "./jobs/pipeline.ts";
 import { seedNodeTimings, seedNodeTimingsIfEmpty } from "./jobs/timings.ts";
 import { reindex } from "./outputs/reindex.ts";
 import { OutputStore } from "./outputs/store.ts";
+import { InputStore } from "./inputs/store.ts";
 import { ModelLibrary } from "./models/library.ts";
 import { SampleStore } from "./samples/store.ts";
 import { backfillOutputSizes } from "./telemetry/backfill.ts";
@@ -56,6 +57,7 @@ export interface App {
   outputs: OutputStore;
   models: ModelLibrary;
   samples: SampleStore;
+  inputs: InputStore;
   hub: WsHub;
   /** True when this boot created `config.yaml` (§3.1 first run). */
   createdConfig: boolean;
@@ -112,6 +114,7 @@ async function startAppWith(
       hub.broadcast({ type: "system_status", data: status }),
   });
   const outputs = new OutputStore({ db, paths, hub });
+  const inputs = new InputStore({ db, paths });
   const samples = new SampleStore({ db, paths });
   const models = new ModelLibrary({
     db,
@@ -128,6 +131,7 @@ async function startAppWith(
     comfy,
     hub,
     outputs,
+    inputs,
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
     telemetry,
@@ -149,6 +153,7 @@ async function startAppWith(
     outputs,
     models,
     samples,
+    inputs,
     hub,
     telemetry,
   };
@@ -213,6 +218,7 @@ async function startAppWith(
     outputs,
     models,
     samples,
+    inputs,
     hub,
     createdConfig: created,
     async shutdown() {

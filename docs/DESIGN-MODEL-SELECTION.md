@@ -244,7 +244,7 @@ each one derived from the official ComfyUI workflow for its model.
 | `anima` | https://docs.comfy.org/tutorials/image/anima/anima |
 | `z-image-turbo` | https://docs.comfy.org/tutorials/image/z-image/z-image-turbo |
 | `flux-klein` | https://docs.comfy.org/tutorials/flux/flux-2-klein |
-| `krea2-img2img` | https://docs.comfy.org/tutorials/basic/image-to-image, applied to the `krea2` graph above — **deferred** with `ltx`, for the same reason |
+| `<id>-upscale` | no official page: each is its family's own loaders with `LoadImage` → `ImageScaleBy` → `VAEEncode` in front and the advanced sampling set behind (§10). `krea2-img2img`, which used to hold this row, is gone: it was the Flux.1 graph under a Krea name and an upscale workflow does the job it was there for |
 | `sd15` | https://docs.comfy.org/tutorials/basic/text-to-image — already matches; leave the graph alone |
 | `illustrious` | no official page: an SDXL community finetune. Keep the current SDXL graph and only add the `model` param |
 

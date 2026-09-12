@@ -68,8 +68,12 @@ export type ParamType = typeof PARAM_TYPES[number];
 export const WORKFLOW_KINDS = ["image", "video"] as const;
 export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 
-/** Known `category` values; `img2img` is the only one the app routes on (§4.2). */
-export const WORKFLOW_CATEGORIES = ["img2img"] as const;
+/**
+ * Known `category` values (§4.2). Both are routed on: `img2img` answers
+ * "use this image in a workflow", and `upscale` is what the Upscale action
+ * looks for in the output's own family (§10).
+ */
+export const WORKFLOW_CATEGORIES = ["img2img", "upscale"] as const;
 export type WorkflowCategory = typeof WORKFLOW_CATEGORIES[number];
 
 /**

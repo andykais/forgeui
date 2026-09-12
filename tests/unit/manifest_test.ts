@@ -261,10 +261,12 @@ Deno.test("workflow-level fields are checked", () => {
     ManifestError,
     "one of image, video",
   );
+  // `upscale` joined `img2img` when the Upscale action gained something to
+  // route to (§10); a category nobody routes on is still refused.
   assertThrows(
-    () => validateManifest(manifest([], { category: "upscale" }), { graph }),
+    () => validateManifest(manifest([], { category: "inpaint" }), { graph }),
     ManifestError,
-    "one of img2img",
+    "one of img2img, upscale",
   );
   assertThrows(
     () =>

@@ -68,8 +68,10 @@ Verified against **ComfyUI v0.34.0**, python 3.12, torch CPU, on Linux.
   placeholder model filenames (`workflows/bundled/README.md`), so they load
   and list but cannot run until you point them at real files.
 - **Video.** `ltx` writes a video; nothing here has produced one.
-- **`image` params.** `krea2-img2img` needs the content-addressed input store,
-  which is Phase 3.
+- **The upscale workflows.** One per image family, each of them
+  `LoadImage` → scale → re-sample (§10). The plumbing is verified against the
+  fake ComfyUI, but no upscale has ever been run on real weights, so the
+  0.2 creativity default is reasoning rather than a measured result.
 - **Windows and macOS.** `scripts/setup-comfy.sh` is written for both but has
   only been run on Linux.
 

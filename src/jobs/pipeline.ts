@@ -45,6 +45,7 @@ import {
 import { completedProgress, ProgressTracker } from "./progress.ts";
 import { parseSidecar } from "./sidecar.ts";
 import { log, logError, oneLine, seconds } from "../log.ts";
+import type { InputStore } from "../inputs/store.ts";
 
 /**
  * The job pipeline (§5): validate, rewrite, persist, submit, follow the
@@ -119,6 +120,8 @@ export interface JobRunnerOptions {
   hub: WsHub;
   /** Used to broadcast outputs in the shape the API returns them. */
   outputs: OutputStore;
+  /** The content-addressed input store an `image` param names (§9). */
+  inputs?: InputStore;
   /** Fills in the hashes of models the library has already hashed (§8.1). */
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Whether a model of this class is on disk under this name (§5.1). */
@@ -137,6 +140,7 @@ export class JobRunner {
   #comfy: ComfyManager;
   #hub: WsHub;
   #outputs: OutputStore;
+  #inputs: InputStore | null;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
   #telemetry?: TelemetryStore;
@@ -155,6 +159,7 @@ export class JobRunner {
     this.#comfy = options.comfy;
     this.#hub = options.hub;
     this.#outputs = options.outputs;
+    this.#inputs = options.inputs ?? null;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
     this.#telemetry = options.telemetry;
@@ -288,6 +293,55 @@ export class JobRunner {
     throw new JobRequestError("rerun needs an output_id or a job_id");
   }
 
+  /**
+   * Push every stored input the graph names up to ComfyUI (§9 steps 3-4).
+   *
+   * Found by the filename rather than by walking the manifest, because the
+   * frozen graph a rerun replays has no manifest behind it any more — and
+   * `comfy-input/` is a cache that is swept on startup, so a rerun of a job
+   * from last week has to put the file back before it can run. A stored
+   * input's name *is* its sha256, so the graph says what it needs.
+   */
+  async #uploadInputs(graph: ApiGraph): Promise<void> {
+    if (!this.#inputs) return;
+    const wanted = new Set<string>();
+    for (const node of Object.values(graph)) {
+      for (const value of Object.values(node.inputs)) {
+        if (typeof value !== "string") continue;
+        const match = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/.exec(value);
+        if (match) wanted.add(match[1]!);
+      }
+    }
+    for (const sha256 of wanted) {
+      const stored = this.#inputs.get(sha256);
+      if (!stored) {
+        throw new JobRequestError(
+          `the input ${sha256.slice(0, 12)}… is not in the store any more; ` +
+            `attach the image again`,
+        );
+      }
+      const bytes = await this.#inputs.read(sha256);
+      await this.#comfy.client.uploadImage(
+        stored.filename,
+        bytes,
+        stored.contentType,
+      );
+    }
+  }
+
+  /** §9 step 5: what each finished output was generated from. */
+  #linkInputs(outputIds: string[], params: Record<string, unknown>): void {
+    if (!this.#inputs || outputIds.length === 0) return;
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value !== "string") continue;
+      const match = /^([0-9a-f]{64})\.(?:png|jpe?g|webp)$/.exec(value);
+      if (!match) continue;
+      for (const outputId of outputIds) {
+        this.#inputs.link(outputId, match[1]!, key);
+      }
+    }
+  }
+
   async #persistAndSubmit(input: {
     jobId: string;
     workflowId: string | null;
@@ -300,6 +354,11 @@ export class JobRunner {
     // and the `outputs/YYYY/MM/DD` directory in exact agreement, so `reindex`
     // reproduces the row rather than approximating it. Durations come from
     // started_at/finished_at, which stay at millisecond precision.
+    // The files first, and before the row: a graph that names an input
+    // ComfyUI has never seen fails at load, and an input the store has lost
+    // is as much a bad request as an empty prompt is — neither should leave
+    // a failed job behind to explain (§9).
+    await this.#uploadInputs(input.graph);
     const createdAt = Math.floor(this.#now() / 1000) * 1000;
     insertJob(this.#db, {
       id: input.jobId,
@@ -560,6 +619,10 @@ export class JobRunner {
         } — ${result.outputs.length} output${
           result.outputs.length === 1 ? "" : "s"
         }${result.outputs.map((output) => `\n  ${output.path}`).join("")}`,
+      );
+      this.#linkInputs(
+        result.outputs.map((output) => output.id),
+        job.params,
       );
       for (const output of result.outputs) {
         this.#hub.broadcast({

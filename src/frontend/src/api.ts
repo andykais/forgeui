@@ -6,6 +6,7 @@ import type {
   LiteralInput,
   Manifest,
   ModelDetail,
+  InputMedia,
   ModelEntry,
   Output,
   OutputDetail,
@@ -230,6 +231,37 @@ export const api = {
   rescanModels: () =>
     request<{ models: number; queued: number }>("/api/maintenance/rescan-models", {
       method: "POST",
+    }),
+
+  /**
+   * Put an image into the content-addressed store and get back the name a
+   * param binds (§9). A file the user picked, dropped or pasted goes up as
+   * multipart; one of the app's own outputs is named rather than uploaded,
+   * because it is already on the server's disk.
+   */
+  uploadInput: async (file: File | Blob, name = "pasted.png") => {
+    const form = new FormData();
+    form.set("file", file instanceof File ? file : new File([file], name));
+    const response = await fetch("/api/inputs", { method: "POST", body: form });
+    const text = await response.text();
+    const body = text.length > 0 ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const error = (body as { error?: { code: string; message: string } })?.error;
+      throw new ApiError(
+        response.status,
+        error?.code ?? "error",
+        error?.message ?? "the upload failed",
+        body,
+      );
+    }
+    return body as InputMedia;
+  },
+  /** What the store knows about one stored input, by its sha256. */
+  input: (sha256: string) => request<InputMedia>(`/api/inputs/${sha256}`),
+  adoptOutput: (outputId: string) =>
+    request<InputMedia>("/api/inputs", {
+      method: "POST",
+      body: JSON.stringify({ output_id: outputId }),
     }),
 
   /** The drop zone on the model page; multipart, never JSON (§8.3). */

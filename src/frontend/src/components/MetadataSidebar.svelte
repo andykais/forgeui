@@ -1,5 +1,6 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
+  import ImageUpscale from "@lucide/svelte/icons/image-upscale";
   import Plus from "@lucide/svelte/icons/plus";
   import type { OutputDetail } from "../types.ts";
   import { absoluteTime, duration, relativeTime } from "../lib/format.ts";
@@ -20,12 +21,25 @@
     onedit: () => void;
     onrerun: () => void;
     ondelete: () => void;
+    /**
+     * Upscale this output with the named workflow (§10). Absent hides the
+     * action, which is what a screen with nowhere to land does.
+     */
+    onupscale?: (workflowId: string) => void;
   }
 
-  let { output, onedit, onrerun, ondelete }: Props = $props();
+  let { output, onedit, onrerun, ondelete, onupscale }: Props = $props();
 
   let copied = $state<string | null>(null);
   let promoteOpen = $state(false);
+  let upscaleOpen = $state(false);
+
+  /**
+   * Upscale is the same-family `category: upscale` workflow (§10). One match
+   * runs outright, several offer the choice, none hides the button: an
+   * action with nowhere to go is worse than no action.
+   */
+  const upscalers = $derived(onupscale ? app.upscalersFor(output) : []);
   let promoting = $state(false);
   let checked = $state<Record<string, boolean>>({});
   const sidecar = $derived(output.sidecar);
@@ -210,6 +224,35 @@
   <div class="actions">
     <button class="primary" onclick={onedit}>Reuse parameters →</button>
     <button onclick={onrerun}>Generate again ⟳</button>
+    {#if upscalers.length === 1}
+      <button title={`Upscale with ${upscalers[0]!.name}`} onclick={() => onupscale?.(upscalers[0]!.id)}>
+        <ImageUpscale size={12} /> Upscale
+      </button>
+    {:else if upscalers.length > 1}
+      <div class="chip-wrap">
+        <button title="Upscale with…" onclick={() => (upscaleOpen = !upscaleOpen)}>
+          <ImageUpscale size={12} /> Upscale
+        </button>
+        <Popover
+          open={upscaleOpen}
+          width={240}
+          title="Upscale with"
+          onclose={() => (upscaleOpen = false)}
+        >
+          {#each upscalers as workflow (workflow.id)}
+            <button
+              class="option"
+              onclick={() => {
+                upscaleOpen = false;
+                onupscale?.(workflow.id);
+              }}
+            >
+              <span class="option-name">{workflow.name}</span>
+            </button>
+          {/each}
+        </Popover>
+      </div>
+    {/if}
     {#if promotable.length > 0}
       <div class="chip-wrap">
         <button onclick={() => (promoteOpen = !promoteOpen)}>Save as sample</button>
@@ -378,7 +421,7 @@
     position: relative;
   }
 
-  .option.check {
+  .option {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -389,11 +432,11 @@
     font-size: 12px;
   }
 
-  .option.check:hover {
+  .option:hover {
     background: var(--control);
   }
 
-  .option.check .mark {
+  .option .mark {
     width: 10px;
     color: var(--accent);
     font-size: 11px;

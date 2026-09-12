@@ -20,6 +20,8 @@ import {
 } from "../jobs/pipeline.ts";
 import { CursorError } from "../outputs/cursor.ts";
 import { MediaPathError } from "./media.ts";
+import { InputError, type InputStore } from "../inputs/store.ts";
+import { ImageProbeError } from "../inputs/probe.ts";
 import {
   OutputGoneError,
   OutputNotFoundError,
@@ -52,6 +54,7 @@ import { maintenanceRoutes } from "./routes/maintenance.ts";
 import { modelRoutes } from "./routes/models.ts";
 import { outputRoutes } from "./routes/outputs.ts";
 import { sampleRoutes } from "./routes/samples.ts";
+import { inputRoutes } from "./routes/inputs.ts";
 import { serveFrontend } from "./static.ts";
 import { systemRoutes } from "./routes/system.ts";
 import { telemetryRoutes } from "./routes/telemetry.ts";
@@ -68,6 +71,7 @@ export interface AppContext {
   outputs: OutputStore;
   models: ModelLibrary;
   samples: SampleStore;
+  inputs: InputStore;
   hub: WsHub;
   /** The health log of §7.1; its own database, never `app.db`. */
   telemetry: TelemetryStore;
@@ -102,6 +106,7 @@ export function routeTable(ctx: AppContext): Route[] {
     ...outputRoutes(ctx),
     ...modelRoutes(ctx),
     ...sampleRoutes(ctx),
+    ...inputRoutes(ctx),
     ...systemRoutes(ctx),
     ...telemetryRoutes(ctx),
     ...maintenanceRoutes(ctx),
@@ -265,7 +270,8 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof ManifestError || cause instanceof ParamError ||
     cause instanceof RewriteError || cause instanceof JobRequestError ||
     cause instanceof CursorError || cause instanceof MediaPathError ||
-    cause instanceof SampleError
+    cause instanceof SampleError || cause instanceof InputError ||
+    cause instanceof ImageProbeError
   ) {
     return error(400, "bad_request", cause.message);
   }

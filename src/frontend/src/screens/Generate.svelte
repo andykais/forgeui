@@ -149,6 +149,29 @@
     setQuery({ workflow: workflowId });
   }
 
+  /**
+   * One click to an upscale (§10): the output becomes the workflow's image
+   * and the run that made it fills the rest. The numbers that make it an
+   * upscale — creativity 0.4, scale 2 — are the workflow's own defaults, so
+   * there is nothing to preset and everything to adjust before generating.
+   */
+  async function upscale(output: Output, workflowId: string) {
+    const detail = await api.output(output.id);
+    try {
+      await panel.upscale(
+        workflowId,
+        output,
+        detail.sidecar?.params ?? output.params,
+      );
+    } catch (cause) {
+      toasts.message(
+        `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
+      );
+      return;
+    }
+    setQuery({ workflow: workflowId });
+  }
+
   async function rerun(output: Output) {
     await api.rerun({ output_id: output.id });
     following = true;
@@ -367,6 +390,7 @@
       onedit={reuseParams}
       onrerun={rerun}
       ondelete={remove}
+      onupscale={upscale}
       onfollow={() => {
         following = true;
         selectedId = null;
