@@ -171,3 +171,43 @@ describe("upscaling an output", () => {
     );
   });
 });
+
+/**
+ * The submit gate has to agree with what the panel shows (§4.3). A required
+ * field the workflow is ignoring is not on screen, so blocking Generate over
+ * it would refuse with nothing to go and fill in — and the server checks the
+ * same way, so disagreeing here would only move the refusal later.
+ */
+describe("what blocks Generate", () => {
+  const params = [
+    { key: "upscale", type: "bool", default: false, bind: "17.value" },
+    {
+      key: "image",
+      label: "Image",
+      type: "image",
+      required: true,
+      bind: "6.image",
+      when: { param: "upscale", is: true },
+    },
+    { key: "prompt", label: "Prompt", type: "text", required: true, bind: "4.text" },
+  ];
+
+  beforeEach(() => load(params));
+
+  test("a required field that does not apply blocks nothing", () => {
+    panel.values = { upscale: false, prompt: "a granite bowl of figs" };
+    expect(panel.missingRequired).toEqual([]);
+  });
+
+  test("and blocks by name the moment it does", () => {
+    panel.values = { upscale: true, prompt: "a granite bowl of figs" };
+    expect(panel.missingRequired).toEqual(["Image"]);
+    panel.values = { ...panel.values, image: "abc.png" };
+    expect(panel.missingRequired).toEqual([]);
+  });
+
+  test("an unconditional one is unaffected", () => {
+    panel.values = { upscale: false, prompt: "" };
+    expect(panel.missingRequired).toEqual(["Prompt"]);
+  });
+});

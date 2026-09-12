@@ -2,6 +2,7 @@ import { api } from "../api.ts";
 import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
+import { applicableParams } from "../lib/applies.ts";
 
 /**
  * The Generate param panel (§11.2, §11.3). Selecting a workflow fills the
@@ -104,7 +105,11 @@ class PanelState {
 
   /** §11.3: blocked while ComfyUI is away or a required param is empty. */
   get missingRequired(): string[] {
-    return this.params
+    if (!this.manifest) return [];
+    // Only the params that apply (§4.3): a field the workflow is ignoring is
+    // not on screen, so letting it block the button would refuse the job with
+    // nothing to go and fill in. The server checks the same way.
+    return applicableParams(this.manifest, this.values)
       .filter(
         (param) =>
           param.required && param.type !== "seed" &&

@@ -734,3 +734,72 @@ describe("the LoRA search box", () => {
     expect(screen.queryByRole("button", { name: /krea\/film-grain/ })).toBeNull();
   });
 });
+
+/**
+ * `when`: a param applies only while another holds a given value (§4.3). The
+ * panel and the server have to agree, so the same predicate decides what is
+ * rendered here and what `coerceParams` checks `required` against.
+ */
+describe("a param that only sometimes applies", () => {
+  const turbo: Param = {
+    key: "turbo",
+    label: "Turbo LoRA",
+    type: "bool",
+    bind: "17.value",
+  };
+  const steps: Param = {
+    key: "steps",
+    label: "Steps",
+    type: "int",
+    bind: "9.value",
+    when: { param: "turbo", is: false },
+  };
+  const turboSteps: Param = {
+    key: "turbo_steps",
+    label: "Turbo steps",
+    type: "int",
+    bind: "10.value",
+    when: { param: "turbo", is: true },
+  };
+
+  test("only the side the switch is on is rendered", () => {
+    mount([turbo, steps, turboSteps], { turbo: false, steps: 30, turbo_steps: 8 });
+    expect(screen.getByText("Steps")).toBeTruthy();
+    expect(screen.queryByText("Turbo steps")).toBeNull();
+  });
+
+  test("and it swaps when the switch does", () => {
+    mount([turbo, steps, turboSteps], { turbo: true, steps: 30, turbo_steps: 8 });
+    expect(screen.queryByText("Steps")).toBeNull();
+    expect(screen.getByText("Turbo steps")).toBeTruthy();
+  });
+
+  test("the count says how many fields are on screen", () => {
+    // Three in the manifest, two of them ever at once. A count that said
+    // three would disagree with what you can see.
+    mount([turbo, steps, turboSteps], { turbo: false });
+    expect(screen.getByText("2")).toBeTruthy();
+  });
+
+  test("an advanced one that does not apply raises no problem", () => {
+    // Advanced opens itself when something down there needs fixing (§11.2);
+    // a field the workflow is ignoring is not something to fix.
+    mount(
+      [
+        turbo,
+        {
+          key: "image",
+          label: "Image",
+          type: "image",
+          required: true,
+          advanced: true,
+          bind: "10.image",
+          when: { param: "turbo", is: true },
+        },
+      ],
+      { turbo: false },
+    );
+    expect(screen.queryByText("Image")).toBeNull();
+    expect(screen.queryByTitle("Something down here needs fixing")).toBeNull();
+  });
+});

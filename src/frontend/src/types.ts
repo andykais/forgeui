@@ -23,12 +23,20 @@ export interface LoraChain {
   clip_to: string[] | null;
 }
 
+/** When a param applies at all: another param's value has to equal `is` (§4.3). */
+export interface ParamWhen {
+  param: string;
+  is: string | number | boolean;
+}
+
 export interface Param {
   key: string;
   label?: string;
+  description?: string;
   type: ParamType;
   required?: boolean;
   advanced?: boolean;
+  when?: ParamWhen;
   default?: unknown;
   min?: number;
   max?: number;

@@ -16,12 +16,14 @@ import {
   type Param,
   PARAM_TYPES,
   type ParamType,
+  type ParamWhen,
   WORKFLOW_CATEGORIES,
   WORKFLOW_KINDS,
   type WorkflowCategory,
   type WorkflowKind,
 } from "./types.ts";
 import { outputSlot } from "./nodes.ts";
+import { whenChain } from "./visibility.ts";
 
 export class ManifestError extends Error {
   override readonly name = "ManifestError";
@@ -179,6 +181,22 @@ function boolSwitch(
   return { input, on, off };
 }
 
+/**
+ * `{ "param": "turbo", "is": false }` — when this param applies at all
+ * (§4.3). The key it names is checked against the manifest afterwards, once
+ * every param is known; here there is only the shape.
+ */
+function paramWhen(value: unknown, where: string): ParamWhen {
+  const raw = record(value, where);
+  const is = raw.is;
+  if (
+    typeof is !== "string" && typeof is !== "number" && typeof is !== "boolean"
+  ) {
+    fail(`${where}.is`, "a string, a number or a boolean to compare against");
+  }
+  return { param: nonEmptyStr(raw.param, `${where}.param`), is };
+}
+
 function filter(value: unknown, where: string): ModelFilter | undefined {
   if (value === undefined) return undefined;
   const raw = record(value, where);
@@ -267,6 +285,9 @@ function validateParam(
       : {}),
     ...(raw.advanced !== undefined
       ? { advanced: bool(raw.advanced, `${at}.advanced`) }
+      : {}),
+    ...(raw.when !== undefined
+      ? { when: paramWhen(raw.when, `${at}.when`) }
       : {}),
   };
 
@@ -538,6 +559,29 @@ export function validateManifest(
     ) {
       throw new ManifestError(
         `manifest.params (${param.key}).of: no param "${param.of}"`,
+      );
+    }
+  }
+  for (const param of params) {
+    const when = param.when;
+    if (!when) continue;
+    if (!seen.has(when.param)) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).when.param: no param "${when.param}"`,
+      );
+    }
+    if (when.param === param.key) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).when.param: a param cannot decide ` +
+          `whether it applies itself`,
+      );
+    }
+    // Conditions that depend on each other in a circle have no value either
+    // could hold that would settle them, so the panel would be left guessing.
+    if (whenChain(params, param) === null) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).when: this condition depends on ` +
+          `itself through another param`,
       );
     }
   }

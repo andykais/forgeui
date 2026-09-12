@@ -84,7 +84,25 @@
       "min": 1,
       "max": 100,
       "advanced": true,
-      "bind": "9.value"
+      "bind": "9.value",
+      "when": {
+        "param": "turbo",
+        "is": false
+      }
+    },
+    {
+      "key": "turbo_steps",
+      "label": "Steps",
+      "type": "int",
+      "min": 1,
+      "max": 100,
+      "advanced": true,
+      "when": {
+        "param": "turbo",
+        "is": true
+      },
+      "description": "The step count the Turbo LoRA runs at; the template's own is 8.",
+      "bind": "10.value"
     },
     {
       "key": "cfg",
@@ -94,7 +112,26 @@
       "max": 20,
       "step": 0.1,
       "advanced": true,
-      "bind": "14.value"
+      "bind": "14.value",
+      "when": {
+        "param": "turbo",
+        "is": false
+      }
+    },
+    {
+      "key": "turbo_cfg",
+      "label": "CFG",
+      "type": "float",
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "advanced": true,
+      "when": {
+        "param": "turbo",
+        "is": true
+      },
+      "description": "The CFG the Turbo LoRA runs at; the template's own is 1.",
+      "bind": "16.value"
     },
     {
       "key": "clip",

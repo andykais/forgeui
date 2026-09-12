@@ -182,6 +182,43 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
+#### `when`: a param that only sometimes applies
+
+Any param may carry `"when": { "param": "<key>", "is": <value> }`, and it
+applies only while that param holds exactly that value.
+
+A switch in a graph leaves part of the panel doing nothing. Anima's Turbo
+routes `steps` and `cfg` through a `ComfySwitchNode` to a different pair of
+primitives, so the two fields bound to the first pair go on sitting there
+being ignored the moment it is on; Krea 2's enhancer length matters only
+while the enhancer is running. **A field that silently does nothing is worse
+than no field**, because nothing distinguishes it from one that works. So
+Anima exposes both pairs, each behind its side of the switch, and Krea 2's
+`max_length` appears with the enhancer.
+
+Equality against one other param, and nothing cleverer: every case so far is
+"when this checkbox is on", and an expression language would be a second
+thing to learn for no more reach. The comparison is strict — `is: false`
+means the boolean, not `"false"` or `0`.
+
+It is **display and validation together**. `required` is checked only on the
+params that apply, in `coerceParams` *and* in the panel's submit gate, from
+one predicate (`src/workflows/visibility.ts`, mirrored for the panel in
+`src/frontend/src/lib/applies.ts`). A required field nobody can see is a
+Generate button that refuses with no way to find out why, and if only one
+side knew the rule the refusal would simply move from the button to the
+server. `required` is therefore checked *after* every value is coerced, not
+as each arrives: whether a param applies depends on another param's value,
+which is not known until the whole set has been read.
+
+It is **not** graph-level. A param that does not apply still writes whatever
+it holds into the graph; the switch routes around that node, so the value is
+simply never read. Hiding is about the panel.
+
+Conditions that name a missing key, or that depend on themselves directly or
+round a ring, are refused at load — there is no value either could hold that
+would settle a ring, so the panel would be left guessing.
+
 ### 4.4 Graph rewrites
 
 #### `lora_list`
