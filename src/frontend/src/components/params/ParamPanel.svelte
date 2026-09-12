@@ -512,6 +512,19 @@
     text-align: right;
   }
 
+  /* No spinners, as on the size and LoRA-strength boxes (§11.5): the arrows
+     are noise at this size, they steal the right-hand edge the number is
+     aligned to, and there is a slider next to every one of these already. */
+  .narrow {
+    appearance: textfield;
+  }
+
+  .narrow::-webkit-outer-spin-button,
+  .narrow::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
   .toggle {
     display: flex;
     align-items: center;

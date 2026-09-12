@@ -583,15 +583,17 @@ Deno.test("families come back with model and workflow counts", async () => {
     );
     assertEquals(byName.get("flux")?.models, 1);
     assertEquals(byName.get("unset")?.models, 2);
-    // One bundled workflow is Flux.1, one FLUX.2, one Krea 2, one sd15 (§4.6).
-    assertEquals(byName.get("flux")?.workflows, 1);
-    assertEquals(byName.get("flux2")?.workflows, 1);
-    // The enhancer is a checkbox on the one Krea 2 workflow, not a second
-    // workflow of its own (§7.1).
-    // The plain workflow and the upscale one (§10).
+    // Nothing is Flux.1 any more: the img2img workflow that was, is gone.
+    assertEquals(byName.get("flux")?.workflows, 0);
+    // Every other family that can upscale has two, the workflow and its
+    // upscale sibling (§10). The enhancer is a checkbox on the one Krea 2
+    // workflow rather than a third (§7.1).
+    assertEquals(byName.get("flux2")?.workflows, 2);
     assertEquals(byName.get("krea2")?.workflows, 2);
-    assertEquals(byName.get("sd15")?.workflows, 1);
+    assertEquals(byName.get("sd15")?.workflows, 2);
     assertEquals(byName.get("sd15")?.models, 0);
+    // LTX writes a video, and none of these graphs upscale one.
+    assertEquals(byName.get("ltx")?.workflows, 1);
   });
 });
 

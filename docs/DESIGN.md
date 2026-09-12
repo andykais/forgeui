@@ -240,13 +240,13 @@ Initial set:
 | id | family | kind | notes |
 |---|---|---|---|
 | `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
-| `krea2-img2img` | flux | image | `category: img2img`; image (required), prompt, denoise (default 0.5), seed, size, loras; steps/cfg advanced. Image is resized to `size` before encoding |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
 | `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
+| `<id>-upscale` | as its sibling | image | one per image family: `krea2-upscale`, `sd15-upscale`, `illustrious-upscale`, `anima-upscale`, `z-image-upscale`, `flux-klein-upscale`. `category: upscale`; image (required), creativity (0.2), scale (2), prompt, seed, loras; the upscale-model path and the sampling overrides advanced (§10) |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
 Anima, Flux Klein, Z-Image Turbo, Stable Diffusion 1.5. This list is final for
@@ -763,7 +763,13 @@ param on the img2img-style workflows.
 
 No new architecture: img2img, upscale and (later) editing are all workflows
 with an `image` param.
-- `krea2-img2img` ships in v1 (§4.6). Editing workflows (Kontext /
+- Every image workflow has an **upscale sibling** (§4.6): `krea2-upscale` and
+  one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein. The
+  `krea2-img2img` workflow that used to stand for this whole idea is gone —
+  it was the old Flux.1 graph under a Krea name, it had never been run, and
+  an upscale workflow does the job it was there to demonstrate. LTX has none:
+  it writes a video, and none of these graphs upscale one.
+  Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
   (+ optional `mask`) + `prompt` — and are added as user workflows later.
 - Every output has **Use image in workflow** (video: **Use video in
@@ -772,7 +778,8 @@ with an `image` param.
   workflow in the **same family** as the output (no menu when exactly one
   matches, a popover when several do, hidden when none; **image outputs
   only** — never shown on videos, because none of these graphs upscale one).
-  `krea2-upscale` ships first.
+  Every image family has one, so the action is never dark on an output the
+  app made itself; LTX has none, which is what the video rule is for.
 
   It was going to be the `img2img` workflow with `denoise` and `size` preset
   on the way in. Making it **its own workflow** instead is what lets it be

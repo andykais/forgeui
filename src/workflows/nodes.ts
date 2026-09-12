@@ -256,6 +256,12 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     inputs: ["upscale_model", "image"],
     outputs: ["IMAGE"],
   },
+  // Flux.2 shifts its schedule by resolution, and an upscale only knows the
+  // resolution once the scaler has run — so it is read off the image (§10).
+  GetImageSize: {
+    inputs: ["image"],
+    outputs: ["width", "height", "batch_size"],
+  },
   VAEEncode: {
     inputs: ["pixels", "vae"],
     outputs: ["LATENT"],

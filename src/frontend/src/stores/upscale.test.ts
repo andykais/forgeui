@@ -35,7 +35,7 @@ describe("what Upscale routes to", () => {
       workflow({ id: "krea2-upscale" }),
       workflow({ id: "sdxl-upscale", family: "sdxl" }),
       workflow({ id: "krea2", category: null }),
-      workflow({ id: "krea2-img2img", category: "img2img" }),
+      workflow({ id: "krea2-old", category: "img2img" }),
     ];
     expect(app.upscalersFor(output()).map((w) => w.id)).toEqual(["krea2-upscale"]);
   });

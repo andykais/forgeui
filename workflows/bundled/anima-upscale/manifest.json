@@ -1,0 +1,214 @@
+{
+  "id": "anima-upscale",
+  "name": "Anima (upscale)",
+  "family": "anima",
+  "kind": "image",
+  "category": "upscale",
+  "description": "Upscale an image with Anima: the image is scaled up, then the tail of the model's own sampling schedule is re-run so it puts detail into what the scaler could only interpolate. The base weights, not Turbo — Creativity is already running a fraction of the steps.",
+  "params": [
+    {
+      "key": "image",
+      "label": "Image",
+      "type": "image",
+      "required": true,
+      "bind": "25.image"
+    },
+    {
+      "key": "creativity",
+      "label": "Creativity",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.2,
+      "description": "How much of the model's schedule to re-run, and so how far it may stray from the original. 0.2 sharpens; higher redraws, and starts inventing detail that was never there.",
+      "bind": "31.denoise"
+    },
+    {
+      "key": "scale",
+      "label": "Scale",
+      "type": "float",
+      "min": 1,
+      "max": 4,
+      "step": 0.25,
+      "default": 2,
+      "description": "How many times larger than the source.",
+      "bind": "26.scale_by"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "description": "What the picture is. Leave it empty to let the image speak for itself.",
+      "bind": "20.text"
+    },
+    {
+      "key": "negative",
+      "label": "Negative prompt",
+      "type": "text",
+      "bind": "21.text"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "33.noise_seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "anima"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "2.CLIP",
+          "model_to": [
+            "34.model",
+            "30.model"
+          ],
+          "clip_to": [
+            "20.clip",
+            "21.clip"
+          ]
+        }
+      }
+    },
+    {
+      "key": "use_upscale_model",
+      "label": "Use an upscale model",
+      "type": "bool",
+      "default": false,
+      "advanced": true,
+      "description": "Scale with a trained upscale model (ESRGAN and friends) instead of a pixel filter. It hands the sampler real edges to work from rather than a blur, so less of the result is invented.",
+      "bind": {
+        "switch": {
+          "input": "22.pixels",
+          "on": "29.IMAGE",
+          "off": "26.IMAGE"
+        }
+      }
+    },
+    {
+      "key": "upscale_model",
+      "label": "Upscale model",
+      "type": "model",
+      "filter": {
+        "class": "upscale"
+      },
+      "advanced": true,
+      "description": "Which upscale model to scale with. Pick one before turning \"Use an upscale model\" on; it needs a file in `upscale_models/`.",
+      "bind": "27.model_name"
+    },
+    {
+      "key": "model_scale",
+      "label": "Model scale",
+      "type": "float",
+      "min": 0.1,
+      "max": 4,
+      "step": 0.05,
+      "default": 0.5,
+      "advanced": true,
+      "description": "An upscale model scales by the factor it was trained at, usually 4×. This brings that back to the Scale you asked for: 0.5 turns a 4× model into a 2× upscale.",
+      "bind": "29.scale_by"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "min": 1,
+      "max": 100,
+      "advanced": true,
+      "description": "The model's full schedule, of which Creativity re-runs the tail. Raise it to give a low creativity more real steps to work in.",
+      "bind": "30.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "34.cfg"
+    },
+    {
+      "key": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "dpmpp_2m",
+        "dpmpp_sde",
+        "ddim",
+        "res_multistep"
+      ],
+      "advanced": true,
+      "bind": "32.sampler_name"
+    },
+    {
+      "key": "scheduler",
+      "label": "Scheduler",
+      "type": "enum",
+      "options": [
+        "simple",
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "beta"
+      ],
+      "advanced": true,
+      "bind": "30.scheduler"
+    },
+    {
+      "key": "upscale_method",
+      "label": "Scaler",
+      "type": "enum",
+      "options": [
+        "nearest-exact",
+        "bilinear",
+        "area",
+        "bicubic",
+        "lanczos"
+      ],
+      "advanced": true,
+      "bind": "26.upscale_method"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "2.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "3.vae_name"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "anima"
+      },
+      "advanced": true,
+      "bind": "1.unet_name"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "37",
+      "kind": "image"
+    }
+  ]
+}
