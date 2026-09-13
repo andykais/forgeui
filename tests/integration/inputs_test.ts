@@ -400,6 +400,11 @@ Deno.test("LTX-2.3 image-to-video binds the first frame, the model and the LoRAs
     assertEquals(graph["1"]!.inputs.ckpt_name, ckpt);
     assertEquals(graph["10"]!.inputs.ckpt_name, ckpt);
 
+    // Distilled on by default, and the switch picks that side.
+    assertEquals(graph["51"]!.inputs.switch, true);
+    assertEquals(graph["51"]!.inputs.on_true, ["7", 0]);
+    assertEquals(graph["51"]!.inputs.on_false, ["6", 0]);
+
     // The LoRA is spliced after the distilled one and reaches both samplers —
     // the low-resolution pass and the refine pass — as a model-only loader,
     // because LTX-2 video LoRAs do not touch the Gemma text encoder.
@@ -410,11 +415,49 @@ Deno.test("LTX-2.3 image-to-video binds the first frame, the model and the LoRAs
     const [loraId, lora] = spliced[0]!;
     assertEquals(lora.inputs.lora_name, "grain.safetensors");
     assertEquals(lora.inputs.strength_model, 0.8);
-    assertEquals(lora.inputs.model, ["7", 0]);
+    // Stacked onto whichever model the switch picked, so a user LoRA applies
+    // with the distilled one on or off.
+    assertEquals(lora.inputs.model, ["51", 0]);
     assertEquals(graph["24"]!.inputs.model, [loraId, 0]);
     assertEquals(graph["44"]!.inputs.model, [loraId, 0]);
-    // And the prompt enhancer's own model stays where it was: that branch is
-    // the LLM, not the diffusion path.
-    assertEquals(graph["12"]!.inputs.model, ["7", 0]);
+    // And the prompt enhancer's own model stays off the splice: that branch
+    // is the LLM, not the diffusion path.
+    assertEquals(graph["12"]!.inputs.model, ["51", 0]);
+  }, { comfy: true });
+});
+
+Deno.test("the distilled LoRA can be switched off, file and all", async () => {
+  await withTestApp(async (app) => {
+    const input = await upload(app, tinyPng({ width: 64, height: 64 }));
+    await generate(app, "ltx2-i2v", {
+      image: input.filename,
+      prompt: "a paper crane unfolding on a window sill",
+      use_distilled: false,
+    });
+    const { outputs } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const detail = await app.json<{ sidecar_path: string }>(
+      `/api/outputs/${outputs[0]!.id}`,
+    );
+    const sidecar = parseSidecar(
+      await Deno.readTextFile(join(app.paths.root, detail.sidecar_path)),
+      detail.sidecar_path,
+    );
+    const graph = sidecar.api_graph as Record<
+      string,
+      { class_type: string; inputs: Record<string, unknown> }
+    >;
+
+    // `ComfySwitchNode` is lazy on both branches and asks only for the side it
+    // picked, so with the switch off the distilled loader is never executed
+    // and its file is never opened — which is the point of the checkbox.
+    assertEquals(graph["51"]!.inputs.switch, false);
+    assertEquals(graph["51"]!.inputs.on_false, ["6", 0]);
+    // The node stays in the graph; being unreachable is what makes it free.
+    assertEquals(graph["7"]!.class_type, "LoraLoaderModelOnly");
+    // Both samplers read the switch either way round.
+    assertEquals(graph["24"]!.inputs.model, ["51", 0]);
+    assertEquals(graph["44"]!.inputs.model, ["51", 0]);
   }, { comfy: true });
 });

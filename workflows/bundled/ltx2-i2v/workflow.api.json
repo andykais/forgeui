@@ -83,7 +83,7 @@
       "strength_model": 1,
       "strength_clip": 1,
       "model": [
-        "7",
+        "51",
         0
       ],
       "clip": [
@@ -238,7 +238,7 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "7",
+        "51",
         0
       ],
       "positive": [
@@ -504,7 +504,7 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "7",
+        "51",
         0
       ],
       "positive": [
@@ -609,6 +609,20 @@
       "codec": "auto",
       "video": [
         "49",
+        0
+      ]
+    }
+  },
+  "51": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": true,
+      "on_false": [
+        "6",
+        0
+      ],
+      "on_true": [
+        "7",
         0
       ]
     }

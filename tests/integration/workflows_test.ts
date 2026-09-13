@@ -191,6 +191,7 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "fps",
       "seed",
       "loras",
+      "use_distilled",
       "enhance",
     ]);
     // Rebuilt from the official template (§7), through the custom sampler

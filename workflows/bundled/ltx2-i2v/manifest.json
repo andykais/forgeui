@@ -76,7 +76,7 @@
       },
       "bind": {
         "chain": {
-          "model_from": "7.MODEL",
+          "model_from": "51.output",
           "clip_from": null,
           "model_to": [
             "24.model",
@@ -85,6 +85,14 @@
           "clip_to": null
         }
       }
+    },
+    {
+      "key": "use_distilled",
+      "label": "Distilled LoRA",
+      "type": "bool",
+      "default": true,
+      "description": "LTX-2.3's distilled LoRA, which is what makes 8 and 3 steps enough. Off, the checkpoint runs undistilled: more faithful motion, but the short schedules below are no longer sized for it — lengthen the sigma lists and raise CFG above 1, or the result is mush. The file is not even opened while this is off.",
+      "bind": "51.switch"
     },
     {
       "key": "enhance",
@@ -124,7 +132,11 @@
       "filter": {
         "class": "lora"
       },
-      "bind": "7.lora_name"
+      "bind": "7.lora_name",
+      "when": {
+        "param": "use_distilled",
+        "is": true
+      }
     },
     {
       "key": "distilled_strength",
@@ -136,7 +148,11 @@
       "max": 2,
       "step": 0.05,
       "bind": "7.strength_model",
-      "description": "How much of the distilled LoRA to apply. The official graph runs it at 0.5."
+      "description": "How much of the distilled LoRA to apply. The official graph runs it at 0.5.",
+      "when": {
+        "param": "use_distilled",
+        "is": true
+      }
     },
     {
       "key": "latent_upscale_model",
@@ -180,8 +196,17 @@
       ]
     },
     {
+      "key": "sigmas_base",
+      "label": "Sigmas (first pass)",
+      "type": "text",
+      "advanced": true,
+      "default": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0",
+      "description": "The low-resolution pass's schedule, written out rather than built from a step count: nine sigmas are eight steps. Distilled, the four near-1.0 values at the head are what let it start this fast.",
+      "bind": "5.sigmas"
+    },
+    {
       "key": "sigmas",
-      "label": "Sigmas (refine)",
+      "label": "Sigmas (refine pass)",
       "type": "text",
       "advanced": true,
       "default": "0.85, 0.7250, 0.4219, 0.0",
