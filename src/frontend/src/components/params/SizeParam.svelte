@@ -2,6 +2,7 @@
   import Link from "@lucide/svelte/icons/link";
   import Unlink from "@lucide/svelte/icons/unlink";
   import type { Param } from "../../types.ts";
+  import { resolveRatio, snap as snapTo, stepOf } from "../../lib/size.ts";
 
   /**
    * §11.3: the presets are ratios, not pixel counts. They resolve against the
@@ -27,18 +28,17 @@
     ["21:9", 21, 9],
   ];
 
-  const step = $derived(param.step ?? 8);
-  const base = $derived((param.default as [number, number]) ?? [1024, 1024]);
+  // The same arithmetic an attached image resolves through, so the presets
+  // and "match the picture" cannot drift apart (§11.3).
+  const step = $derived(stepOf(param));
   let linked = $state(false);
 
   function snap(pixels: number): number {
-    return Math.max(step, Math.round(pixels / step) * step);
+    return snapTo(pixels, step);
   }
 
   function resolve(a: number, b: number): [number, number] {
-    const area = base[0] * base[1];
-    const width = Math.sqrt(area * (a / b));
-    return [snap(width), snap(width / (a / b))];
+    return resolveRatio(param, a, b);
   }
 
   function isActive(a: number, b: number): boolean {

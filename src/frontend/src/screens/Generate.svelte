@@ -396,6 +396,19 @@
         onseededit={(value) => panel.editSeed(value)}
         onseedroll={() => panel.rollSeed()}
         onseedlock={() => panel.toggleSeedLock()}
+        onimage={(media) => {
+          // Generating at the shape of the picture you just attached is what
+          // you meant; saying so out loud is how you know it happened, and
+          // the size row is still there to overrule it.
+          const set = panel.sizeFromImage(media.width, media.height);
+          if (!set) return;
+          const [width, height] = set.size;
+          toasts.message(
+            set.exact
+              ? `Size set to ${width} × ${height} to match the image`
+              : `Size set to ${width} × ${height} — the image's shape at this workflow's resolution`,
+          );
+        }}
       />
     {:else if panel.loading}
       <p class="empty">loading…</p>

@@ -878,6 +878,15 @@ with an `image` param.
   `category` and `family`, `GET /api/outputs/:id` the output's family and
   kind; the client picks the target, `POST /api/inputs` adopts the output,
   and the panel is filled. No upscale-specific route.
+- **The size follows the picture.** A workflow that has both an `image` and a
+  `size` sets the size from what was just attached: the picture's ratio
+  always, and its own pixels too while it is anywhere near this workflow's
+  resolution — within twice its area, snapped to the grid. Past that the
+  ratio is kept and the area comes down to the workflow's own, which is what
+  the ratio presets already do. It is announced in a toast either way, and
+  the size row still overrules it: this saves you saying the same thing
+  twice, it does not take the say away. A workflow with no `size` — every
+  upscale, which states a `scale` — is untouched.
 - **An `image` param takes a picture four ways**: the file picker, a drop, a
   paste, and a result dragged straight out of the grid. Pasting claims the
   zone the pointer is **over** as well as the one with focus — focus alone

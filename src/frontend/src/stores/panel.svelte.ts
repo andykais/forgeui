@@ -3,6 +3,7 @@ import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
 import { applicableParams } from "../lib/applies.ts";
+import { type ImageSize, sizeForImage } from "../lib/size.ts";
 
 /**
  * The Generate param panel (§11.2, §11.3). Selecting a workflow fills the
@@ -256,6 +257,39 @@ class PanelState {
     }
     // The picture last: it is the one thing the source run cannot supply.
     await this.editWith(workflowId, { ...shared, [imageKey]: media.filename });
+  }
+
+  // --------------------------------------------------------------- the size
+
+  /** The `size` param, if this workflow states one at all. */
+  get sizeParam(): Param | null {
+    return this.params.find((param) => param.type === "size") ?? null;
+  }
+
+  /**
+   * Generate at the shape of the picture that was just attached (§11.3).
+   *
+   * An image-to-video run wants the output to match its first frame, and
+   * before this the panel made you say so twice: attach the image, then
+   * remember to pick the ratio it already has, or type its pixels in. Getting
+   * it wrong is not a small thing — the model letterboxes or crops, and you
+   * find out several minutes later.
+   *
+   * Only the workflows that have both an image and a size are affected; an
+   * upscale states a `scale` instead and is left alone. Returns the size it
+   * set, so a caller can say so.
+   */
+  sizeFromImage(width: number, height: number): ImageSize | null {
+    const param = this.sizeParam;
+    if (!param) return null;
+    const next = sizeForImage(param, width, height);
+    if (!next) return null;
+    const current = this.values[param.key] as [number, number] | undefined;
+    if (current && current[0] === next.size[0] && current[1] === next.size[1]) {
+      return null;
+    }
+    this.set(param.key, next.size);
+    return next;
   }
 
   // -------------------------------------------------------------- the LoRAs

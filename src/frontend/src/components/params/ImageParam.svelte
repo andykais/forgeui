@@ -19,9 +19,15 @@
     param: Param;
     value: string;
     onchange: (filename: string) => void;
+    /**
+     * The picture's shape, for a panel that has a size to match to it
+     * (§11.3). Fired only when one is attached here — not when a value
+     * arrives from a saved run, which already carries the size it ran at.
+     */
+    onattach?: (media: { width: number; height: number }) => void;
   }
 
-  let { param, value, onchange }: Props = $props();
+  let { param, value, onchange, onattach }: Props = $props();
 
   let input = $state<HTMLInputElement | undefined>(undefined);
   let busy = $state(false);
@@ -84,6 +90,7 @@
         height: media.height,
       };
       onchange(media.filename);
+      onattach?.({ width: media.width, height: media.height });
     } catch (cause) {
       error = cause instanceof ApiError
         ? cause.message
@@ -117,6 +124,7 @@
           height: media.height,
         };
         onchange(media.filename);
+        onattach?.({ width: media.width, height: media.height });
       } catch (cause) {
         error = cause instanceof Error ? cause.message : String(cause);
       } finally {

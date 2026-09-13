@@ -211,3 +211,49 @@ describe("what blocks Generate", () => {
     expect(panel.missingRequired).toEqual(["Prompt"]);
   });
 });
+
+/**
+ * §11.3: attaching a picture says what shape to generate at, so the panel
+ * does not make you say it twice. Only the workflows that have both an image
+ * and a size are touched — an upscale states a `scale` instead.
+ */
+describe("the size follows the attached image", () => {
+  const params = [
+    { key: "image", type: "image", required: true, bind: "6.image" },
+    { key: "prompt", type: "text", bind: "4.text" },
+    {
+      key: "size",
+      type: "size",
+      default: [1280, 720],
+      step: 8,
+      bind: { w: "5.width", h: "5.height" },
+    },
+  ];
+
+  beforeEach(() => load(params));
+
+  test("a portrait picture gives a portrait size", () => {
+    expect(panel.sizeFromImage(720, 1280)).toEqual({ size: [720, 1280], exact: true });
+    expect(panel.values.size).toEqual([720, 1280]);
+  });
+
+  test("a picture far bigger than the workflow keeps its shape, not its pixels", () => {
+    const set = panel.sizeFromImage(4032, 3024)!;
+    expect(set.exact).toBe(false);
+    const [width, height] = set.size;
+    expect(width * height).toBeLessThanOrEqual(1280 * 720 * 1.05);
+    expect(width / height).toBeCloseTo(4 / 3, 1);
+  });
+
+  test("attaching the same shape twice changes nothing and says so", () => {
+    expect(panel.sizeFromImage(1280, 720)).toEqual({ size: [1280, 720], exact: true });
+    // Already there: nothing to announce the second time round.
+    expect(panel.sizeFromImage(1280, 720)).toBeNull();
+  });
+
+  test("a workflow with no size param is left alone", () => {
+    load(params.filter((param) => param.key !== "size"));
+    expect(panel.sizeFromImage(720, 1280)).toBeNull();
+    expect(panel.values.size).toBeUndefined();
+  });
+});

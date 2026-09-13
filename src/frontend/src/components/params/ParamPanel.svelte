@@ -36,6 +36,8 @@
     onseededit: (value: number) => void;
     onseedroll: () => void;
     onseedlock: () => void;
+    /** A picture was just attached: the size can follow it (§11.3). */
+    onimage?: (media: { width: number; height: number }) => void;
   }
 
   let {
@@ -54,6 +56,7 @@
     onseededit,
     onseedroll,
     onseedlock,
+    onimage,
   }: Props = $props();
 
   let advancedOpen = $state(false);
@@ -389,6 +392,7 @@
           {param}
           value={(values[param.key] as string) ?? ""}
           onchange={(filename) => onchange(param.key, filename)}
+          onattach={onimage}
         />
       {:else}
         <!--
