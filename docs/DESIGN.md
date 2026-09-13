@@ -878,6 +878,15 @@ with an `image` param.
   `category` and `family`, `GET /api/outputs/:id` the output's family and
   kind; the client picks the target, `POST /api/inputs` adopts the output,
   and the panel is filled. No upscale-specific route.
+- **An `image` param takes a picture four ways**: the file picker, a drop, a
+  paste, and a result dragged straight out of the grid. Pasting claims the
+  zone the pointer is **over** as well as the one with focus — focus alone
+  meant clicking (which opens the file dialog) and pressing Escape to get
+  back out of it, for something the pointer was already resting on. Anything
+  being typed into wins outright, so a screenshot pasted into the prompt box
+  is a prompt. A dragged tile carries its **output id**, not its bytes: the
+  drop adopts the file the app already wrote rather than uploading a copy of
+  it back to itself (§9).
 - The `mask` widget is a simple brush/erase canvas over the bound image,
   producing a PNG that goes through §9.
 - Provenance chain via `derived_from_output` gives a "lineage" view.
@@ -1033,6 +1042,20 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - **LINEAGE** is read-only metadata: parents above, children below, each
   node showing the id suffix and the family from that output's sidecar,
   "this" marking the current one. Clicking a node opens it.
+- **A thumbnail is drawn by what the file is.** Every small picture of an
+  output — a workflow's last run, a model's tile, a lineage node, a sample —
+  goes through one component that picks `<video>` or `<img>`, from the `kind`
+  where the caller has it and the extension where all it has is a URL. An
+  `<img>` pointed at an mp4 draws the browser's broken-image outline, which
+  is what every video workflow used to show. A video thumbnail is muted and
+  seeks a fraction of a second in, because `preload="metadata"` alone leaves
+  a black plate with no frame decoded. **A video output can be a model's
+  thumbnail**: the query behind it excluded them, so a model that only makes
+  videos had an empty plate for ever.
+- **A video plays when it is opened**, and only one element plays at a time:
+  the page's video and the fullscreen one both exist while fullscreen is up,
+  so without pausing the one underneath a clip with sound played its audio
+  twice, a frame apart. The position is handed across in both directions.
 - **Identifiers**: an output's id is `<ulid>-<n>` and there is no
   secondary human id. Tiles, badges and lineage nodes show the last 5
   characters of the ULID plus index (`…ZM4T-0`); the viewer header shows

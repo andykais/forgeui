@@ -1105,12 +1105,18 @@ export function firstSamplePathByModel(db: Database): Map<string, string> {
   return new Map(rows);
 }
 
+/**
+ * The most recent thing each model made, for the tile it is pictured by
+ * (§8.1). Videos count: a video model's outputs are all videos, so excluding
+ * them left every one of them with an empty plate for ever. The client picks
+ * the element to draw it with by what the file is.
+ */
 export function latestOutputPathByModel(db: Database): Map<string, string> {
   const rows = db.prepare(
     `SELECT om.model_hash, o.path, max(o.created_at)
        FROM output_models om
        JOIN outputs o ON o.id = om.output_id
-      WHERE o.deleted_at IS NULL AND o.kind = 'image'
+      WHERE o.deleted_at IS NULL
       GROUP BY om.model_hash`,
   ).values<[string, string, number]>();
   return new Map(rows.map(([hash, path]) => [hash, path]));

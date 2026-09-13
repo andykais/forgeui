@@ -27,6 +27,14 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
   let over = $state(false);
+  /**
+   * Pointing at the zone is enough to paste into it (§11.2). It used to have
+   * to be focused, and the only way to focus it was to click — which opens
+   * the file dialog — and then press Escape. Hover is the thing you were
+   * already doing.
+   */
+  let hover = $state(false);
+  let focused = $state(false);
   /** What was attached here, for the thumbnail; the value is only a name. */
   let preview = $state<{ filename: string; url: string; width: number; height: number } | null>(null);
 
@@ -87,19 +95,54 @@
     }
   }
 
-  function onDrop(event: DragEvent) {
+  /** What a dragged result carries, so a drop knows it is one (§11.2). */
+  const OUTPUT_MIME = "application/x-forgeui-output";
+
+  async function onDrop(event: DragEvent) {
     event.preventDefault();
     over = false;
-    const file = event.dataTransfer?.files?.[0];
-    take(file);
+    // A tile dragged out of the results: the bytes are already on the server,
+    // so it is adopted rather than uploaded — the same path the Upscale
+    // action takes, and it costs a hard link rather than a copy (§9).
+    const outputId = event.dataTransfer?.getData(OUTPUT_MIME);
+    if (outputId) {
+      busy = true;
+      error = null;
+      try {
+        const media = await api.adoptOutput(outputId);
+        preview = {
+          filename: media.filename,
+          url: media.url,
+          width: media.width,
+          height: media.height,
+        };
+        onchange(media.filename);
+      } catch (cause) {
+        error = cause instanceof Error ? cause.message : String(cause);
+      } finally {
+        busy = false;
+      }
+      return;
+    }
+    take(event.dataTransfer?.files?.[0]);
   }
 
   /**
-   * Pasting is caught on the drop zone rather than on the window: a paste
-   * belongs to whatever has focus, and a panel with two image params would
-   * otherwise have no way to say which one was meant.
+   * A paste still has to belong to one zone — a panel with two image params
+   * must not fill both — but the claim is "the pointer is over it, or it has
+   * the focus" rather than focus alone. Anything being typed into wins
+   * outright: a screenshot pasted into the prompt box is a prompt.
    */
   function onPaste(event: ClipboardEvent) {
+    if (!hover && !focused) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
     const item = [...(event.clipboardData?.items ?? [])].find((entry) =>
       entry.type.startsWith("image/")
     );
@@ -114,6 +157,8 @@
     onchange("");
   }
 </script>
+
+<svelte:window onpaste={onPaste} />
 
 <div class="wrap">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -131,7 +176,10 @@
         input?.click();
       }
     }}
-    onpaste={onPaste}
+    onmouseenter={() => (hover = true)}
+    onmouseleave={() => (hover = false)}
+    onfocusin={() => (focused = true)}
+    onfocusout={() => (focused = false)}
     ondrop={onDrop}
     ondragover={(event) => {
       event.preventDefault();

@@ -18,6 +18,7 @@
   import JobCard from "../components/JobCard.svelte";
   import Viewer from "../components/Viewer.svelte";
   import MediaTable from "../components/MediaTable.svelte";
+  import MediaThumb from "../components/MediaThumb.svelte";
   import { toasts } from "../stores/toasts.svelte.ts";
 
   /**
@@ -129,6 +130,12 @@
   function thumbnailFor(outputId: string | null): string | null {
     if (!outputId) return null;
     return app.outputs[outputId]?.media_url ?? null;
+  }
+
+  /** The output says what it is, so a video workflow gets a video thumb. */
+  function kindFor(outputId: string | null): string | null {
+    if (!outputId) return null;
+    return app.outputs[outputId]?.kind ?? null;
   }
 
   function open(output: Output) {
@@ -324,7 +331,10 @@
       <button class="workflow-card" onclick={() => (pickerOpen = !pickerOpen)}>
         <span class="thumb">
           {#if thumbnailFor(selectedWorkflow?.last_output_id ?? null)}
-            <img src={thumbnailFor(selectedWorkflow?.last_output_id ?? null)} alt="" />
+            <MediaThumb
+              src={thumbnailFor(selectedWorkflow?.last_output_id ?? null)}
+              kind={kindFor(selectedWorkflow?.last_output_id ?? null)}
+            />
           {/if}
         </span>
         <span class="card-text">
@@ -351,7 +361,10 @@
             <button class="option" onclick={() => pick(workflow.id)}>
               <span class="option-thumb">
                 {#if thumbnailFor(workflow.last_output_id)}
-                  <img src={thumbnailFor(workflow.last_output_id)} alt="" />
+                  <MediaThumb
+                    src={thumbnailFor(workflow.last_output_id)}
+                    kind={kindFor(workflow.last_output_id)}
+                  />
                 {/if}
               </span>
               <span class="option-text">
@@ -546,13 +559,6 @@
     border-radius: var(--radius-input);
     background: var(--control);
     overflow: hidden;
-  }
-
-  .thumb img,
-  .option-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .card-text {

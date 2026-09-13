@@ -4,6 +4,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import PencilLine from "@lucide/svelte/icons/pencil-line";
   import type { Sample } from "../types.ts";
+  import MediaThumb from "./MediaThumb.svelte";
 
   /**
    * The Samples strip of the model page (§8.3, frame 05): media that shows
@@ -52,7 +53,7 @@
   <div class="strip">
     {#each samples as sample (sample.id)}
       <figure class="sample" class:chosen={sample.path === thumbPath}>
-        <img src={sample.media_url} alt="" loading="lazy" />
+        <MediaThumb src={sample.media_url} kind={sample.kind} lazy />
         <div class="menu">
           <button
             title="Set as thumbnail"
@@ -155,12 +156,6 @@
     border-radius: var(--radius-tile);
     overflow: hidden;
     background: var(--control);
-  }
-
-  .sample img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .sample.chosen {

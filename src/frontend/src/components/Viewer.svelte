@@ -54,6 +54,15 @@
 
   let fit = $state(true);
   let fullscreen = $state(false);
+  /**
+   * The two video elements — the one in the page and the one over it —
+   * exist at the same time while fullscreen is up, and both would play: the
+   * page carried on behind the black field, so an LTX clip with sound played
+   * its audio twice, a frame or two apart. Only the one on top plays, and
+   * the position is handed across so the picture does not jump back to zero.
+   */
+  let inlineVideo = $state<HTMLVideoElement | undefined>(undefined);
+  let fullVideo = $state<HTMLVideoElement | undefined>(undefined);
   let detail = $state<OutputDetail | null>(null);
   let mediaBox: HTMLDivElement | undefined;
   let renderedWidth = $state(0);
@@ -105,8 +114,35 @@
     else if (delta < 0 && index === 0) onfollow?.();
   }
 
+  $effect(() => {
+    const inline = inlineVideo;
+    const full = fullVideo;
+    if (!inline) return;
+    if (fullscreen) {
+      const at = inline.currentTime;
+      inline.pause();
+      if (full) {
+        full.currentTime = at;
+        full.play().catch(() => {});
+      }
+      return;
+    }
+    // Back from fullscreen: pick the clip up where it was left.
+    inline.play().catch(() => {});
+  });
+
+  /** Hand the position back before the fullscreen element goes. */
+  function leaveFullscreen() {
+    if (fullVideo && inlineVideo) inlineVideo.currentTime = fullVideo.currentTime;
+    fullscreen = false;
+  }
+
   export function toggleFullscreen() {
-    fullscreen = !fullscreen;
+    if (fullscreen) {
+      leaveFullscreen();
+      return;
+    }
+    fullscreen = true;
   }
 
   export function isFullscreen(): boolean {
@@ -115,17 +151,18 @@
 
   export function exitFullscreen(): boolean {
     if (!fullscreen) return false;
-    fullscreen = false;
+    leaveFullscreen();
     return true;
   }
 </script>
 
 {#if fullscreen}
   <!-- Media only, no chrome, black field (§11.4). -->
-  <div class="fullscreen" role="presentation" onclick={() => (fullscreen = false)}>
+  <div class="fullscreen" role="presentation" onclick={leaveFullscreen}>
     {#if selected.kind === "video"}
       <!-- svelte-ignore a11y_media_has_caption -->
-      <video src={selected.media_url} controls autoplay loop></video>
+      <video bind:this={fullVideo} src={selected.media_url} controls autoplay loop
+      ></video>
     {:else}
       <img src={selected.media_url} alt={selected.prompt ?? selected.id} />
     {/if}
@@ -183,7 +220,13 @@
       {/if}
       {#if selected.kind === "video"}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={selected.media_url} controls loop></video>
+        <video
+          bind:this={inlineVideo}
+          src={selected.media_url}
+          controls
+          autoplay
+          loop
+        ></video>
       {:else}
         <img src={selected.media_url} alt={selected.prompt ?? selected.id} />
       {/if}

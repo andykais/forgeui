@@ -12,6 +12,7 @@
   import TagFilter from "./TagFilter.svelte";
   import type { LoraRow, ModelEntry, Param } from "../../types.ts";
   import { relativeTime } from "../../lib/format.ts";
+  import MediaThumb from "../MediaThumb.svelte";
 
   /**
    * §11.3: repeatable rows, drag to reorder, and linked strengths by default
@@ -361,7 +362,7 @@
           <button class="option" disabled={added} onclick={() => add(model)}>
             <span class="option-thumb">
               {#if model.thumb_url}
-                <img src={model.thumb_url} alt="" loading="lazy" />
+                <MediaThumb src={model.thumb_url} lazy />
               {:else}
                 <span class="plate"></span>
               {/if}
@@ -546,7 +547,6 @@
     flex: 0 0 auto;
   }
 
-  .option-thumb img,
   .option-thumb .plate {
     width: 100%;
     height: 100%;

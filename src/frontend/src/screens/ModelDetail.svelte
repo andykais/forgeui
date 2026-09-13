@@ -17,6 +17,7 @@
   import TagPicker from "../components/TagPicker.svelte";
   import Tile from "../components/Tile.svelte";
   import Viewer from "../components/Viewer.svelte";
+  import MediaThumb from "../components/MediaThumb.svelte";
 
   /**
    * The model page (§8.1, §11.2, frame 05): an edit-in-place header — blur
@@ -297,7 +298,7 @@
 
       <div class="thumb">
         {#if model.thumb_url}
-          <img src={model.thumb_url} alt="" />
+          <MediaThumb src={model.thumb_url} />
         {:else}
           <span class="plate"><Brain size={20} /></span>
         {/if}
@@ -639,12 +640,6 @@
     justify-content: center;
     color: var(--mark);
     flex: 0 0 auto;
-  }
-
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .identity {

@@ -10,6 +10,7 @@
   import { toasts } from "../stores/toasts.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
   import Popover from "./Popover.svelte";
+  import MediaThumb from "./MediaThumb.svelte";
 
   /**
    * The metadata sidebar (§11.2), in its stated order: actions, created,
@@ -466,7 +467,7 @@
         {/each}
         <div class="node this">
           <span class="thumb">
-            <img src={output.media_url} alt="" />
+            <MediaThumb src={output.media_url} kind={output.kind} />
           </span>
           <span class="node-text">
             <span class="mono">{shortId(output.id)}</span>
@@ -503,7 +504,7 @@
       >
         <span class="thumb">
           {#if node.media_url}
-            <img src={node.media_url} alt="" />
+            <MediaThumb src={node.media_url} kind={node.kind} />
           {/if}
         </span>
         <span class="node-text">
@@ -781,13 +782,6 @@
     border-radius: var(--radius-control);
     background: var(--control);
     overflow: hidden;
-  }
-
-  .node .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
   }
 
   .node .orphan {

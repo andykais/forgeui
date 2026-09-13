@@ -24,6 +24,7 @@
   import FamilyPicker from "../components/FamilyPicker.svelte";
   import Popover from "../components/Popover.svelte";
   import TagPicker from "../components/TagPicker.svelte";
+  import MediaThumb from "../components/MediaThumb.svelte";
 
   /**
    * Models (§11.2, frame 04): a tab per model class, tiles or table, search
@@ -595,7 +596,7 @@
             >
               <td class="thumb-cell">
                 {#if model.thumb_url}
-                  <img src={model.thumb_url} alt="" loading="lazy" />
+                  <MediaThumb src={model.thumb_url} lazy />
                 {:else}
                   <span class="plate"></span>
                 {/if}
@@ -886,7 +887,10 @@
     width: 130px;
   }
 
-  .thumb-cell img,
+  /* The thumbnail sizes its own element to fill this, so the box is here
+     rather than on the picture: a video thumb is the same 32px square. */
+  .thumb-cell :global(img),
+  .thumb-cell :global(video),
   .plate {
     width: 32px;
     height: 32px;

@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
   buildOutputsWhere,
   ftsMatchQuery,
+  latestOutputPathByModel,
   listOutputs,
 } from "../../src/db/queries.ts";
 import {
@@ -151,4 +152,40 @@ Deno.test("media urls are built from the stored path", () => {
     mediaUrl("outputs/2026/09/05/01J-0.png"),
     "/api/media/outputs/2026/09/05/01J-0.png",
   );
+});
+
+Deno.test("a model is pictured by its newest output, video or not", () => {
+  const db = new Database(":memory:", DATABASE_OPTIONS);
+  applyPragmas(db);
+  migrate(db);
+  try {
+    const output = db.prepare(
+      `INSERT INTO outputs (id, path, sidecar_path, kind, params_json, created_at)
+       VALUES (?, ?, ?, ?, '{}', ?)`,
+    );
+    const used = db.prepare(
+      `INSERT INTO output_models (output_id, model_hash, role) VALUES (?, ?, 'unet')`,
+    );
+
+    // A model that has only ever made videos: every one of these used to be
+    // filtered out, which left an LTX model with an empty plate for ever.
+    output.run("01V-0", "outputs/v.mp4", "outputs/v.json", "video", 2000);
+    used.run("01V-0", "videomodel");
+
+    // And one that has made both; the newest wins whichever kind it is.
+    output.run("01I-0", "outputs/i.png", "outputs/i.json", "image", 1000);
+    used.run("01I-0", "mixedmodel");
+    output.run("01V2-0", "outputs/v2.mp4", "outputs/v2.json", "video", 3000);
+    used.run("01V2-0", "mixedmodel");
+
+    const latest = latestOutputPathByModel(db);
+    assertEquals(latest.get("videomodel"), "outputs/v.mp4");
+    assertEquals(latest.get("mixedmodel"), "outputs/v2.mp4");
+
+    // A deleted output is still no one's thumbnail.
+    db.prepare(`UPDATE outputs SET deleted_at = 1 WHERE id = '01V-0'`).run();
+    assertEquals(latestOutputPathByModel(db).get("videomodel"), undefined);
+  } finally {
+    db.close();
+  }
 });

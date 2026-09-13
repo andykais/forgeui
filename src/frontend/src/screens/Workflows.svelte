@@ -9,6 +9,7 @@
   import { relativeTime } from "../lib/format.ts";
   import Popover from "../components/Popover.svelte";
   import { toasts } from "../stores/toasts.svelte.ts";
+  import MediaThumb from "../components/MediaThumb.svelte";
 
   /**
    * The workflows table (§11.2): the manifest surface at a glance. The ⋯ menu
@@ -49,6 +50,11 @@
 
   function thumbnail(id: string | null): string | null {
     return id ? (app.outputs[id]?.media_url ?? null) : null;
+  }
+
+  /** The output says what it is, so a video workflow gets a video thumb. */
+  function kindOf(id: string | null): string | null {
+    return id ? (app.outputs[id]?.kind ?? null) : null;
   }
 
   function paramsSummary(keys: string[], advanced: number): string {
@@ -185,7 +191,10 @@
             <td class="thumb-col">
               <span class="thumb">
                 {#if thumbnail(workflow.last_output_id)}
-                  <img src={thumbnail(workflow.last_output_id)} alt="" />
+                  <MediaThumb
+                    src={thumbnail(workflow.last_output_id)}
+                    kind={kindOf(workflow.last_output_id)}
+                  />
                 {/if}
               </span>
             </td>
@@ -407,12 +416,6 @@
     border-radius: var(--radius-control);
     background: var(--control);
     overflow: hidden;
-  }
-
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .name {
