@@ -44,7 +44,8 @@ export interface Param {
   options?: string[];
   source?: string;
   filter?: { family?: string; class?: string };
-  bind: string | { w: string; h: string } | { chain: LoraChain };
+  /** A list is a model pick that lands in several loaders at once (§4.6). */
+  bind: string | string[] | { w: string; h: string } | { chain: LoraChain };
   of?: string;
 }
 

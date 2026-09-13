@@ -206,6 +206,120 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["frame_rate"],
     outputs: ["CONDITIONING", "CONDITIONING"],
   },
+
+  // ---------------------------------------------------- LTX-2.3 (§4.6)
+  //
+  // The official image-to-video graph is an audio-video model run twice: a
+  // half-resolution pass, a latent upsample, then a refine pass, with the
+  // audio latent carried alongside the video one the whole way. These are the
+  // classes that graph needs which nothing else here does.
+  LTXAVTextEncoderLoader: {
+    widgets: ["text_encoder", "ckpt_name", "device"],
+    outputs: ["CLIP"],
+  },
+  LTXVAudioVAELoader: {
+    widgets: ["ckpt_name"],
+    outputs: ["AUDIO_VAE"],
+  },
+  LatentUpscaleModelLoader: {
+    widgets: ["model_name"],
+    outputs: ["LATENT_UPSCALE_MODEL"],
+  },
+  LTXVEmptyLatentAudio: {
+    inputs: ["audio_vae"],
+    widgets: ["frames_number", "frame_rate", "batch_size"],
+    outputs: ["LATENT"],
+  },
+  /** Pairs a video latent with its audio one; the sampler moves them together. */
+  LTXVConcatAVLatent: {
+    inputs: ["video_latent", "audio_latent"],
+    outputs: ["LATENT"],
+  },
+  LTXVSeparateAVLatent: {
+    inputs: ["av_latent"],
+    outputs: ["video_latent", "audio_latent"],
+  },
+  LTXVCropGuides: {
+    inputs: ["positive", "negative", "latent"],
+    outputs: ["CONDITIONING", "CONDITIONING", "LATENT"],
+  },
+  /** Writes the first frame into an existing latent, in place (§10). */
+  LTXVImgToVideoInplace: {
+    inputs: ["vae", "image", "latent"],
+    widgets: ["strength", "bypass"],
+    outputs: ["LATENT"],
+  },
+  LTXVPreprocess: {
+    inputs: ["image"],
+    widgets: ["img_compression"],
+    outputs: ["IMAGE"],
+  },
+  LTXVLatentUpsampler: {
+    inputs: ["samples", "upscale_model", "vae"],
+    outputs: ["LATENT"],
+  },
+  LTXVAudioVAEDecode: {
+    inputs: ["samples", "audio_vae"],
+    outputs: ["AUDIO"],
+  },
+  /** The sigma schedule written out by hand, rather than built from steps. */
+  ManualSigmas: {
+    widgets: ["sigmas"],
+    outputs: ["SIGMAS"],
+  },
+  /**
+   * `a * b + 1`: the frame count from a duration and a frame rate. The three
+   * outputs are the one answer in three types, so a binding has to say which
+   * — `FLOAT` where a float is wanted, `INT` where the node downstream counts.
+   */
+  ComfyMathExpression: {
+    inputs: ["values.a", "values.b"],
+    widgets: ["expression"],
+    outputs: ["FLOAT", "INT", "BOOL"],
+  },
+  ResizeImageMaskNode: {
+    inputs: ["input"],
+    widgets: ["resize_type", "scale_method"],
+    dynamic: {
+      resize_type: {
+        "scale dimensions": ["width", "height", "crop"],
+        "scale longer dimension": ["longer_size"],
+        "scale shorter dimension": ["shorter_size"],
+      },
+    },
+    outputs: ["IMAGE"],
+  },
+  VAEDecodeTiled: {
+    inputs: ["samples", "vae"],
+    widgets: ["tile_size", "overlap", "temporal_size", "temporal_overlap"],
+    outputs: ["IMAGE"],
+  },
+  /** The prompt enhancer of the official graph; Gemma, behind a switch. */
+  TextGenerateLTX2Prompt: {
+    inputs: ["clip", "image", "video", "audio"],
+    widgets: ["prompt", "max_length", "sampling_mode"],
+    dynamic: {
+      sampling_mode: {
+        on: [
+          "temperature",
+          "top_k",
+          "top_p",
+          "min_p",
+          "repetition_penalty",
+          "seed",
+          "presence_penalty",
+        ],
+        off: [],
+      },
+    },
+    outputs: ["STRING"],
+  },
+  /** Frames plus audio into one video object; `SaveVideo` writes it. */
+  CreateVideo: {
+    inputs: ["images", "audio"],
+    widgets: ["fps", "bit_depth", "color_space"],
+    outputs: ["VIDEO"],
+  },
   KSampler: {
     inputs: ["model", "positive", "negative", "latent_image"],
     widgets: ["seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"],
@@ -291,6 +405,11 @@ export const CORE_NODES: Record<string, NodeSchema> = {
   SaveImage: {
     inputs: ["images"],
     widgets: ["filename_prefix"],
+    output: true,
+  },
+  SaveVideo: {
+    inputs: ["video"],
+    widgets: ["filename_prefix", "format", "codec"],
     output: true,
   },
   SaveAnimatedWEBP: {

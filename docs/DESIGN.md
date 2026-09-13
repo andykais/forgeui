@@ -252,6 +252,20 @@ never runs. Both sources are validated against the graph at load, and `input`
 must already be fed by a link: an input holding a literal means the manifest
 has drifted from its graph, and saying so on load beats a surprise at submit.
 
+**A `model`, `text_encoder` or `vae` param may bind a list**, for the graph
+that opens one file in more than one loader:
+
+```json
+"bind": ["6.ckpt_name", "1.ckpt_name", "10.ckpt_name"]
+```
+
+LTX-2.3 is the case: its diffusion model, its audio VAE and its AV
+text-encoder pairing all come out of the same checkpoint, and a pick that
+moved only the first would assemble the run out of two different models. One
+picker, every input it fills — rather than three pickers nobody can be
+expected to keep in step. Every target is checked against the graph at load,
+as a single binding is.
+
 ### 4.5 Workflow versions
 Only the **latest** version of each workflow is exposed in the UI. There is no
 version table. Each workflow's content hash (`sha256(api.json + manifest.json)`)
@@ -278,15 +292,16 @@ Initial set:
 |---|---|---|---|
 | `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
-| `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
+| `ltx2-i2v` | ltx-2 | video | the official Comfy-Org LTX-2.3 image-to-video template, flattened out of its subgraph: image (required), prompt, negative, size, duration (seconds — the graph makes `duration * fps + 1` frames), fps, seed, loras, enhance; the models, the distilled LoRA and its strength, the latent upscaler, the sampler and the refine sigmas advanced. Two sampling passes either side of a spatial latent upsample, with an audio latent carried alongside, so it writes a video with sound. `model` binds three loaders at once (§4.4) |
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 | `<id>-upscale` | as its sibling | image | one per image family: `krea2-upscale`, `sd15-upscale`, `illustrious-upscale`, `anima-upscale`, `z-image-upscale`, `flux-klein-upscale`. `category: upscale`; image (required), creativity (0.2), scale (2), prompt, seed, loras; the upscale-model path and the sampling overrides advanced (§10) |
 
-Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
-Anima, Flux Klein, Z-Image Turbo, Stable Diffusion 1.5. This list is final for
+Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
+LTX-2.3 Image to Video, Anima, Flux Klein, Z-Image Turbo,
+Stable Diffusion 1.5. This list is final for
 v1 and must match the Workflows screen and the use-in-workflow popover in the
 mocks.
 
@@ -804,7 +819,7 @@ with an `image` param.
   one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein. The
   `krea2-img2img` workflow that used to stand for this whole idea is gone —
   it was the old Flux.1 graph under a Krea name, it had never been run, and
-  an upscale workflow does the job it was there to demonstrate. LTX has none:
+  an upscale workflow does the job it was there to demonstrate. LTX-2.3 has none:
   it writes a video, and none of these graphs upscale one.
   Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
@@ -816,7 +831,7 @@ with an `image` param.
   matches, a popover when several do, hidden when none; **image outputs
   only** — never shown on videos, because none of these graphs upscale one).
   Every image family has one, so the action is never dark on an output the
-  app made itself; LTX has none, which is what the video rule is for.
+  app made itself; LTX-2.3 has none, which is what the video rule is for.
 
   It was going to be the `img2img` workflow with `denoise` and `size` preset
   on the way in. Making it **its own workflow** instead is what lets it be

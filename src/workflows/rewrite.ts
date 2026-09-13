@@ -181,6 +181,18 @@ function applyParam(
       if (value === null || value === undefined || value === "") return;
       setScalar(graph, param.bind, value, where);
       return;
+    case "model":
+    case "text_encoder":
+    case "vae":
+      // One file, however many loaders open it (§4.6).
+      if (Array.isArray(param.bind)) {
+        for (const [i, target] of param.bind.entries()) {
+          setScalar(graph, target, value, `${where}[${i}]`);
+        }
+        return;
+      }
+      setScalar(graph, param.bind, value, where);
+      return;
     default:
       setScalar(graph, param.bind, value, where);
   }

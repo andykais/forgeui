@@ -349,3 +349,72 @@ Deno.test("an output with no history has an empty chain, not an error", async ()
     assertEquals(missing.status, 404);
   }, { comfy: true });
 });
+
+Deno.test("LTX-2.3 image-to-video binds the first frame, the model and the LoRAs", async () => {
+  await withTestApp(async (app) => {
+    const input = await upload(app, tinyPng({ width: 64, height: 64 }));
+    const jobId = await generate(app, "ltx2-i2v", {
+      image: input.filename,
+      prompt: "a paper crane unfolding on a window sill",
+      duration: 3,
+      fps: 24,
+      loras: [{ name: "grain.safetensors", strength_model: 0.8 }],
+    });
+
+    const { outputs } = await app.json<{ outputs: { id: string }[] }>(
+      "/api/outputs?limit=1",
+    );
+    const detail = await app.json<{ sidecar_path: string; kind: string }>(
+      `/api/outputs/${outputs[0]!.id}`,
+    );
+    assertEquals(detail.kind, "video", "the manifest declares a video output");
+
+    const sidecar = parseSidecar(
+      await Deno.readTextFile(join(app.paths.root, detail.sidecar_path)),
+      detail.sidecar_path,
+    );
+    const graph = sidecar.api_graph as Record<
+      string,
+      { class_type: string; inputs: Record<string, unknown> }
+    >;
+    assert(outputs[0]!.id.startsWith(jobId));
+
+    // The first frame is the uploaded file, under the name ComfyUI knows.
+    assertEquals(graph["13"]!.inputs.image, input.filename);
+    // Seconds and frame rate stay as they were asked for: the graph works the
+    // frame count out itself, as `duration * fps + 1` (§4.6).
+    assertEquals(graph["28"]!.inputs.value, 3);
+    assertEquals(graph["8"]!.inputs.value, 24);
+    assertEquals(graph["29"]!.inputs.expression, "a * b + 1");
+
+    // One checkpoint, three loaders. This is what the list binding is for:
+    // the diffusion model, the audio VAE and the AV text-encoder pairing are
+    // all the same file, and a pick that moved only one would assemble the
+    // run out of two different models.
+    //
+    // The name is the graph's own, because nothing was picked — a list bind
+    // reads its default from the first target like a single one does. Get
+    // that wrong and the param defaults to empty and *blanks* all three.
+    const ckpt = graph["6"]!.inputs.ckpt_name;
+    assertEquals(ckpt, "ltx-2.3-22b-dev-fp8.safetensors");
+    assertEquals(graph["1"]!.inputs.ckpt_name, ckpt);
+    assertEquals(graph["10"]!.inputs.ckpt_name, ckpt);
+
+    // The LoRA is spliced after the distilled one and reaches both samplers —
+    // the low-resolution pass and the refine pass — as a model-only loader,
+    // because LTX-2 video LoRAs do not touch the Gemma text encoder.
+    const spliced = Object.entries(graph).filter(([id, node]) =>
+      node.class_type === "LoraLoaderModelOnly" && id !== "7"
+    );
+    assertEquals(spliced.length, 1);
+    const [loraId, lora] = spliced[0]!;
+    assertEquals(lora.inputs.lora_name, "grain.safetensors");
+    assertEquals(lora.inputs.strength_model, 0.8);
+    assertEquals(lora.inputs.model, ["7", 0]);
+    assertEquals(graph["24"]!.inputs.model, [loraId, 0]);
+    assertEquals(graph["44"]!.inputs.model, [loraId, 0]);
+    // And the prompt enhancer's own model stays where it was: that branch is
+    // the LLM, not the diffusion path.
+    assertEquals(graph["12"]!.inputs.model, ["7", 0]);
+  }, { comfy: true });
+});

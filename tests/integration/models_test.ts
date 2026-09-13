@@ -597,8 +597,10 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(byName.get("krea2")?.workflows, 2);
     assertEquals(byName.get("sd15")?.workflows, 2);
     assertEquals(byName.get("sd15")?.models, 0);
-    // LTX writes a video, and none of these graphs upscale one.
-    assertEquals(byName.get("ltx")?.workflows, 1);
+    // The video workflow is LTX-2.3 now, and none of these graphs upscale a
+    // video — so `ltx` is a family the app still knows and ships nothing for.
+    assertEquals(byName.get("ltx")?.workflows, 0);
+    assertEquals(byName.get("ltx-2")?.workflows, 1);
   });
 });
 
@@ -854,4 +856,48 @@ Deno.test("the list is newest added first, and says so either way", async () => 
     const bad = await app.fetch("/api/models?sort=sideways");
     assertEquals(bad.status, 400);
   });
+});
+
+Deno.test("a model on a branch that is switched off blocks nothing", async () => {
+  await withModels(async (app) => {
+    await scanAndHash(app);
+
+    const submit = (params: Record<string, unknown>) =>
+      app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({ workflow_id: "ltx2-i2v", params }),
+      });
+
+    // LTX-2.3 carries a LoRA for its prompt enhancer, and this machine has a
+    // `loras/` folder with other files in it — so the check has a list to
+    // judge against and really does find the file missing. With the enhancer
+    // off that branch never runs, and refusing over a model ComfyUI would
+    // never open would make the workflow unusable (§4.3).
+    const off = await submit({
+      image: "example.png",
+      prompt: "a paper crane",
+      enhance: false,
+      enhancer_lora: "not-on-this-machine.safetensors",
+      // The params that do apply are judged as usual, so they name files
+      // this fixture really has.
+      model: CHECKPOINT,
+      distilled_lora: "film-grain-35mm.safetensors",
+    });
+    assertEquals(off.status, 201, await off.text());
+
+    // Turned on, the same file is load-bearing and the refusal names it.
+    const on = await submit({
+      image: "example.png",
+      prompt: "a paper crane",
+      enhance: true,
+      enhancer_lora: "not-on-this-machine.safetensors",
+      model: CHECKPOINT,
+      distilled_lora: "film-grain-35mm.safetensors",
+    });
+    assertEquals(on.status, 400);
+    assertStringIncludes(
+      (await on.json() as { error: { message: string } }).error.message,
+      "not-on-this-machine.safetensors",
+    );
+  }, { comfy: true });
 });

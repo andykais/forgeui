@@ -51,7 +51,7 @@ const BUNDLED = [
   ["illustrious-upscale", "Illustrious XL (upscale)"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-upscale", "Krea 2 Turbo (upscale)"],
-  ["ltx", "LTX Video"],
+  ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-upscale", "Stable Diffusion 1.5 (upscale)"],
   ["z-image-turbo", "Z-Image Turbo"],
@@ -111,27 +111,27 @@ Deno.test("the workflow order is the one the user dragged into place", async () 
     // Two ids pulled to the front. Everything else keeps its place behind
     // them, still by name, so a workflow added later needs no list updating
     // and a deleted one leaves no hole (§4.6).
-    const moved = app.workflows.list(["sd15", "ltx"]).map((w) => w.id);
-    assertEquals(moved.slice(0, 2), ["sd15", "ltx"]);
+    const moved = app.workflows.list(["sd15", "ltx2-i2v"]).map((w) => w.id);
+    assertEquals(moved.slice(0, 2), ["sd15", "ltx2-i2v"]);
     assertEquals(
       moved.slice(2),
-      byName.filter((id) => id !== "sd15" && id !== "ltx"),
+      byName.filter((id) => id !== "sd15" && id !== "ltx2-i2v"),
     );
 
     // An id for a workflow that is not there is simply not a position.
     assertEquals(
-      app.workflows.list(["nope", "ltx"]).map((w) => w.id).slice(0, 1),
-      ["ltx"],
+      app.workflows.list(["nope", "ltx2-i2v"]).map((w) => w.id).slice(0, 1),
+      ["ltx2-i2v"],
     );
 
     // And it reaches the API the Generate picker reads.
     await app.json("/api/config", {
       method: "PATCH",
-      body: JSON.stringify({ ui: { workflow_order: ["sd15", "ltx"] } }),
+      body: JSON.stringify({ ui: { workflow_order: ["sd15", "ltx2-i2v"] } }),
     });
     assertEquals((await list(app)).map((w) => w.id).slice(0, 2), [
       "sd15",
-      "ltx",
+      "ltx2-i2v",
     ]);
   });
 });
@@ -179,13 +179,19 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "loras",
     ]);
-    assertEquals(keys("ltx"), [
+    // The official LTX-2.3 image-to-video graph (§4.6): a first frame and a
+    // prompt, with the length asked for in seconds rather than frames — the
+    // graph works out `duration * fps + 1` itself.
+    assertEquals(keys("ltx2-i2v"), [
+      "image",
       "prompt",
+      "negative",
       "size",
-      "frames",
+      "duration",
       "fps",
       "seed",
       "loras",
+      "enhance",
     ]);
     // Rebuilt from the official template (§7), through the custom sampler
     // chain rather than KSampler. Not tied to one size of Klein: the text
@@ -234,7 +240,7 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     assertEquals(byId.get("sd15")!.params.advanced, 2); // steps, cfg
 
-    assertEquals(byId.get("ltx")!.kind, "video");
+    assertEquals(byId.get("ltx2-i2v")!.kind, "video");
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
@@ -249,7 +255,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "sdxl",
         "krea2",
         "krea2",
-        "ltx",
+        // LTX-2.3, which is a different architecture from the LTX-Video
+        // this workflow replaced (§6).
+        "ltx-2",
         "sd15",
         "sd15",
         "z-image",

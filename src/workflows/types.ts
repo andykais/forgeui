@@ -214,7 +214,17 @@ export const MODEL_PARAM_CLASS: Record<ModelParamType, ModelClass> = {
 
 export interface ModelParam extends ParamCommon {
   type: ModelParamType;
-  bind: string;
+  /**
+   * The input the pick lands in, or every input it lands in.
+   *
+   * A list is for the graph that reads one file from more than one loader:
+   * LTX-2.3 opens its checkpoint three times — the diffusion model, the audio
+   * VAE and the AV text-encoder pairing all come out of the same file (§4.6)
+   * — and picking a different checkpoint has to move all three or the run is
+   * assembled from two different models. One picker, several targets, rather
+   * than three pickers nobody can be expected to keep in step.
+   */
+  bind: string | string[];
   filter?: ModelFilter;
   default?: string;
 }

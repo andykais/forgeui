@@ -15,7 +15,7 @@ from then on (§4.6).
 | `illustrious-upscale` | Illustrious XL (upscale)       | sdxl    | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced            |
 | `krea2`               | Krea 2 Turbo                   | krea2   | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, max_length (`when` enhance) advanced                                                                                                 |
 | `krea2-upscale`       | Krea 2 Turbo (upscale)         | krea2   | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced           |
-| `ltx`                 | LTX Video                      | ltx     | video | prompt, size, frames, fps, seed, loras                                                                                                                                                                  |
+| `ltx2-i2v`            | LTX-2.3 Image to Video         | ltx-2   | video | image, prompt, negative, size, duration, fps, seed, loras, enhance · model, clip, distilled_lora, distilled_strength, latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas advanced    |
 | `sd15`                | Stable Diffusion 1.5           | sd15    | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                               |
 | `sd15-upscale`        | Stable Diffusion 1.5 (upscale) | sd15    | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced            |
 | `z-image-turbo`       | Z-Image Turbo                  | z-image | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                     |
@@ -60,8 +60,10 @@ and the advanced sampling set behind, so each names the same model files its
 sibling does. They come from one script rather than by hand, which is what keeps
 them the same shape as each other.
 
-`ltx` is also still the old graph, LTX-Video 0.9.5 rather than LTX-2.3.
-Rebuilding it waits on video outputs.
+`ltx2-i2v` is the official Comfy-Org LTX-2.3 image-to-video template
+(`templates/video_ltx2_3_i2v.json`), which ships as a single subgraph node; it
+was flattened into an api graph here, because that is the form the app queues.
+The text-to-video `ltx` it replaced was the old LTX-Video 0.9.5 graph.
 
 A template holding several variants ships all but one bypassed, so
 `--subgraph <n>` picks which one to import — `flux-klein` is variant 1, the
@@ -77,10 +79,10 @@ The other eight have never been run: this repository has no GPU and none of
 their weights. Every model filename below is a **placeholder** and will not
 resolve on your machine until you point it at a file you actually have.
 
-| workflow      | placeholder filenames                                       |
-| ------------- | ----------------------------------------------------------- |
-| `illustrious` | `illustriousXL.safetensors`                                 |
-| `ltx`         | `ltx-video-2b-v0.9.5.safetensors`, `t5xxl_fp16.safetensors` |
+| workflow      | placeholder filenames                                 |
+| ------------- | ----------------------------------------------------- |
+| `illustrious` | `illustriousXL.safetensors`                           |
+| `ltx2-i2v`    | none — it names the files the official template names |
 
 **Fixing them:** open the workflow from the Workflows screen ("Open in
 ComfyUI"), pick your real model files in the loader nodes, then use the app's
@@ -100,10 +102,16 @@ saving replaces it with the editor's own.
 - **Flux-shaped workflows** (`krea2`, `flux-klein`, `z-image-turbo` and their
   upscale siblings) have no negative prompt: `ConditioningZeroOut` supplies the
   empty negative they expect, and CFG defaults to 1.
-- **`ltx`** exposes `fps` as the frame rate of the `LTXVConditioning` node,
-  which is what the model conditions on. The `SaveAnimatedWEBP` node writes at a
-  fixed 25 fps; rewire it in ComfyUI if you want the two to track each other.
-  `frames` snaps to 8n+1, which is what LTX requires.
+- **`ltx2-i2v`** asks for a length in **seconds**, not frames: the graph
+  multiplies duration by fps and adds one itself, and the same frame rate
+  reaches the conditioning, the audio latent and the written file, so the three
+  cannot drift apart. It samples twice — a half-resolution pass, a spatial
+  latent upsample, then a refine pass — carrying an audio latent beside the
+  video one the whole way, which is why the result has sound. `model` is one
+  pick bound to three loaders: the diffusion model, the audio VAE and the AV
+  text-encoder pairing all come out of that one checkpoint. LoRAs splice in
+  after the distilled LoRA as model-only loaders, because an LTX-2 video LoRA
+  has nothing to say to a Gemma text encoder.
 - **The `-upscale` workflows** scale with `ImageScaleBy`, so the result is a
   multiple of whatever was handed in rather than a size stated up front — which
   is what an upscale means. It then re-samples at `creativity` (the KSampler's
@@ -111,5 +119,6 @@ saving replaces it with the editor's own.
   only interpolate. Everything about it is an ordinary param: save a copy and
   change the numbers, or the scaler, or the model.
 - Only core ComfyUI nodes are used, so nothing here depends on custom nodes.
-- One of these cannot be generated from yet: `ltx` writes a video, and video
-  outputs are a later phase; it loads, lists and rewrites today.
+  `ltx2-i2v` needs a recent ComfyUI: the LTX-2.3 classes it uses
+  (`LTXAVTextEncoderLoader`, `LTXVConcatAVLatent`, `LTXVImgToVideoInplace` and
+  the rest) arrived with the model.
