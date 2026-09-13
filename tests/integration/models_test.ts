@@ -135,13 +135,18 @@ Deno.test("scanned models are listed before they are hashed", async () => {
       before.models.every((model) => model.id.startsWith("path:")),
       "an unhashed model is addressed by its path",
     );
-    assertEquals(before.models[0]?.display_name, "film-grain-35mm");
-    assertEquals(before.models[0]?.family, "unset");
-    assertEquals(before.models[0]?.output_count, 0);
+    // By name, not by position: the list comes back newest-added first
+    // (§8.1), which is not an order this test is about.
+    const grain = before.models.find(
+      (model) => model.display_name === "film-grain-35mm",
+    );
+    assert(grain, "the LoRA on disk is listed");
+    assertEquals(grain.family, "unset");
+    assertEquals(grain.output_count, 0);
     assertEquals(before.folders.length, 1);
 
     // Editing has to wait for the hash (§8.1).
-    const rejected = await app.fetch(`/api/models/${before.models[0]!.id}`, {
+    const rejected = await app.fetch(`/api/models/${grain.id}`, {
       method: "PATCH",
       body: JSON.stringify({ display_name: "Film grain" }),
     });
@@ -592,8 +597,10 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(byName.get("krea2")?.workflows, 2);
     assertEquals(byName.get("sd15")?.workflows, 2);
     assertEquals(byName.get("sd15")?.models, 0);
-    // LTX writes a video, and none of these graphs upscale one.
-    assertEquals(byName.get("ltx")?.workflows, 1);
+    // The video workflow is LTX-2.3 now, and none of these graphs upscale a
+    // video — so `ltx` is a family the app still knows and ships nothing for.
+    assertEquals(byName.get("ltx")?.workflows, 0);
+    assertEquals(byName.get("ltx-2")?.workflows, 1);
   });
 });
 
@@ -803,3 +810,94 @@ function dayOf(createdAt: number): string {
     `${date.getUTCMonth() + 1}`.padStart(2, "0")
   }/${`${date.getUTCDate()}`.padStart(2, "0")}`;
 }
+
+Deno.test("the list is newest added first, and says so either way", async () => {
+  await withModels(async (app, fixtures) => {
+    // A file that plainly arrived later than the fixtures. The gap is
+    // explicit because `added_at` has millisecond resolution and two writes
+    // in the same tick are the same instant — which is a tie, not an order.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await writeFakeSafetensors(
+      join(fixtures.loras, "arrived-last.safetensors"),
+      { name: "last" },
+    );
+
+    const newest = await models(app, "?kind=loras");
+    assertEquals(newest.models[0]?.display_name, "arrived-last");
+    // Every model carries the date the order is read from, and it really is
+    // descending — not just right at the top of the list.
+    const dates = newest.models.map((model) => model.added_at);
+    assert(
+      dates.every((at) => typeof at === "number"),
+      `every model has an added date: ${JSON.stringify(dates)}`,
+    );
+    assertEquals([...dates].sort((a, b) => b! - a!), dates);
+
+    const oldest = await models(app, "?kind=loras&sort=oldest");
+    assertEquals(
+      oldest.models.at(-1)?.display_name,
+      "arrived-last",
+      "oldest first puts the newcomer at the end",
+    );
+    // Ascending, and not merely the other list backwards: two files written
+    // in the same millisecond tie, and a tie falls back to the name in both
+    // directions rather than flipping with them.
+    const ascending = oldest.models.map((model) => model.added_at);
+    assertEquals([...ascending].sort((a, b) => a! - b!), ascending);
+
+    // The alphabetical order this screen used to have is still on offer.
+    const byName = await models(app, "?kind=loras&sort=name");
+    assertEquals(byName.models.map((model) => model.display_name), [
+      "arrived-last",
+      "film-grain-35mm",
+      "soft-studio-light",
+    ]);
+
+    const bad = await app.fetch("/api/models?sort=sideways");
+    assertEquals(bad.status, 400);
+  });
+});
+
+Deno.test("a model on a branch that is switched off blocks nothing", async () => {
+  await withModels(async (app) => {
+    await scanAndHash(app);
+
+    const submit = (params: Record<string, unknown>) =>
+      app.fetch("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({ workflow_id: "ltx2-i2v", params }),
+      });
+
+    // LTX-2.3 carries a LoRA for its prompt enhancer, and this machine has a
+    // `loras/` folder with other files in it — so the check has a list to
+    // judge against and really does find the file missing. With the enhancer
+    // off that branch never runs, and refusing over a model ComfyUI would
+    // never open would make the workflow unusable (§4.3).
+    const off = await submit({
+      image: "example.png",
+      prompt: "a paper crane",
+      enhance: false,
+      enhancer_lora: "not-on-this-machine.safetensors",
+      // The params that do apply are judged as usual, so they name files
+      // this fixture really has.
+      model: CHECKPOINT,
+      distilled_lora: "film-grain-35mm.safetensors",
+    });
+    assertEquals(off.status, 201, await off.text());
+
+    // Turned on, the same file is load-bearing and the refusal names it.
+    const on = await submit({
+      image: "example.png",
+      prompt: "a paper crane",
+      enhance: true,
+      enhancer_lora: "not-on-this-machine.safetensors",
+      model: CHECKPOINT,
+      distilled_lora: "film-grain-35mm.safetensors",
+    });
+    assertEquals(on.status, 400);
+    assertStringIncludes(
+      (await on.json() as { error: { message: string } }).error.message,
+      "not-on-this-machine.safetensors",
+    );
+  }, { comfy: true });
+});

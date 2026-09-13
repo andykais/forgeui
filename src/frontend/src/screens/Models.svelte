@@ -5,16 +5,24 @@
   import List from "@lucide/svelte/icons/list";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Brain from "@lucide/svelte/icons/brain";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { navigate, newTab, opensElsewhere, router, setQuery } from "../router.svelte.ts";
+  import {
+    navigate,
+    newTab,
+    opensElsewhere,
+    router,
+    setQuery,
+  } from "../router.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { matcher } from "../lib/search.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import ModelCard from "../components/ModelCard.svelte";
   import FamilyPicker from "../components/FamilyPicker.svelte";
+  import Popover from "../components/Popover.svelte";
   import TagPicker from "../components/TagPicker.svelte";
 
   /**
@@ -56,14 +64,36 @@
   /** Comma separated, all required; a URL param like every other filter. */
   const tags = $derived(query.get("tags") ?? "");
   const chosenTags = $derived(
-    tags.split(",").map((tag) => tag.trim()).filter((tag) => tag.length > 0),
+    tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0),
   );
   /** The set-aside pile, or everything else; never both (§8.1). */
   const hidden = $derived(query.get("hidden") === "1");
   const view = $derived(query.get("view") === "table" ? "table" : "tiles");
+  /**
+   * Newest added first by default (§8.1). A library is filled over time and
+   * the thing you just downloaded is the thing you are looking for; sorting
+   * by name put it wherever its filename happened to land. `name` keeps the
+   * alphabetical order this screen used to have, for when that is the
+   * question.
+   */
+  const sort = $derived.by(() => {
+    const wanted = query.get("sort");
+    return wanted === "oldest" || wanted === "name" ? wanted : "added";
+  });
   const filterKey = $derived(
-    `${modelClass}\u0000${kind}\u0000${family}\u0000${q}\u0000${tags}\u0000${hidden}`,
+    `${modelClass}\u0000${kind}\u0000${family}\u0000${q}\u0000${tags}` +
+      `\u0000${hidden}\u0000${sort}`,
   );
+  let sortOpen = $state(false);
+  const SORTS = [
+    ["added", "Newest"],
+    ["oldest", "Oldest"],
+    ["name", "Name"],
+  ] as const;
+  const sortLabel = $derived(SORTS.find(([value]) => value === sort)?.[1] ?? "Newest");
 
   /** What a class is called on a tab; anything else is shown as it is named. */
   const CLASS_LABELS: Record<string, string> = {
@@ -153,6 +183,7 @@
         q: q || undefined,
         tags: tags || undefined,
         hidden: hidden || undefined,
+        sort,
       });
       if (mine !== request) return;
       models = body.models;
@@ -280,9 +311,7 @@
 
   const hashingLeft = $derived(models.filter((model) => model.hashing).length);
   /** What the listed models take up on disk, for the info row. */
-  const listedBytes = $derived(
-    models.reduce((total, model) => total + model.size, 0),
-  );
+  const listedBytes = $derived(models.reduce((total, model) => total + model.size, 0));
 
   /**
    * The counts beside the tabs and the chips answer the same question the
@@ -296,9 +325,10 @@
    */
   const searched = $derived.by(() => {
     const matches = matcher(q);
-    const wanted = tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(
-      (tag) => tag.length > 0,
-    );
+    const wanted = tags
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter((tag) => tag.length > 0);
     return all.filter((model) => {
       if (q && !matches(model.name, model.display_name, ...model.tags)) {
         return false;
@@ -408,6 +438,31 @@
       <EyeOff size={13} />
       Show hidden
     </button>
+
+    <div class="chip-wrap">
+      <button class="chip" onclick={() => (sortOpen = !sortOpen)}>
+        Sort: <strong>{sortLabel}</strong>
+        <ChevronDown size={12} />
+      </button>
+      <Popover
+        open={sortOpen}
+        width={160}
+        align="right"
+        onclose={() => (sortOpen = false)}
+      >
+        {#each SORTS as [value, text] (value)}
+          <button
+            class="option"
+            onclick={() => {
+              setQuery({ sort: value === "added" ? null : value });
+              sortOpen = false;
+            }}
+          >
+            {text}
+          </button>
+        {/each}
+      </Popover>
+    </div>
 
     <div class="row views">
       <button
@@ -552,8 +607,8 @@
                 {:else if model.hash_error}
                   <span
                     class="badge failed mono"
-                    title={`Could not read it: ${model.hash_error}`}
-                  >unreadable</span>
+                    title={`Could not read it: ${model.hash_error}`}>unreadable</span
+                  >
                 {/if}
                 <div class="mono dim file">{model.name}</div>
               </td>
@@ -600,6 +655,38 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  /* The same chip the Gallery's filter bar uses, for the same job (§11.2). */
+  .chip-wrap {
+    position: relative;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    background: var(--raised);
+    color: var(--text-3);
+  }
+
+  .chip strong {
+    color: var(--text);
+    font-weight: 400;
+  }
+
+  .option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+
+  .option:hover {
+    background: var(--control);
   }
 
   .filters {
@@ -681,7 +768,6 @@
     padding: 5px 0;
     width: 180px;
   }
-
 
   .spacer {
     flex: 1;
@@ -774,15 +860,21 @@
   /* Where the arrow keys are, which is not the same as where the mouse is. */
   tbody tr.selected td {
     background: var(--control);
-    box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+    box-shadow:
+      inset 0 1px 0 var(--accent),
+      inset 0 -1px 0 var(--accent);
   }
 
   tbody tr.selected td:first-child {
-    box-shadow: inset 1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+    box-shadow:
+      inset 1px 1px 0 var(--accent),
+      inset 0 -1px 0 var(--accent);
   }
 
   tbody tr.selected td:last-child {
-    box-shadow: inset -1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+    box-shadow:
+      inset -1px 1px 0 var(--accent),
+      inset 0 -1px 0 var(--accent);
   }
 
   .thumb-cell {

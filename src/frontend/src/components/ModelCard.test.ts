@@ -23,6 +23,7 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     class: "lora",
     size: 145_000_000,
     mtime: 1_780_000_000_000,
+    added_at: 1_780_000_000_000,
     notes: null,
     tags: [],
     strength_min: -2,

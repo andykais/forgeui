@@ -20,7 +20,8 @@
     /** The ordered set the grid was showing; ← / → walk it. */
     outputs: Output[];
     selected: Output;
-    runningJob?: Job | null;
+    /** What has not landed yet, for the head of the filmstrip (§11.2). */
+    activeJobs?: Job[];
     /** Generate's follow-latest chip (§11.4); omitted in Gallery. */
     following?: boolean | null;
     onselect: (output: Output) => void;
@@ -30,6 +31,8 @@
     ondelete: (output: Output) => void;
     /** Upscale this output with the named workflow (§10). */
     onupscale?: (output: Output, workflowId: string) => void;
+    /** Open another output by id — a lineage node (§11.2). */
+    onopenoutput?: (id: string) => void;
     onfollow?: () => void;
   }
 
@@ -37,7 +40,7 @@
     screen,
     outputs,
     selected,
-    runningJob = null,
+    activeJobs = [],
     following = null,
     onselect,
     onclose,
@@ -45,6 +48,7 @@
     onrerun,
     ondelete,
     onupscale,
+    onopenoutput,
     onfollow,
   }: Props = $props();
 
@@ -193,7 +197,7 @@
       {outputs}
       selectedId={selected.id}
       collapsed={filmstripCollapsed}
-      {runningJob}
+      {activeJobs}
       oncollapse={(collapsed) => app.setFilmstripCollapsed(screen, collapsed)}
       onselect={(output) => onselect(output)}
     />
@@ -209,6 +213,7 @@
         onupscale={onupscale
           ? (workflowId) => onupscale(selected, workflowId)
           : undefined}
+        onopen={onopenoutput}
       />
     {:else}
       <aside class="sidebar-loading"><span class="dim">loading metadata…</span></aside>

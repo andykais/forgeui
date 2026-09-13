@@ -1,0 +1,198 @@
+{
+  "id": "ltx2-i2v",
+  "name": "LTX-2.3 Image to Video",
+  "family": "ltx-2",
+  "kind": "video",
+  "category": null,
+  "description": "The official Comfy-Org LTX-2.3 image-to-video graph: a first frame and a prompt become a video with sound. Sampled twice — a half-resolution pass, a spatial latent upsample, then a refine pass — with the audio latent carried alongside the video one throughout. Length is duration x fps + 1 frame.",
+  "params": [
+    {
+      "key": "image",
+      "label": "First frame",
+      "type": "image",
+      "required": true,
+      "bind": "13.image"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "bind": "11.value"
+    },
+    {
+      "key": "negative",
+      "label": "Negative",
+      "type": "text",
+      "default": "pc game, console game, video game, cartoon, childish, ugly",
+      "bind": "22.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1280,
+        720
+      ],
+      "step": 8,
+      "bind": {
+        "w": "15.value",
+        "h": "14.value"
+      }
+    },
+    {
+      "key": "duration",
+      "label": "Duration (s)",
+      "type": "int",
+      "default": 5,
+      "min": 1,
+      "max": 20,
+      "bind": "28.value",
+      "description": "Length in seconds; the graph turns it into duration x fps + 1 frames."
+    },
+    {
+      "key": "fps",
+      "label": "FPS",
+      "type": "int",
+      "default": 25,
+      "min": 1,
+      "max": 60,
+      "bind": "8.value"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.noise_seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "ltx-2"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "7.MODEL",
+          "clip_from": null,
+          "model_to": [
+            "24.model",
+            "44.model"
+          ],
+          "clip_to": null
+        }
+      }
+    },
+    {
+      "key": "enhance",
+      "label": "Enhance the prompt",
+      "type": "bool",
+      "default": false,
+      "bind": "19.value",
+      "description": "Rewrite the prompt with Gemma before encoding it. Needs the enhancer LoRA and the text encoder; off, that branch never runs."
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "family": "ltx-2"
+      },
+      "bind": [
+        "6.ckpt_name",
+        "1.ckpt_name",
+        "10.ckpt_name"
+      ],
+      "description": "Read three times over: the diffusion model, the audio VAE and the AV text-encoder pairing all come out of this one file."
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "10.text_encoder"
+    },
+    {
+      "key": "distilled_lora",
+      "label": "Distilled LoRA",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "lora"
+      },
+      "bind": "7.lora_name"
+    },
+    {
+      "key": "distilled_strength",
+      "label": "Distilled strength",
+      "type": "float",
+      "advanced": true,
+      "default": 0.5,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "bind": "7.strength_model",
+      "description": "How much of the distilled LoRA to apply. The official graph runs it at 0.5."
+    },
+    {
+      "key": "latent_upscale_model",
+      "label": "Latent upscaler",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "upscale"
+      },
+      "bind": "37.model_name",
+      "description": "The spatial upscaler between the two sampling passes. Listed with the pixel upscalers, because `latent_upscale_models/` and `upscale_models/` are one class here (§8.2)."
+    },
+    {
+      "key": "enhancer_lora",
+      "label": "Enhancer LoRA",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "lora"
+      },
+      "when": {
+        "param": "enhance",
+        "is": true
+      },
+      "bind": "12.lora_name"
+    },
+    {
+      "key": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "advanced": true,
+      "default": "euler",
+      "bind": "41.sampler_name",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "dpmpp_2m",
+        "dpmpp_sde",
+        "ddim",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "sigmas",
+      "label": "Sigmas (refine)",
+      "type": "text",
+      "advanced": true,
+      "default": "0.85, 0.7250, 0.4219, 0.0",
+      "bind": "42.sigmas",
+      "description": "The refine pass's schedule, written out rather than built from a step count."
+    }
+  ],
+  "outputs": [
+    {
+      "node": "50",
+      "kind": "video"
+    }
+  ]
+}

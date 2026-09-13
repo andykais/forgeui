@@ -30,6 +30,7 @@ import type { MemoryMonitor } from "../telemetry/memory.ts";
 import { isOutputNodeType } from "../workflows/nodes.ts";
 import { coerceParams } from "../workflows/coerce.ts";
 import { rewriteGraph } from "../workflows/rewrite.ts";
+import { applicableParams } from "../workflows/visibility.ts";
 import {
   WorkflowNotFoundError,
   type WorkflowStore,
@@ -788,6 +789,11 @@ export class JobRunner {
    * the filenames on anyone else's machine, and without this the job is
    * queued and ComfyUI fails somewhere the user has to go digging for. Naming
    * the param and the value is enough to fix it in the panel.
+   *
+   * Only the params that apply (§4.3). A model on a branch the run has
+   * switched off is not a model the run needs: LTX-2.3 carries a LoRA for its
+   * prompt enhancer, and checking it with the enhancer off refused every
+   * generation over a file that would never have been opened.
    */
   #assertModelsPresent(
     manifest: Manifest,
@@ -795,7 +801,7 @@ export class JobRunner {
   ): void {
     if (!this.#modelExists) return;
     const missing: string[] = [];
-    for (const param of manifest.params) {
+    for (const param of applicableParams(manifest, values)) {
       if (
         param.type !== "model" && param.type !== "text_encoder" &&
         param.type !== "vae"

@@ -2,8 +2,8 @@
   import Check from "@lucide/svelte/icons/check";
   import ImageUpscale from "@lucide/svelte/icons/image-upscale";
   import Plus from "@lucide/svelte/icons/plus";
-  import type { OutputDetail } from "../types.ts";
-  import { absoluteTime, duration, relativeTime } from "../lib/format.ts";
+  import type { Lineage, LineageNode, OutputDetail } from "../types.ts";
+  import { absoluteTime, duration, relativeTime, shortId } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
   import { api } from "../api.ts";
@@ -13,8 +13,8 @@
 
   /**
    * The metadata sidebar (§11.2), in its stated order: actions, created,
-   * duration, params, FILES. Inputs and lineage are Phase 3 and Phase 4 and
-   * appear when there is something to show.
+   * duration, params, FILES, lineage. Lineage appears only when this output
+   * has one — most do not, and an empty block is a row of nothing.
    */
   interface Props {
     output: OutputDetail;
@@ -26,9 +26,16 @@
      * action, which is what a screen with nowhere to land does.
      */
     onupscale?: (workflowId: string) => void;
+    /**
+     * Open another output — a lineage node. The screen decides what that
+     * means: Generate keeps you in the session when it can, Gallery walks to
+     * it. Absent falls back to the gallery, which can show any output there
+     * is.
+     */
+    onopen?: (id: string) => void;
   }
 
-  let { output, onedit, onrerun, ondelete, onupscale }: Props = $props();
+  let { output, onedit, onrerun, ondelete, onupscale, onopen }: Props = $props();
 
   let copied = $state<string | null>(null);
   let promoteOpen = $state(false);
@@ -62,8 +69,7 @@
     return (sidecar?.models ?? []).map((model) => {
       const known = app.modelByName(model.name);
       const sole = byRole.get(model.role);
-      const hash = known?.hash ?? model.hash ??
-        (sole?.length === 1 ? sole[0]! : null);
+      const hash = known?.hash ?? model.hash ?? (sole?.length === 1 ? sole[0]! : null);
       return {
         role: model.role,
         name: model.name,
@@ -96,6 +102,35 @@
     } finally {
       promoting = false;
     }
+  }
+
+  /**
+   * Where this output came from and what has come out of it (§11.2). Fetched
+   * per output rather than carried on the detail route: it is one extra
+   * query for a block most outputs do not have, and it must stay right as
+   * children are generated while the viewer is open.
+   */
+  let lineage = $state<Lineage | null>(null);
+  $effect(() => {
+    const id = output.id;
+    lineage = null;
+    api
+      .lineage(id)
+      .then((loaded) => {
+        if (output.id === id) lineage = loaded;
+      })
+      .catch(() => {
+        if (output.id === id) lineage = null;
+      });
+  });
+  const hasLineage = $derived(
+    (lineage?.parents.length ?? 0) + (lineage?.children.length ?? 0) > 0,
+  );
+
+  function openLineage(node: LineageNode) {
+    if (node.deleted) return;
+    if (onopen) onopen(node.id);
+    else navigate(`/gallery?output=${encodeURIComponent(node.id)}`);
   }
 
   function openModel(event: MouseEvent, hash: string) {
@@ -225,7 +260,10 @@
     <button class="primary" onclick={onedit}>Reuse parameters →</button>
     <button onclick={onrerun}>Generate again ⟳</button>
     {#if upscalers.length === 1}
-      <button title={`Upscale with ${upscalers[0]!.name}`} onclick={() => onupscale?.(upscalers[0]!.id)}>
+      <button
+        title={`Upscale with ${upscalers[0]!.name}`}
+        onclick={() => onupscale?.(upscalers[0]!.id)}
+      >
         <ImageUpscale size={12} /> Upscale
       </button>
     {:else if upscalers.length > 1}
@@ -372,10 +410,9 @@
           {:else if typeof value === "string" && hashOfName.has(value)}
             <div class="mono">{@render modelLink(linkTo(value))}</div>
           {:else}
-            <div
-              class="mono value"
-              class:selectable={selectable(key)}
-            >{render(value)}</div>
+            <div class="mono value" class:selectable={selectable(key)}>
+              {render(value)}
+            </div>
           {/if}
         </div>
       {/each}
@@ -414,6 +451,72 @@
       <p class="warn mono">sidecar: {output.sidecar_error}</p>
     {/if}
   </section>
+
+  <!--
+    Read-only metadata: parents above, children below, `this` in between
+    (§11.2). A node whose output has been deleted is a "?" rather than a
+    link — the chain has to say something was there even once it is gone.
+  -->
+  {#if hasLineage && lineage}
+    <section>
+      <div class="label">Lineage</div>
+      <div class="lineage">
+        {#each lineage.parents as node (node.id)}
+          {@render lineageNode(node, "from")}
+        {/each}
+        <div class="node this">
+          <span class="thumb">
+            <img src={output.media_url} alt="" />
+          </span>
+          <span class="node-text">
+            <span class="mono">{shortId(output.id)}</span>
+            <span class="dim">this{output.family ? ` · ${output.family}` : ""}</span>
+          </span>
+        </div>
+        {#each lineage.children as node (node.id)}
+          {@render lineageNode(node, "made")}
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#snippet lineageNode(node: LineageNode, relation: "from" | "made")}
+    {#if node.deleted}
+      <div class="node gone" title="that output has been deleted">
+        <span class="thumb orphan mono">?</span>
+        <span class="node-text">
+          <span class="mono">{shortId(node.id)}</span>
+          <span class="dim">{relation === "from" ? "made from" : "made"} · deleted</span>
+        </span>
+      </div>
+    {:else}
+      <a
+        class="node"
+        href={`/gallery?output=${encodeURIComponent(node.id)}`}
+        title="Open this output"
+        onclick={(event) => {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0)
+            return;
+          event.preventDefault();
+          openLineage(node);
+        }}
+      >
+        <span class="thumb">
+          {#if node.media_url}
+            <img src={node.media_url} alt="" />
+          {/if}
+        </span>
+        <span class="node-text">
+          <span class="mono">{shortId(node.id)}</span>
+          <span class="dim">
+            {relation === "from" ? "made from" : "made"}{node.family
+              ? ` · ${node.family}`
+              : ""}
+          </span>
+        </span>
+      </a>
+    {/if}
+  {/snippet}
 </aside>
 
 <style>
@@ -633,5 +736,75 @@
   .warn {
     color: var(--error);
     font-size: 11px;
+  }
+
+  /* Parents above, this one in the middle, children below: the chain reads
+     down the block, so the rows are stacked rather than laid out sideways. */
+  .lineage {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+  }
+
+  .node {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 5px;
+    border-radius: var(--radius-control);
+    background: var(--raised);
+    color: var(--text-2);
+    font-size: 11px;
+    text-decoration: none;
+  }
+
+  a.node:hover {
+    background: var(--control);
+    color: var(--text);
+  }
+
+  /* Where you already are: marked, and not offering to take you there. */
+  .node.this {
+    background: transparent;
+    border: 1px solid var(--line-2);
+  }
+
+  .node.gone {
+    color: var(--text-4);
+  }
+
+  .node .thumb {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-control);
+    background: var(--control);
+    overflow: hidden;
+  }
+
+  .node .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .node .orphan {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-4);
+  }
+
+  .node-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .node-text .dim {
+    font-size: 10px;
   }
 </style>
