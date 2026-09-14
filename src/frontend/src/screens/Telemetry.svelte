@@ -37,6 +37,12 @@
   let exhausted = $state(false);
   let error = $state<string | null>(null);
   let openFilter = $state<string | null>(null);
+  /**
+   * The entry the pointer is on, down in the table. The graph draws a line
+   * where it falls (§11.2): a row is a number and a time, and where in the
+   * run of them it sits is the question the table cannot answer.
+   */
+  let hoveredEntry = $state<TelemetryEntry | null>(null);
   let minDraft = $state("");
   let scroller = $state<HTMLDivElement | undefined>(undefined);
 
@@ -458,6 +464,7 @@
           {mode}
           shape={report.shape}
           loading={loadingSeries}
+          markAt={hoveredEntry?.at ?? null}
         />
       </div>
     </div>
@@ -474,12 +481,22 @@
               {/each}
             </tr>
           </thead>
-          <tbody>
+          <!--
+            Pointing at a row marks it on the graph. Leaving the table clears
+            it rather than every row clearing on its own way out: moving from
+            one row to the next would otherwise blink the line off and on.
+          -->
+          <tbody onmouseleave={() => (hoveredEntry = null)}>
             {#each entries as entry (entry.id)}
               <tr
                 class:selected={String(entry.id) === selectedId}
                 tabindex="0"
                 onclick={() => setQuery({ entry: String(entry.id) })}
+                onmouseenter={() => (hoveredEntry = entry)}
+                onfocus={() => (hoveredEntry = entry)}
+                onblur={() => {
+                  if (hoveredEntry?.id === entry.id) hoveredEntry = null;
+                }}
                 onkeydown={(event) => {
                   if (event.key === "Enter") setQuery({ entry: String(entry.id) });
                 }}

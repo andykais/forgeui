@@ -1183,6 +1183,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   filtered by, so the thing a filter narrows is always visible in the rows.
   **Clicking a row opens a right-hand sidebar with the raw entry** — the
   verbatim `data_json` of §7.1 — and Esc closes it.
+- **Pointing at a row marks it on the graph.** A dashed line, with a head at
+  the top, drops where that entry falls in the timeline — a row is a value
+  and a clock time, and *where in the run of them it sits* is the one
+  question the table cannot answer. It lands on the centre of the column
+  that entry belongs to, so it points at the mark rather than a fraction of
+  a pixel beside it, and it is told apart from the pointer's own crosshair
+  (thin, solid, dimmer) by being dashed. Focusing a row with the keyboard
+  draws it too. An entry older than the drawn span — the graph is capped at
+  the newest points, the table is not — draws no line rather than one pinned
+  to the edge, which would say it is there when it is not.
 - **Two columns name something with a page of its own, and link to it.** An
   `output_size` row is the file the generation wrote — its filename, not the
   id it is filed under — and opens that output in the gallery; a `model_size`

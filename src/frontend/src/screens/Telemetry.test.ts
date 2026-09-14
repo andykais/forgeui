@@ -1,21 +1,28 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { render } from "@testing-library/svelte";
-import type { ModelEntry, TelemetryEntry, TelemetryReport } from "../types.ts";
+import { fireEvent, render } from "@testing-library/svelte";
+import type {
+  ModelEntry,
+  TelemetryEntry,
+  TelemetryLine,
+  TelemetryReport,
+} from "../types.ts";
 
 /**
- * The telemetry table's two columns that name something with a page of its
- * own (§11.2): an output row is its filename, linked to itself in the
- * gallery, and a model row is linked to the model's page.
+ * The telemetry table (§11.2): the two columns that name something with a
+ * page of its own — an output row is its filename, linked to itself in the
+ * gallery, and a model row is linked to the model's page — and the line the
+ * graph draws where the row under the pointer falls in its span.
  */
 
 let reports: TelemetryReport[] = [];
 let entries: TelemetryEntry[] = [];
+let series: TelemetryLine[] = [];
 
 vi.mock("../api.ts", () => ({
   api: {
     telemetryReports: () => Promise.resolve({ reports, bytes: 1024 }),
     telemetrySeries: () =>
-      Promise.resolve({ series: [], truncated: false, total: entries.length }),
+      Promise.resolve({ series, truncated: false, total: entries.length }),
     telemetryEntries: () => Promise.resolve({ entries, cursor: null }),
   },
 }));
@@ -79,6 +86,7 @@ describe("the telemetry table", () => {
     library.length = 0;
     reports = [];
     entries = [];
+    series = [];
     history.replaceState(null, "", "/telemetry");
   });
 
@@ -162,5 +170,68 @@ describe("the telemetry table", () => {
     expect(document.querySelector("tbody td")?.textContent?.trim()).toBe(
       "Film grain 35mm",
     );
+  });
+});
+
+/** The graph marks the row the pointer is on (§11.2). */
+describe("pointing at a row", () => {
+  const WHEN = [1_789_000_000_000, 1_789_000_060_000, 1_789_000_120_000];
+
+  beforeEach(() => {
+    reports = [
+      report({
+        shape: "events",
+        columns: [
+          { key: "at", label: "When", kind: "time" },
+          { key: "value", label: "Size", kind: "value" },
+        ],
+      }),
+    ];
+    // Newest first in the table, oldest first in the series: the two halves
+    // come from different routes and are ordered as each is read.
+    entries = WHEN.map((at, index) => entry({ id: index + 1, at })).reverse();
+    series = [
+      { key: null, points: WHEN.map((at, index) => ({ id: index + 1, at, value: 10 })) },
+    ];
+  });
+
+  function markX(): number | null {
+    const line = document.querySelector("svg line.mark");
+    return line === null ? null : Number(line.getAttribute("x1"));
+  }
+
+  test("the graph draws a line where that entry falls, and clears it after", async () => {
+    await mount();
+    expect(markX()).toBeNull();
+
+    const rows = [...document.querySelectorAll("tbody tr")];
+    await fireEvent.mouseEnter(rows[0]!);
+    const newest = markX();
+    expect(newest).not.toBeNull();
+
+    await fireEvent.mouseEnter(rows[2]!);
+    const oldest = markX();
+    expect(oldest).not.toBeNull();
+    // The table reads newest first, so the last row sits to the left of the
+    // first one — the line follows the time, not the row's position.
+    expect(oldest!).toBeLessThan(newest!);
+
+    await fireEvent.mouseLeave(document.querySelector("tbody")!);
+    expect(markX()).toBeNull();
+  });
+
+  test("a row from before the drawn span is not pinned to the edge", async () => {
+    // The series is capped at the newest points; the table pages past them.
+    // A line at the edge would say an entry is there when it is not.
+    entries = [entry({ id: 9, at: WHEN[0]! - 3_600_000 }), ...entries];
+    await mount();
+    await fireEvent.mouseEnter(document.querySelectorAll("tbody tr")[0]!);
+    expect(markX()).toBeNull();
+  });
+
+  test("the keyboard gets the same line", async () => {
+    await mount();
+    await fireEvent.focus(document.querySelectorAll("tbody tr")[1]!);
+    expect(markX()).not.toBeNull();
   });
 });
