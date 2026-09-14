@@ -595,7 +595,9 @@ The five reports, and what makes an entry:
   it at instead of at zero.
 
 The table underneath is the entries either way: one row each, because *which*
-request, output or model is exactly what a table is for.
+request, output or model is exactly what a table is for — and for the two
+reports whose rows are a thing this app can show, the row is a link to it
+(§11.2).
 
 **A report may draw more than one line.** `memory` records VRAM and RAM at the
 same instant, as two entries that share a timestamp and differ in `series`.
@@ -879,14 +881,15 @@ with an `image` param.
   kind; the client picks the target, `POST /api/inputs` adopts the output,
   and the panel is filled. No upscale-specific route.
 - **The size follows the picture.** A workflow that has both an `image` and a
-  `size` sets the size from what was just attached: the picture's ratio
-  always, and its own pixels too while it is anywhere near this workflow's
-  resolution — within twice its area, snapped to the grid. Past that the
-  ratio is kept and the area comes down to the workflow's own, which is what
-  the ratio presets already do. It is announced in a toast either way, and
-  the size row still overrules it: this saves you saying the same thing
-  twice, it does not take the say away. A workflow with no `size` — every
-  upscale, which states a `scale` — is untouched.
+  `size` sets the size from what was just attached: the picture's own shape
+  and its own pixels, snapped to the model's grid because that is the only
+  size it can actually make, and clamped to a stated min/max. Nothing else —
+  not the workflow's own resolution, however far past it the picture is. An
+  upscaled frame handed in on purpose is the whole point of handing it in,
+  and bringing it down would be overruling a decision already made. It is
+  announced in a toast, and the size row still overrules it: this saves you
+  saying the same thing twice, it does not take the say away. A workflow with
+  no `size` — every upscale, which states a `scale` — is untouched.
 - **An `image` param takes a picture four ways**: the file picker, a drop, a
   paste, and a result dragged straight out of the grid. Pasting claims the
   zone the pointer is **over** as well as the one with focus — focus alone
@@ -979,7 +982,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   named — the same LoRA is never shown twice. Each model is resolved by its
   filename, which is what a graph binds and what a sidecar records; a role
   cannot identify one, because a job with three LoRAs has three rows under
-  the one `lora` role. Prompt and seed are
+  the one `lora` role. **An image param is shown as the picture**, at its own
+  shape and no taller than a row can afford: the value is a 64-character
+  content hash (§9), which is true and no use to anybody reading it — the
+  question an image param raises is *which* image. The name stays on the
+  link's title, and the picture links to the file itself. Prompt and seed are
   `user-select: all`, so one click takes the whole value.
 - **A LoRA row offers itself to the panel.** Each LoRA in the params carries
   a `+` that adds it to the workflow open in Generate **at the strength this
@@ -1176,6 +1183,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   filtered by, so the thing a filter narrows is always visible in the rows.
   **Clicking a row opens a right-hand sidebar with the raw entry** — the
   verbatim `data_json` of §7.1 — and Esc closes it.
+- **Two columns name something with a page of its own, and link to it.** An
+  `output_size` row is the file the generation wrote — its filename, not the
+  id it is filed under — and opens that output in the gallery; a `model_size`
+  row opens the model's own page. The column declares what it holds
+  (`kind: "output"`, `kind: "model"`) and the screen draws the link. A model
+  whose file has since gone has no page, so that row stays plain text: the
+  report is a record of what the folders held, and a link that lands nowhere
+  is worse than none. Clicking anywhere else in the row still opens the raw
+  entry.
 - Reports that have filters carry them as chips above the graph
   (`api_requests`: method, url, status, min duration; `output_size`: family;
   `model_size`: model class, family). `memory` and `telemetry_size` have

@@ -233,20 +233,17 @@ describe("the size follows the attached image", () => {
   beforeEach(() => load(params));
 
   test("a portrait picture gives a portrait size", () => {
-    expect(panel.sizeFromImage(720, 1280)).toEqual({ size: [720, 1280], exact: true });
+    expect(panel.sizeFromImage(720, 1280)).toEqual([720, 1280]);
     expect(panel.values.size).toEqual([720, 1280]);
   });
 
-  test("a picture far bigger than the workflow keeps its shape, not its pixels", () => {
-    const set = panel.sizeFromImage(4032, 3024)!;
-    expect(set.exact).toBe(false);
-    const [width, height] = set.size;
-    expect(width * height).toBeLessThanOrEqual(1280 * 720 * 1.05);
-    expect(width / height).toBeCloseTo(4 / 3, 1);
+  test("an upscaled frame is taken at its own size, not brought down", () => {
+    expect(panel.sizeFromImage(2720, 1536)).toEqual([2720, 1536]);
+    expect(panel.values.size).toEqual([2720, 1536]);
   });
 
   test("attaching the same shape twice changes nothing and says so", () => {
-    expect(panel.sizeFromImage(1280, 720)).toEqual({ size: [1280, 720], exact: true });
+    expect(panel.sizeFromImage(1280, 720)).toEqual([1280, 720]);
     // Already there: nothing to announce the second time round.
     expect(panel.sizeFromImage(1280, 720)).toBeNull();
   });

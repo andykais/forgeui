@@ -81,7 +81,7 @@ function lora(name: string, hash: string): ModelEntry {
 const A = "a".repeat(64);
 const B = "b".repeat(64);
 
-function output(): OutputDetail {
+function output(extra: Record<string, unknown> = {}): OutputDetail {
   const sidecar = {
     app_version: "0.1.0",
     job_id: "01J",
@@ -100,6 +100,7 @@ function output(): OutputDetail {
         { name: "glow.safetensors", strength_model: 1, strength_clip: 1 },
         { name: "grain.safetensors", strength_model: 0.5, strength_clip: 0.5 },
       ],
+      ...extra,
     },
     models: [
       { role: "lora", name: "glow.safetensors", hash: null },
@@ -140,9 +141,9 @@ function output(): OutputDetail {
   };
 }
 
-function mount() {
+function mount(extra: Record<string, unknown> = {}) {
   return render(MetadataSidebar, {
-    output: output(),
+    output: output(extra),
     onedit: vi.fn(),
     onrerun: vi.fn(),
     ondelete: vi.fn(),
@@ -247,6 +248,29 @@ describe("the metadata sidebar", () => {
     stub.loraParam = null;
     mount();
     expect(screen.queryByLabelText(/^Add /)).toBeNull();
+  });
+
+  test("an image param is shown as the picture, not as its hash", () => {
+    // The value is a 64-character content hash. True, and no use to anybody
+    // reading it: the question an image param raises is "which image".
+    const image = `${"c".repeat(64)}.png`;
+    mount({ image });
+    const row = [...document.querySelectorAll(".field")].find(
+      (field) => field.querySelector(".key")?.textContent?.trim() === "image",
+    );
+    expect(row?.textContent).not.toContain(image);
+    expect(row?.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/media/inputs/cc/${image}`,
+    );
+  });
+
+  test("a param that only looks like a filename is left as text", () => {
+    mount({ model: "krea2_turbo_fp8_scaled.safetensors" });
+    const row = [...document.querySelectorAll(".field")].find(
+      (field) => field.querySelector(".key")?.textContent?.trim() === "model",
+    );
+    expect(row?.querySelector("img")).toBeNull();
+    expect(row?.textContent).toContain("krea2_turbo_fp8_scaled.safetensors");
   });
 
   test("says nothing when no workflow is open at all", () => {

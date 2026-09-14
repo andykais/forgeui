@@ -27,3 +27,21 @@ export function isVideoUrl(url: string | null | undefined): boolean {
 export function posterFrame(url: string): string {
   return url.includes("#") ? url : `${url}#t=0.1`;
 }
+
+/**
+ * A value that is a file in the content-addressed input store (§9), and the
+ * URL it is served from.
+ *
+ * An `image` param holds `<sha256>.<ext>` and nothing else does, so the shape
+ * of the value is enough to recognise one — the same test the server applies
+ * when it decides what to upload (`jobs/pipeline.ts`). That matters where the
+ * manifest is not to hand: the metadata sidebar has an output's params but
+ * not the types behind them, and a 64-character hash is no use to anybody as
+ * a line of text.
+ */
+const INPUT_FILENAME = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/;
+
+export function inputMediaUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !INPUT_FILENAME.test(value)) return null;
+  return `/api/media/inputs/${value.slice(0, 2)}/${value}`;
+}

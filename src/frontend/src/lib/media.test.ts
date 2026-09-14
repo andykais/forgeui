@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isVideoUrl, posterFrame } from "./media.ts";
+import { inputMediaUrl, isVideoUrl, posterFrame } from "./media.ts";
 
 describe("isVideoUrl", () => {
   it("knows the video containers the app writes", () => {
@@ -36,5 +36,24 @@ describe("posterFrame", () => {
 
   it("leaves a url that already carries a fragment alone", () => {
     expect(posterFrame("/api/media/a.mp4#t=2")).toBe("/api/media/a.mp4#t=2");
+  });
+});
+
+describe("inputMediaUrl", () => {
+  const sha = "a".repeat(64);
+
+  it("recognises a file in the input store and points at it", () => {
+    expect(inputMediaUrl(`${sha}.png`)).toBe(`/api/media/inputs/aa/${sha}.png`);
+    expect(inputMediaUrl(`${sha}.jpeg`)).toBe(`/api/media/inputs/aa/${sha}.jpeg`);
+  });
+
+  it("leaves every other param value alone", () => {
+    // A prompt, a model filename, a number: none of these are pictures.
+    expect(inputMediaUrl("a paper crane on a window sill")).toBeNull();
+    expect(inputMediaUrl("krea2_turbo_fp8_scaled.safetensors")).toBeNull();
+    expect(inputMediaUrl(`${sha}.safetensors`)).toBeNull();
+    expect(inputMediaUrl("abc.png")).toBeNull();
+    expect(inputMediaUrl(42)).toBeNull();
+    expect(inputMediaUrl(null)).toBeNull();
   });
 });

@@ -273,6 +273,17 @@ class AppState {
     return this.allModels.find((model) => model.name === name) ?? null;
   }
 
+  /**
+   * The model a recorded path refers to — telemetry files a model by its
+   * path under the models folder, which is the one thing about a model that
+   * does not change while it sits there. A path with nothing behind it is a
+   * model that has since gone, and there is no page to send anyone to.
+   */
+  modelByPath(path: string | null | undefined): ModelEntry | null {
+    if (!path) return null;
+    return this.allModels.find((model) => model.path === path) ?? null;
+  }
+
   /** A model's display name, wherever one is named (§8.1). */
   modelName(hash: string | null | undefined): string {
     const model = this.model(hash);

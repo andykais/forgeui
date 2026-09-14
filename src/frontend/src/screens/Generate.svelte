@@ -401,13 +401,7 @@
           // you meant; saying so out loud is how you know it happened, and
           // the size row is still there to overrule it.
           const set = panel.sizeFromImage(media.width, media.height);
-          if (!set) return;
-          const [width, height] = set.size;
-          toasts.message(
-            set.exact
-              ? `Size set to ${width} × ${height} to match the image`
-              : `Size set to ${width} × ${height} — the image's shape at this workflow's resolution`,
-          );
+          if (set) toasts.message(`Size set to ${set[0]} × ${set[1]} to match the image`);
         }}
       />
     {:else if panel.loading}

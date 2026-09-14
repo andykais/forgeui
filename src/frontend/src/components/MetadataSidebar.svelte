@@ -9,6 +9,7 @@
   import { api } from "../api.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
+  import { inputMediaUrl } from "../lib/media.ts";
   import Popover from "./Popover.svelte";
   import MediaThumb from "./MediaThumb.svelte";
 
@@ -410,6 +411,24 @@
             </div>
           {:else if typeof value === "string" && hashOfName.has(value)}
             <div class="mono">{@render modelLink(linkTo(value))}</div>
+          {:else if inputMediaUrl(value)}
+            {@const url = inputMediaUrl(value)!}
+            <!--
+              What was fed in, as a picture. The value itself is a 64-character
+              content hash — true, and no use to anybody reading it: the
+              question an image param raises is "which image", and only the
+              image answers that. The name is on the link's title for the
+              times the file itself is what is wanted.
+            -->
+            <a
+              class="input"
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              title={String(value)}
+            >
+              <img src={url} alt={`the ${key} this was made from`} />
+            </a>
           {:else}
             <div class="mono value" class:selectable={selectable(key)}>
               {render(value)}
@@ -643,6 +662,26 @@
 
   .value {
     white-space: pre-wrap;
+  }
+
+  /*
+   * As wide as the sidebar allows and no taller than a param row can afford,
+   * but at its own shape within that: the picture sizes the box rather than
+   * the box cropping or boxing in the picture, so a square input does not
+   * sit in a wide plate of empty ground.
+   */
+  .input {
+    display: block;
+    margin-top: 2px;
+  }
+
+  .input img {
+    display: block;
+    max-width: 100%;
+    max-height: 200px;
+    width: auto;
+    height: auto;
+    border-radius: var(--radius-control);
   }
 
   /* One click takes the whole value, which is the point of showing it. */

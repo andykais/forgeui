@@ -357,7 +357,11 @@ export type TelemetryUnit = "ms" | "bytes";
 export interface TelemetryColumn {
   key: string;
   label: string;
-  kind: "time" | "value" | "text" | "number";
+  /**
+   * `output` and `model` are cells that name something with a page of its
+   * own, which the screen draws as a link to it (§11.2).
+   */
+  kind: "time" | "value" | "text" | "number" | "output" | "model";
 }
 
 export interface TelemetryFilterOption {

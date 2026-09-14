@@ -3,7 +3,7 @@ import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
 import { applicableParams } from "../lib/applies.ts";
-import { type ImageSize, sizeForImage } from "../lib/size.ts";
+import { sizeForImage } from "../lib/size.ts";
 
 /**
  * The Generate param panel (§11.2, §11.3). Selecting a workflow fills the
@@ -279,16 +279,14 @@ class PanelState {
    * upscale states a `scale` instead and is left alone. Returns the size it
    * set, so a caller can say so.
    */
-  sizeFromImage(width: number, height: number): ImageSize | null {
+  sizeFromImage(width: number, height: number): [number, number] | null {
     const param = this.sizeParam;
     if (!param) return null;
     const next = sizeForImage(param, width, height);
     if (!next) return null;
     const current = this.values[param.key] as [number, number] | undefined;
-    if (current && current[0] === next.size[0] && current[1] === next.size[1]) {
-      return null;
-    }
-    this.set(param.key, next.size);
+    if (current && current[0] === next[0] && current[1] === next[1]) return null;
+    this.set(param.key, next);
     return next;
   }
 
