@@ -11,8 +11,10 @@ import {
   listOutputs,
   type ListOutputsOptions,
   modelHashesForOutput,
+  outputChildIds,
   type OutputFilters,
   outputModelsFor,
+  outputParentIds,
   type OutputRow,
   outputsDeletedBefore,
   refreshModelUsage,
@@ -61,6 +63,26 @@ export interface OutputDetail extends OutputView {
   /** §12: the detail route carries the sidecar contents. */
   sidecar: Sidecar | null;
   sidecar_error: string | null;
+}
+
+/**
+ * One output in another's provenance chain (§11.2). A node whose row is gone
+ * carries `deleted: true` and nothing else worth showing: it is the "?"
+ * marker, not a link — the chain still has to say that something was there.
+ */
+export interface LineageNode {
+  id: string;
+  family: string | null;
+  kind: string | null;
+  media_url: string | null;
+  created_at: number | null;
+  deleted: boolean;
+}
+
+/** Parents above, children below (§11.2). */
+export interface Lineage {
+  parents: LineageNode[];
+  children: LineageNode[];
 }
 
 export function mediaUrl(path: string): string {
@@ -146,6 +168,45 @@ export class OutputStore {
       sidecarError = cause instanceof Error ? cause.message : String(cause);
     }
     return { ...view!, sidecar, sidecar_error: sidecarError };
+  }
+
+  /**
+   * The provenance chain either side of one output (§10, §11.2): what it was
+   * made from, and what has been made from it. One hop each way — a chain is
+   * walked by opening a node, which asks this again from there.
+   */
+  lineage(id: string): Lineage {
+    this.require(id);
+    return {
+      parents: outputParentIds(this.#db, id).map((parent) =>
+        this.#node(parent)
+      ),
+      children: outputChildIds(this.#db, id).map((child) => this.#node(child)),
+    };
+  }
+
+  #node(id: string): LineageNode {
+    const row = getOutput(this.#db, id);
+    // Deleted or swept: the id is all that is left, and it is enough to say
+    // that this output came from something (§11.2).
+    if (!row || row.deleted_at !== null) {
+      return {
+        id,
+        family: null,
+        kind: null,
+        media_url: null,
+        created_at: row?.created_at ?? null,
+        deleted: true,
+      };
+    }
+    return {
+      id: row.id,
+      family: row.family,
+      kind: row.kind,
+      media_url: mediaUrl(row.path),
+      created_at: row.created_at,
+      deleted: false,
+    };
   }
 
   /**

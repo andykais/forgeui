@@ -48,7 +48,14 @@ export interface ColumnDef {
   /** `at`, `value`, `label`, or a dimension. */
   key: "at" | "value" | "label" | Dimension;
   label: string;
-  kind: "time" | "value" | "text" | "number";
+  /**
+   * How the cell reads. `output` and `model` say the cell names something
+   * this app has a page for, which is what lets the screen draw it as a link
+   * to that page rather than as the id or the name it was recorded under
+   * (§11.2) — the column declares what it holds, and the screen decides how
+   * to show it.
+   */
+  kind: "time" | "value" | "text" | "number" | "output" | "model";
 }
 
 /** One line of a report that draws more than one (§11.2). */
@@ -135,7 +142,7 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
       WHEN,
       { key: "value", label: "Size", kind: "value" },
       { key: "family", label: "Family", kind: "text" },
-      { key: "label", label: "Output", kind: "text" },
+      { key: "label", label: "Output", kind: "output" },
     ],
     filters: [
       { key: "family", label: "Family", kind: "enum", column: "family" },
@@ -155,7 +162,7 @@ export const TELEMETRY_REPORTS: readonly ReportDef[] = [
       { key: "change", label: "Change", kind: "text" },
       { key: "model_class", label: "Type", kind: "text" },
       { key: "family", label: "Family", kind: "text" },
-      { key: "label", label: "Model", kind: "text" },
+      { key: "label", label: "Model", kind: "model" },
     ],
     filters: [
       {

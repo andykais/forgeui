@@ -252,6 +252,20 @@ never runs. Both sources are validated against the graph at load, and `input`
 must already be fed by a link: an input holding a literal means the manifest
 has drifted from its graph, and saying so on load beats a surprise at submit.
 
+**A `model`, `text_encoder` or `vae` param may bind a list**, for the graph
+that opens one file in more than one loader:
+
+```json
+"bind": ["6.ckpt_name", "1.ckpt_name", "10.ckpt_name"]
+```
+
+LTX-2.3 is the case: its diffusion model, its audio VAE and its AV
+text-encoder pairing all come out of the same checkpoint, and a pick that
+moved only the first would assemble the run out of two different models. One
+picker, every input it fills — rather than three pickers nobody can be
+expected to keep in step. Every target is checked against the graph at load,
+as a single binding is.
+
 ### 4.5 Workflow versions
 Only the **latest** version of each workflow is exposed in the UI. There is no
 version table. Each workflow's content hash (`sha256(api.json + manifest.json)`)
@@ -278,15 +292,16 @@ Initial set:
 |---|---|---|---|
 | `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
-| `ltx` | ltx | video | prompt, seed, size, frames, fps; loras |
+| `ltx2-i2v` | ltx-2 | video | the official Comfy-Org LTX-2.3 image-to-video template, flattened out of its subgraph: image (required), prompt, negative, size, duration (seconds — the graph makes `duration * fps + 1` frames), fps, seed, loras, enhance; the models, the distilled LoRA and its strength, the latent upscaler, the sampler and the refine sigmas advanced. Two sampling passes either side of a spatial latent upsample, with an audio latent carried alongside, so it writes a video with sound. `model` binds three loaders at once (§4.4) |
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
 | `<id>-upscale` | as its sibling | image | one per image family: `krea2-upscale`, `sd15-upscale`, `illustrious-upscale`, `anima-upscale`, `z-image-upscale`, `flux-klein-upscale`. `category: upscale`; image (required), creativity (0.2), scale (2), prompt, seed, loras; the upscale-model path and the sampling overrides advanced (§10) |
 
-Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL, LTX Video,
-Anima, Flux Klein, Z-Image Turbo, Stable Diffusion 1.5. This list is final for
+Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
+LTX-2.3 Image to Video, Anima, Flux Klein, Z-Image Turbo,
+Stable Diffusion 1.5. This list is final for
 v1 and must match the Workflows screen and the use-in-workflow popover in the
 mocks.
 
@@ -580,7 +595,9 @@ The five reports, and what makes an entry:
   it at instead of at zero.
 
 The table underneath is the entries either way: one row each, because *which*
-request, output or model is exactly what a table is for.
+request, output or model is exactly what a table is for — and for the two
+reports whose rows are a thing this app can show, the row is a link to it
+(§11.2).
 
 **A report may draw more than one line.** `memory` records VRAM and RAM at the
 same instant, as two entries that share a timestamp and differ in `series`.
@@ -804,7 +821,7 @@ with an `image` param.
   one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein. The
   `krea2-img2img` workflow that used to stand for this whole idea is gone —
   it was the old Flux.1 graph under a Krea name, it had never been run, and
-  an upscale workflow does the job it was there to demonstrate. LTX has none:
+  an upscale workflow does the job it was there to demonstrate. LTX-2.3 has none:
   it writes a video, and none of these graphs upscale one.
   Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
@@ -816,7 +833,7 @@ with an `image` param.
   matches, a popover when several do, hidden when none; **image outputs
   only** — never shown on videos, because none of these graphs upscale one).
   Every image family has one, so the action is never dark on an output the
-  app made itself; LTX has none, which is what the video rule is for.
+  app made itself; LTX-2.3 has none, which is what the video rule is for.
 
   It was going to be the `img2img` workflow with `denoise` and `size` preset
   on the way in. Making it **its own workflow** instead is what lets it be
@@ -863,6 +880,25 @@ with an `image` param.
   `category` and `family`, `GET /api/outputs/:id` the output's family and
   kind; the client picks the target, `POST /api/inputs` adopts the output,
   and the panel is filled. No upscale-specific route.
+- **The size follows the picture.** A workflow that has both an `image` and a
+  `size` sets the size from what was just attached: the picture's own shape
+  and its own pixels, snapped to the model's grid because that is the only
+  size it can actually make, and clamped to a stated min/max. Nothing else —
+  not the workflow's own resolution, however far past it the picture is. An
+  upscaled frame handed in on purpose is the whole point of handing it in,
+  and bringing it down would be overruling a decision already made. It is
+  announced in a toast, and the size row still overrules it: this saves you
+  saying the same thing twice, it does not take the say away. A workflow with
+  no `size` — every upscale, which states a `scale` — is untouched.
+- **An `image` param takes a picture four ways**: the file picker, a drop, a
+  paste, and a result dragged straight out of the grid. Pasting claims the
+  zone the pointer is **over** as well as the one with focus — focus alone
+  meant clicking (which opens the file dialog) and pressing Escape to get
+  back out of it, for something the pointer was already resting on. Anything
+  being typed into wins outright, so a screenshot pasted into the prompt box
+  is a prompt. A dragged tile carries its **output id**, not its bytes: the
+  drop adopts the file the app already wrote rather than uploading a copy of
+  it back to itself (§9).
 - The `mask` widget is a simple brush/erase canvas over the bound image,
   producing a PNG that goes through §9.
 - Provenance chain via `derived_from_output` gives a "lineage" view.
@@ -911,7 +947,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   "this session's jobs," with in-progress cards showing percent/ETA/current
   node and streaming previews (ComfyUI binary preview frames). Failed cards
   keep their slot with the error inline plus Retry / Edit in Generate / Copy
-  error.
+  error. **A session is one run of the app**: `GET /api/system/status`
+  carries `started_at`, and the header reads `N jobs · since 14:32` so the
+  boundary is visible rather than guessed at. A browser reload is the same
+  session and a restart is a new one — it used to mean "the last forty jobs
+  in the database", which left the previous run's pictures on screen under a
+  heading that said they were new. Everything ever made is on Gallery, which
+  is where the empty state points. The filmstrip under an open result shows
+  **every job still in flight**, the running one and the queue behind it, not
+  the running one alone. Queue positions count from the job that runs next:
+  ComfyUI runs oldest-first while every list in the UI reads newest-first.
 - The viewer's actions are **Reuse parameters**, **Generate again**, **Save
   as sample** and Delete. Reuse parameters fills the panel and leaves the
   view alone — it used to drop back to the grid, taking away the thing you
@@ -937,7 +982,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   named — the same LoRA is never shown twice. Each model is resolved by its
   filename, which is what a graph binds and what a sidecar records; a role
   cannot identify one, because a job with three LoRAs has three rows under
-  the one `lora` role. Prompt and seed are
+  the one `lora` role. **An image param is shown as the picture**, at its own
+  shape and no taller than a row can afford: the value is a 64-character
+  content hash (§9), which is true and no use to anybody reading it — the
+  question an image param raises is *which* image. The name stays on the
+  link's title, and the picture links to the file itself. Prompt and seed are
   `user-select: all`, so one click takes the whole value.
 - **A LoRA row offers itself to the panel.** Each LoRA in the params carries
   a `+` that adds it to the workflow open in Generate **at the strength this
@@ -984,7 +1033,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   media centre with Fit / 1:1 and a size+zoom chip (video: transport bar),
   metadata sidebar right, filmstrip bottom that walks the same filtered set.
   Sidebar and filmstrip are collapsible, state persisted per screen; this is
-  the one viewer component, shared with Generate's focused view.
+  the one viewer component, shared with Generate's focused view. Esc returns
+  the grid **to the offset it was left at**, not to the top; when the viewer
+  was walked somewhere else first (← / → or a lineage node), the grid lands on
+  that output instead. `?output=` is a real link: an output the current
+  filters never loaded is fetched on its own rather than closing the viewer.
   Sidebar order: actions, then created (absolute + relative), duration,
   params, FILES, inputs, lineage. Checkpoint and LoRA rows are links to their
   model pages; shift-click filters the grid to them.
@@ -993,7 +1046,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   put), **Use image in workflow** / **Use video in workflow**, **Upscale
   image**, **Promote to sample**, **Delete**. No favorites in v1.
 - **Delete** has no confirmation: the item disappears and an undo toast
-  (~8s) restores it. The row is soft-deleted (`deleted_at`) at once; the
+  (~8s) restores it. Deleting from inside the viewer **steps to the next
+  oldest** rather than dropping back to the grid — working through a batch
+  means deleting the ones that did not come off, and losing the view each
+  time makes the next delete a click and a scroll. It falls back to the newer
+  one when the oldest goes, and only the last one left closes the viewer. The row is soft-deleted (`deleted_at`) at once; the
   media and sidecar are removed from disk only after the undo window
   closes. A deleted output that is the parent of others appears in their
   LINEAGE as an orphan marker ("?"), not a link; bytes hard-linked into
@@ -1001,6 +1058,20 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - **LINEAGE** is read-only metadata: parents above, children below, each
   node showing the id suffix and the family from that output's sidecar,
   "this" marking the current one. Clicking a node opens it.
+- **A thumbnail is drawn by what the file is.** Every small picture of an
+  output — a workflow's last run, a model's tile, a lineage node, a sample —
+  goes through one component that picks `<video>` or `<img>`, from the `kind`
+  where the caller has it and the extension where all it has is a URL. An
+  `<img>` pointed at an mp4 draws the browser's broken-image outline, which
+  is what every video workflow used to show. A video thumbnail is muted and
+  seeks a fraction of a second in, because `preload="metadata"` alone leaves
+  a black plate with no frame decoded. **A video output can be a model's
+  thumbnail**: the query behind it excluded them, so a model that only makes
+  videos had an empty plate for ever.
+- **A video plays when it is opened**, and only one element plays at a time:
+  the page's video and the fullscreen one both exist while fullscreen is up,
+  so without pausing the one underneath a clip with sound played its audio
+  twice, a frame apart. The position is handed across in both directions.
 - **Identifiers**: an output's id is `<ulid>-<n>` and there is no
   secondary human id. Tiles, badges and lineage nodes show the last 5
   characters of the ULID plus index (`…ZM4T-0`); the viewer header shows
@@ -1112,6 +1183,25 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   filtered by, so the thing a filter narrows is always visible in the rows.
   **Clicking a row opens a right-hand sidebar with the raw entry** — the
   verbatim `data_json` of §7.1 — and Esc closes it.
+- **Pointing at a row marks it on the graph.** A dashed line, with a head at
+  the top, drops where that entry falls in the timeline — a row is a value
+  and a clock time, and *where in the run of them it sits* is the one
+  question the table cannot answer. It lands on the centre of the column
+  that entry belongs to, so it points at the mark rather than a fraction of
+  a pixel beside it, and it is told apart from the pointer's own crosshair
+  (thin, solid, dimmer) by being dashed. Focusing a row with the keyboard
+  draws it too. An entry older than the drawn span — the graph is capped at
+  the newest points, the table is not — draws no line rather than one pinned
+  to the edge, which would say it is there when it is not.
+- **Two columns name something with a page of its own, and link to it.** An
+  `output_size` row is the file the generation wrote — its filename, not the
+  id it is filed under — and opens that output in the gallery; a `model_size`
+  row opens the model's own page. The column declares what it holds
+  (`kind: "output"`, `kind: "model"`) and the screen draws the link. A model
+  whose file has since gone has no page, so that row stays plain text: the
+  report is a record of what the folders held, and a link that lands nowhere
+  is worse than none. Clicking anywhere else in the row still opens the raw
+  entry.
 - Reports that have filters carry them as chips above the graph
   (`api_requests`: method, url, status, min duration; `output_size`: family;
   `model_size`: model class, family). `memory` and `telemetry_size` have
@@ -1333,8 +1423,9 @@ GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q&tags&hidden  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at
+GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at, added_at
                                         tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
+                                        sort: added (newest first, default) | oldest | name; added_at is the file's creation time, else its mtime
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
@@ -1345,6 +1436,7 @@ DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}
 GET  /api/system/status                 comfy state (starting|running|disconnected|failed), pid, uptime, VRAM free (ComfyUI /system_stats)
+                                        plus started_at: when this run of the app began, which is where Generate's session starts (§11.2)
 POST /api/system/comfy/restart          managed mode only
 GET  /api/system/comfy/log              tail of the child process log
 GET  /api/system/storage                counts + bytes for outputs, inputs, samples, app.db, telemetry.db
@@ -1383,11 +1475,11 @@ Civitai fetch-info and URL import (raw only).
 
 Landed so far: the store and `POST /api/inputs`, the `image` param widget
 (picker, drop, paste), `krea2-upscale` and the Upscale action, `output_inputs`
-provenance. Still to come in this phase: `video` params, "Use image in
-workflow", the orphan sweep, the lineage view, and the rest of the list.
+provenance, and the lineage view. Still to come in this phase: `video` params,
+"Use image in workflow", the orphan sweep, and the rest of the list.
 
 **Phase 4 — editing**
-`mask` widget, inpaint/edit bundled workflows, lineage view.
+`mask` widget, inpaint/edit bundled workflows.
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,

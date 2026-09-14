@@ -133,9 +133,10 @@ podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
 `Stable-Diffusion`, `diffusion_models`, `unet`, `loras`, `vae`, `text_encoders`,
-`controlnet`, `upscale_models` — matching how the container's entrypoint wires
-up `--models-dir` (see `Containerfile`'s `CMD`). A folder you do not use can
-simply be absent; a missing folder scans as empty.
+`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings` — matching
+how the container's entrypoint wires up `--models-dir` (see `Containerfile`'s
+`CMD`). A folder you do not use can simply be absent; a missing folder scans as
+empty.
 
 Anything that can drive a generation is one _class_ to the app, so
 `checkpoints`, `diffusion_models` and `unet` are listed together in a workflow's

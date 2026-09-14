@@ -41,6 +41,7 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     class: "lora",
     size: 145_000_000,
     mtime: 1_780_000_000_000,
+    added_at: 1_780_000_000_000,
     notes: null,
     tags: ["film"],
     strength_min: -2,

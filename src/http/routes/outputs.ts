@@ -110,6 +110,11 @@ export function outputRoutes(ctx: AppContext): Route[] {
       handler: async (_req, { params }) => json(await store.detail(params.id!)),
     },
     {
+      method: "GET",
+      path: "/api/outputs/:id/lineage",
+      handler: (_req, { params }) => json(store.lineage(params.id!)),
+    },
+    {
       method: "DELETE",
       path: "/api/outputs/:id",
       handler: (_req, { params }) => json(store.softDelete(params.id!)),

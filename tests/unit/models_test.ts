@@ -276,6 +276,7 @@ Deno.test("the re-hash decision compares path, size and mtime", () => {
     kind: "checkpoints",
     size: 100,
     mtime: 42,
+    added_at: 42,
   };
   assert(unchanged(row, model));
   assert(!unchanged(row, { ...model, size: 101 }));

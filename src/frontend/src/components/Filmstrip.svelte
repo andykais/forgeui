@@ -3,18 +3,25 @@
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { Job, Output } from "../types.ts";
   import { app } from "../stores/app.svelte.ts";
+  import { queuePosition } from "../lib/queue.ts";
 
   /**
    * The filmstrip along the bottom of a viewer (§11.2): it walks the same
-   * ordered set the grid was showing, a running job keeps its progress
-   * treatment, and it collapses to a one-line count bar.
+   * ordered set the grid was showing, the jobs still in flight keep their
+   * progress treatment at the head of it, and it collapses to a one-line
+   * count bar.
    */
   interface Props {
     outputs: Output[];
     selectedId: string | null;
     collapsed: boolean;
-    /** Shown as a progress tile while it runs, as on Generate. */
-    runningJob?: Job | null;
+    /**
+     * What has not landed yet, newest first — the running job and the queue
+     * behind it, as the grid shows them. It used to be the running job
+     * alone, so queueing five more while the viewer was open looked like
+     * queueing nothing.
+     */
+    activeJobs?: Job[];
     oncollapse: (collapsed: boolean) => void;
     onselect: (output: Output) => void;
   }
@@ -23,10 +30,13 @@
     outputs,
     selectedId,
     collapsed,
-    runningJob = null,
+    activeJobs = [],
     oncollapse,
     onselect,
   }: Props = $props();
+
+  /** Position in the queue, which is what a queued tile has to say. */
+  const queued = $derived(activeJobs.filter((job) => job.status === "queued"));
 
   let strip = $state<HTMLDivElement | undefined>(undefined);
 
@@ -41,19 +51,31 @@
 {#if collapsed}
   <button class="count-bar" onclick={() => oncollapse(false)}>
     <ChevronUp size={13} />
-    <span class="mono">{outputs.length} results</span>
+    <span class="mono">
+      {outputs.length} results{activeJobs.length > 0
+        ? ` · ${activeJobs.length} in flight`
+        : ""}
+    </span>
   </button>
 {:else}
   <div class="filmstrip">
     <div class="strip scroll" bind:this={strip}>
-      {#if runningJob}
-        <div class="thumb running" title="running">
-          <span class="mono pct">{Math.round(runningJob.progress?.pct ?? 0)}%</span>
-          {#if app.previews[runningJob.id]}
-            <img src={app.previews[runningJob.id]} alt="streaming preview" />
-          {/if}
-        </div>
-      {/if}
+      {#each activeJobs as job (job.id)}
+        {#if job.status === "running"}
+          <div class="thumb running" title="running">
+            <span class="mono pct">{Math.round(job.progress?.pct ?? 0)}%</span>
+            {#if app.previews[job.id]}
+              <img src={app.previews[job.id]} alt="streaming preview" />
+            {/if}
+          </div>
+        {:else}
+          {@const position = queuePosition(queued, job.id)}
+          <div class="thumb queued" title={`queued · position ${position}`}>
+            <span class="mono label">queued</span>
+            <span class="mono position">{position}</span>
+          </div>
+        {/if}
+      {/each}
       {#each outputs as output (output.id)}
         <button
           class="thumb"
@@ -134,6 +156,28 @@
     justify-content: center;
     border: 1px dashed var(--running);
     cursor: default;
+  }
+
+  /* Dashed, like the queued card on the grid: nothing has been made yet. */
+  .thumb.queued {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: 1px dashed var(--line-2);
+    color: var(--text-4);
+    cursor: default;
+  }
+
+  .thumb.queued .label {
+    font-size: 10px;
+  }
+
+  .thumb.queued .position {
+    font-size: 13px;
+    color: var(--text-3);
   }
 
   .thumb img,

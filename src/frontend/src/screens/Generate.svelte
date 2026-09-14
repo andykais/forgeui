@@ -8,7 +8,9 @@
   import { panel } from "../stores/panel.svelte.ts";
   import { untrack } from "svelte";
   import { navigate, router, setQuery } from "../router.svelte.ts";
-  import { relativeTime } from "../lib/format.ts";
+  import { clockTime, relativeTime } from "../lib/format.ts";
+  import { afterRemoval } from "../lib/neighbour.ts";
+  import { queuePosition } from "../lib/queue.ts";
   import type { Output, TileSize } from "../types.ts";
   import ParamPanel from "../components/params/ParamPanel.svelte";
   import Popover from "../components/Popover.svelte";
@@ -16,6 +18,7 @@
   import JobCard from "../components/JobCard.svelte";
   import Viewer from "../components/Viewer.svelte";
   import MediaTable from "../components/MediaTable.svelte";
+  import MediaThumb from "../components/MediaThumb.svelte";
   import { toasts } from "../stores/toasts.svelte.ts";
 
   /**
@@ -35,9 +38,16 @@
   const selectedWorkflow = $derived(app.workflow(panel.workflowId));
   const tileSize = $derived(app.tileSize("generate"));
 
-  /** This session's jobs, newest first, with their outputs (§11.2). */
+  /**
+   * This session's jobs, newest first, with their outputs (§11.2).
+   *
+   * "This session" used to mean "the last forty jobs in the database", which
+   * is not a session at all: restarting the app left the same pictures on
+   * screen under a heading that said they were new. It is now the jobs this
+   * run of the app has queued, and the header says when that began.
+   */
   const sessionJobs = $derived(
-    app.jobs.filter(
+    app.sessionJobs.filter(
       (job) =>
         filter === "all" ||
         (filter === "active"
@@ -46,7 +56,7 @@
     ),
   );
   const sessionOutputs = $derived(
-    app.jobs
+    app.sessionJobs
       .flatMap((job) => app.jobOutputs(job))
       .sort((a, b) =>
         b.created_at === a.created_at
@@ -55,6 +65,8 @@
       ),
   );
   const queuedJobs = $derived(app.activeJobs.filter((job) => job.status === "queued"));
+  /** The running job and the queue behind it, as the filmstrip shows them. */
+  const activeJobs = $derived(app.activeJobs);
 
   const focused = $derived.by(() => {
     if (following) return sessionOutputs[0] ?? null;
@@ -120,6 +132,12 @@
     return app.outputs[outputId]?.media_url ?? null;
   }
 
+  /** The output says what it is, so a video workflow gets a video thumb. */
+  function kindFor(outputId: string | null): string | null {
+    if (!outputId) return null;
+    return app.outputs[outputId]?.kind ?? null;
+  }
+
   function open(output: Output) {
     selectedId = output.id;
     focusRequested = true;
@@ -158,11 +176,7 @@
   async function upscale(output: Output, workflowId: string) {
     const detail = await api.output(output.id);
     try {
-      await panel.upscale(
-        workflowId,
-        output,
-        detail.sidecar?.params ?? output.params,
-      );
+      await panel.upscale(workflowId, output, detail.sidecar?.params ?? output.params);
     } catch (cause) {
       toasts.message(
         `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
@@ -178,13 +192,43 @@
     selectedId = null;
   }
 
+  /**
+   * Delete and keep going. Working through a batch means deleting the ones
+   * that did not come off, and dropping back to the grid each time takes the
+   * run away: the viewer steps to the next one older instead, to the newer
+   * one when that was the oldest, and closes only when nothing is left
+   * (§11.2). Worked out before the row goes, because afterwards there is no
+   * position left to step from.
+   */
   async function remove(output: Output) {
+    const next = afterRemoval(sessionOutputs, output.id);
     const { undo_window_ms } = await api.deleteOutput(output.id);
-    if (selectedId === output.id) {
-      selectedId = null;
-      closeFocused();
+    if (selectedId === output.id || focused?.id === output.id) {
+      if (next) {
+        selectedId = next.id;
+        // The newest is gone, so what is newest now is what we stepped to.
+        following = false;
+      } else {
+        selectedId = null;
+        closeFocused();
+      }
     }
     toasts.undo(output, undo_window_ms);
+  }
+
+  /**
+   * A lineage node (§11.2). It is usually in this session — you upscale what
+   * you just made — so the viewer stays where it is; anything older lives in
+   * the gallery, which can show any output there is.
+   */
+  function openOutput(id: string) {
+    if (sessionOutputs.some((output) => output.id === id)) {
+      selectedId = id;
+      following = sessionOutputs[0]?.id === id;
+      focusRequested = true;
+      return;
+    }
+    navigate(`/gallery?output=${encodeURIComponent(id)}`);
   }
 
   /** §11.4: two behaviours only, and never while typing. */
@@ -287,7 +331,10 @@
       <button class="workflow-card" onclick={() => (pickerOpen = !pickerOpen)}>
         <span class="thumb">
           {#if thumbnailFor(selectedWorkflow?.last_output_id ?? null)}
-            <img src={thumbnailFor(selectedWorkflow?.last_output_id ?? null)} alt="" />
+            <MediaThumb
+              src={thumbnailFor(selectedWorkflow?.last_output_id ?? null)}
+              kind={kindFor(selectedWorkflow?.last_output_id ?? null)}
+            />
           {/if}
         </span>
         <span class="card-text">
@@ -314,7 +361,10 @@
             <button class="option" onclick={() => pick(workflow.id)}>
               <span class="option-thumb">
                 {#if thumbnailFor(workflow.last_output_id)}
-                  <img src={thumbnailFor(workflow.last_output_id)} alt="" />
+                  <MediaThumb
+                    src={thumbnailFor(workflow.last_output_id)}
+                    kind={kindFor(workflow.last_output_id)}
+                  />
                 {/if}
               </span>
               <span class="option-text">
@@ -346,6 +396,13 @@
         onseededit={(value) => panel.editSeed(value)}
         onseedroll={() => panel.rollSeed()}
         onseedlock={() => panel.toggleSeedLock()}
+        onimage={(media) => {
+          // Generating at the shape of the picture you just attached is what
+          // you meant; saying so out loud is how you know it happened, and
+          // the size row is still there to overrule it.
+          const set = panel.sizeFromImage(media.width, media.height);
+          if (set) toasts.message(`Size set to ${set[0]} × ${set[1]} to match the image`);
+        }}
       />
     {:else if panel.loading}
       <p class="empty">loading…</p>
@@ -380,7 +437,7 @@
       screen="generate"
       outputs={sessionOutputs}
       selected={focused}
-      runningJob={app.runningJob}
+      {activeJobs}
       {following}
       onselect={(output) => {
         selectedId = output.id;
@@ -391,6 +448,7 @@
       onrerun={rerun}
       ondelete={remove}
       onupscale={upscale}
+      onopenoutput={openOutput}
       onfollow={() => {
         following = true;
         selectedId = null;
@@ -400,8 +458,19 @@
     <section class="results">
       <header class="results-head">
         <span class="label">This session</span>
+        <!--
+          What "this session" is, spelled out. The heading was already there;
+          what was missing was any way to tell which jobs it meant, and a
+          restart that left the last run's pictures on screen made it look
+          like it meant nothing at all.
+        -->
         <span class="mono dim">
-          {app.jobs.length} jobs · {app.activeJobs.length} active
+          {app.sessionJobs.length} jobs · {app.activeJobs.length} active
+          {#if app.startedAt > 0}
+            <span title="Everything queued since the app started">
+              · since {clockTime(app.startedAt)}
+            </span>
+          {/if}
         </span>
         <span class="spacer"></span>
         <div class="row filters">
@@ -440,14 +509,15 @@
               <JobCard
                 {job}
                 position={job.status === "queued"
-                  ? queuedJobs.findIndex((queued) => queued.id === job.id) + 1
+                  ? queuePosition(queuedJobs, job.id)
                   : undefined}
               />
             {/if}
           {/each}
-          {#if app.jobs.length === 0}
+          {#if app.sessionJobs.length === 0}
             <p class="empty grid-empty">
-              Nothing generated yet. Type a prompt and press Generate.
+              Nothing generated this session. Type a prompt and press Generate —
+              everything you have ever made is on the Gallery screen.
             </p>
           {/if}
         </div>
@@ -496,13 +566,6 @@
     border-radius: var(--radius-input);
     background: var(--control);
     overflow: hidden;
-  }
-
-  .thumb img,
-  .option-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .card-text {

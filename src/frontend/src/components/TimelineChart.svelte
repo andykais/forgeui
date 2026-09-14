@@ -34,6 +34,12 @@
     shape?: "events" | "gauge" | "total";
     /** Dimmed rather than blanked while a reload is in flight. */
     loading?: boolean;
+    /**
+     * An instant to mark on the timeline, from outside the graph: the table
+     * underneath hands over the row the pointer is on, and the graph says
+     * where in its span that entry sits (§11.2). Null marks nothing.
+     */
+    markAt?: number | null;
   }
 
   let {
@@ -43,6 +49,7 @@
     mode,
     shape = "gauge",
     loading = false,
+    markAt = null,
   }: Props = $props();
 
   const aggregate = $derived(shape === "total" ? "last" : "max");
@@ -104,6 +111,8 @@
   const slotWidth = $derived(
     Math.min(MAX_SLOT, Math.max(MIN_SLOT, plotWidth / Math.max(1, longest))),
   );
+  /** How many slots the plot is divided into; the x axis's own resolution. */
+  const slotCount = $derived(Math.max(1, Math.floor(plotWidth / slotWidth)));
 
   /**
    * The x axis is time, so points are placed by when they happened rather
@@ -114,7 +123,7 @@
    */
   const slots = $derived.by<Slot[]>(() => {
     if (totalPoints === 0) return [];
-    const count = Math.max(1, Math.floor(plotWidth / slotWidth));
+    const count = slotCount;
     const found = new Map<number, Slot>();
     lines.forEach((line, index) => {
       for (const point of line.points) {
@@ -371,6 +380,22 @@
     if (event.key === "Escape") hovered = null;
   }
 
+  /**
+   * Where an instant handed in from outside falls, in px — the centre of the
+   * column it belongs to, so the line lands on the mark that entry is part
+   * of rather than a fraction of a pixel beside it. An instant outside the
+   * drawn span gets no line: the graph holds every point it was given, but a
+   * capped series can start after an entry the table still lists, and a line
+   * pinned to the edge would say that entry is there when it is not.
+   */
+  const markX = $derived.by(() => {
+    if (markAt === null || slots.length === 0) return null;
+    if (markAt < bounds.from || markAt > bounds.to) return null;
+    const fraction = span === 0 ? 0.5 : (markAt - bounds.from) / span;
+    const index = Math.min(slotCount - 1, Math.floor(fraction * slotCount));
+    return PAD.left + index * slotWidth + slotWidth / 2;
+  });
+
   /** Kept inside the plot, so a mark at either edge still reads its tooltip. */
   const tooltipLeft = $derived(
     active === null ? 0 : Math.max(PAD.left, Math.min(width - 160, centre(active) - 80)),
@@ -458,6 +483,22 @@
           {/if}
         {/if}
       {/each}
+    {/if}
+
+    <!--
+      The row the pointer is on, down in the table: drawn under the pointer's
+      own crosshair, because when both are up the one the hand is on is the
+      one to read.
+    -->
+    {#if markX !== null}
+      <line
+        class="mark"
+        x1={markX}
+        x2={markX}
+        y1={PAD.top - 4}
+        y2={PAD.top + plotHeight}
+      />
+      <path class="mark-head" d={`M${markX - 4} ${PAD.top - 4} h8 l-4 5 Z`} />
     {/if}
 
     {#if active}
@@ -622,6 +663,23 @@
   .crosshair {
     stroke: var(--text-4);
     stroke-width: 1;
+  }
+
+  /*
+   * Dashed, and with a head at the top: this line points at something
+   * somewhere else on screen, so it has to be told from the pointer's own
+   * crosshair, which is thin, solid and dimmer. Not the accent — the marks
+   * themselves are the accent, and a line that lands on a tall bar would
+   * disappear into it.
+   */
+  .mark {
+    stroke: var(--text);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+
+  .mark-head {
+    fill: var(--text);
   }
 
   .hot-dot {

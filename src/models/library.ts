@@ -72,6 +72,13 @@ export interface ModelView {
   class: ModelClass;
   size: number;
   mtime: number | null;
+  /**
+   * When this file appeared here (§8.1): its creation time where the
+   * filesystem reports one, its mtime otherwise. What the newest-first sort
+   * reads; null only for a model whose file is gone and whose row never
+   * recorded one.
+   */
+  added_at: number | null;
   display_name: string;
   family: string;
   notes: string | null;
@@ -129,7 +136,17 @@ export interface ModelListFilters {
    * to look at the pile you have set aside, or not to (§8.1).
    */
   hidden?: boolean;
+  /**
+   * How the list comes back (§8.1). `added` is newest first, which is what a
+   * library you are still filling wants: the thing you just downloaded is the
+   * thing you are looking for. `name` is the alphabetical order this screen
+   * used to have and nothing else offers.
+   */
+  sort?: ModelSort;
 }
+
+/** §8.1's sort dropdown, spelled as the Gallery's is (§11.2). */
+export type ModelSort = "added" | "oldest" | "name";
 
 export interface FamilyCount {
   family: string;
@@ -316,10 +333,24 @@ export class ModelLibrary {
       matchesTags(view, filters.tags) &&
       matchesQuery(view, filters.q)
     );
-    filtered.sort((a, b) =>
+    const byName = (a: ModelView, b: ModelView) =>
       a.display_name.localeCompare(b.display_name) ||
-      a.name.localeCompare(b.name)
-    );
+      a.name.localeCompare(b.name);
+    const sort = filters.sort ?? "added";
+    if (sort === "name") filtered.sort(byName);
+    else {
+      // A model with no date at all sorts as oldest either way round, rather
+      // than jumping to the top of "newest first" on a zero.
+      const newest = sort === "added";
+      filtered.sort((a, b) => {
+        const left = a.added_at;
+        const right = b.added_at;
+        if (left === right) return byName(a, b);
+        if (left === null) return 1;
+        if (right === null) return -1;
+        return newest ? right - left : left - right;
+      });
+    }
     return filtered;
   }
 
@@ -514,6 +545,8 @@ export class ModelLibrary {
       class: classOf(kind, this.#config.config.model_classes),
       size: scanned?.size ?? row!.size,
       mtime: scanned?.mtime ?? row?.mtime ?? null,
+      // A row whose file has gone has only the mtime the hasher recorded.
+      added_at: scanned?.added_at ?? row?.mtime ?? null,
       // Unset, a display name falls back to the filename minus its extension.
       display_name: row?.display_name ?? basename(filename, extname(filename)),
       family,

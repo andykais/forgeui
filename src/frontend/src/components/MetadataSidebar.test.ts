@@ -7,7 +7,15 @@ import type { ModelEntry, OutputDetail, Sidecar } from "../types.ts";
  * it marks copyable are wrapped.
  */
 
-vi.mock("../api.ts", () => ({ api: { promote: vi.fn() } }));
+vi.mock("../api.ts", () => ({
+  api: {
+    promote: vi.fn(),
+    // The sidebar asks for the provenance chain on every output it shows
+    // (§11.2); these tests are about the rows above it, so it comes back
+    // empty and the block is not rendered at all.
+    lineage: vi.fn(() => Promise.resolve({ parents: [], children: [] })),
+  },
+}));
 
 const library: ModelEntry[] = [];
 vi.mock("../stores/app.svelte.ts", () => ({
@@ -16,12 +24,10 @@ vi.mock("../stores/app.svelte.ts", () => ({
     get loras() {
       return library;
     },
-    modelByName: (name: string) =>
-      library.find((model) => model.name === name) ?? null,
+    modelByName: (name: string) => library.find((model) => model.name === name) ?? null,
     modelName: (hash: string) =>
       library.find((model) => model.hash === hash)?.display_name ?? "unknown",
-    model: (hash: string) =>
-      library.find((model) => model.hash === hash) ?? null,
+    model: (hash: string) => library.find((model) => model.hash === hash) ?? null,
   },
 }));
 
@@ -56,6 +62,7 @@ function lora(name: string, hash: string): ModelEntry {
     class: "lora",
     size: 1,
     mtime: null,
+    added_at: null,
     notes: null,
     tags: [],
     strength_min: -2,
@@ -74,7 +81,7 @@ function lora(name: string, hash: string): ModelEntry {
 const A = "a".repeat(64);
 const B = "b".repeat(64);
 
-function output(): OutputDetail {
+function output(extra: Record<string, unknown> = {}): OutputDetail {
   const sidecar = {
     app_version: "0.1.0",
     job_id: "01J",
@@ -93,6 +100,7 @@ function output(): OutputDetail {
         { name: "glow.safetensors", strength_model: 1, strength_clip: 1 },
         { name: "grain.safetensors", strength_model: 0.5, strength_clip: 0.5 },
       ],
+      ...extra,
     },
     models: [
       { role: "lora", name: "glow.safetensors", hash: null },
@@ -133,9 +141,9 @@ function output(): OutputDetail {
   };
 }
 
-function mount() {
+function mount(extra: Record<string, unknown> = {}) {
   return render(MetadataSidebar, {
-    output: output(),
+    output: output(extra),
     onedit: vi.fn(),
     onrerun: vi.fn(),
     ondelete: vi.fn(),
@@ -158,7 +166,7 @@ describe("the metadata sidebar", () => {
     // first hash, and both chips the same name.
     mount();
     const names = [...document.querySelectorAll(".lora-name")].map((el) =>
-      el.textContent?.trim()
+      el.textContent?.trim(),
     );
     expect(names).toEqual(["glow", "grain"]);
   });
@@ -166,7 +174,7 @@ describe("the metadata sidebar", () => {
   test("each LoRA links to its own model page", () => {
     mount();
     const links = [...document.querySelectorAll(".lora-name a")].map((el) =>
-      el.getAttribute("href")
+      el.getAttribute("href"),
     );
     expect(links).toEqual([`/models/${A}`, `/models/${B}`]);
   });
@@ -175,7 +183,7 @@ describe("the metadata sidebar", () => {
     library.length = 0;
     mount();
     const names = [...document.querySelectorAll(".lora-name")].map((el) =>
-      el.textContent?.trim()
+      el.textContent?.trim(),
     );
     expect(names).toEqual(["glow.safetensors", "grain.safetensors"]);
   });
@@ -198,8 +206,9 @@ describe("the metadata sidebar", () => {
   test("the label sits above its value, not beside it", () => {
     // A 74px label column took a fifth of the sidebar away from the value.
     mount();
-    const row = [...document.querySelectorAll(".field")]
-      .find((r) => r.querySelector(".key")?.textContent?.trim() === "prompt");
+    const row = [...document.querySelectorAll(".field")].find(
+      (r) => r.querySelector(".key")?.textContent?.trim() === "prompt",
+    );
     expect(row?.children).toHaveLength(2);
     expect(row?.children[0]?.className).toContain("key");
     expect(getComputedStyle(row!).display).toBe("block");
@@ -208,9 +217,7 @@ describe("the metadata sidebar", () => {
   test("the prompt is shown exactly as it was written", () => {
     mount();
     const prompt = [...document.querySelectorAll(".field")]
-      .find((row) =>
-        row.querySelector(".key")?.textContent?.trim() === "prompt"
-      )
+      .find((row) => row.querySelector(".key")?.textContent?.trim() === "prompt")
       ?.querySelector(".selectable");
     expect(prompt?.textContent).toBe("a red firetruck\n\non a wet street");
   });
@@ -225,9 +232,7 @@ describe("the metadata sidebar", () => {
   test("offers each LoRA to the workflow open in the panel", async () => {
     panelTakesLoras();
     mount();
-    const add = await screen.findByLabelText(
-      "Add grain at 0.5 to Krea 2 Turbo",
-    );
+    const add = await screen.findByLabelText("Add grain at 0.5 to Krea 2 Turbo");
     await add.click();
     // The strengths come from the run, not from the model's own defaults:
     // what makes a LoRA usable is the number somebody already found for it.
@@ -243,6 +248,29 @@ describe("the metadata sidebar", () => {
     stub.loraParam = null;
     mount();
     expect(screen.queryByLabelText(/^Add /)).toBeNull();
+  });
+
+  test("an image param is shown as the picture, not as its hash", () => {
+    // The value is a 64-character content hash. True, and no use to anybody
+    // reading it: the question an image param raises is "which image".
+    const image = `${"c".repeat(64)}.png`;
+    mount({ image });
+    const row = [...document.querySelectorAll(".field")].find(
+      (field) => field.querySelector(".key")?.textContent?.trim() === "image",
+    );
+    expect(row?.textContent).not.toContain(image);
+    expect(row?.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/media/inputs/cc/${image}`,
+    );
+  });
+
+  test("a param that only looks like a filename is left as text", () => {
+    mount({ model: "krea2_turbo_fp8_scaled.safetensors" });
+    const row = [...document.querySelectorAll(".field")].find(
+      (field) => field.querySelector(".key")?.textContent?.trim() === "model",
+    );
+    expect(row?.querySelector("img")).toBeNull();
+    expect(row?.textContent).toContain("krea2_turbo_fp8_scaled.safetensors");
   });
 
   test("says nothing when no workflow is open at all", () => {

@@ -35,6 +35,7 @@ const loras: ModelEntry[] = [
     class: "lora",
     size: 1024,
     mtime: null,
+    added_at: null,
     id: "hash-placeholder",
     hash: null,
     notes: null,
@@ -60,6 +61,7 @@ const loras: ModelEntry[] = [
     class: "lora",
     size: 1024,
     mtime: null,
+    added_at: null,
     id: "hash-placeholder",
     hash: null,
     notes: null,
@@ -98,6 +100,7 @@ function diffusionModel(name: string, family: string, kind = "checkpoints"): Mod
     class: "diffusion",
     size: 1024,
     mtime: null,
+    added_at: null,
     id: `id-${name}`,
     hash: null,
     notes: null,
@@ -361,15 +364,11 @@ describe("each param type renders from the manifest", () => {
       { key: "image", label: "Image", type: "image", required: true, bind: "10.image" },
     ]);
     expect(screen.getByText(/Choose, drop or paste an image/)).toBeTruthy();
-    expect(
-      screen.getByLabelText("Image: choose, drop or paste an image"),
-    ).toBeTruthy();
+    expect(screen.getByLabelText("Image: choose, drop or paste an image")).toBeTruthy();
   });
 
   test("mask and video still say why they cannot run yet", () => {
-    mount([
-      { key: "mask", label: "Mask", type: "mask", bind: "11.mask" },
-    ]);
+    mount([{ key: "mask", label: "Mask", type: "mask", bind: "11.mask" }]);
     expect(screen.getByText(/arrive in a later phase/)).toBeTruthy();
   });
 });
@@ -707,12 +706,16 @@ describe("the LoRA search box", () => {
   });
 
   test("picking a model still hands the caret to the prompt", async () => {
-    mount([
-      { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
-      { key: "model", label: "Model", type: "model", bind: "1.ckpt_name" },
-    ], { prompt: "figs", model: "" }, {
-      checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")],
-    });
+    mount(
+      [
+        { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
+        { key: "model", label: "Model", type: "model", bind: "1.ckpt_name" },
+      ],
+      { prompt: "figs", model: "" },
+      {
+        checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")],
+      },
+    );
     await fireEvent.click(screen.getByText("choose a model…"));
     await fireEvent.click(screen.getByText("krea2_turbo_bf16"));
     await tick();

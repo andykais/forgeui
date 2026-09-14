@@ -6,6 +6,7 @@
   import { bytes, relativeTime } from "../lib/format.ts";
   import { navigate, opensElsewhere } from "../router.svelte.ts";
   import FamilyPicker from "./FamilyPicker.svelte";
+  import MediaThumb from "./MediaThumb.svelte";
 
   /**
    * One card of the Models grid (§11.2, frame 04): thumbnail, display name,
@@ -47,7 +48,7 @@
     }}
   >
     {#if model.thumb_url}
-      <img src={model.thumb_url} alt="" loading="lazy" />
+      <MediaThumb src={model.thumb_url} lazy />
     {:else}
       <span class="plate"><Brain size={18} /></span>
     {/if}
@@ -151,12 +152,6 @@
     align-items: center;
     justify-content: center;
     color: var(--mark);
-  }
-
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .body {

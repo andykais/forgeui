@@ -79,7 +79,12 @@ ENTRYPOINT ["deno", "task", "start"]
 # --data-dir is the /workspace mount (config.yaml, app.db, outputs, ...);
 # --host 0.0.0.0 so the app is reachable from outside the container;
 # --comfy-path points at the ComfyUI baked into this image;
-# --models-dir wires up the /models layout the README describes.
+# --models-dir wires up the /models layout the README describes. Every kind in
+# DEFAULT_MODEL_KINDS is listed: a kind left out here is one the app never
+# learns about in a container, so it reaches neither the model library nor the
+# extra_model_paths.yaml handed to ComfyUI — which is how a loader ends up
+# offering an empty list for files that are plainly on the volume. A test
+# holds this list to that one.
 # These are per-run overrides (never written to config.yaml), so editing
 # config.yaml for anything else is still safe across restarts.
 CMD ["--data-dir", "/workspace", \
@@ -93,4 +98,6 @@ CMD ["--data-dir", "/workspace", \
      "--models-dir", "vae=/models/vae", \
      "--models-dir", "text_encoders=/models/text_encoders", \
      "--models-dir", "controlnet=/models/controlnet", \
-     "--models-dir", "upscale_models=/models/upscale_models"]
+     "--models-dir", "upscale_models=/models/upscale_models", \
+     "--models-dir", "latent_upscale_models=/models/latent_upscale_models", \
+     "--models-dir", "embeddings=/models/embeddings"]

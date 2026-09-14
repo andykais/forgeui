@@ -86,6 +86,9 @@
         const bind = param.bind as { w: string; h: string };
         map.set(bind.w, param);
         map.set(bind.h, param);
+      } else if (Array.isArray(param.bind)) {
+        // One model pick, several loaders: each input is spoken for (§4.6).
+        for (const bind of param.bind) map.set(bind, param);
       } else if (typeof param.bind === "string") {
         map.set(param.bind, param);
       }
@@ -97,9 +100,11 @@
     const bind =
       param.type === "size"
         ? (param.bind as { w: string }).w
-        : typeof param.bind === "string"
-          ? param.bind
-          : null;
+        : Array.isArray(param.bind)
+          ? param.bind[0] ?? null
+          : typeof param.bind === "string"
+            ? param.bind
+            : null;
     if (!bind) return null;
     const [node, ...rest] = bind.split(".");
     return (

@@ -11,4 +11,17 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+/**
+ * And no `ResizeObserver`, which is how anything that draws to a measured box
+ * — the telemetry timeline — learns its own width. Nothing resizes in a test,
+ * so it is enough that the observer exists and never reports.
+ */
+if (!("ResizeObserver" in globalThis)) {
+  (globalThis as Record<string, unknown>).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 afterEach(() => cleanup());

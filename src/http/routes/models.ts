@@ -1,6 +1,6 @@
 import { MODEL_CLASSES, type ModelClass } from "../../config/types.ts";
 import { FAMILIES } from "../../workflows/types.ts";
-import type { ModelPatch } from "../../models/library.ts";
+import type { ModelPatch, ModelSort } from "../../models/library.ts";
 import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 
@@ -21,6 +21,17 @@ function optionalString(
   }
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
+}
+
+const MODEL_SORTS = ["added", "oldest", "name"] as const;
+
+/** §8.1's sort, as a URL param like every other filter on the screen. */
+function sortFrom(value: string | null): ModelSort | undefined {
+  if (value === null) return undefined;
+  if (!(MODEL_SORTS as readonly string[]).includes(value)) {
+    throw new BodyError(`sort: expected one of ${MODEL_SORTS.join(", ")}`);
+  }
+  return value as ModelSort;
 }
 
 function readMetaPatch(body: Record<string, unknown>): ModelPatch {
@@ -166,6 +177,7 @@ export function modelRoutes(ctx: AppContext): Route[] {
             q: url.searchParams.get("q") ?? undefined,
             tags: splitTags(url.searchParams.get("tags")),
             hidden: url.searchParams.get("hidden") === "1",
+            sort: sortFrom(url.searchParams.get("sort")),
           }),
           progress: ctx.models.progress,
         });

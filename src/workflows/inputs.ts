@@ -61,6 +61,14 @@ export function boundInputs(manifest: Manifest | null): Map<string, string> {
         // A switched checkbox binds no literal: it moves a link (§4.4).
         if (typeof param.bind === "string") add(param.bind, param);
         break;
+      case "model":
+      case "text_encoder":
+      case "vae":
+        // A model pick may land in several inputs; each is bound (§4.6).
+        if (Array.isArray(param.bind)) {
+          for (const bind of param.bind) add(bind, param);
+        } else add(param.bind, param);
+        break;
       default:
         add(param.bind, param);
     }

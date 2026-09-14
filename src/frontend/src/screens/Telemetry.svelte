@@ -6,9 +6,11 @@
   import Info from "@lucide/svelte/icons/info";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
-  import { router, setQuery } from "../router.svelte.ts";
+  import { navigate, opensElsewhere, router, setQuery } from "../router.svelte.ts";
+  import { app } from "../stores/app.svelte.ts";
   import { absoluteTime, bytes, localDate, measure } from "../lib/format.ts";
   import type {
+    TelemetryColumn,
     TelemetryEntry,
     TelemetryFilter,
     TelemetryLine,
@@ -35,6 +37,12 @@
   let exhausted = $state(false);
   let error = $state<string | null>(null);
   let openFilter = $state<string | null>(null);
+  /**
+   * The entry the pointer is on, down in the table. The graph draws a line
+   * where it falls (§11.2): a row is a number and a time, and where in the
+   * run of them it sits is the question the table cannot answer.
+   */
+  let hoveredEntry = $state<TelemetryEntry | null>(null);
   let minDraft = $state("");
   let scroller = $state<HTMLDivElement | undefined>(undefined);
 
@@ -197,9 +205,18 @@
     })} ${time}`;
   }
 
-  function cell(entry: TelemetryEntry, key: string): string {
+  function cell(entry: TelemetryEntry, column: TelemetryColumn): string {
+    const key = column.key;
     if (key === "at") return stamp(entry.at);
     if (key === "value") return measure(entry.value, report?.unit ?? "ms");
+    // An output is filed under its generated id, which names it to the
+    // database and to nobody else. The filename is the same row read the way
+    // its owner sees it — in the gallery, in the folder, in a file dialog.
+    if (column.kind === "output") {
+      const path = entry.data?.path;
+      const filename = typeof path === "string" ? path.split("/").pop() : null;
+      return filename || entry.label || "—";
+    }
     const value = (entry as unknown as Record<string, unknown>)[key];
     if (value === null || value === undefined || value === "") return "—";
     // A line is named the same way in the table as in the legend: "VRAM",
@@ -209,6 +226,42 @@
       if (line) return line.label;
     }
     return String(value);
+  }
+
+  /**
+   * Where a cell points, for the columns that name something with a page of
+   * its own (§11.2): an output goes to itself in the gallery, a model to its
+   * own page. A model whose file has gone has no page, and an entry that
+   * recorded no label names nothing — both stay plain text, because a link
+   * that lands nowhere is worse than none.
+   */
+  function linkOf(entry: TelemetryEntry, column: TelemetryColumn): string | null {
+    if (column.kind === "output") {
+      return entry.label ? `/gallery?output=${encodeURIComponent(entry.label)}` : null;
+    }
+    if (column.kind === "model") {
+      const path = entry.data?.path;
+      const model = typeof path === "string" ? app.modelByPath(path) : null;
+      return model ? `/models/${encodeURIComponent(model.id)}` : null;
+    }
+    return null;
+  }
+
+  /**
+   * Following a link is not opening the raw entry, so the click stops at the
+   * link rather than carrying on to the row beneath it — which would
+   * otherwise write `?entry=` onto the page just navigated to.
+   */
+  function follow(event: MouseEvent, url: string) {
+    event.stopPropagation();
+    if (opensElsewhere(event) || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    navigate(url);
+  }
+
+  /** Ids, sizes and times are read in a monospace column; names are not. */
+  function mono(column: TelemetryColumn): boolean {
+    return (column.kind !== "text" && column.kind !== "model") || column.key === "route";
   }
 
   /**
@@ -411,6 +464,7 @@
           {mode}
           shape={report.shape}
           loading={loadingSeries}
+          markAt={hoveredEntry?.at ?? null}
         />
       </div>
     </div>
@@ -427,23 +481,46 @@
               {/each}
             </tr>
           </thead>
-          <tbody>
+          <!--
+            Pointing at a row marks it on the graph. Leaving the table clears
+            it rather than every row clearing on its own way out: moving from
+            one row to the next would otherwise blink the line off and on.
+          -->
+          <tbody onmouseleave={() => (hoveredEntry = null)}>
             {#each entries as entry (entry.id)}
               <tr
                 class:selected={String(entry.id) === selectedId}
                 tabindex="0"
                 onclick={() => setQuery({ entry: String(entry.id) })}
+                onmouseenter={() => (hoveredEntry = entry)}
+                onfocus={() => (hoveredEntry = entry)}
+                onblur={() => {
+                  if (hoveredEntry?.id === entry.id) hoveredEntry = null;
+                }}
                 onkeydown={(event) => {
                   if (event.key === "Enter") setQuery({ entry: String(entry.id) });
                 }}
               >
                 {#each report.columns as column (column.key)}
+                  {@const url = linkOf(entry, column)}
                   <td
-                    class:mono={column.kind !== "text" || column.key === "route"}
+                    class:mono={mono(column)}
                     class:num={column.kind === "value" || column.kind === "number"}
                     title={column.kind === "time" ? absoluteTime(entry.at) : undefined}
                   >
-                    {cell(entry, column.key)}
+                    {#if url}
+                      <a
+                        href={url}
+                        title={column.kind === "output"
+                          ? "Open this output in the gallery"
+                          : "Open this model"}
+                        onclick={(event) => follow(event, url)}
+                      >
+                        {cell(entry, column)}
+                      </a>
+                    {:else}
+                      {cell(entry, column)}
+                    {/if}
                   </td>
                 {/each}
               </tr>
@@ -720,6 +797,21 @@
 
   tr {
     cursor: pointer;
+  }
+
+  /* Marked as a link, but not loudly: a table of rows in accent would read as
+     a table of buttons. A faint rule under the text is enough to say it can
+     be followed; hovering it says so properly. */
+  td a {
+    color: var(--text-2);
+    text-decoration: underline;
+    text-decoration-color: var(--text-4);
+    text-underline-offset: 2px;
+  }
+
+  td a:hover {
+    color: var(--accent);
+    text-decoration-color: currentColor;
   }
 
   tbody tr:hover td {

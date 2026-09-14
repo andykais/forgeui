@@ -21,6 +21,13 @@ export interface ScannedModel {
   kind: string;
   size: number;
   mtime: number | null;
+  /**
+   * When the file appeared on this machine (§8.1's newest-first sort): the
+   * filesystem's creation time where it reports one, the modification time
+   * where it does not. A downloaded model's mtime can be the uploader's,
+   * which says nothing about when this library got it.
+   */
+  added_at: number | null;
 }
 
 const MODEL_EXTENSIONS = new Set([
@@ -75,6 +82,7 @@ async function walk(
       kind,
       size: stat.size,
       mtime: stat.mtime?.getTime() ?? null,
+      added_at: stat.birthtime?.getTime() ?? stat.mtime?.getTime() ?? null,
     });
   }
   return found;

@@ -54,6 +54,12 @@ async function databaseUse(path: string): Promise<StorageUse> {
 
 /** §12's `/api/system/*` group: what Settings and the queue strip read. */
 export function systemRoutes(ctx: AppContext): Route[] {
+  /**
+   * When this process came up. Generate's results are "this session's jobs"
+   * (§11.2), and the only thing that can say where a session begins is the
+   * app itself — a browser reload is not a new one, and a restart is.
+   */
+  const startedAt = Date.now();
   return [
     {
       method: "GET",
@@ -63,6 +69,7 @@ export function systemRoutes(ctx: AppContext): Route[] {
         return json({
           comfy: ctx.comfy.status(),
           data_dir: ctx.paths.root,
+          started_at: startedAt,
         });
       },
     },

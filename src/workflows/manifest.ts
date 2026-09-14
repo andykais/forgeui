@@ -297,6 +297,23 @@ function validateParam(
     return bind;
   };
 
+  /**
+   * A model pick may land in more than one input: one file read by several
+   * loaders is one choice, not several (§4.6). Every target is checked, so a
+   * list that names a node the graph has not got fails at load like any
+   * other binding.
+   */
+  const modelBind = (): string | string[] => {
+    if (!Array.isArray(raw.bind)) return scalarBind();
+    const binds = array(raw.bind, `${at}.bind`);
+    if (binds.length === 0) fail(`${at}.bind`, "at least one input to bind");
+    return binds.map((bind, i) => {
+      const one = nonEmptyStr(bind, `${at}.bind[${i}]`);
+      assertBindTarget(graph, one, `${at}.bind[${i}]`);
+      return one;
+    });
+  };
+
   switch (type) {
     case "text":
       return {
@@ -445,7 +462,7 @@ function validateParam(
       return {
         ...common,
         type: kind,
-        bind: scalarBind(),
+        bind: modelBind(),
         filter: { class: MODEL_PARAM_CLASS[kind], ...parsed },
         ...(raw.default !== undefined
           ? { default: str(raw.default, `${at}.default`) }
@@ -693,14 +710,22 @@ export function resolveDefaults(manifest: Manifest, graph: ApiGraph): Manifest {
     // Narrow first: only these types have both a scalar bind and a default
     // the graph could supply.
     if (!GRAPH_BACKED_TYPES.includes(param.type)) return param;
-    const scalar = param as Extract<Param, { bind: string }> & {
+    const scalar = param as Extract<Param, { bind: string | string[] }> & {
       default?: unknown;
     };
     if (scalar.default !== undefined) return param;
-    if (typeof scalar.bind !== "string") return param;
+    /**
+     * A model pick may bind several inputs, and they hold the same filename —
+     * that is the point of the list — so the first one is the default. Read
+     * nothing and the param defaults to empty, which then *overwrites* every
+     * loader with an empty name at submit: the graph's own value has to come
+     * back out of it.
+     */
+    const first = Array.isArray(scalar.bind) ? scalar.bind[0] : scalar.bind;
+    if (typeof first !== "string") return param;
     let node: string, input: string;
     try {
-      ({ node, input } = parseBind(scalar.bind, param.key));
+      ({ node, input } = parseBind(first, param.key));
     } catch {
       return param;
     }

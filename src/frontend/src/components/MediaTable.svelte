@@ -75,6 +75,7 @@
       {@const chips = modelChips(output)}
       <tr
         class:selected={output.id === selectedId}
+        data-output-id={output.id}
         onclick={() => onopen(output)}
         tabindex="0"
         onkeydown={(event) => {
