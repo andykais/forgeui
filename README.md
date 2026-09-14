@@ -33,10 +33,10 @@ interface, which ships pre-built in a release.
 ```sh
 deno task start --data-dir ./data   # serve the UI and the API
 deno task test                      # unit + integration + golden tests
-deno task check                      # type-check
-deno task fmt                        # format
-deno task lint                       # lint
-deno task reindex                    # rebuild app.db from the sidecars on disk
+deno task check                     # type-check
+deno task fmt                       # format
+deno task lint                      # lint
+deno task reindex                   # rebuild app.db from the sidecars on disk
 ```
 
 The data directory holds `config.yaml`, `app.db`, workflows and every output
