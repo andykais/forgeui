@@ -14,14 +14,16 @@ ForgeUI becomes able to generate speech and treat it as a first-class result,
 so that a line of dialogue can be written, generated, auditioned, and then
 carried into an LTX video.
 
-Two workflows ship:
+Three workflows ship. Two make speech:
 
 | Workflow | What the user gives it | What it is for |
 | --- | --- | --- |
 | **Voice clone** | a reference clip, the exact transcript of that clip, and the text to speak | making one specific voice say something |
 | **Voice design** | a description of a voice ("older man, warm, unhurried"), and the text to speak | making a voice that does not exist yet |
 
-Both are text-to-speech. They differ only in where the voice comes from.
+Both are text-to-speech; they differ only in where the voice comes from. A
+third workflow, `ltx2-ia2v`, takes an image and one of those takes and returns
+a video that is lip-synced to it.
 
 The work divides into four parts, in this order:
 
@@ -31,73 +33,75 @@ The work divides into four parts, in this order:
    take sound, so a reference clip can be attached the way a picture is.
 3. **The two TTS workflows**, on a custom node pack installed by the
    container.
-4. **Sound in video** — the generated speech is muxed onto an LTX render.
+4. **Sound in video** — a third workflow takes an image and a generated
+   speech track and returns video that is lip-synced to it.
 
 Three findings shaped this, all verified against the pinned ComfyUI
-(`v0.34.0`) and this repository:
+(`v0.34.0`), its official workflow templates, and this repository:
 
+- **LTX-2.3 lip-syncs to an audio track you give it**, in the open-weights
+  model, with core nodes. There is an official template for it —
+  `video_ltx2_3_ia2v`, "LTX-2.3: Image Audio to Video" — and it differs from
+  the graph this repo already ships by four nodes (§3).
 - **The database needs no migration.** `outputs.kind` and `inputs.kind` are
   plain `TEXT`, and every dimension column is already nullable (§5).
 - **There is one integration bug waiting.** ComfyUI reports audio files under
   a key this app does not read, so an audio workflow would run, succeed, and
   be reported as having produced nothing (§4.1).
-- **LTX-2.3 will carry our audio, but it will not lip-sync to it.** The
-  existing graph already has the seam where a track can be substituted;
-  driving the picture *from* the audio is a different model family (§3).
 
 ---
 
 ## 1. The two candidates
 
-Both were asked for by name. Both do the job. They differ most in licence,
-size, and language coverage.
+**Breeze-TTS-2 is the one to integrate.** Licensing is not a constraint here —
+LTX already carries its own — and 7 GiB is affordable on this machine, because
+jobs run one at a time: ForgeUI serialises the queue and ComfyUI frees a model
+between prompts, so the TTS model and the video model never need to be
+resident together.
 
-| | **Qwen3-TTS** | **Breeze-TTS-2** |
+With those two off the table, what is left favours Breeze:
+
+| | **Breeze-TTS-2** | **Qwen3-TTS** |
 | --- | --- | --- |
-| Weights | 0.6B and 1.7B | 3B |
-| Licence (weights) | Apache 2.0 | BreezeBlue Research and Non-Commercial |
-| Languages | 10, incl. English | English and Chinese |
-| Voice cloning | reference clip + its transcript | reference clip + its transcript |
-| Voice design | yes, a separate `VoiceDesign` checkpoint | yes, same checkpoint |
-| Peak VRAM | not published; 0.6B is a 2.5 GB download, 1.7B is 4.5 GB | 5.3–7.5 GiB, or 4.5 GiB for the int8-hybrid build |
-| ComfyUI nodes | several third-party packs, none canonical | one well-developed pack |
-| Extras | — | voice direction, multi-speaker dialogue, inline vocal events |
+| Weights | 3B | 0.6B and 1.7B |
+| Peak VRAM | 5.3–7.5 GiB; 4.5 GiB for the int8-hybrid build | smaller, not published |
+| Voice cloning | reference clip + its exact transcript | reference clip + its exact transcript |
+| Voice design | yes, from a natural-language description | yes, via a separate `VoiceDesign` checkpoint |
+| Languages | English and Chinese | 10, incl. English |
+| Extras | voice direction, 8-speaker dialogue, inline vocal events | — |
+| Licence (weights) | BreezeBlue Research and Non-Commercial | Apache 2.0 |
 
-**Recommendation: integrate Qwen3-TTS first.** Three reasons, in order of
-weight:
+The two workflows asked for map straight onto Breeze's two modes, and its
+node pack covers both plus a Whisper helper for §7. A bigger model on a
+machine that can hold it is the better default for quality; ten languages is
+not worth anything to an English-and-Chinese user today.
 
-1. **Licence.** Apache 2.0 covers the weights. Breeze's weights are
-   research/non-commercial, which is probably fine for a personal tool but
-   puts a condition on a repository that ships bundled workflows pointing at
-   them. A default should not carry that.
-2. **VRAM.** This machine already runs out of memory on LTX past eight
-   seconds at 2720×1536. A 0.6B speech model that costs ~2 GB is a very
-   different neighbour to a 3B one that wants 5–7 GiB, and TTS will often be
-   run in the same session as a video render.
-3. **Languages.** Ten against two. It costs nothing now and avoids a rebuild
-   later.
+**Qwen3-TTS stays on the list as a second family, not a fallback.** Adding it
+later is two more workflow directories and no app code, because the param
+panel does not know what a TTS model is. Its 0.6B is the one to reach for if
+TTS ever does need to sit alongside a resident video model.
 
-**Breeze-TTS-2 stays on the list as a second family, not a fallback.** Its
-node pack is the better piece of software — voice direction and an
-eight-speaker dialogue node are genuinely ahead of what the Qwen packs offer —
-and its cloning is reported to be strong. The manifest format is what makes
-this cheap: adding Breeze later is two more workflow directories and no app
-code, because the param panel does not know what a TTS model is. If the Qwen
-output quality disappoints in testing, swapping the default is a workflow
-change, not a redesign.
+**Neither pack is official.** There is no ComfyUI-org or BreezeBlue node pack
+for either model — everything on offer is third-party. The one this design
+assumes is the one you named:
 
-**What I could not verify.** Node *class* names (the ids that go in
-`workflow.api.json`) are not reliably documented in any of these packs;
-READMEs list display names. The graphs must be authored against
-`/object_info` on the machine that has the pack installed — the same way the
-LTX-2.3 graph was built. Treat every node id in this document as
-illustrative.
+```
+https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2   (Apache-2.0 node code)
+```
 
-**Which pack.** For Qwen3-TTS there are at least five. They need comparing on
-the machine before one is pinned; the selection criteria should be: exposes
-cloning *and* design, accepts an `AUDIO` input rather than only a file path,
-puts its weights somewhere configurable, and has a licence compatible with
-being named in our README. Pinning a commit is required either way (§6).
+It registers seven nodes — Load Model, Voice Clone, Voice Design, Voice
+Direction, Whisper Transcribe, Speaker, Multi-Speaker — and downloads weights
+to `ComfyUI/models/breezetts2/` on first use, with four build options
+(bf16 combined, int8-hybrid, int8 all-linears, int8 text-encoder-only). That
+being unofficial is the reason §6 pins a commit and §4.6 asks for a missing-node
+check: an unofficial dependency that moves under you is the most likely source
+of a workflow that stopped working.
+
+**What I could not verify.** Node *class* names — the ids that go in
+`workflow.api.json` — are not documented; the README lists display names. The
+graphs must be authored against `/object_info` on the machine with the pack
+installed, the same way the LTX-2.3 graph was. Treat every TTS node id in this
+document as illustrative.
 
 ---
 
@@ -186,64 +190,106 @@ Two differences from an image input:
 
 ## 3. How the user uses audio in video workflows
 
-This is the actual goal, so it gets the most precision.
+This is the goal, so it gets the most precision.
 
-### 3.1 What the LTX-2.3 workflow does today
+**Correction to an earlier draft of this document, which said LTX would carry
+our audio but not lip-sync to it. That was wrong.** LTX-2.3 generates video
+that is lip-synced to an audio track you supply, in the open-weights model,
+with nodes that ship in ComfyUI `v0.34.0`. There is an official workflow
+template for it: `video_ltx2_3_ia2v`, "LTX-2.3: Image Audio to Video".
 
-The bundled `ltx2-i2v` graph already generates sound. It is an audio-visual
-model: an empty audio latent is created, concatenated with the video latent,
-and the two are denoised together, so the sound it produces is the sound of
-the scene it drew.
+### 3.1 What the bundled graph does today
+
+`ltx2-i2v` is audio-visual already: an *empty* audio latent is concatenated
+with the video latent and the two are denoised together, so the sound it
+produces is the sound it imagined for the scene it drew.
 
 ```
-LTXVEmptyLatentAudio ─┐
-                      ├─ LTXVConcatAVLatent ─ SamplerCustomAdvanced ─ LTXVSeparateAVLatent ─┐
-EmptyLTXVLatentVideo ─┘                                                                     │
-                                          ┌─ video latents → VAEDecode → images ────────────┤
-                                          └─ audio latent  → LTXVAudioVAEDecode → audio ────┤
-                                                                                            ▼
-                                                                        CreateVideo(images, audio) → SaveVideo
+LTXVEmptyLatentAudio ──┐
+                       ├─ LTXVConcatAVLatent ─ SamplerCustomAdvanced ─ LTXVSeparateAVLatent ─→ video ─┐
+EmptyLTXVLatentVideo ──┘                                                            └────────→ audio ─┤
+                                                                                                     ▼
+                                                                         CreateVideo(images, audio) → SaveVideo
 ```
 
-The important node is the last one. `CreateVideo` takes an `audio` input
-(`workflow.api.json` node 49). That is the seam.
+### 3.2 What the audio-to-video graph does instead
 
-### 3.2 Three ways to get our speech into a video
+The supplied audio is encoded into an audio latent, **masked so the sampler
+keeps it rather than regenerating it**, and concatenated with the video latent
+in its place. The model then has to draw a video that fits the sound — which
+is what makes the mouth match.
 
-| | How | Lip-sync | Effort |
-| --- | --- | --- | --- |
-| **A. Mux** | attach the generated speech as an audio param; it replaces LTX's own track at `CreateVideo` | none | one new bundled workflow |
-| **B. Condition the AV latent** | encode our speech with `LTXVAudioVAEEncode` and pass it to `LTXVConcatAVLatent` instead of the empty latent | unknown | an experiment first |
-| **C. An audio-driven model** | Wan S2V / HuMo — `AudioEncoderLoader` → `AudioEncoderEncode` → `WanSoundImageToVideo` | yes, by design | a new family and a new model folder |
+```
+LoadAudio → TrimAudioDuration → LTXVAudioVAEEncode ─┐
+                                                    ├─ SetLatentNoiseMask ─┐
+                              SolidMask(value = 0) ─┘                      │
+                                                                           ├─ LTXVConcatAVLatent → sampler → …
+                                         LTXVImgToVideoInplace(image) ─────┘
+```
 
-**Phase 1 does A.** It is small, it cannot fail in an interesting way, and it
-covers the common case: narration, a voice-over, a line of dialogue on a shot
-where the speaker is not in frame or not in close-up.
+The whole delta from the graph already in this repo is four nodes —
+`LoadAudio`, `TrimAudioDuration`, `LTXVAudioVAEEncode`, `SetLatentNoiseMask`
+(plus a `SolidMask`) — replacing one, `LTXVEmptyLatentAudio`. Everything
+downstream is unchanged: the same two-pass half-res-then-upsample structure,
+the same guiders, the same `CreateVideo` → `SaveVideo`.
 
-**B is a question, not a plan.** `LTXVAudioVAEEncode` exists and produces an
-audio latent from real audio, so the graph *can* be wired that way. Whether
-the sampler preserves what it is given depends on the sigma schedule over the
-audio half of the latent: at full noise it is an init latent and gets
-overwritten, exactly like img2img at denoise 1.0. LTX-2.3 is a joint AV model,
-not an audio-driven one, so the honest expectation is that this produces
-"video that ignores your audio". It is a half-day experiment and worth doing
-before anyone designs around it.
+Two details worth stating, both taken from the official template:
 
-**C is the real lip-sync answer** and is out of scope here. Worth noting for
-sequencing: it needs the `audio_encoders` model folder, which §4.4 adds
-anyway, so the groundwork lands either way.
+- **`SolidMask` has value `0`.** In ComfyUI a noise mask of 1 means "generate
+  this", 0 means "keep it". Zero is what pins the supplied audio.
+- **`LTXVConcatAVLatent` is built for this.** Its own code describes fitting
+  an audio stream "to the length of the one it replaces", and zero-pads a
+  short clip with mask `1` so the model generates the tail. A clip shorter
+  than the video is handled, not an error.
 
-### 3.3 Length
+This is a **separate bundled workflow**, `ltx2-ia2v`, as asked — not a
+variant of `ltx2-i2v` behind a `when`. The two have different inputs, different
+lengths, and different reasons to exist; the shared graph would be mostly
+branches. In the panel:
 
-A video is a frame count. Speech is however long the sentence takes. Muxing a
-nine-second line onto a five-second render truncates it, and there is no way
-for the workflow to know which of the two the user meant.
+```
+image             [ the first frame ]                   ← image param
+audio             [ a take from the gallery ]           ← audio param · 11.4s
+duration          [ 9 ] seconds        start [ 0 ]
+prompt            [ what is happening in the shot ]
+size              [ 1280 × 720 ]   fps [ 24 ]
+seed              [ 1234567  🔒 ]
+```
 
-The panel should **show the attached clip's duration next to the length
-field** — and stop there. Following the decision already made for image size:
-show what would match, never silently change what the user set. If it turns
-out to be tedious, a "match the clip" button next to the length field is the
-smallest thing that fixes it, and it is still the user pressing it.
+Both media params accept a drag from the results grid, so the ordinary path is:
+generate the line, generate or pick the frame, drag both in.
+
+### 3.3 Length: the audio decides it
+
+The official template derives the frame count from the audio, and this is
+worth copying exactly:
+
+```
+frames = duration × fps + 1      (ComfyMathExpression "a * b + 1")
+```
+
+`TrimAudioDuration(start_index, duration)` trims the clip to the same window.
+So the user sets a **duration in seconds** and a **start offset**, and the
+video length follows from them. Nothing has to reconcile a frame count against
+a clip length, and there is no silent adjustment of a field the user set — the
+duration *is* the field.
+
+The panel should show the attached clip's own duration beside that input, so
+"9 seconds" can be checked against "the clip is 11.4s" without opening it.
+
+### 3.4 Two further capabilities, noted and not built
+
+- **`LTXVModalityGuidance`** ("A/V coupling") runs an extra pass per step with
+  the audio↔video cross-attention severed and guides toward the coupled
+  prediction; its own description names lip-sync as the thing it strengthens.
+  Reference default is 3.0. The official ia2v template does **not** use it. If
+  sync is weak in testing, this is the first knob to reach for, and it can be
+  added to the graph later without changing anything in the app.
+- **`LTXVReferenceAudio`** ("ID-LoRA") is a different feature that is easy to
+  confuse with cloning: it transfers a *speaker identity* into the audio LTX
+  generates itself, from a ~5-second reference. It is the subject of another
+  official template, `video_ltx2_3_id_lora`. Worth knowing about; not part of
+  this design, because the voice we want is the one Breeze made.
 
 ---
 
@@ -306,29 +352,26 @@ carries a `.wav` unchanged.
 **There is no top-level audio model folder in ComfyUI, and we should not
 invent one.** Audio checkpoints (Stable Audio, ACE-Step) live in
 `checkpoints/`, their text encoders in `text_encoders/`, their VAEs in `vae/`.
-The only audio-specific key in `folder_paths.py` is `audio_encoders/`, used by
-Wan S2V and HuMo.
+The only audio-specific key in `folder_paths.py` is `audio_encoders/`, and
+nothing in this design uses it: LTX takes its audio VAE from the checkpoint it
+already loads. It is what Wan S2V and HuMo would need, so it is worth adding
+the day one of those is wanted — as a model kind *and* to the `--models-dir`
+list in the `Containerfile`, because omitting the second is what caused the
+latent-upscaler failure, where the file was on disk, the folder was not
+passed, and the loader offered an empty dropdown.
 
-**One addition to `DEFAULT_MODEL_KINDS`** (`src/config/defaults.ts:13`):
-`audio_encoders`. It is a real ComfyUI key, its contents are single
-`.safetensors` files loaded through `folder_paths`, and it is what §3.2 option
-C needs. It must also be added to the `--models-dir` list in the
-`Containerfile` — skipping that step is what caused the latent-upscaler
-failure, where the model was on disk, the folder was not passed, and the
-loader offered an empty dropdown.
+**So phase 1 adds no model kinds at all.**
 
-**The TTS weights are a different shape, and should not become a model kind.**
-A TTS checkpoint is a *directory* — sharded weights, a tokenizer, an audio
-codec — and the node pack downloads it itself on first use. Adding a `TTS` key
-to `model_folders` would have a side effect that is easy to miss: that config
-drives two things at once, the generated `extra_model_paths.yaml` *and* the
-library scan, and the scan takes every `.safetensors` and `.bin` it finds
-(`src/models/scan.ts:33`). The Models screen would fill up with tokenizer
-shards presented as models.
+**The TTS weights are a different shape again, and should not become a model
+kind either.** A Breeze checkpoint is a *directory* — weights, tokenizer,
+audio codec — and the node pack downloads it itself on first use. Adding a
+`breezetts2` key to `model_folders` would have a side effect that is easy to
+miss: that config drives two things at once, the generated
+`extra_model_paths.yaml` *and* the library scan, and the scan takes every
+`.safetensors` and `.bin` it finds (`src/models/scan.ts:33`). The Models
+screen would fill up with tokenizer shards presented as models. So:
 
-So, for phase 1:
-
-- the TTS weights live on the `/models` mount at the path the pack expects,
+- the weights live on the `/models` mount at the path the pack expects,
   put there by the container rather than by config;
 - the TTS workflows declare **no `model` param**, so the model-presence check
   does not apply to them — it only iterates declared model params;
@@ -439,9 +482,9 @@ build months later.
 
 Voice cloning needs the exact words of the reference clip. Both candidate
 models require it, and both node packs ship a Whisper transcription node to
-produce it (`Breeze TTS 2 Whisper Transcribe`; `Whisper STT` in the Qwen
-pack). So the capability is already in the box — what phase 1 declines is
-wiring it into the UI.
+produce it — `Breeze TTS 2 Whisper Transcribe` in the pack this design uses,
+and an equivalent in every Qwen pack. So the capability is already in the
+box — what phase 1 declines is wiring it into the UI.
 
 There are two ways it could work, and they are not the same feature:
 
@@ -481,30 +524,33 @@ testing before trusting.
 2. The audio tile, the player in the viewer, the gallery chip, the peaks
    (§2.2).
 3. The `audio` param, the probe, the input-store extensions (§4.2, §4.3).
-4. The node pack in the `Containerfile`, the README section, the
-   `audio_encoders` folder key (§4.4, §6).
-5. Two bundled workflows: `qwen-tts-clone` and `qwen-tts-design`.
-6. One bundled workflow: LTX-2.3 image-to-video with an optional audio input
-   that replaces the generated track (§3.2 option A).
+4. The node pack in the `Containerfile` and the README section (§6).
+5. Two bundled workflows: `breeze-tts-clone` and `breeze-tts-design`.
+6. One bundled workflow: `ltx2-ia2v`, image plus audio to lip-synced video
+   (§3.2).
 
-**Deliberately not in phase 1:** auto transcript (§7), lip-sync via Wan S2V or
-HuMo (§3.2 C), the AV-latent conditioning experiment (§3.2 B), Breeze-TTS-2 as
-a second family (§1), music generation with ACE-Step or Stable Audio, and TTS
-weights as library models (§4.4).
+**Deliberately not in phase 1:** auto transcript (§7), `LTXVModalityGuidance`
+and `LTXVReferenceAudio` (§3.4), Qwen3-TTS as a second family (§1), music
+generation with ACE-Step or Stable Audio, audio-driven video from other model
+families (Wan S2V, HuMo), and TTS weights as library models (§4.4).
 
 **A suggested first cut.** Steps 1 and 5 are the smallest end-to-end proof:
 one workflow, one result, played back with the browser's default controls.
 Everything in step 2 is easier to judge once there is a real take to look at.
+Step 6 is worth doing early anyway, before the polish in step 2 — it is the
+step that proves the point of all of this, and it can be tested by hand in
+ComfyUI with a clip from anywhere.
 
 ---
 
 ## 9. Open questions
 
-1. **Which Qwen3-TTS node pack?** Five candidates, none canonical. Needs a
-   comparison on the machine against the criteria in §1.
-2. **Does the 0.6B model sound good enough**, or does this want the 1.7B?
-   Affects nothing in this design; worth knowing before writing the README's
-   download sizes.
+1. **Which Breeze build?** int8-hybrid (4.5 GiB, claimed to match bf16) or
+   bf16 combined (6.5 GiB, fastest). A run of each on the same line of text
+   settles it; the README quotes whichever is pinned.
+2. **Is lip-sync good enough out of the official ia2v graph**, or does it want
+   `LTXVModalityGuidance` (§3.4)? Testable in ComfyUI before any app code is
+   written, with any audio clip at all.
 3. **Are peaks in the sidecar right?** The alternative is a column, which
    makes the gallery query heavier but avoids a write path. Sidecar is
    proposed because it survives a reindex.
@@ -513,6 +559,9 @@ Everything in step 2 is easier to judge once there is a real take to look at.
    action should be absent rather than disabled for an audio output.
 5. **Does the app need a volume control**, or is the system mixer enough for
    a local tool?
-6. **Where exactly do the TTS weights land**, and does the chosen pack let
-   that be configured, or does it need the symlink of §6? Answer per pack,
-   during the comparison in question 1.
+6. **Can the pack's weights directory be pointed at the `/models` mount**, or
+   does it need the symlink of §6?
+7. **Does `ltx2-ia2v` want the audio track written out on its own** as well as
+   muxed into the video? It is already in the input store, so probably not —
+   but a take that was trimmed to 9 seconds is not the take that was
+   generated.
