@@ -19,7 +19,7 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 | `docs/PHASE-2-HANDOFF.md`    | What Phase 2 delivered, the screens it added, and where Phase 3 picks up.                  |
 | `docs/IMPLEMENT-PHASE-2.md`  | Work plan for the model library, samples and node-timing ETA (M5–M9).                      |
 | `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, and what it still does not.                    |
-| `docs/DESIGN-AUDIO.md`       | Proposal: audio as a result, TTS voices, and sound in video workflows. Not implemented.    |
+| `docs/DESIGN-AUDIO.md`       | Proposal: audio as a result, TTS voices, song, and lip-synced video. Not implemented.      |
 | `AGENTS.md`                  | How to navigate and build the repo, and the conventions a coding agent must follow.        |
 
 Phase 1 is complete and has been verified against a real ComfyUI; see the

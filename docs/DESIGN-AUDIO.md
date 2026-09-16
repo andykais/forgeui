@@ -4,26 +4,33 @@
 **Touches:** DESIGN.md §3.1, §4.2, §6.3, §7.1, §9, §11.2, §11.4, §12.
 **Already decided:** custom nodes are acceptable. They must be installed by
 the `Containerfile` and documented in the README.
-**Goal behind the goal:** generated speech, used in generated video.
+**Goal behind the goal:** generated speech and song, used in generated video.
 
 ---
 
 ## 0. Summary
 
-ForgeUI becomes able to generate speech and treat it as a first-class result,
-so that a line of dialogue can be written, generated, auditioned, and then
-carried into an LTX video.
+ForgeUI becomes able to generate speech and song, and to treat the result as a
+first-class one — so that a line of dialogue or a chorus can be written,
+generated, auditioned, and then carried into an LTX video that is lip-synced
+to it.
 
-Three workflows ship. Two make speech:
+Four workflows ship:
 
-| Workflow | What the user gives it | What it is for |
-| --- | --- | --- |
-| **Voice clone** | a reference clip, the exact transcript of that clip, and the text to speak | making one specific voice say something |
-| **Voice design** | a description of a voice ("older man, warm, unhurried"), and the text to speak | making a voice that does not exist yet |
+| Workflow | What it does | Custom nodes | Models |
+| --- | --- | --- | --- |
+| `breeze-tts-clone` | Speech in a cloned voice. Takes a reference clip, that clip's exact transcript, and the text to speak. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` (one build: int8-hybrid or bf16) |
+| `breeze-tts-design` | Speech in a voice described in words — no reference clip. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` |
+| `ace-step-song` | A song: style tags plus lyrics, sung, with backing. | none — core nodes | `ace_step_1.5_turbo_aio` |
+| `ltx2-ia2v` | An image plus an audio take, returning video lip-synced to it. | none — core nodes | `ltx-2.3-22b-dev-fp8`, `gemma_3_12B_it_fp4_mixed`, `ltx_2.3_22b_distilled_1.1_lora`, `ltx-2.3-spatial-upscaler-x2-1.1` |
 
-Both are text-to-speech; they differ only in where the voice comes from. A
-third workflow, `ltx2-ia2v`, takes an image and one of those takes and returns
-a video that is lip-synced to it.
+The first two are text-to-speech and differ only in where the voice comes
+from. The third sings. The fourth is the point of the other three: it takes a
+take made by any of them and makes video that matches it.
+
+Only the speech workflows need anything that is not already in ComfyUI. The
+LTX models are the ones `ltx2-i2v` already uses, so that row costs no new
+downloads.
 
 The work divides into four parts, in this order:
 
@@ -31,10 +38,10 @@ The work divides into four parts, in this order:
    tile, a player, and a place in the gallery.
 2. **Audio as an input** — the content-addressed input store (§9) learns to
    take sound, so a reference clip can be attached the way a picture is.
-3. **The two TTS workflows**, on a custom node pack installed by the
-   container.
-4. **Sound in video** — a third workflow takes an image and a generated
-   speech track and returns video that is lip-synced to it.
+3. **The generation workflows** — two speech, one song; the speech pair
+   needs a custom node pack installed by the container, the song does not.
+4. **Sound in video** — a fourth workflow takes an image and a generated
+   take and returns video that is lip-synced to it.
 
 Three findings shaped this, all verified against the pinned ComfyUI
 (`v0.34.0`), its official workflow templates, and this repository:
@@ -51,7 +58,11 @@ Three findings shaped this, all verified against the pinned ComfyUI
 
 ---
 
-## 1. The two candidates
+## 1. The speech model: two candidates
+
+Only speech is a choice. The song model was named — ACE-Step 1.5, MIT, and
+already supported in core ComfyUI (§2.1.1) — and LTX is the video model this
+app already runs. This section is about the two TTS candidates only.
 
 **Breeze-TTS-2 is the one to integrate.** Licensing is not a constraint here —
 LTX already carries its own — and 7 GiB is affordable on this machine, because
@@ -130,9 +141,58 @@ text              [ what you want it to say ]
 seed              [ 1234567  🔒 ]
 ```
 
-Neither has a size row — they declare no `size` param, and the panel already
-only renders what the manifest declares. Neither declares a `model` param
-either, for reasons covered in §4.4.
+**A song (ACE-Step 1.5)**
+
+```
+style             [ neo-soul, live drums, warm rhodes, female vocal ]
+lyrics            [ [verse] … [chorus] …            ]
+duration          [ 120 ] seconds   bpm [ 120 ]   key [ C major ]
+language          [ en ]            time signature [ 4 ]
+model             [ ace_step_1.5_turbo_aio ]
+seed              [ 1234567  🔒 ]
+```
+
+None of the three has a size row — they declare no `size` param, and the panel
+already only renders what the manifest declares. The two speech workflows
+declare no `model` param either, for reasons covered in §4.4; the song one
+does, because its checkpoint is an ordinary single file.
+
+### 2.1.1 The song workflow, in more detail
+
+`ace-step-song` is the odd one out in three useful ways.
+
+**It needs no custom nodes.** ACE-Step 1.5 is supported in core ComfyUI —
+`TextEncodeAceStepAudio1.5`, `EmptyAceStep1.5LatentAudio`, `VAEDecodeAudio` —
+and ships with official templates (`audio_ace_step_1_5_checkpoint` for the
+all-in-one checkpoint, `audio_ace_step_1_5_split` for separate UNet, dual CLIP
+and VAE). The bundled workflow should follow the all-in-one template: one
+file to download, one `model` param, and a graph of eight nodes.
+
+**Its model is an ordinary library model.** `ace_step_1.5_turbo_aio.safetensors`
+is a single file in `checkpoints/`, so it is scanned, hashed, tagged and
+picked exactly like a diffusion checkpoint, and the workflow gets a real
+`model` param. Nothing in §4.4's argument about TTS weights applies to it.
+
+**Its params are musical, not visual.** `TextEncodeAceStepAudio1.5` takes
+tags, lyrics, bpm, duration, time signature, language and key scale, with
+sampler knobs behind Advanced (`cfg_scale`, `temperature`, `top_p`, `top_k`,
+`min_p`, and `generate_audio_codes` — an LLM pass that raises quality and
+costs time). Duration is set in two places that must agree: the text encoder's
+`duration` and `EmptyAceStep1.5LatentAudio`'s `seconds`. One param, two binds
+— which the manifest format already supports, and which `ltx2-i2v` already
+does for its checkpoint.
+
+The turbo model runs at 8 steps and CFG 1 in the official template, which
+makes it fast. VRAM is modest: the 2B turbo fits in 6 GB on its own and 6–8 GB
+with the small LM, against 20 GB for the 4B XL variants, so the 2B turbo AIO
+is what the README should name. The licence is MIT.
+
+**Singing in a cloned voice is out of scope**, as agreed. Worth recording
+where the thread is picked up if that changes: core ComfyUI has
+`ReferenceTimbreAudio` ("Set Reference Audio"), an experimental node that
+feeds a reference latent into ACE-Step 1.5's conditioning. That is the hook —
+a different workflow, with its own questions about clip length and how much
+identity actually transfers.
 
 ### 2.2 The result
 
@@ -360,7 +420,9 @@ list in the `Containerfile`, because omitting the second is what caused the
 latent-upscaler failure, where the file was on disk, the folder was not
 passed, and the loader offered an empty dropdown.
 
-**So phase 1 adds no model kinds at all.**
+**So phase 1 adds no model kinds at all.** ACE-Step's checkpoint is a single
+file in `checkpoints/`, which the library already scans, so the song workflow
+gets an ordinary `model` param and needs nothing new (§2.1.1).
 
 **The TTS weights are a different shape again, and should not become a model
 kind either.** A Breeze checkpoint is a *directory* — weights, tokenizer,
@@ -392,9 +454,9 @@ treatment — it should, for the same reason.
 
 ### 4.6 A custom-node requirement
 
-This is the first workflow that cannot run on stock ComfyUI. That is a change
-to what the project promises, and it deserves to be visible rather than
-discovered:
+The two speech workflows are the first in this repo that cannot run on stock
+ComfyUI — `ace-step-song` and `ltx2-ia2v` still can. That is a change to what
+the project promises, and it deserves to be visible rather than discovered:
 
 - the manifest gains an optional `requires` field naming the node pack and the
   minimum version;
@@ -525,17 +587,20 @@ testing before trusting.
    (§2.2).
 3. The `audio` param, the probe, the input-store extensions (§4.2, §4.3).
 4. The node pack in the `Containerfile` and the README section (§6).
-5. Two bundled workflows: `breeze-tts-clone` and `breeze-tts-design`.
+5. Three bundled workflows: `breeze-tts-clone`, `breeze-tts-design`, and
+   `ace-step-song`.
 6. One bundled workflow: `ltx2-ia2v`, image plus audio to lip-synced video
    (§3.2).
 
-**Deliberately not in phase 1:** auto transcript (§7), `LTXVModalityGuidance`
-and `LTXVReferenceAudio` (§3.4), Qwen3-TTS as a second family (§1), music
-generation with ACE-Step or Stable Audio, audio-driven video from other model
+**Deliberately not in phase 1:** auto transcript (§7), singing in a cloned
+voice (§2.1.1), `LTXVModalityGuidance` and `LTXVReferenceAudio` (§3.4),
+Qwen3-TTS as a second family (§1), audio-driven video from other model
 families (Wan S2V, HuMo), and TTS weights as library models (§4.4).
 
 **A suggested first cut.** Steps 1 and 5 are the smallest end-to-end proof:
 one workflow, one result, played back with the browser's default controls.
+`ace-step-song` is the one to start with, because it needs no custom nodes —
+the whole audio path can be proved before the container grows a dependency.
 Everything in step 2 is easier to judge once there is a real take to look at.
 Step 6 is worth doing early anyway, before the polish in step 2 — it is the
 step that proves the point of all of this, and it can be tested by hand in
@@ -561,7 +626,10 @@ ComfyUI with a clip from anywhere.
    a local tool?
 6. **Can the pack's weights directory be pointed at the `/models` mount**, or
    does it need the symlink of §6?
-7. **Does `ltx2-ia2v` want the audio track written out on its own** as well as
+7. **Does the song workflow want the 2B turbo AIO only**, or the split
+   UNet/CLIP/VAE variant too? Split makes the LM swappable (0.6B / 1.7B / 4B),
+   which is the quality-for-VRAM dial; AIO is one file and one param.
+8. **Does `ltx2-ia2v` want the audio track written out on its own** as well as
    muxed into the video? It is already in the input store, so probably not —
    but a take that was trimmed to 9 seconds is not the take that was
    generated.
