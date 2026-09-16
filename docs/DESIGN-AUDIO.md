@@ -19,8 +19,8 @@ Four workflows ship:
 
 | Workflow | What it does | Custom nodes | Models |
 | --- | --- | --- | --- |
-| `breeze-tts-clone` | Speech in a cloned voice. Takes a reference clip, that clip's exact transcript, and the text to speak. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` (one build: int8-hybrid or bf16) |
-| `breeze-tts-design` | Speech in a voice described in words — no reference clip. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` |
+| `breeze-tts-clone` | Speech in a cloned voice. Takes a reference clip, that clip's exact transcript, and the text to speak. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2-int8-hybrid` (or another of the four builds) |
+| `breeze-tts-design` | Speech in a voice described in words — no reference clip. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2-int8-hybrid` |
 | `ace-step-song` | A song: style tags plus lyrics, sung, with backing. | none — core nodes | `acestep_v1.5_xl_turbo_bf16`, `qwen_0.6b_ace15`, `qwen_4b_ace15`, `ace_1.5_vae` |
 | `ltx2-ia2v` | An image plus an audio take, returning video lip-synced to it. | none — core nodes | `ltx-2.3-22b-dev-fp8`, `gemma_3_12B_it_fp4_mixed`, `ltx_2.3_22b_distilled_1.1_lora`, `ltx-2.3-spatial-upscaler-x2-1.1` |
 
@@ -485,29 +485,42 @@ list in the `Containerfile`, because omitting the second is what caused the
 latent-upscaler failure, where the file was on disk, the folder was not
 passed, and the loader offered an empty dropdown.
 
-**So phase 1 adds no model kinds at all.** ACE-Step's checkpoint is a single
-file in `checkpoints/`, which the library already scans, so the song workflow
-gets an ordinary `model` param and needs nothing new (§2.1.1).
+**ACE-Step needs nothing new.** Its files are ordinary single `.safetensors`
+in `checkpoints/`, `text_encoders/` and `vae/` — folders the library already
+scans — so they appear on the Models screen like any other model, and the song
+workflow gets an ordinary `model` param (§2.1.1).
 
-**The TTS weights are a different shape again, and should not become a model
-kind either.** A Breeze checkpoint is a *directory* — weights, tokenizer,
-audio codec — and the node pack downloads it itself on first use. Adding a
-`breezetts2` key to `model_folders` would have a side effect that is easy to
-miss: that config drives two things at once, the generated
-`extra_model_paths.yaml` *and* the library scan, and the scan takes every
-`.safetensors` and `.bin` it finds (`src/models/scan.ts:33`). The Models
-screen would fill up with tokenizer shards presented as models. So:
+**Breeze does get a model folder: `breezetts2`.** An earlier draft argued for
+keeping it out of the library on the grounds that the scan would fill the
+Models screen with tokenizer shards. That was wrong, and reading the pack's
+loader settles it. What is on disk per build is:
 
-- the weights live on the `/models` mount at the path the pack expects,
-  put there by the container rather than by config;
-- the TTS workflows declare **no `model` param**, so the model-presence check
-  does not apply to them — it only iterates declared model params;
-- nothing about TTS appears on the Models screen.
+```
+/models/breezetts2/<repo>/Breeze-TTS-2-int8-hybrid.safetensors   4.5 GiB
+/models/breezetts2/<repo>/config.json
+/models/breezetts2/<repo>/audio_tokenizer/model.safetensors      small
+```
 
-If a second TTS family arrives and picking between them becomes a real choice,
-the clean fix is to let a model kind be *unscanned*: written to
-`extra_model_paths.yaml` for ComfyUI, skipped by the library. That is a small
-change to one function and is not needed yet.
+One real weights file per build — four of them if all four are pulled, at
+4.2–7.5 GiB each — plus one small audio-tokenizer file. That is a handful of
+rows, not shard soup, and the big ones are exactly what somebody looking at
+the Models screen wants to see: six gigabytes of speech model should not be
+invisible to the page whose job is "what is on disk", and the Model Size
+telemetry report (§7.1) reads the same scan.
+
+So `breezetts2` goes into `model_folders`, which puts it in the library scan
+and writes a `breezetts2:` key into the generated `extra_model_paths.yaml`,
+which the pack reads. The one row of noise — `audio_tokenizer/model.safetensors`
+— can be hidden from its own page like any other model (§8.1).
+
+**One caveat, and it is about the Generate panel rather than the library.**
+The pack's Load Model node does not take a filename: it takes one of four
+fixed labels ("int8 hybrid (recommended)", "bf16 (best quality)", …) and
+resolves the file itself. So the speech workflows expose an `enum` of those
+labels, not a `model` picker, and the Breeze rows on the Models screen are
+informational — size, hash, tags, notes — rather than something Generate
+selects from. Worth knowing before somebody wonders why the model row and the
+param do not line up.
 
 ### 4.5 The waveform image
 
@@ -598,27 +611,30 @@ A commit, not a branch: a custom node pack that moves under you is the most
 likely source of "it worked last week". The version is a build arg for the
 same reason `COMFY_VERSION` is.
 
-**Where the Breeze weights live.** Asked and answered: the pack looks for
-them in `ComfyUI/models/breezetts2/`, and it honours ComfyUI's `folder_paths`,
-so a `breezetts2:` key in `extra_model_paths.yaml` is searched too — but **new
-downloads always land in the running installation's own models folder**. Since
-every model here belongs under `/models`, the smallest thing that does it is a
-symlink at build time:
+**Where the Breeze weights live.** Read out of the pack's loader rather than
+guessed, because the behaviour is in three parts:
+
+- it **searches** `<models_dir>/breezetts2`, any `breezetts2:` key in
+  `extra_model_paths.yaml`, and — usefully — `<root>/breezetts2` for every
+  models root it can infer from the standard folder keys. Since ForgeUI maps
+  `checkpoints/`, `loras/` and the rest to folders under `/models`, it infers
+  `/models` and probes `/models/breezetts2` on its own;
+- it **registers** `breezetts2` with ComfyUI's `folder_paths` at import;
+- it **downloads** to `model_dirs()[0]`, which is always the running
+  install's own `ComfyUI/models/breezetts2` — a yaml key does not redirect
+  that.
+
+So finding the weights is solved twice over, and only the first download needs
+help. A symlink at build time is that help:
 
 ```dockerfile
 RUN mkdir -p /models/breezetts2 \
     && ln -s /models/breezetts2 "${COMFY_HOME}/models/breezetts2"
 ```
 
-Downloads then land on the mount, and the weights are never baked into the
-image — they are gigabytes, and an image should not carry them.
-
-The alternative is to have ForgeUI write the `breezetts2:` key into the
-`extra_model_paths.yaml` it generates. That is more code than it looks:
-`model_folders` drives both that file *and* the library scan (§4.4), so it
-would need a model kind that is exported to ComfyUI but skipped by the
-scanner. Worth doing the day a second such folder appears; not worth it for
-one symlink.
+Downloads then land on the mount, the library scans them there (§4.4), and
+nothing is baked into the image — the weights are gigabytes, and an image
+should not carry them.
 
 **README.** A subsection under *Running in a container*, covering: that
 ffmpeg is required and what for; which pack and pin is installed; where the
@@ -682,7 +698,8 @@ testing before trusting.
    the player in the viewer, the gallery chip (§2.2, §6).
 3. The `audio` param, the `ffprobe` duration probe, the input-store
    extensions (§4.2, §4.3).
-4. The node pack in the `Containerfile` and the README section (§6).
+4. The node pack and the `breezetts2` model folder in the `Containerfile`,
+   and the README section (§4.4, §6).
 5. Three bundled workflows: `breeze-tts-clone`, `breeze-tts-design`, and
    `ace-step-song`.
 6. One bundled workflow: `ltx2-ia2v`, image plus audio to lip-synced video
@@ -691,7 +708,7 @@ testing before trusting.
 **Deliberately not in phase 1:** auto transcript (§7), singing in a cloned
 voice (§2.1.1), `LTXVModalityGuidance` and `LTXVReferenceAudio` (§3.4),
 Qwen3-TTS as a second family (§1), audio-driven video from other model
-families (Wan S2V, HuMo), and TTS weights as library models (§4.4).
+families (Wan S2V, HuMo).
 
 **A suggested first cut.** Steps 1 and 5 are the smallest end-to-end proof:
 one workflow, one result, played back with the browser's default controls.
