@@ -21,7 +21,7 @@ Four workflows ship:
 | --- | --- | --- | --- |
 | `breeze-tts-clone` | Speech in a cloned voice. Takes a reference clip, that clip's exact transcript, and the text to speak. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` (one build: int8-hybrid or bf16) |
 | `breeze-tts-design` | Speech in a voice described in words — no reference clip. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2` |
-| `ace-step-song` | A song: style tags plus lyrics, sung, with backing. | none — core nodes | `ace_step_1.5_turbo_aio` |
+| `ace-step-song` | A song: style tags plus lyrics, sung, with backing. | none — core nodes | `acestep_v1.5_xl_turbo_bf16`, `qwen_0.6b_ace15`, `qwen_4b_ace15`, `ace_1.5_vae` |
 | `ltx2-ia2v` | An image plus an audio take, returning video lip-synced to it. | none — core nodes | `ltx-2.3-22b-dev-fp8`, `gemma_3_12B_it_fp4_mixed`, `ltx_2.3_22b_distilled_1.1_lora`, `ltx-2.3-spatial-upscaler-x2-1.1` |
 
 The first two are text-to-speech and differ only in where the voice comes
@@ -51,7 +51,9 @@ Three findings shaped this, all verified against the pinned ComfyUI
   `video_ltx2_3_ia2v`, "LTX-2.3: Image Audio to Video" — and it differs from
   the graph this repo already ships by four nodes (§3).
 - **The database needs no migration.** `outputs.kind` and `inputs.kind` are
-  plain `TEXT`, and every dimension column is already nullable (§5).
+  plain `TEXT`, and every dimension column is already nullable; one additive
+  column carries a clip's duration, and the waveform is a file rather than a
+  row (§5).
 - **There is one integration bug waiting.** ComfyUI reports audio files under
   a key this app does not read, so an audio workflow would run, succeed, and
   be reported as having produced nothing (§4.1).
@@ -148,7 +150,7 @@ style             [ neo-soul, live drums, warm rhodes, female vocal ]
 lyrics            [ [verse] … [chorus] …            ]
 duration          [ 120 ] seconds   bpm [ 120 ]   key [ C major ]
 language          [ en ]            time signature [ 4 ]
-model             [ ace_step_1.5_turbo_aio ]
+model             [ acestep_v1.5_xl_turbo_bf16 ]
 seed              [ 1234567  🔒 ]
 ```
 
@@ -157,21 +159,52 @@ already only renders what the manifest declares. The two speech workflows
 declare no `model` param either, for reasons covered in §4.4; the song one
 does, because its checkpoint is an ordinary single file.
 
+**How delivery is controlled.** Two mechanisms, and they are not
+interchangeable:
+
+| What | How | Where |
+| --- | --- | --- |
+| A laugh, a cough, a sigh, a throat-clear | **inline in the text**, in parentheses: `(sigh) It is good to hear your voice again.` Chinese uses square brackets: `[叹气]` | the `text` param of either workflow — it is only text, so it costs nothing |
+| Pauses and emphasis | punctuation and line breaks in the same text | same |
+| Tone, emotion, pace, delivery | a **separate instruction**, e.g. "Speak slowly with a restrained, serious tone." | `voice` in the design workflow; a `direction` toggle in the clone workflow |
+
+Design already has somewhere to put tone, because its whole input is a
+description of a voice — "an older man, warm, unhurried" is a delivery
+instruction as much as a timbre. Cloning does not: the Voice Clone node runs
+at CFG 1.0 and takes no instruction, because the reference is the voice.
+
+Breeze's answer to that is a third node, **Voice Direction**, which is
+"clone this voice *and* deliver it like this", at CFG 4. Rather than a third
+workflow, the clone workflow should carry it as an option:
+
+```
+reference voice   [ drop a clip, or pick a result ]
+transcript        [ what the reference clip says  ]
+text              [ (sigh) what you want it to say ]
+direct the read   [x]                                   ← bool param
+instruction       [ slowly, restrained, serious ]        ← when direct is on
+seed              [ 1234567  🔒 ]
+```
+
+That is the `when` pattern this repo already has, with a `ComfySwitchNode`
+picking Voice Clone or Voice Direction — the same shape as `ltx2-i2v`'s
+optional distilled LoRA, including the lazy evaluation that keeps the
+unselected branch from running.
+
 ### 2.1.1 The song workflow, in more detail
 
 `ace-step-song` is the odd one out in three useful ways.
 
 **It needs no custom nodes.** ACE-Step 1.5 is supported in core ComfyUI —
 `TextEncodeAceStepAudio1.5`, `EmptyAceStep1.5LatentAudio`, `VAEDecodeAudio` —
-and ships with official templates (`audio_ace_step_1_5_checkpoint` for the
-all-in-one checkpoint, `audio_ace_step_1_5_split` for separate UNet, dual CLIP
-and VAE). The bundled workflow should follow the all-in-one template: one
-file to download, one `model` param, and a graph of eight nodes.
+and ships with official templates for every variant. The bundled workflow
+should follow `audio_ace_step1_5_xl_turbo` — a graph of eight nodes, with
+separate UNet, dual-CLIP and VAE loaders.
 
-**Its model is an ordinary library model.** `ace_step_1.5_turbo_aio.safetensors`
-is a single file in `checkpoints/`, so it is scanned, hashed, tagged and
-picked exactly like a diffusion checkpoint, and the workflow gets a real
-`model` param. Nothing in §4.4's argument about TTS weights applies to it.
+**Its models are ordinary library models.** Single `.safetensors` files in
+the folders the library already scans, so they are hashed, tagged and picked
+exactly like a diffusion checkpoint, and the workflow gets a real `model`
+param. Nothing in §4.4's argument about TTS weights applies to it.
 
 **Its params are musical, not visual.** `TextEncodeAceStepAudio1.5` takes
 tags, lyrics, bpm, duration, time signature, language and key scale, with
@@ -182,10 +215,26 @@ costs time). Duration is set in two places that must agree: the text encoder's
 — which the manifest format already supports, and which `ltx2-i2v` already
 does for its checkpoint.
 
-The turbo model runs at 8 steps and CFG 1 in the official template, which
-makes it fast. VRAM is modest: the 2B turbo fits in 6 GB on its own and 6–8 GB
-with the small LM, against 20 GB for the 4B XL variants, so the 2B turbo AIO
-is what the README should name. The licence is MIT.
+**Which build: the 4B XL turbo, split.** ACE-Step 1.5 ships a 2B line and a
+4B XL line, each in base / SFT / turbo, plus separate 0.6B, 1.7B and 4B
+language models. The XL models want ~20 GB without offloading, which a 5090
+has, so there is no reason to take the smaller one. Turbo over base because
+the official templates run it at 8 steps and CFG 1 against base's 50 steps and
+CFG 6 — six times the work for a difference nobody has measured here yet.
+
+Four files rather than one:
+
+```
+UNETLoader      acestep_v1.5_xl_turbo_bf16.safetensors
+DualCLIPLoader  qwen_0.6b_ace15.safetensors + qwen_4b_ace15.safetensors  (type: ace)
+VAELoader       ace_1.5_vae.safetensors
+```
+
+The split layout is also the more useful one for this app: the language model
+is the quality-for-VRAM dial, so having it as its own picker means dropping to
+the 1.7B is a change in a dropdown rather than a different workflow. The
+all-in-one checkpoint (`ace_step_1.5_turbo_aio.safetensors`, 2B) stays worth
+knowing about as the small-machine option. The licence is MIT.
 
 **Singing in a cloned voice is out of scope**, as agreed. Worth recording
 where the thread is picked up if that changes: core ComfyUI has
@@ -204,27 +253,43 @@ that was spoken. The waveform is what makes a grid of speech scannable — a
 three-second line and a thirty-second paragraph should not look alike, and
 silence at the front of a take should be visible before it is audible.
 
-**Where the waveform comes from** is the one genuinely new piece of
-engineering in this design. Three options were considered:
+**Where the waveform comes from: ffmpeg, at completion.** ffmpeg is a
+reasonable thing for this stack to require — it is one apt package, every
+machine that runs ComfyUI has room for it, and it removes three problems at
+once:
 
-| Approach | Cost | Verdict |
-| --- | --- | --- |
-| Decode server-side, store peaks | needs an audio decoder; there is no ffmpeg in the container and Deno has none | rejected — a new binary dependency for a thumbnail |
-| Decode in the browser per tile | free (WebAudio has the codecs) but re-downloads and re-decodes the whole file per tile | rejected — a gallery of 100 takes is unusable |
-| Decode in the browser **once**, persist the peaks | one decode per output, ever | **chosen** |
+- the waveform is **a PNG file beside the audio**, drawn once by
+  `ffmpeg -filter_complex showwavespic`, so the tile and the viewer are an
+  `<img>` and nothing more. No peaks format, no write-back endpoint, no
+  canvas drawing, no "not computed yet" state after the first second;
+- `ffprobe` gives the **duration** of both outputs and uploaded clips, so the
+  input probe (§4.3) is a subprocess call rather than a set of hand-written
+  container parsers;
+- it is the same answer for every codec, including the ones a browser's
+  decoder is patchy on.
 
-The peaks are ~200 min/max pairs — under 1 KB as a JSON array. They belong in
-the output's sidecar, next to the params, which keeps them out of the database
-and makes them survive a reindex. The viewer computes them on first open and
-writes them back through a small endpoint; a tile with no peaks yet draws a
-flat placeholder and the duration. This mirrors how video thumbnails already
-work: the browser has the codecs, so the browser does the work.
+The file is `<output path>.waveform.png` — a sibling, by convention, so it
+needs no column and no migration. It is drawn in one colour on transparency
+so the one image reads in both themes, and it is deleted with the output
+(`remove()` in `src/outputs/store.ts:343` gains a third path).
+
+If ffmpeg is missing — a dev box, not the container — the waveform is simply
+absent and the tile falls back to the duration on a plain plate. Missing
+ffmpeg must never fail a generation.
 
 **The viewer** replaces the image element with a transport: waveform, a
 playhead, a scrub bar, play/pause on space, and the duration. The existing
-rules carry across where they make sense and are dropped where they do not —
-audio autoplays on open like video does, and `f` for fullscreen is meaningless
-and is not bound.
+rules carry across where they make sense and are dropped where they do not:
+
+- audio autoplays on open, as video does;
+- `f` for fullscreen is meaningless and is not bound;
+- **Upscale is absent** — not disabled, absent. There is no upscale workflow
+  for audio and there is no plan for one, so the action should not be in the
+  sidebar at all for an audio output (`upscalersFor` already returns an empty
+  list when nothing matches, which hides it);
+- **Generate again** and **Reuse parameters** work unchanged;
+- there is **no volume control**. This is a local app on a machine with a
+  system mixer.
 
 **The gallery** gains a third chip beside Image and Video. Search already
 matches the prompt, which for a TTS workflow is the spoken text — so searching
@@ -392,13 +457,13 @@ The store itself needs nothing — it is content-addressed by bytes and does not
 care what they are. Two things around it are image-shaped:
 
 - **The probe** (`src/inputs/probe.ts`) sniffs PNG, JPEG and WebP magic and
-  returns width and height. It needs an audio sibling that recognises `RIFF`,
-  `fLaC`, `OggS`, `ftyp` and MPEG frame headers, and returns **duration**
-  instead of dimensions. Reading duration from a container header is
-  straightforward for WAV and FLAC and fiddly for MP3 (it means either
-  trusting a VBR header or counting frames); the browser knows it anyway from
-  the `<audio>` element, so the probe may reasonably return `null` and let the
-  client fill it in.
+  returns width and height. Audio needs a sibling that returns **duration**
+  instead of dimensions, and with ffmpeg in the stack (§2.2) that is one
+  `ffprobe` call rather than a hand-written parser per container — which
+  matters most for MP3, where the honest alternatives are trusting a VBR
+  header or counting frames. It still sniffs the magic bytes to decide the
+  extension, because the extension is what the store writes and a `.wav` that
+  is really an MP3 breaks ComfyUI at load time, not at upload time.
 - **The filename pattern** — `^([0-9a-f]{64})\.(png|jpe?g|webp)$` — appears in
   both `src/jobs/pipeline.ts` and `src/frontend/src/lib/media.ts`. It gains
   the audio extensions, and the two copies should agree.
@@ -444,13 +509,18 @@ the clean fix is to let a model kind be *unscanned*: written to
 `extra_model_paths.yaml` for ComfyUI, skipped by the library. That is a small
 change to one function and is not needed yet.
 
-### 4.5 Waveform peaks
+### 4.5 The waveform image
 
-Covered in §2.2. The primitive is: a short array of min/max pairs, computed
-once in the browser, stored in the output's sidecar, read by the tile and the
-viewer. It needs a write path (`POST /api/outputs/:id/peaks` or a field on the
-existing patch route) and a decision about whether an input clip gets the same
-treatment — it should, for the same reason.
+Covered in §2.2. The primitive is: **one PNG per audio file**, drawn by
+ffmpeg at completion, named by convention beside the audio, served by the
+existing media route, and deleted with its output. An uploaded clip gets the
+same treatment for the same reason — the player on an attached reference
+should show the shape of what was attached.
+
+What this replaces is worth stating, since an earlier draft proposed it: no
+peaks array, no sidecar field for it, no endpoint for the browser to write one
+back, and no canvas. A file the server already knows how to serve is less to
+build and less to get wrong.
 
 ### 4.6 A custom-node requirement
 
@@ -479,8 +549,9 @@ gets an inscrutable ComfyUI error.
 | `inputs` | `kind = 'audio'`; `width`/`height` null | **none** — same (`schema.sql:78`) |
 | `inputs` | duration of a clip | **one additive column**, `duration_ms INTEGER`, nullable |
 | `outputs` | duration of a take | **none** — `duration_ms` exists and is currently written as null |
-| sidecars | `kind: "audio"`, plus peaks | no migration; **validator change** (see below) |
-| `config.yaml` | two new model folders | **none** — new keys are merged into an existing config on launch |
+| sidecars | `kind: "audio"` | no migration; **validator change** (see below) |
+| waveform PNGs | one per audio file, named by convention | **none** — a file beside the audio, not a row (§4.5) |
+| `config.yaml` | no new keys | **none** |
 
 So: one migration, version 6, adding `inputs.duration_ms`. It follows the
 established shape — additive, nullable, no backfill, also present in
@@ -495,14 +566,20 @@ at reindex. That is acceptable and normal, and it should be stated in the
 phase notes rather than found.
 
 **Nothing needs backfilling and nothing is rewritten.** Existing outputs keep
-their rows; the waveform peaks are additive and absent means "not computed
-yet", which the tile already has to handle for a brand-new output.
+their rows, and a missing waveform PNG means "no waveform", which the tile has
+to handle anyway for the moment between a file landing and ffmpeg finishing.
 
 ---
 
-## 6. Custom nodes: the container and the README
+## 6. What the container and the README gain
 
-Two places, one source of truth: a pinned commit.
+Three things: ffmpeg, the node pack, and somewhere for the weights to live.
+
+**ffmpeg.** One line in the existing `apt-get install`, beside `git` and
+`curl`. The README should say what it is for — audio waveform thumbnails and
+reading clip durations (§2.2) — so nobody wonders why a video app that shells
+out to nothing suddenly wants it, and so a non-container install knows to
+provide it.
 
 **`Containerfile`.** After ComfyUI's own requirements are installed, clone the
 pack at a pinned commit and install its requirements into the same venv:
@@ -521,22 +598,40 @@ A commit, not a branch: a custom node pack that moves under you is the most
 likely source of "it worked last week". The version is a build arg for the
 same reason `COMFY_VERSION` is.
 
-Weights are **not** baked into the image. They are gigabytes, and they belong
-on the `/models` mount with everything else. The pack downloads them on first
-use into its own directory, so that directory has to resolve onto the mount —
-a symlink created at build time is enough, and it keeps the weights out of
-`model_folders` for the reason given in §4.4.
+**Where the Breeze weights live.** Asked and answered: the pack looks for
+them in `ComfyUI/models/breezetts2/`, and it honours ComfyUI's `folder_paths`,
+so a `breezetts2:` key in `extra_model_paths.yaml` is searched too — but **new
+downloads always land in the running installation's own models folder**. Since
+every model here belongs under `/models`, the smallest thing that does it is a
+symlink at build time:
 
-**README.** A subsection under *Running in a container*, covering: which pack
-and pin is installed, where the weights land and roughly how large the first
-download is, the licence of the weights, and — for people not using the
-container — the manual install: clone the pack into `custom_nodes/`,
-`pip install -r requirements.txt` into ComfyUI's venv, restart ComfyUI.
+```dockerfile
+RUN mkdir -p /models/breezetts2 \
+    && ln -s /models/breezetts2 "${COMFY_HOME}/models/breezetts2"
+```
+
+Downloads then land on the mount, and the weights are never baked into the
+image — they are gigabytes, and an image should not carry them.
+
+The alternative is to have ForgeUI write the `breezetts2:` key into the
+`extra_model_paths.yaml` it generates. That is more code than it looks:
+`model_folders` drives both that file *and* the library scan (§4.4), so it
+would need a model kind that is exported to ComfyUI but skipped by the
+scanner. Worth doing the day a second such folder appears; not worth it for
+one symlink.
+
+**README.** A subsection under *Running in a container*, covering: that
+ffmpeg is required and what for; which pack and pin is installed; where the
+weights land and roughly how large the first download is; the licence of the
+weights; and — for people not using the container — the manual steps: install
+ffmpeg, clone the pack into `custom_nodes/`, `pip install -r requirements.txt`
+into ComfyUI's venv, restart ComfyUI.
 
 **Tests.** The existing `tests/unit/container_test.ts` holds the Containerfile
-to the model-kind list. It should also hold it to the node pin, so a pack
-added to the image without a documented commit fails a test rather than a
-build months later.
+to the model-kind list and to the README. It should also hold it to the node
+pin and to ffmpeg, so a pack added without a documented commit — or an
+`apt-get` line that loses ffmpeg in a rebase — fails a test rather than a
+generation months later.
 
 ---
 
@@ -583,9 +678,10 @@ testing before trusting.
 
 1. Read `ui.audio` from ComfyUI's outputs; add `audio` to `WorkflowKind` and
    the extension sniffing (§4.1). Without this nothing else is testable.
-2. The audio tile, the player in the viewer, the gallery chip, the peaks
-   (§2.2).
-3. The `audio` param, the probe, the input-store extensions (§4.2, §4.3).
+2. ffmpeg in the container; the waveform PNG at completion; the audio tile,
+   the player in the viewer, the gallery chip (§2.2, §6).
+3. The `audio` param, the `ffprobe` duration probe, the input-store
+   extensions (§4.2, §4.3).
 4. The node pack in the `Containerfile` and the README section (§6).
 5. Three bundled workflows: `breeze-tts-clone`, `breeze-tts-design`, and
    `ace-step-song`.
@@ -610,26 +706,24 @@ ComfyUI with a clip from anywhere.
 
 ## 9. Open questions
 
+Six of the original nine were answered in review and are now decisions in the
+text above: ffmpeg draws the waveform (§2.2), Upscale is absent for audio and
+Generate again stays (§2.2), there is no volume control (§2.2), the Breeze
+weights reach `/models` by symlink (§6), the song workflow takes the 4B XL
+turbo (§2.1.1), and `ltx2-ia2v` writes only the video (§3.2).
+
+What is left:
+
 1. **Which Breeze build?** int8-hybrid (4.5 GiB, claimed to match bf16) or
    bf16 combined (6.5 GiB, fastest). A run of each on the same line of text
    settles it; the README quotes whichever is pinned.
 2. **Is lip-sync good enough out of the official ia2v graph**, or does it want
    `LTXVModalityGuidance` (§3.4)? Testable in ComfyUI before any app code is
    written, with any audio clip at all.
-3. **Are peaks in the sidecar right?** The alternative is a column, which
-   makes the gallery query heavier but avoids a write path. Sidecar is
-   proposed because it survives a reindex.
-4. **Should an audio result be upscalable/reusable** in the sense the viewer
-   means today? "Generate again" makes sense; "Upscale" does not, and the
-   action should be absent rather than disabled for an audio output.
-5. **Does the app need a volume control**, or is the system mixer enough for
-   a local tool?
-6. **Can the pack's weights directory be pointed at the `/models` mount**, or
-   does it need the symlink of §6?
-7. **Does the song workflow want the 2B turbo AIO only**, or the split
-   UNet/CLIP/VAE variant too? Split makes the LM swappable (0.6B / 1.7B / 4B),
-   which is the quality-for-VRAM dial; AIO is one file and one param.
-8. **Does `ltx2-ia2v` want the audio track written out on its own** as well as
-   muxed into the video? It is already in the input store, so probably not —
-   but a take that was trimmed to 9 seconds is not the take that was
-   generated.
+3. **How should the waveform be coloured** so one PNG reads on both themes?
+   A mid-tone at partial opacity is the cheap answer; two files, one per
+   theme, is the thorough one and probably not worth it.
+4. **Does the clone workflow's `direction` toggle earn its place**, or is
+   Voice Direction different enough to be its own workflow? Depends on whether
+   a directed clone at CFG 4 sounds like the same feature as a clone at CFG 1.
+   A listening question, not a design one.
