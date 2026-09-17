@@ -46,3 +46,26 @@ Deno.test("the README lists the same folders the Containerfile mounts", async ()
     );
   }
 });
+
+/**
+ * ffmpeg is the app's only external binary (DESIGN-AUDIO §2.2): it draws the
+ * waveform an audio output is shown by and reads the duration of a clip. It
+ * is one word in a long `apt-get` line, which is exactly the kind of thing a
+ * rebase drops — and its absence is silent, because everything degrades to
+ * "no waveform" rather than failing.
+ */
+Deno.test("the container installs ffmpeg, and the README says why", async () => {
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const containerfile = await Deno.readTextFile(join(root, "Containerfile"));
+  const installed = /apt-get install[^\n]*(\n[^\n]*)*?\bffmpeg\b/.test(
+    containerfile,
+  );
+  assertEquals(installed, true, "Containerfile does not install ffmpeg");
+
+  const readme = await Deno.readTextFile(join(root, "README.md"));
+  assertEquals(
+    readme.includes("ffmpeg"),
+    true,
+    "README does not mention ffmpeg",
+  );
+});

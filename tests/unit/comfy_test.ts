@@ -80,6 +80,16 @@ Deno.test("executed events collect the files a node wrote", () => {
     }).map((image) => image.filename),
     ["clip.webp"],
   );
+
+  // And audio under a third. Every save-audio node reports under `audio` and
+  // under nothing else, so a workflow that makes sound looked to this app
+  // like a workflow that produced no files at all.
+  assertEquals(
+    outputImages({
+      audio: [{ filename: "take_00001_.flac", subfolder: "", type: "output" }],
+    }).map((image) => image.filename),
+    ["take_00001_.flac"],
+  );
 });
 
 Deno.test("errors and interruptions keep ComfyUI's own payload", () => {

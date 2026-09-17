@@ -25,6 +25,7 @@
 
   let video = $state<HTMLVideoElement | undefined>(undefined);
   const isVideo = $derived(output.kind === "video");
+  const isAudio = $derived(output.kind === "audio");
 
   /**
    * A tile can be dragged straight into an `image` param (§11.2). What
@@ -69,13 +70,25 @@
         playsinline
         preload="metadata"
       ></video>
+    {:else if isAudio}
+      <!--
+        A drawn waveform (§2.2), which is the only picture sound has. It is a
+        wide, short image in a square cell, so it sits in the middle of the
+        tile rather than filling it — and a take with no waveform yet still
+        gets its duration and prompt from the strip below.
+      -->
+      <span class="wave">
+        {#if output.waveform_url}
+          <img src={output.waveform_url} alt="" loading="lazy" />
+        {/if}
+      </span>
     {:else}
       <img src={output.media_url} alt={output.prompt ?? output.id} loading="lazy" />
     {/if}
   </button>
 
-  {#if isVideo}
-    <span class="badge kind">Video</span>
+  {#if isVideo || isAudio}
+    <span class="badge kind">{isVideo ? "Video" : "Audio"}</span>
     {#if output.duration_ms}
       <span class="length mono">{clock(output.duration_ms)}</span>
     {/if}
@@ -128,6 +141,23 @@
   /* The letterbox behind a fitted image; the ring above carries the rest. */
   .tile:hover .surface {
     background: var(--control-selected);
+  }
+
+  /* Centred in the cell: a 960x160 waveform in a square tile is a band, and
+     stretching it to fill would say something false about the sound. */
+  .wave {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .wave img {
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
   }
 
   /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */

@@ -8,6 +8,7 @@
  * read from the other end.
  */
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".mov"];
+const AUDIO_EXTENSIONS = [".flac", ".mp3", ".opus", ".wav", ".ogg", ".m4a"];
 
 export function isVideoUrl(url: string | null | undefined): boolean {
   if (!url) return false;
@@ -16,6 +17,15 @@ export function isVideoUrl(url: string | null | undefined): boolean {
   const dot = path.lastIndexOf(".");
   if (dot < 0) return false;
   return VIDEO_EXTENSIONS.includes(path.slice(dot).toLowerCase());
+}
+
+/** The same question for sound: what a `<audio>` should be pointed at. */
+export function isAudioUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const path = url.split(/[?#]/)[0] ?? "";
+  const dot = path.lastIndexOf(".");
+  if (dot < 0) return false;
+  return AUDIO_EXTENSIONS.includes(path.slice(dot).toLowerCase());
 }
 
 /**

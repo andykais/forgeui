@@ -65,7 +65,7 @@ export const PARAM_TYPES = [
 ] as const;
 export type ParamType = typeof PARAM_TYPES[number];
 
-export const WORKFLOW_KINDS = ["image", "video"] as const;
+export const WORKFLOW_KINDS = ["image", "video", "audio"] as const;
 export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 
 /**

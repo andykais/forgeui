@@ -32,9 +32,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DENO_INSTALL=/usr/local \
     PATH="/usr/local/bin:${PATH}"
 
+# ffmpeg is the one external binary the app itself shells out to: it draws
+# the waveform that stands in for an audio file's thumbnail and reads the
+# duration of a clip (docs/DESIGN-AUDIO.md §2.2).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip python3-dev \
       git curl ca-certificates unzip build-essential \
+      ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Deno (runs the app itself)

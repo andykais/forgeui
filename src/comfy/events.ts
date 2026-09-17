@@ -113,7 +113,13 @@ function images(value: unknown): ComfyImageRef[] {
   return out;
 }
 
-/** Every file a node reported, whatever key ComfyUI filed it under. */
+/**
+ * Every file a node reported, whatever key ComfyUI filed it under.
+ *
+ * `audio` is not optional politeness: every audio save node reports under it
+ * and under nothing else (`comfy_api/latest/_ui.py`), so without it an audio
+ * workflow runs, succeeds, and is reported as having written no files at all.
+ */
 export function outputImages(output: unknown): ComfyImageRef[] {
   if (typeof output !== "object" || output === null) return [];
   const record = output as Record<string, unknown>;
@@ -121,6 +127,7 @@ export function outputImages(output: unknown): ComfyImageRef[] {
     ...images(record.images),
     ...images(record.gifs),
     ...images(record.videos),
+    ...images(record.audio),
   ];
 }
 

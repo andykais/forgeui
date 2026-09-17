@@ -107,6 +107,12 @@ a pinned ComfyUI (`docs/HARDWARE-CHECKLIST.md`'s verified version) with CUDA
 Everything needed to launch the app is baked in at build time; only your data is
 expected to come from volumes.
 
+It also installs **`ffmpeg`**, which is the one external binary the app itself
+runs: an audio result has no thumbnail of its own, so ffmpeg draws its waveform
+beside it and reads how long the clip is. Running the app outside the container
+means installing ffmpeg too — without it, audio still generates and plays, it
+just has no waveform and no duration.
+
 Build:
 
 ```sh

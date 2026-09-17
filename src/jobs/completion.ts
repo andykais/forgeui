@@ -13,6 +13,7 @@ import {
 import type { ComfyImageRef } from "../comfy/events.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import type { Manifest, WorkflowKind } from "../workflows/types.ts";
+import { readAudio } from "../media/audio.ts";
 import { collectModels } from "./models.ts";
 import { readPngSize, SIDECAR_KEYWORD, withTextChunk } from "./png.ts";
 import {
@@ -64,6 +65,15 @@ export interface CompleteJobResult {
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov"]);
+/** What ComfyUI's save-audio nodes write: flac, mp3 and opus (§4.1). */
+const AUDIO_EXTENSIONS = new Set([
+  ".flac",
+  ".mp3",
+  ".opus",
+  ".wav",
+  ".ogg",
+  ".m4a",
+]);
 
 function dayPath(date: Date): string {
   const year = date.getUTCFullYear();
@@ -81,6 +91,7 @@ function kindFor(
   if (declared) return declared.kind;
   const ext = extname(file).toLowerCase();
   if (VIDEO_EXTENSIONS.has(ext)) return "video";
+  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
   if (IMAGE_EXTENSIONS.has(ext)) return "image";
   return manifest?.kind ?? "image";
 }
@@ -144,6 +155,7 @@ export async function completeJob(
     kind: WorkflowKind;
     width: number | null;
     height: number | null;
+    durationMs: number | null;
   }
 
   const moved: Moved[] = [];
@@ -169,15 +181,21 @@ export async function completeJob(
         // A file we cannot measure still counts as an output.
       }
     }
+    // Sound has no thumbnail of its own, so one is drawn beside it, and the
+    // duration is read from the container rather than guessed (§2.2). Both
+    // are best-effort: a machine without ffmpeg still gets its output.
+    const kind = kindFor(name, entry.node, manifest);
+    const audio = kind === "audio" ? await readAudio(destination) : null;
     moved.push({
       id: `${job.id}-${index}`,
       node: entry.node,
       relativePath: `${relativeDir}/${name}`,
       absolutePath: destination,
       file: name,
-      kind: kindFor(name, entry.node, manifest),
+      kind,
       width,
       height,
+      durationMs: audio?.duration_ms ?? null,
     });
   }
 
@@ -190,6 +208,7 @@ export async function completeJob(
     kind: entry.kind,
     ...(entry.width !== null ? { width: entry.width } : {}),
     ...(entry.height !== null ? { height: entry.height } : {}),
+    ...(entry.durationMs !== null ? { duration_ms: entry.durationMs } : {}),
   }));
 
   const sidecar = buildSidecar({
@@ -242,7 +261,7 @@ export async function completeJob(
       kind: entry.kind,
       width: entry.width,
       height: entry.height,
-      duration_ms: null,
+      duration_ms: entry.durationMs,
       sha256,
       workflow_id: job.workflow_id,
       workflow_hash: job.workflow_hash,

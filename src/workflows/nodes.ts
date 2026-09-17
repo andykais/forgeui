@@ -417,6 +417,69 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["filename_prefix", "fps", "lossless", "quality", "method"],
     output: true,
   },
+
+  // ---------------------------------------------------------------- audio
+  // The generic core audio nodes (`comfy_extras/nodes_audio.py`). Every save
+  // node here reports its files under ComfyUI's `audio` key rather than
+  // `images`, which is the difference the app had to learn (§4.1).
+  LoadAudio: {
+    widgets: ["audio"],
+    outputs: ["AUDIO"],
+  },
+  EmptyLatentAudio: {
+    widgets: ["seconds", "batch_size"],
+    outputs: ["LATENT"],
+  },
+  VAEEncodeAudio: {
+    inputs: ["audio", "vae"],
+    outputs: ["LATENT"],
+  },
+  VAEDecodeAudio: {
+    inputs: ["samples", "vae"],
+    outputs: ["AUDIO"],
+  },
+  TrimAudioDuration: {
+    inputs: ["audio"],
+    widgets: ["start_index", "duration"],
+    outputs: ["AUDIO"],
+  },
+  SaveAudio: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  SaveAudioMP3: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "quality"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  SaveAudioOpus: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "quality"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  // `format` is a DynamicCombo: flac takes no further widget, mp3 and opus
+  // each add their own quality combo after it (comfy_api/latest/_io.py).
+  SaveAudioAdvanced: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "format"],
+    dynamic: {
+      format: {
+        flac: [],
+        mp3: ["quality"],
+        opus: ["quality"],
+      },
+    },
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  PreviewAudio: {
+    inputs: ["audio"],
+    output: true,
+  },
 };
 
 export const CORE_NODE_TYPES: readonly string[] = Object.keys(CORE_NODES);

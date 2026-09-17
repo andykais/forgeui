@@ -53,18 +53,18 @@ export interface Manifest {
   id: string;
   name: string;
   family: string | null;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   category: string | null;
   description: string | null;
   params: Param[];
-  outputs: { node: string; kind: "image" | "video" }[];
+  outputs: { node: string; kind: "image" | "video" | "audio" }[];
 }
 
 export interface WorkflowSummary {
   id: string;
   name: string;
   family: string | null;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   category: string | null;
   description: string | null;
   source: "bundled" | "user";
@@ -157,6 +157,8 @@ export interface Output {
   deleted_at: number | null;
   created_at: number;
   media_url: string;
+  /** The drawn waveform of an audio output (§2.2); null for every other kind. */
+  waveform_url: string | null;
   generation_ms: number | null;
   models: { model_hash: string; role: string }[];
 }

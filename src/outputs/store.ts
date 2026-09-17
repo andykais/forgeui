@@ -1,5 +1,6 @@
 import type { Database } from "@db/sqlite";
 import { join } from "@std/path";
+import { WAVEFORM_SUFFIX, waveformPathFor } from "../media/audio.ts";
 import type { DataPaths } from "../config/paths.ts";
 import {
   countLiveOutputsForSidecar,
@@ -48,6 +49,12 @@ export const UNDO_WINDOW_MS = 8000;
 export interface OutputView extends OutputRow {
   /** What the client fetches the media from. */
   media_url: string;
+  /**
+   * The drawn waveform, for an audio output that has one (§2.2). Null for
+   * every other kind, and for audio on a machine with no ffmpeg — a tile that
+   * gets null shows the duration on a plain plate instead.
+   */
+  waveform_url: string | null;
   /** Wall-clock generation time, for the table's DURATION column. */
   generation_ms: number | null;
   models: { model_hash: string; role: string }[];
@@ -87,6 +94,19 @@ export interface Lineage {
 
 export function mediaUrl(path: string): string {
   return `/api/media/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/**
+ * The waveform beside an audio file, as a URL. The file is written at
+ * completion and is a sibling of the media, so the URL is the media's — which
+ * means a row does not have to carry a second path, and `reindex` has nothing
+ * extra to rebuild.
+ */
+export function waveformUrl(
+  row: { kind: string; path: string },
+): string | null {
+  if (row.kind !== "audio") return null;
+  return mediaUrl(`${row.path}${WAVEFORM_SUFFIX}`);
 }
 
 export class OutputStore {
@@ -291,7 +311,11 @@ export class OutputStore {
   async #removeFiles(id: string): Promise<void> {
     const row = getOutput(this.#db, id);
     if (!row || row.deleted_at === null) return; // Restored in the meantime.
-    await remove(join(this.#paths.root, row.path));
+    const media = join(this.#paths.root, row.path);
+    await remove(media);
+    // Audio carries a drawn waveform beside it (§2.2); it is part of the
+    // output, not a file of its own, so it goes at the same moment.
+    await remove(waveformPathFor(media));
     // The sidecar belongs to the job, so it goes with the last of its outputs.
     if (countLiveOutputsForSidecar(this.#db, row.sidecar_path, row.id) === 0) {
       const others = outputsDeletedBefore(this.#db, Number.MAX_SAFE_INTEGER)
@@ -331,6 +355,7 @@ export class OutputStore {
     return rows.map((row) => ({
       ...row,
       media_url: mediaUrl(row.path),
+      waveform_url: waveformUrl(row),
       generation_ms: row.job_id ? times.get(row.job_id) ?? null : null,
       models: (models.get(row.id) ?? []).map(({ model_hash, role }) => ({
         model_hash,

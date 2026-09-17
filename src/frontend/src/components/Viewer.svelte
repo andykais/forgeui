@@ -5,7 +5,7 @@
   import type { Job, Output, OutputDetail, UiScreen } from "../types.ts";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
-  import { dimensions } from "../lib/format.ts";
+  import { clock, dimensions } from "../lib/format.ts";
   import MetadataSidebar from "./MetadataSidebar.svelte";
   import Filmstrip from "./Filmstrip.svelte";
 
@@ -54,6 +54,7 @@
 
   let fit = $state(true);
   let fullscreen = $state(false);
+  const isAudio = $derived(selected.kind === "audio");
   /**
    * The two video elements — the one in the page and the one over it —
    * exist at the same time while fullscreen is up, and both would play: the
@@ -142,6 +143,9 @@
       leaveFullscreen();
       return;
     }
+    // A black field with a waveform on it is not a fullscreen anything: there
+    // is nothing to see bigger, so `f` does nothing on an audio output.
+    if (isAudio) return;
     fullscreen = true;
   }
 
@@ -227,13 +231,28 @@
           autoplay
           loop
         ></video>
+      {:else if isAudio}
+        <!--
+          The waveform is the picture, and the transport sits under it: a take
+          is something you listen to, so it plays on open the way a video does.
+        -->
+        <div class="audio">
+          {#if selected.waveform_url}
+            <img class="wave" src={selected.waveform_url} alt="" />
+          {/if}
+          <audio src={selected.media_url} controls autoplay></audio>
+        </div>
       {:else}
         <img src={selected.media_url} alt={selected.prompt ?? selected.id} />
       {/if}
-      <span class="size-chip mono">
-        {dimensions(selected.width, selected.height, selected.duration_ms)}
-        · shown at {zoom}%
-      </span>
+      {#if !isAudio}
+        <span class="size-chip mono">
+          {dimensions(selected.width, selected.height, selected.duration_ms)}
+          · shown at {zoom}%
+        </span>
+      {:else if selected.duration_ms}
+        <span class="size-chip mono">{clock(selected.duration_ms)}</span>
+      {/if}
     </div>
 
     <Filmstrip
@@ -273,6 +292,33 @@
 </div>
 
 <style>
+  /*
+   * Sound in the place a picture would be: the waveform as wide as the box
+   * allows, the transport under it, both centred so a short take does not
+   * sit in the top-left corner of an empty field.
+   */
+  .audio {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: min(760px, 100%);
+    margin: auto;
+    padding: 0 16px;
+  }
+
+  .audio .wave {
+    width: 100%;
+    height: auto;
+    max-height: 200px;
+    object-fit: contain;
+  }
+
+  .audio audio {
+    width: 100%;
+  }
+
   .viewer {
     flex: 1;
     display: flex;

@@ -87,6 +87,14 @@
           {#if output.kind === "video"}
             <!-- svelte-ignore a11y_media_has_caption -->
             <video src={output.media_url} muted preload="metadata"></video>
+          {:else if output.kind === "audio"}
+            {#if output.waveform_url}
+              <img
+                class="wave"
+                src={output.waveform_url}
+                alt={output.prompt ?? output.id}
+              />
+            {/if}
           {:else}
             <img src={output.media_url} alt={output.prompt ?? output.id} />
           {/if}
@@ -186,6 +194,15 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /*
+   * A waveform is 960x160, so cropping it to a square thumb shows one sixth
+   * of one take — and where that sixth happens to be silent, the thumb is
+   * empty. The whole shape, letterboxed, is the only honest crop of a sound.
+   */
+  .thumb img.wave {
+    object-fit: contain;
   }
 
   /* A preview frame is tiny; show all of it rather than a crop of it. */

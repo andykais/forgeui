@@ -129,6 +129,7 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
     deleted_at: null,
     created_at: 1_789_000_000_000,
     media_url: "/api/media/outputs/a.png",
+    waveform_url: null,
     generation_ms: 228,
     // Both LoRAs share the one role, which is the shape that used to defeat
     // the by-role lookup.

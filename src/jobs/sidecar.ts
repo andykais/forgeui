@@ -39,7 +39,7 @@ export interface SidecarModel {
 
 export interface SidecarOutput {
   file: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   width?: number;
   height?: number;
   duration_ms?: number;
@@ -180,8 +180,10 @@ export function parseSidecar(text: string, source = "sidecar"): Sidecar {
     const record = requireRecord(output, at);
     requireString(record.file, `${at}.file`);
     const kind = requireString(record.kind, `${at}.kind`);
-    if (kind !== "image" && kind !== "video") {
-      throw new SidecarError(`${at}.kind: expected image or video`);
+    // A kind this build does not know is a sidecar from a newer one; the
+    // list is closed here because `reindex` files outputs by it.
+    if (kind !== "image" && kind !== "video" && kind !== "audio") {
+      throw new SidecarError(`${at}.kind: expected image, video or audio`);
     }
   }
   const timing = requireRecord(raw.timing, `${source}.timing`);

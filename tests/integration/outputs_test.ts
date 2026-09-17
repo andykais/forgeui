@@ -191,7 +191,14 @@ Deno.test("filters are AND-ed, and q searches the prompt", async () => {
         .outputs.length,
       0,
     );
-    assertEquals((await app.fetch("/api/outputs?kind=audio")).status, 400);
+    // Audio is a kind the gallery can be narrowed to now; a kind nobody
+    // files anything under still is not.
+    assertEquals((await app.fetch("/api/outputs?kind=audio")).status, 200);
+    assertEquals(
+      (await app.json<OutputPage>("/api/outputs?kind=audio")).outputs,
+      [],
+    );
+    assertEquals((await app.fetch("/api/outputs?kind=hologram")).status, 400);
   }, { comfy: true });
 });
 

@@ -257,9 +257,14 @@ Deno.test("workflow-level fields are checked", () => {
       "wan2, qwen-image, sd15",
   );
   assertThrows(
-    () => validateManifest(manifest([], { kind: "audio" }), { graph }),
+    () => validateManifest(manifest([], { kind: "hologram" }), { graph }),
     ManifestError,
-    "one of image, video",
+    "one of image, video, audio",
+  );
+  // Audio joined the two the day a workflow could make sound (§4.1).
+  validateManifest(
+    manifest([], { kind: "audio", outputs: [{ node: "9", kind: "audio" }] }),
+    { graph },
   );
   // `upscale` joined `img2img` when the Upscale action gained something to
   // route to (§10); a category nobody routes on is still refused.
