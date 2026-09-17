@@ -17,7 +17,7 @@ import {
 const haveFfmpeg = await ffmpegAvailable();
 
 /** A tone, a gap, a tone: something with a shape rather than a flat line. */
-async function writeTone(path: string): Promise<void> {
+async function writeTone(path: string, volume = 1): Promise<void> {
   const { code, stderr } = await new Deno.Command("ffmpeg", {
     args: [
       "-v",
@@ -36,7 +36,7 @@ async function writeTone(path: string): Promise<void> {
       "-i",
       "sine=frequency=220:duration=1.5",
       "-filter_complex",
-      "[0:a][1:a][2:a]concat=n=3:v=0:a=1",
+      `[0:a][1:a][2:a]concat=n=3:v=0:a=1,volume=${volume}`,
       path,
     ],
     stdout: "null",
@@ -129,4 +129,88 @@ async function assertMissing(path: string): Promise<void> {
   } catch (error) {
     assert(error instanceof Deno.errors.NotFound, `${path} exists`);
   }
+}
+
+/**
+ * A quiet take is lifted so its loudest moment fills the picture (§2.2).
+ *
+ * A generated line often peaks around -30 dBFS. Drawn as the samples are, it
+ * is a thread across an empty box — the complaint that started this. Scaled
+ * by one constant the shape is legible, and because it *is* one constant, a
+ * pause still looks like a pause.
+ */
+Deno.test({
+  name: "a quiet clip is drawn as large as a loud one",
+  ignore: !haveFfmpeg,
+  fn: async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      const quiet = join(dir, "quiet.wav");
+      const loud = join(dir, "loud.wav");
+      await writeTone(quiet, 0.02);
+      await writeTone(loud, 1.0);
+
+      await readAudio(quiet);
+      await readAudio(loud);
+      const drawn = [
+        await inkRows(waveformPathFor(quiet)),
+        await inkRows(waveformPathFor(loud)),
+      ];
+      // Within a row of each other: the same tone at 2% and at 100% draws
+      // the same picture, which is the whole point of the gain.
+      assert(
+        Math.abs(drawn[0]! - drawn[1]!) <= 1,
+        `quiet drew ${drawn[0]} rows, loud drew ${drawn[1]}`,
+      );
+      // And it is a tall picture rather than the 6:1 strip it was: a tile is
+      // square, and a strip that wide letterboxes to a thread.
+      const [width, height] = await pngSize(waveformPathFor(loud));
+      assert(width / height <= 3, `waveform is ${width}x${height}`);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
+});
+
+/** The PNG header's width and height, which is all IHDR is needed for here. */
+async function pngSize(path: string): Promise<[number, number]> {
+  const bytes = await Deno.readFile(path);
+  const view = new DataView(bytes.buffer, bytes.byteOffset);
+  return [view.getUint32(16), view.getUint32(20)];
+}
+
+/**
+ * How many rows of the drawn PNG have ink in them — a stand-in for "how big
+ * is the waveform", read out of the file rather than guessed.
+ */
+async function inkRows(path: string): Promise<number> {
+  const { code, stdout } = await new Deno.Command("ffmpeg", {
+    args: [
+      "-nostdin",
+      "-v",
+      "error",
+      "-i",
+      path,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "gray",
+      "-",
+    ],
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  assertEquals(code, 0, `could not read ${path}`);
+  const [width, height] = await pngSize(path);
+  let rows = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      // The waveform is drawn mid-grey on white, so anything darker is ink.
+      if (stdout[y * width + x]! < 200) {
+        rows++;
+        break;
+      }
+    }
+  }
+  return rows;
 }

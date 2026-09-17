@@ -23,7 +23,19 @@ export const WAVEFORM_SUFFIX = ".waveform.png";
  * would fight one of them.
  */
 const WAVEFORM_COLOUR = "0x8a8a8aff";
-const WAVEFORM_SIZE = "960x160";
+/**
+ * 2.5:1 rather than the 6:1 strip this started as. A tile is close to
+ * square, and a strip that wide letterboxes down to a thread across the
+ * middle of it — the picture was there, it was just too small to read.
+ */
+const WAVEFORM_SIZE = "1000x400";
+/**
+ * The most a quiet take is lifted by. A generated line often peaks around
+ * -30 dBFS, and drawn as-is it is a flat line in a large empty box; scaled so
+ * its loudest moment reaches the top, it is a shape. The cap is what stops a
+ * near-silent file from being drawn as a wall of noise.
+ */
+const MAX_WAVEFORM_GAIN_DB = 40;
 
 export function waveformPathFor(mediaPath: string): string {
   return `${mediaPath}${WAVEFORM_SUFFIX}`;
@@ -109,14 +121,47 @@ export async function probeDuration(path: string): Promise<number | null> {
 }
 
 /**
+ * How much to lift this file by so its loudest moment fills the picture.
+ *
+ * One constant for the whole clip, from `volumedetect`'s peak — not
+ * `dynaudnorm` or a `sqrt` axis, both of which flatter the quiet parts and
+ * turn a considered pause into something that looks like speech. The shape
+ * stays the shape; only the scale changes.
+ *
+ * Best-effort like everything else here: a file ffmpeg cannot measure is
+ * drawn unscaled rather than not drawn.
+ */
+async function peakGainDb(path: string): Promise<number> {
+  const { ok, stderr } = await run("ffmpeg", [
+    "-nostdin",
+    "-v",
+    "info",
+    "-i",
+    path,
+    "-af",
+    "volumedetect",
+    "-f",
+    "null",
+    "-",
+  ]);
+  if (!ok) return 0;
+  const peak = stderr.match(/max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/);
+  if (!peak) return 0;
+  const headroom = -Number.parseFloat(peak[1]!);
+  if (!Number.isFinite(headroom) || headroom <= 0) return 0;
+  return Math.min(headroom, MAX_WAVEFORM_GAIN_DB);
+}
+
+/**
  * Draw `path`'s waveform to `<path>.waveform.png`, and say whether there is
  * now a file there.
  *
- * Mono, because two channels stacked in a 40px tile is a smear rather than a
+ * Mono, because two channels stacked in a tile is a smear rather than a
  * shape, and one waveform is what a person means by "the waveform".
  */
 export async function drawWaveform(path: string): Promise<string | null> {
   const destination = waveformPathFor(path);
+  const gain = await peakGainDb(path);
   const { ok } = await run("ffmpeg", [
     "-nostdin",
     "-v",
@@ -125,7 +170,8 @@ export async function drawWaveform(path: string): Promise<string | null> {
     "-i",
     path,
     "-filter_complex",
-    `aformat=channel_layouts=mono,showwavespic=s=${WAVEFORM_SIZE}:colors=${WAVEFORM_COLOUR}`,
+    `aformat=channel_layouts=mono,volume=${gain}dB,` +
+    `showwavespic=s=${WAVEFORM_SIZE}:colors=${WAVEFORM_COLOUR}`,
     "-frames:v",
     "1",
     destination,

@@ -30,7 +30,10 @@
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "2.value"
+      "bind": "2.value",
+      "min": 1,
+      "max": 2147483647,
+      "description": "Breeze TTS 2 takes a seed up to 2^31 - 1, and reads 0 as \"use the current random state\" \u2014 so a roll here lands between 1 and that."
     },
     {
       "key": "build",

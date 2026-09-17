@@ -183,6 +183,15 @@ export interface SeedParam extends ParamCommon {
   bind: string;
   /** `-1` means "random at submit" (§4.3). */
   default?: number;
+  /**
+   * The range the node accepts. Most samplers take anything up to 2^64, but
+   * not all of them: Breeze TTS 2's own seed stops at 2^31 - 1, and a
+   * randomly rolled 2^53 came back as "Seed must be between 0 and 2**32 - 1"
+   * — a generation refused over a number the app chose. Where a workflow
+   * says, both the random roll and a typed value are held to it.
+   */
+  min?: number;
+  max?: number;
 }
 
 export interface SizeParam extends ParamCommon {

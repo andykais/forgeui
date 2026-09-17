@@ -29,6 +29,23 @@ export function isAudioUrl(url: string | null | undefined): boolean {
 }
 
 /**
+ * The picture that stands in for a sound file.
+ *
+ * ffmpeg draws one PNG per audio file at completion, named by convention
+ * beside the media (`src/media/audio.ts`), so the URL is derivable wherever
+ * the media URL is known. That matters for every small thumbnail whose
+ * caller has a path and nothing else — a workflow's last run, a model tile,
+ * a lineage node — which would otherwise point an `<img>` at a `.flac` and
+ * draw the browser's broken-image outline.
+ */
+export const WAVEFORM_SUFFIX = ".waveform.png";
+
+export function waveformUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.endsWith(WAVEFORM_SUFFIX) ? url : `${url}${WAVEFORM_SUFFIX}`;
+}
+
+/**
  * A video element shows nothing until it has decoded a frame, and
  * `preload="metadata"` alone often leaves a black plate. Seeking a fraction
  * of a second in gives the browser a frame to paint, which is what makes a

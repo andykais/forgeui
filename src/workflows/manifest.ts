@@ -412,7 +412,12 @@ function validateParam(
         ...(value !== undefined ? { default: value } : {}),
       };
     }
-    case "seed":
+    case "seed": {
+      const min = raw.min === undefined ? undefined : num(raw.min, `${at}.min`);
+      const max = raw.max === undefined ? undefined : num(raw.max, `${at}.max`);
+      if (min !== undefined && max !== undefined && min > max) {
+        throw new ManifestError(`${at}: min is greater than max`);
+      }
       return {
         ...common,
         type,
@@ -420,7 +425,10 @@ function validateParam(
         ...(raw.default !== undefined
           ? { default: num(raw.default, `${at}.default`) }
           : {}),
+        ...(min !== undefined ? { min } : {}),
+        ...(max !== undefined ? { max } : {}),
       };
+    }
     case "size": {
       const bind = record(raw.bind, `${at}.bind`);
       const w = nonEmptyStr(bind.w, `${at}.bind.w`);

@@ -197,7 +197,8 @@
   }
 
   /*
-   * A waveform is 960x160, so cropping it to a square thumb shows one sixth
+   * A waveform is wider than tall, so cropping it to a square thumb shows
+   * only its middle
    * of one take — and where that sixth happens to be silent, the thumb is
    * empty. The whole shape, letterboxed, is the only honest crop of a sound.
    */

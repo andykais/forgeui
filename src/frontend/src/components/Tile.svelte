@@ -72,10 +72,10 @@
       ></video>
     {:else if isAudio}
       <!--
-        A drawn waveform (§2.2), which is the only picture sound has. It is a
-        wide, short image in a square cell, so it sits in the middle of the
-        tile rather than filling it — and a take with no waveform yet still
-        gets its duration and prompt from the strip below.
+        A drawn waveform (§2.2), which is the only picture sound has. It is
+        wider than the cell, so it sits across the middle of the tile rather
+        than filling it — and a take with no waveform yet still gets its
+        duration and prompt from the strip below.
       -->
       <span class="wave">
         {#if output.waveform_url}
@@ -143,7 +143,7 @@
     background: var(--control-selected);
   }
 
-  /* Centred in the cell: a 960x160 waveform in a square tile is a band, and
+  /* Centred in the cell: a 2.5:1 waveform in a square tile is a band, and
      stretching it to fill would say something false about the sound. */
   .wave {
     display: flex;

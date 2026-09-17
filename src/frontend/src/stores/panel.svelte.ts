@@ -338,11 +338,17 @@ class PanelState {
     return this.params.find((param) => param.type === "seed") ?? null;
   }
 
-  /** 🎲 re-rolls immediately, in either state (§11.3). */
+  /**
+   * 🎲 re-rolls immediately, in either state (§11.3), inside whatever range
+   * the workflow says its node takes. Breeze TTS 2 stops at 2^31 - 1, and
+   * rolling past it refused the generation over a number the app picked.
+   */
   rollSeed(): void {
     const param = this.seedParam;
     if (!param) return;
-    const seed = Math.floor(Math.random() * 2 ** 32);
+    const low = Math.max(0, param.min ?? 0);
+    const high = Math.min(param.max ?? 2 ** 32 - 1, Number.MAX_SAFE_INTEGER);
+    const seed = low + Math.floor(Math.random() * (high - low + 1));
     this.set(param.key, seed);
     this.seedLocked = true;
   }

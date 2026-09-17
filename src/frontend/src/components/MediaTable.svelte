@@ -208,7 +208,7 @@
     display: block;
   }
 
-  /* Contain, not cover: a cropped waveform is one sixth of a take, and can
+  /* Contain, not cover: a cropped waveform is the middle of a take, and can
      easily be the sixth where nobody is speaking. */
   .thumb img.wave {
     object-fit: contain;
