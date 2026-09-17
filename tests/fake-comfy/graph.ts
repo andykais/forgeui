@@ -8,6 +8,7 @@
 
 import {
   CORE_NODE_TYPES,
+  NODE_PACKS,
   OUTPUT_NODE_TYPES,
 } from "../../src/workflows/nodes.ts";
 import type { ApiGraph, ApiNode } from "../../src/workflows/types.ts";
@@ -50,6 +51,12 @@ export type ValidationResult = ValidationSuccess | ValidationFailure;
 export interface ValidateOptions {
   /** Node types accepted on top of {@link CORE_NODE_TYPES}. */
   extraNodeTypes?: readonly string[];
+  /**
+   * Custom node packs this ComfyUI has installed (§4.6). A real ComfyUI
+   * without the pack rejects its nodes exactly the way this does, which is
+   * what makes "the pack is missing" testable rather than hypothetical.
+   */
+  packs?: readonly string[];
 }
 
 function nodeError(classType: string, message: string): NodeError {
@@ -90,6 +97,9 @@ export function validateGraph(
 
   const known = new Set([
     ...CORE_NODE_TYPES,
+    ...(options.packs ?? []).flatMap((pack) =>
+      Object.keys(NODE_PACKS[pack]?.nodes ?? {})
+    ),
     ...(options.extraNodeTypes ?? []),
   ]);
   const outputNodes: string[] = [];

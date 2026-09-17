@@ -480,16 +480,157 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     inputs: ["audio"],
     output: true,
   },
+
+  // ---- ACE-Step 1.5, the song model (`comfy_extras/nodes_ace.py`) --------
+  // Core nodes, so `ace-step-song` runs on stock ComfyUI (DESIGN-AUDIO
+  // §2.1.1). `seed` carries the same `control_after_generate` combo a
+  // sampler's does, and the encoder holds the musical parameters — bpm, key,
+  // time signature — that a picture model has no equivalent of.
+  "TextEncodeAceStepAudio1.5": {
+    inputs: ["clip"],
+    widgets: [
+      "tags",
+      "lyrics",
+      "seed",
+      "bpm",
+      "duration",
+      "timesignature",
+      "language",
+      "keyscale",
+      "generate_audio_codes",
+      "cfg_scale",
+      "temperature",
+      "top_p",
+      "top_k",
+      "min_p",
+    ],
+    after: { seed: "fixed" },
+    outputs: ["CONDITIONING"],
+  },
+  "EmptyAceStep1.5LatentAudio": {
+    widgets: ["seconds", "batch_size"],
+    outputs: ["LATENT"],
+  },
 };
 
 export const CORE_NODE_TYPES: readonly string[] = Object.keys(CORE_NODES);
+
+/**
+ * A custom node pack a workflow may need (§4.6).
+ *
+ * Everything else this repo ships runs on stock ComfyUI. The two speech
+ * workflows do not, which is a change in what the project promises, so the
+ * requirement is written down rather than discovered: a manifest names the
+ * pack in `requires`, the loader checks that the pack it names actually
+ * covers the nodes the graph uses, and the message a user gets says which
+ * pack to install instead of "node type not found".
+ *
+ * `id` is the folder name under `custom_nodes/`, which is what both the
+ * Containerfile and the manual instructions use.
+ */
+export interface NodePack {
+  id: string;
+  name: string;
+  url: string;
+  /** What the container pins; the version this repo's graphs were built on. */
+  version: string;
+  nodes: Record<string, NodeSchema>;
+}
+
+/**
+ * The Breeze TTS 2 pack, read off its `nodes.py` rather than guessed.
+ *
+ * Three generation nodes matter here. `VoiceClone` copies a reference voice
+ * at CFG 1 and takes no instruction, because the reference *is* the delivery.
+ * `VoiceDesign` invents a voice from a description at CFG 4. `VoiceDirection`
+ * is the pair of them: a cloned voice delivered to an instruction. All three
+ * end in the same nine sampling widgets, whose order is what a rebuilt
+ * LiteGraph document depends on.
+ */
+const BREEZE_CONTROLS = [
+  "max_new_tokens",
+  "temperature",
+  "top_k",
+  "top_p",
+  "repetition_penalty",
+  "depth_temperature",
+  "depth_top_k",
+  "depth_top_p",
+  "seed",
+];
+
+export const NODE_PACKS: Record<string, NodePack> = {
+  "ComfyUI-Breeze-TTS-2": {
+    id: "ComfyUI-Breeze-TTS-2",
+    name: "Breeze TTS 2",
+    url: "https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2",
+    version: "1.4.6",
+    nodes: {
+      // No filename widget: the loader takes one of four build labels and
+      // resolves the file itself, which is why the speech workflows expose an
+      // `enum` rather than a `model` picker (§4.4).
+      BreezeTTS2LoadModel: {
+        widgets: [
+          "model",
+          "dtype",
+          "device",
+          "attention",
+          "decode_mode",
+          "download_if_missing",
+        ],
+        outputs: ["BREEZE_TTS2_MODEL"],
+      },
+      BreezeTTS2VoiceClone: {
+        inputs: ["breeze_model", "reference_audio"],
+        widgets: ["text", "reference_text", "cfg_scale", ...BREEZE_CONTROLS],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+      BreezeTTS2VoiceDesign: {
+        inputs: ["breeze_model"],
+        widgets: ["text", "instruction", "cfg_scale", ...BREEZE_CONTROLS],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+      BreezeTTS2VoiceDirection: {
+        inputs: ["breeze_model", "reference_audio"],
+        widgets: [
+          "text",
+          "reference_text",
+          "instruction",
+          "cfg_scale",
+          "stitch_reference",
+          ...BREEZE_CONTROLS,
+        ],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+    },
+  },
+};
+
+/** Every node type any known pack provides, mapped to the pack providing it. */
+export const PACK_OF_NODE: Record<string, NodePack> = Object.fromEntries(
+  Object.values(NODE_PACKS).flatMap((pack) =>
+    Object.keys(pack.nodes).map((type) => [type, pack] as const)
+  ),
+);
+
+/**
+ * What the app knows about a node type: core first, then any pack's. Every
+ * reader goes through this rather than `CORE_NODES` directly, so a pack node
+ * gets the same widget order and slot names a core one does.
+ */
+export function nodeSchema(classType: string): NodeSchema | undefined {
+  return CORE_NODES[classType] ?? PACK_OF_NODE[classType]?.nodes[classType];
+}
 
 export const OUTPUT_NODE_TYPES: readonly string[] = Object.entries(CORE_NODES)
   .filter(([, schema]) => schema.output)
   .map(([type]) => type);
 
 export function isOutputNodeType(classType: string): boolean {
-  return CORE_NODES[classType]?.output === true;
+  return nodeSchema(classType)?.output === true;
 }
 
 /**
@@ -502,7 +643,7 @@ export function outputSlot(
   outputName: string,
 ): number | null {
   if (/^\d+$/.test(outputName)) return Number(outputName);
-  const outputs = CORE_NODES[classType]?.outputs;
+  const outputs = nodeSchema(classType)?.outputs;
   if (!outputs) return null;
   const index = outputs.indexOf(outputName);
   return index < 0 ? null : index;

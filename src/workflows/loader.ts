@@ -185,6 +185,7 @@ function stubManifest(id: string, name: string): Manifest {
     kind: "image",
     category: null,
     description: null,
+    requires: [],
     params: [],
     outputs: [],
   };

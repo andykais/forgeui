@@ -22,7 +22,7 @@ import {
   type WorkflowCategory,
   type WorkflowKind,
 } from "./types.ts";
-import { outputSlot } from "./nodes.ts";
+import { CORE_NODES, outputSlot, PACK_OF_NODE } from "./nodes.ts";
 import { whenChain } from "./visibility.ts";
 
 export class ManifestError extends Error {
@@ -542,6 +542,31 @@ export interface ValidateManifestOptions {
 }
 
 /**
+ * A node from a pack the app knows about must be declared in `requires`
+ * (§4.6).
+ *
+ * This is the half of the requirement that can be checked without a running
+ * ComfyUI. It is deliberately narrow: a node type the app has never heard of
+ * passes, because a user may install any pack and the app has no list of
+ * every node in the world. What it catches is the one case it can be sure
+ * about — a graph using, say, a Breeze node while claiming to need nothing —
+ * where saying so at load beats "node type not found" at queue time.
+ */
+function assertNodesCovered(graph: ApiGraph, requires: string[]): void {
+  const declared = new Set(requires);
+  for (const [id, node] of Object.entries(graph)) {
+    const type = node.class_type;
+    if (type in CORE_NODES) continue;
+    const provider = PACK_OF_NODE[type];
+    if (!provider || declared.has(provider.id)) continue;
+    throw new ManifestError(
+      `manifest.requires: node ${id} is "${type}", which comes from ` +
+        `${provider.id}; add it to requires`,
+    );
+  }
+}
+
+/**
  * Validate a `manifest.json` against the closed param type set (§4.3) and,
  * when the graph is available, against the nodes it binds to.
  */
@@ -610,6 +635,13 @@ export function validateManifest(
     );
   }
 
+  const requires = raw.requires === undefined
+    ? []
+    : array(raw.requires, "manifest.requires").map((pack, i) =>
+      nonEmptyStr(pack, `manifest.requires[${i}]`)
+    );
+  if (graph) assertNodesCovered(graph, requires);
+
   return {
     id,
     name: nonEmptyStr(raw.name, "manifest.name"),
@@ -627,6 +659,7 @@ export function validateManifest(
       raw.description,
       (v) => str(v, "manifest.description"),
     ),
+    requires,
     params,
     // An empty list is a draft: it loads and lists, but cannot be submitted.
     outputs: array(raw.outputs, "manifest.outputs").map((output, i) =>
@@ -644,6 +677,7 @@ export function serializeManifest(manifest: Manifest): string {
     kind: manifest.kind,
     category: manifest.category,
     description: manifest.description,
+    requires: manifest.requires,
     params: manifest.params,
     outputs: manifest.outputs,
   };

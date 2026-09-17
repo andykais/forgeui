@@ -47,6 +47,8 @@ export interface FakeComfyOptions {
   /** Overrides the size taken from the graph's latent node. */
   imageSize?: { width: number; height: number };
   extraNodeTypes?: readonly string[];
+  /** Custom node packs this ComfyUI pretends to have installed (§4.6). */
+  packs?: readonly string[];
   /** Pause between steps; 0 keeps tests fast but ordered. */
   stepDelayMs?: number;
 }
@@ -381,6 +383,7 @@ export class FakeComfy {
     }
     const validation = validateGraph(body.prompt, {
       extraNodeTypes: this.#options.extraNodeTypes,
+      packs: this.#options.packs,
     });
     if (!validation.ok) {
       return this.#promptError(validation.message, validation.nodeErrors);

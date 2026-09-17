@@ -1,4 +1,4 @@
-import { CORE_NODES } from "./nodes.ts";
+import { nodeSchema } from "./nodes.ts";
 import { type ApiGraph, isLink, type Manifest, type Param } from "./types.ts";
 
 /**
@@ -83,7 +83,7 @@ export function literalInputs(
   const bound = boundInputs(manifest);
   const out: LiteralInput[] = [];
   for (const [nodeId, node] of Object.entries(graph)) {
-    const order = CORE_NODES[node.class_type]?.widgets;
+    const order = nodeSchema(node.class_type)?.widgets;
     const literals = Object.entries(node.inputs).filter(([, value]) =>
       !isLink(value)
     );

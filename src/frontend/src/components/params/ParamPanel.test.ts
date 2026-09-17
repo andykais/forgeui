@@ -19,6 +19,7 @@ function manifestWith(params: Param[]): Manifest {
     kind: "image",
     category: null,
     description: null,
+    requires: [],
     params,
     outputs: [{ node: "9", kind: "image" }],
   };

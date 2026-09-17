@@ -1,0 +1,232 @@
+{
+  "id": "ace-step-song",
+  "name": "ACE-Step Song",
+  "family": "ace-step-1.5",
+  "kind": "audio",
+  "category": null,
+  "description": "A song from style tags and lyrics: ACE-Step 1.5 XL Turbo at eight steps, singing over its own backing. Duration sets the length of the piece, not a crop of it.",
+  "requires": [],
+  "params": [
+    {
+      "key": "style",
+      "label": "Style",
+      "description": "Genre, instruments, voice, production \u2014 the tags the model composes to.",
+      "type": "text",
+      "required": true,
+      "bind": "7.tags"
+    },
+    {
+      "key": "lyrics",
+      "label": "Lyrics",
+      "description": "Structure tags like [verse], [chorus] and [bridge] tell the model where it is in the song. Leave empty for an instrumental.",
+      "type": "text",
+      "bind": "7.lyrics"
+    },
+    {
+      "key": "duration",
+      "label": "Duration (seconds)",
+      "description": "The length of the song. The encoder and the latent are both told, so the arrangement is written to fit rather than cut off.",
+      "type": "float",
+      "default": 120.0,
+      "min": 10.0,
+      "max": 600.0,
+      "step": 5.0,
+      "bind": "5.value"
+    },
+    {
+      "key": "bpm",
+      "label": "BPM",
+      "type": "int",
+      "default": 92,
+      "min": 10,
+      "max": 300,
+      "bind": "7.bpm"
+    },
+    {
+      "key": "key_scale",
+      "label": "Key",
+      "type": "enum",
+      "default": "C major",
+      "options": [
+        "C major",
+        "C# major",
+        "Db major",
+        "D major",
+        "D# major",
+        "Eb major",
+        "E major",
+        "F major",
+        "F# major",
+        "Gb major",
+        "G major",
+        "G# major",
+        "Ab major",
+        "A major",
+        "A# major",
+        "Bb major",
+        "B major",
+        "C minor",
+        "C# minor",
+        "Db minor",
+        "D minor",
+        "D# minor",
+        "Eb minor",
+        "E minor",
+        "F minor",
+        "F# minor",
+        "Gb minor",
+        "G minor",
+        "G# minor",
+        "Ab minor",
+        "A minor",
+        "A# minor",
+        "Bb minor",
+        "B minor"
+      ],
+      "bind": "7.keyscale"
+    },
+    {
+      "key": "time_signature",
+      "label": "Time signature",
+      "type": "enum",
+      "default": "4",
+      "options": [
+        "2",
+        "3",
+        "4",
+        "6"
+      ],
+      "bind": "7.timesignature"
+    },
+    {
+      "key": "language",
+      "label": "Language",
+      "description": "The language the lyrics are sung in.",
+      "type": "enum",
+      "default": "en",
+      "options": [
+        "ar",
+        "az",
+        "bg",
+        "bn",
+        "ca",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "fa",
+        "fi",
+        "fr",
+        "he",
+        "hi",
+        "hr",
+        "ht",
+        "hu",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "ko",
+        "la",
+        "lt",
+        "ms",
+        "ne",
+        "nl",
+        "no",
+        "pa",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sa",
+        "sk",
+        "sr",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "th",
+        "tl",
+        "tr",
+        "uk",
+        "ur",
+        "vi",
+        "yue",
+        "zh",
+        "unknown"
+      ],
+      "bind": "7.language"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "6.value",
+      "description": "One seed feeds both the text encoder and the sampler, as the official template wires it."
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "ace-step-1.5"
+      },
+      "bind": "1.unet_name"
+    },
+    {
+      "key": "language_model",
+      "label": "Language model",
+      "description": "The bigger half of the text side: 4B is the quality-for-VRAM dial, 1.7B and 0.6B are the smaller options.",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "2.clip_name2"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "3.vae_name"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "default": 8,
+      "min": 1,
+      "max": 100,
+      "advanced": true,
+      "bind": "10.steps"
+    },
+    {
+      "key": "audio_codes",
+      "label": "Generate audio codes",
+      "description": "An LLM pass before sampling that raises quality and costs time.",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "bind": "7.generate_audio_codes"
+    },
+    {
+      "key": "encoder_cfg",
+      "label": "Encoder guidance",
+      "type": "float",
+      "default": 2.0,
+      "min": 0.0,
+      "max": 20.0,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "7.cfg_scale"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "12",
+      "kind": "audio"
+    }
+  ]
+}

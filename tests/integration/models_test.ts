@@ -571,6 +571,8 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(
       families.map((entry) => entry.family).sort(),
       [
+        "ace-step",
+        "ace-step-1.5",
         "anima",
         "chroma",
         "flux",

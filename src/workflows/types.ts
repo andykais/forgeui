@@ -26,6 +26,11 @@ export type ApiLink = [string, number];
  * same config off the same `head.modulation` key, so a 2.1/2.2 split would be
  * a distinction the files themselves do not draw.
  *
+ * `ace-step` and `ace-step-1.5` are two for the same reason `ltx` and `ltx-2`
+ * are: 1.5 rebuilt the text side around a lyric encoder and gets its own
+ * encoder and latent nodes, so a graph written for one cannot load the
+ * other.
+ *
  * Since the picker orders by family (§5), this is no longer decoration: it
  * is what tells a user which of their models a workflow can actually use.
  */
@@ -42,6 +47,8 @@ export const FAMILIES = [
   "wan2",
   "qwen-image",
   "sd15",
+  "ace-step",
+  "ace-step-1.5",
 ] as const;
 export type Family = typeof FAMILIES[number];
 
@@ -281,6 +288,14 @@ export interface Manifest {
   kind: WorkflowKind;
   category: WorkflowCategory | null;
   description: string | null;
+  /**
+   * Custom node packs this workflow cannot run without (§4.6), by the folder
+   * name they are cloned into. Everything in this repo ran on stock ComfyUI
+   * until the speech workflows; a requirement that is written down can be
+   * checked, reported and installed, where one that is only implied turns
+   * into "node type not found" on somebody's machine.
+   */
+  requires: string[];
   params: Param[];
   outputs: ManifestOutput[];
 }

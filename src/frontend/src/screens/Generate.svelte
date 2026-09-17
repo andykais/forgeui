@@ -121,7 +121,13 @@
   const grouped = $derived.by(() => {
     const groups = new Map<string, typeof workflows>();
     for (const workflow of workflows) {
-      const key = `${workflow.family ?? "unset"} · ${workflow.kind}`;
+      // A workflow with no family is not an unfiled one: the speech
+      // workflows pick no model from the library at all, so the group is the
+      // kind by itself rather than "UNSET", which on a model means "nobody
+      // has filed this yet" and reads as something to go and fix.
+      const key = workflow.family
+        ? `${workflow.family} · ${workflow.kind}`
+        : workflow.kind;
       groups.set(key, [...(groups.get(key) ?? []), workflow]);
     }
     return [...groups.entries()];

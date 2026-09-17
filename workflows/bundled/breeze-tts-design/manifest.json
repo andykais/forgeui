@@ -1,0 +1,102 @@
+{
+  "id": "breeze-tts-design",
+  "name": "Breeze TTS (voice design)",
+  "family": null,
+  "kind": "audio",
+  "category": null,
+  "description": "Speech in a voice you describe rather than one you supply. The description carries both the timbre and the delivery \u2014 \"an older man, warm, unhurried, faint Irish accent\" is as much an instruction as a voice.",
+  "requires": [
+    "ComfyUI-Breeze-TTS-2"
+  ],
+  "params": [
+    {
+      "key": "voice",
+      "label": "Voice",
+      "description": "Who is speaking and how: age, warmth, pace, accent. Write it in the same language as the text.",
+      "type": "text",
+      "required": true,
+      "bind": "3.instruction"
+    },
+    {
+      "key": "text",
+      "label": "Text",
+      "description": "What you want it to say. (sigh), (laugh), (cough) and (clears throat) work inline; punctuation and line breaks are where it pauses.",
+      "type": "text",
+      "required": true,
+      "bind": "3.text"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "2.value"
+    },
+    {
+      "key": "build",
+      "label": "Model build",
+      "description": "The pack's loader picks a build by name and fetches it on first use; it is not a file from the model library.",
+      "type": "enum",
+      "default": "int8 hybrid (recommended)",
+      "options": [
+        "int8 hybrid (recommended)",
+        "bf16 (best quality)",
+        "int8 (smallest, slower)",
+        "int8 text encoder only"
+      ],
+      "advanced": true,
+      "bind": "1.model"
+    },
+    {
+      "key": "cfg_scale",
+      "label": "Description strength",
+      "description": "How hard the description is pushed. Four is what the pack recommends for following an instruction.",
+      "type": "float",
+      "default": 4.0,
+      "min": 1.0,
+      "max": 10.0,
+      "step": 0.5,
+      "advanced": true,
+      "bind": "3.cfg_scale"
+    },
+    {
+      "key": "max_new_tokens",
+      "label": "Maximum length",
+      "description": "Audio frames to generate at 12.5 per second; the model stops at the end of the text by itself.",
+      "type": "int",
+      "default": 1500,
+      "min": 64,
+      "max": 3000,
+      "advanced": true,
+      "bind": "3.max_new_tokens"
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "advanced": true,
+      "bind": "3.temperature"
+    },
+    {
+      "key": "repetition_penalty",
+      "label": "Repetition penalty",
+      "type": "float",
+      "default": 1.1,
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "advanced": true,
+      "bind": "3.repetition_penalty"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "4",
+      "kind": "audio"
+    }
+  ]
+}

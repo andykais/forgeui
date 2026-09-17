@@ -57,6 +57,8 @@ export interface Manifest {
   kind: "image" | "video" | "audio";
   category: string | null;
   description: string | null;
+  /** Custom node packs this workflow needs, by folder name (§4.6). */
+  requires: string[];
   params: Param[];
   outputs: { node: string; kind: "image" | "video" | "audio" }[];
 }
@@ -305,6 +307,8 @@ export const FAMILIES = [
   "wan2",
   "qwen-image",
   "sd15",
+  "ace-step",
+  "ace-step-1.5",
 ] as const;
 
 export interface FamilyCount {
