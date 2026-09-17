@@ -140,14 +140,56 @@ podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
 `Stable-Diffusion`, `diffusion_models`, `unet`, `loras`, `vae`, `text_encoders`,
-`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings` — matching
-how the container's entrypoint wires up `--models-dir` (see `Containerfile`'s
-`CMD`). A folder you do not use can simply be absent; a missing folder scans as
-empty.
+`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings`,
+`breezetts2` — matching how the container's entrypoint wires up `--models-dir`
+(see `Containerfile`'s `CMD`). A folder you do not use can simply be absent; a
+missing folder scans as empty.
 
 Anything that can drive a generation is one _class_ to the app, so
 `checkpoints`, `diffusion_models` and `unet` are listed together in a workflow's
 model picker regardless of which of them a file sits in.
+
+### Speech: the one custom node pack
+
+Everything else in this repo runs on stock ComfyUI. The two speech workflows do
+not: they need
+[`ComfyUI-Breeze-TTS-2`](https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2)
+(Apache-2.0, an unofficial pack — Breeze TTS 2 has no official ComfyUI nodes),
+which the image clones at a pinned commit and whose lightweight dependencies it
+installs into ComfyUI's venv. The pin is the `BREEZE_NODES_COMMIT` build arg;
+override it to try a newer one. `ace-step-song` and the LTX video workflows need
+nothing extra.
+
+The weights are not baked into the image — they are gigabytes, and the pack
+fetches them on first use from
+[`drbaph/Breeze-TTS-2-comfyui`](https://huggingface.co/drbaph/Breeze-TTS-2-comfyui).
+There are four builds, and the Load Model node picks between them by label
+rather than by filename: `int8 hybrid (recommended)` (4.5 GiB),
+`bf16 (best quality)` (6.5 GiB), `int8 (smallest, slower)` (4.2 GiB), and
+`int8 text encoder only` (5.8 GiB). Each lands in `/models/breezetts2/` beside a
+`config.json` and a 0.6 GiB audio tokenizer, so expect a little over five
+gigabytes for the recommended build. The download survives a rebuilt image and
+shows up on the Models page like anything else on the volume. The weights carry
+their own licence — check it before you ship anything made with them.
+
+Running the speech workflows outside the container means doing the same three
+things by hand:
+
+```sh
+git clone https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2 \
+  <comfyui>/custom_nodes/ComfyUI-Breeze-TTS-2
+<comfyui>/venv/bin/pip install -r \
+  <comfyui>/custom_nodes/ComfyUI-Breeze-TTS-2/requirements.txt
+# then restart ComfyUI
+```
+
+The pack needs `transformers >= 4.57`, which current ComfyUI already installs.
+It finds weights through the `breezetts2:` key ForgeUI writes into
+`extra_model_paths.yaml`, so pointing a `breezetts2` folder at your model
+library in Settings is enough — but its _first download_ always goes to
+`<comfyui>/models/breezetts2`, which no config can redirect. The container
+symlinks that path onto `/models`; outside it, either symlink it the same way or
+let the download land there and move it afterwards.
 
 `/workspace` is ForgeUI's data directory (`--data-dir`, §3): `config.yaml`,
 `app.db`, `workflows/user`, `outputs`, `samples`, and everything else the app

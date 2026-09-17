@@ -69,3 +69,68 @@ Deno.test("the container installs ffmpeg, and the README says why", async () => 
     "README does not mention ffmpeg",
   );
 });
+
+/**
+ * The speech workflows are the first thing in this repo that stock ComfyUI
+ * cannot run (DESIGN-AUDIO §4.6, §6). Three things have to hold together, and
+ * each fails quietly on its own: the pack has to be pinned to a commit rather
+ * than a branch, its dependencies have to go into ComfyUI's venv rather than
+ * the system python, and the weights have to land on the /models mount rather
+ * than inside the image.
+ */
+Deno.test("the container pins the Breeze node pack and installs it in the venv", async () => {
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const containerfile = await Deno.readTextFile(join(root, "Containerfile"));
+
+  // A commit, not a branch: a pack that moves under you is the likeliest
+  // source of "it worked last week".
+  const pin = containerfile.match(
+    /ARG BREEZE_NODES_COMMIT=([0-9a-f]{40})\s/,
+  );
+  assertEquals(
+    pin !== null,
+    true,
+    "Containerfile does not pin BREEZE_NODES_COMMIT to a full commit sha",
+  );
+
+  assertEquals(
+    /git clone "\$\{BREEZE_NODES_REPO\}"/.test(containerfile),
+    true,
+    "Containerfile does not clone the node pack",
+  );
+  assertEquals(
+    /checkout "\$\{BREEZE_NODES_COMMIT\}"/.test(containerfile),
+    true,
+    "Containerfile clones the node pack but never checks out the pin",
+  );
+  // Into ComfyUI's venv — the system python is not what runs the nodes.
+  assertEquals(
+    /venv\/bin\/pip" install[^\n]*(\n[^\n]*)*?custom_nodes\/ComfyUI-Breeze-TTS-2\/requirements\.txt/
+      .test(containerfile),
+    true,
+    "the pack's requirements are not installed into ComfyUI's venv",
+  );
+
+  // The pack's first download always goes to the running install's own models
+  // tree, which no yaml key redirects; the symlink is what keeps gigabytes of
+  // weights off the image and on the volume.
+  assertEquals(
+    /ln -s \/models\/breezetts2 "\$\{COMFY_HOME\}\/models\/breezetts2"/.test(
+      containerfile,
+    ),
+    true,
+    "Containerfile does not symlink the breezetts2 weights onto /models",
+  );
+});
+
+Deno.test("the README documents the node pack it installs", async () => {
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const readme = await Deno.readTextFile(join(root, "README.md"));
+  for (const mention of ["ComfyUI-Breeze-TTS-2", "BREEZE_NODES_COMMIT"]) {
+    assertEquals(
+      readme.includes(mention),
+      true,
+      `README does not mention ${mention}`,
+    );
+  }
+});

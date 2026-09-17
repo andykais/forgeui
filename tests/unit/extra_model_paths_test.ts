@@ -93,3 +93,19 @@ Deno.test("an unknown kind keeps its own key", () => {
   }));
   assertEquals(paths.gligen, ["/models/gligen"]);
 });
+
+/**
+ * `breezetts2` is not one of ComfyUI's own folder keys — the Breeze TTS 2
+ * node pack registers it and reads any `breezetts2:` mapping it finds here
+ * (DESIGN-AUDIO §4.4). It is the one model kind the app knows about that
+ * exists purely to be handed to a custom node, so it has to arrive under its
+ * own name and not be swept into the diffusion pool.
+ */
+Deno.test("the breeze weights folder reaches ComfyUI under its own key", () => {
+  const paths = resolveExtraModelPaths(configWith({
+    checkpoints: ["/models/checkpoints"],
+    breezetts2: ["/models/breezetts2"],
+  }));
+  assertEquals(paths.breezetts2, ["/models/breezetts2"]);
+  assertEquals(paths.checkpoints, ["/models/checkpoints"]);
+});

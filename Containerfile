@@ -28,6 +28,13 @@ FROM ${CUDA_IMAGE}
 ARG COMFY_VERSION=v0.34.0
 ARG COMFY_HOME=/opt/ComfyUI
 
+# The speech workflows (breeze-tts-clone, breeze-tts-design) are the first in
+# this repo that cannot run on stock ComfyUI. A commit rather than a branch:
+# a custom node pack that moves under you is the likeliest source of "it
+# worked last week" (docs/DESIGN-AUDIO.md §6).
+ARG BREEZE_NODES_REPO=https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2.git
+ARG BREEZE_NODES_COMMIT=3461ca6011b7e833147b2e7edb779da7a08c6259
+
 ENV DEBIAN_FRONTEND=noninteractive \
     DENO_INSTALL=/usr/local \
     PATH="/usr/local/bin:${PATH}"
@@ -58,6 +65,28 @@ RUN "${COMFY_HOME}/venv/bin/pip" install --no-cache-dir --upgrade pip && \
       torch torchvision torchaudio && \
     "${COMFY_HOME}/venv/bin/pip" install --no-cache-dir \
       -r "${COMFY_HOME}/requirements.txt"
+
+# The Breeze TTS 2 node pack, at the pin above. Only its own lightweight
+# dependencies are installed: the pack deliberately never touches torch or
+# transformers, and neither do we. It does need transformers >= 4.57, which
+# ComfyUI's own unpinned `transformers>=4.50.3` satisfies today — checked here
+# so a resolver that moves backwards fails the build rather than a generation
+# months later.
+RUN git clone "${BREEZE_NODES_REPO}" "${COMFY_HOME}/custom_nodes/ComfyUI-Breeze-TTS-2" \
+    && git -C "${COMFY_HOME}/custom_nodes/ComfyUI-Breeze-TTS-2" \
+         checkout "${BREEZE_NODES_COMMIT}" \
+    && "${COMFY_HOME}/venv/bin/pip" install --no-cache-dir \
+         -r "${COMFY_HOME}/custom_nodes/ComfyUI-Breeze-TTS-2/requirements.txt" \
+    && "${COMFY_HOME}/venv/bin/python" -c "import transformers as t; v = tuple(int(part) for part in t.__version__.split('.')[:2]); assert v >= (4, 57), f'Breeze TTS 2 needs transformers>=4.57, found {t.__version__}'"
+
+# Where the Breeze weights land. The pack finds existing weights anywhere it
+# is pointed — including the `breezetts2:` key ForgeUI writes into
+# extra_model_paths.yaml — but its first download always goes to the running
+# install's own models tree, which a yaml key cannot redirect. The symlink
+# sends that download onto the /models mount instead of into the image, where
+# gigabytes of speech model have no business being (§6).
+RUN mkdir -p /models/breezetts2 "${COMFY_HOME}/models" \
+    && ln -s /models/breezetts2 "${COMFY_HOME}/models/breezetts2"
 
 WORKDIR /app
 COPY deno.json deno.lock ./
@@ -104,4 +133,5 @@ CMD ["--data-dir", "/workspace", \
      "--models-dir", "controlnet=/models/controlnet", \
      "--models-dir", "upscale_models=/models/upscale_models", \
      "--models-dir", "latent_upscale_models=/models/latent_upscale_models", \
-     "--models-dir", "embeddings=/models/embeddings"]
+     "--models-dir", "embeddings=/models/embeddings", \
+     "--models-dir", "breezetts2=/models/breezetts2"]
