@@ -409,6 +409,15 @@
           const set = panel.sizeFromImage(media.width, media.height);
           if (set) toasts.message(`Size set to ${set[0]} × ${set[1]} to match the image`);
         }}
+        onaudio={(key, media) => {
+          // And the same for a length: the take decides how long the video
+          // is, so attaching one sets it rather than leaving you to read the
+          // clip and type the number (§11.3).
+          const set = panel.durationFromAudio(key, media.duration_ms);
+          if (set !== null) {
+            toasts.message(`Duration set to ${set}s to match the clip`);
+          }
+        }}
       />
     {:else if panel.loading}
       <p class="empty">loading…</p>

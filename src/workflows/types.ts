@@ -146,6 +146,16 @@ export interface NumberParam extends ParamCommon {
   min?: number;
   max?: number;
   step?: number;
+  /**
+   * The key of an `audio` param this length follows, in seconds (§11.3).
+   *
+   * `ltx2-ia2v` generates as many frames as the duration asks for and trims
+   * the clip to the same window, so the two are one decision — and the panel
+   * made you take it twice: attach the take, then remember how long it was
+   * and type it. Getting it wrong cuts a word off the end, several minutes
+   * later. This is the same idea as a size following the attached picture.
+   */
+  follows?: string;
 }
 
 /**

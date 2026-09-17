@@ -53,13 +53,14 @@
     {
       "key": "duration",
       "label": "Duration (s)",
-      "description": "How much of the clip to use, and therefore how long the video is: the same number trims the audio and sets duration x fps + 1 frames. A clip shorter than this is padded and the model generates the tail.",
+      "description": "How much of the clip to use, and therefore how long the video is: the same number trims the audio and sets duration x fps + 1 frames. Attaching a clip sets this to its length, rounded up to the next half second. A clip shorter than this is padded and the model generates the tail.",
       "type": "float",
       "default": 9.0,
       "min": 1.0,
       "max": 60.0,
       "step": 0.5,
-      "bind": "42.value"
+      "bind": "42.value",
+      "follows": "audio"
     },
     {
       "key": "start",

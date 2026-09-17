@@ -3,6 +3,7 @@
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api, ApiError } from "../../api.ts";
+  import { draggedOutput } from "../../lib/drag.ts";
   import { clock } from "../../lib/format.ts";
   import type { Param } from "../../types.ts";
 
@@ -21,9 +22,11 @@
     param: Param;
     value: string;
     onchange: (filename: string) => void;
+    /** What was attached, so a duration can follow the clip (§11.3). */
+    onattach?: (media: { duration_ms: number | null }) => void;
   }
 
-  let { param, value, onchange }: Props = $props();
+  let { param, value, onchange, onattach }: Props = $props();
 
   let input = $state<HTMLInputElement | undefined>(undefined);
   let busy = $state(false);
@@ -95,6 +98,7 @@
       const media = await api.uploadInput(file, "clip.wav");
       attached = fromMedia(media);
       onchange(media.filename);
+      onattach?.(media);
     } catch (cause) {
       error = failed(cause);
     } finally {
@@ -102,22 +106,26 @@
     }
   }
 
-  /** What a dragged result carries, so a drop knows it is one (§11.2). */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
   async function onDrop(event: DragEvent) {
     event.preventDefault();
     over = false;
     // A take dragged out of the results: the bytes are already on the server,
     // so it is adopted rather than sent back up again (§9).
-    const outputId = event.dataTransfer?.getData(OUTPUT_MIME);
-    if (outputId) {
+    const dragged = draggedOutput(event);
+    if (dragged) {
+      // A picture has no sound in it. Taking one anyway used to leave a clip
+      // that would not play and a run that failed in ComfyUI.
+      if (dragged.kind && dragged.kind !== "audio") {
+        error = `${dragged.kind} has no sound in it — this takes an audio take`;
+        return;
+      }
       busy = true;
       error = null;
       try {
-        const media = await api.adoptOutput(outputId);
+        const media = await api.adoptOutput(dragged.id);
         attached = fromMedia(media);
         onchange(media.filename);
+        onattach?.(media);
       } catch (cause) {
         error = failed(cause);
       } finally {

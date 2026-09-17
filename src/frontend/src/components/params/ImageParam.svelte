@@ -3,6 +3,7 @@
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api, ApiError } from "../../api.ts";
+  import { draggedOutput } from "../../lib/drag.ts";
   import type { Param } from "../../types.ts";
 
   /**
@@ -108,21 +109,24 @@
     }
   }
 
-  /** What a dragged result carries, so a drop knows it is one (§11.2). */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
   async function onDrop(event: DragEvent) {
     event.preventDefault();
     over = false;
     // A tile dragged out of the results: the bytes are already on the server,
     // so it is adopted rather than uploaded — the same path the Upscale
     // action takes, and it costs a hard link rather than a copy (§9).
-    const outputId = event.dataTransfer?.getData(OUTPUT_MIME);
-    if (outputId) {
+    const dragged = draggedOutput(event);
+    if (dragged) {
+      // Sound is not a picture. Dropping a take here used to be accepted in
+      // silence, leaving an input with no image in it (§11.2).
+      if (dragged.kind === "audio") {
+        error = "an audio take is not a picture — this takes an image";
+        return;
+      }
       busy = true;
       error = null;
       try {
-        const media = await api.adoptOutput(outputId);
+        const media = await api.adoptOutput(dragged.id);
         preview = {
           filename: media.filename,
           url: media.url,

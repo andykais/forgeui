@@ -2,6 +2,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { Job, Output } from "../types.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
   import { app } from "../stores/app.svelte.ts";
   import { queuePosition } from "../lib/queue.ts";
 
@@ -77,11 +78,18 @@
         {/if}
       {/each}
       {#each outputs as output (output.id)}
+        <!--
+          Draggable like a grid tile: the strip is where a take you just made
+          is, and "drag it into the panel" should not depend on which of the
+          four places you are looking at it in (§11.2).
+        -->
         <button
           class="thumb"
           class:selected={output.id === selectedId}
           data-strip-id={output.id}
           title={output.prompt ?? output.id}
+          draggable="true"
+          ondragstart={(event) => startOutputDrag(event, output)}
           onclick={() => onselect(output)}
         >
           {#if output.kind === "video"}

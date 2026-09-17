@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Output } from "../types.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
   import { dimensions, duration } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
@@ -76,6 +77,8 @@
       <tr
         class:selected={output.id === selectedId}
         data-output-id={output.id}
+        draggable="true"
+        ondragstart={(event) => startOutputDrag(event, output)}
         onclick={() => onopen(output)}
         tabindex="0"
         onkeydown={(event) => {

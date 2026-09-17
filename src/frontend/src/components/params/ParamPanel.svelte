@@ -39,6 +39,8 @@
     onseedlock: () => void;
     /** A picture was just attached: the size can follow it (§11.3). */
     onimage?: (media: { width: number; height: number }) => void;
+    /** A clip was attached to `key`, so a length can follow it (§11.3). */
+    onaudio?: (key: string, media: { duration_ms: number | null }) => void;
   }
 
   let {
@@ -58,6 +60,7 @@
     onseedroll,
     onseedlock,
     onimage,
+    onaudio,
   }: Props = $props();
 
   let advancedOpen = $state(false);
@@ -400,6 +403,7 @@
           {param}
           value={(values[param.key] as string) ?? ""}
           onchange={(filename) => onchange(param.key, filename)}
+          onattach={(media) => onaudio?.(param.key, media)}
         />
       {:else}
         <!--

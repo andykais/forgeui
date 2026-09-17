@@ -254,3 +254,61 @@ describe("the size follows the attached image", () => {
     expect(panel.values.size).toBeUndefined();
   });
 });
+
+/**
+ * §11.3: and a length follows the clip, for the same reason — `ltx2-ia2v`
+ * trims the take to the duration and makes that many frames, so attaching
+ * one is saying how long the video is.
+ */
+describe("the duration follows the attached clip", () => {
+  const params = [
+    { key: "image", type: "image", required: true, bind: "54.image" },
+    { key: "audio", type: "audio", required: true, bind: "55.audio" },
+    {
+      key: "duration",
+      type: "float",
+      default: 9,
+      min: 1,
+      max: 60,
+      step: 0.5,
+      follows: "audio",
+      bind: "42.value",
+    },
+  ];
+
+  beforeEach(() => load(params));
+
+  test("an 11.4s clip gives 11.5 seconds, not 11", () => {
+    // Up, never down: overshooting pads, undershooting cuts a word off.
+    expect(panel.durationFromAudio("audio", 11_400)).toBe(11.5);
+    expect(panel.values.duration).toBe(11.5);
+  });
+
+  test("a clip that lands on the step is taken as it is", () => {
+    expect(panel.durationFromAudio("audio", 4_000)).toBe(4);
+  });
+
+  test("a clip longer than the param allows stops at the maximum", () => {
+    expect(panel.durationFromAudio("audio", 90_000)).toBe(60);
+  });
+
+  test("attaching the same clip twice changes nothing and says so", () => {
+    expect(panel.durationFromAudio("audio", 6_000)).toBe(6);
+    expect(panel.durationFromAudio("audio", 6_000)).toBeNull();
+  });
+
+  test("a clip whose length is unknown is left alone", () => {
+    panel.values = { duration: 9 };
+    expect(panel.durationFromAudio("audio", null)).toBeNull();
+    expect(panel.values.duration).toBe(9);
+  });
+
+  test("a duration that follows nothing is not touched", () => {
+    load(params.map((param) =>
+      param.key === "duration" ? { ...param, follows: undefined } : param
+    ));
+    panel.values = { duration: 9 };
+    expect(panel.durationFromAudio("audio", 11_400)).toBeNull();
+    expect(panel.values.duration).toBe(9);
+  });
+});

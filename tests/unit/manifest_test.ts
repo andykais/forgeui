@@ -514,3 +514,61 @@ Deno.test("a pack node has to be declared, and an unknown one need not be", () =
   );
   assertEquals(loaded.requires, []);
 });
+
+/**
+ * A length that follows a clip (§11.3). The reference has to be real and it
+ * has to be audio: a size follows a picture because a picture has a shape,
+ * and this follows a clip because a clip has a length. Nothing else does.
+ */
+Deno.test("a duration can only follow an audio param that exists", () => {
+  const audioGraph: ApiGraph = {
+    "1": { class_type: "LoadAudio", inputs: { audio: "take.wav" } },
+    "2": { class_type: "PrimitiveFloat", inputs: { value: 9 } },
+    "3": {
+      class_type: "SaveAudio",
+      inputs: { filename_prefix: "audio/take", audio: ["1", 0] },
+    },
+  };
+  const withParams = (params: unknown[]) =>
+    manifest(params, {
+      kind: "audio",
+      outputs: [{ node: "3", kind: "audio" }],
+    });
+
+  const good = validateManifest(
+    withParams([
+      { key: "clip", type: "audio", bind: "1.audio" },
+      { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+    ]),
+    { graph: audioGraph },
+  );
+  assertEquals(
+    good.params.find((param) => param.key === "seconds")?.type,
+    "float",
+  );
+
+  const missing = assertThrows(
+    () =>
+      validateManifest(
+        withParams([
+          { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+        ]),
+        { graph: audioGraph },
+      ),
+    ManifestError,
+  );
+  assertStringIncludes(missing.message, 'no param "clip"');
+
+  const wrongType = assertThrows(
+    () =>
+      validateManifest(
+        withParams([
+          { key: "clip", type: "text", bind: "1.audio" },
+          { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+        ]),
+        { graph: audioGraph },
+      ),
+    ManifestError,
+  );
+  assertStringIncludes(wrongType.message, "only an audio param has a length");
+});

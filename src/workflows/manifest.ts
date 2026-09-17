@@ -351,6 +351,9 @@ function validateParam(
         ...(min !== undefined ? { min } : {}),
         ...(max !== undefined ? { max } : {}),
         ...(step !== undefined ? { step } : {}),
+        ...(raw.follows !== undefined
+          ? { follows: nonEmptyStr(raw.follows, `${at}.follows`) }
+          : {}),
       };
     }
     case "bool": {
@@ -610,6 +613,23 @@ export function validateManifest(
     ) {
       throw new ManifestError(
         `manifest.params (${param.key}).of: no param "${param.of}"`,
+      );
+    }
+  }
+  // A length that follows a clip has to name one (§11.3).
+  for (const param of params) {
+    if (param.type !== "int" && param.type !== "float") continue;
+    if (param.follows === undefined) continue;
+    const followed = params.find((other) => other.key === param.follows);
+    if (!followed) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).follows: no param "${param.follows}"`,
+      );
+    }
+    if (followed.type !== "audio") {
+      throw new ManifestError(
+        `manifest.params (${param.key}).follows: "${param.follows}" is a ` +
+          `${followed.type} param, and only an audio param has a length`,
       );
     }
   }

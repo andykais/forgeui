@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Output } from "../types.ts";
   import { clock } from "../lib/format.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
 
   /**
    * One media tile (§11.5): always a square cell with the whole image fitted
@@ -27,22 +28,7 @@
   const isVideo = $derived(output.kind === "video");
   const isAudio = $derived(output.kind === "audio");
 
-  /**
-   * A tile can be dragged straight into an `image` param (§11.2). What
-   * travels is the output's id rather than its bytes: the server already has
-   * them, so the drop adopts the file into the input store instead of
-   * uploading a copy of something it wrote itself (§9).
-   */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
-  function onDragStart(event: DragEvent) {
-    if (!event.dataTransfer) return;
-    event.dataTransfer.setData(OUTPUT_MIME, output.id);
-    // So a drop somewhere else in the world gets something it can use.
-    event.dataTransfer.setData("text/uri-list", output.media_url);
-    event.dataTransfer.setData("text/plain", output.media_url);
-    event.dataTransfer.effectAllowed = "copy";
-  }
+  /** A tile can be dragged straight into a media param (§11.2, lib/drag.ts). */
 </script>
 
 <div
@@ -51,7 +37,7 @@
   role="group"
   data-output-id={output.id}
   draggable="true"
-  ondragstart={onDragStart}
+  ondragstart={(event) => startOutputDrag(event, output)}
   onmouseenter={() => video?.play().catch(() => {})}
   onmouseleave={() => video?.pause()}
 >

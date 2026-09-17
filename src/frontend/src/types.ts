@@ -42,6 +42,8 @@ export interface Param {
   min?: number;
   max?: number;
   step?: number;
+  /** A length that follows an `audio` param's clip, by key (§11.3). */
+  follows?: string;
   options?: string[];
   source?: string;
   filter?: { family?: string; class?: string };
