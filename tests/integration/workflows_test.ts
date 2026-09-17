@@ -54,6 +54,7 @@ const BUNDLED = [
   ["illustrious-upscale", "Illustrious XL (upscale)"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-upscale", "Krea 2 Turbo (upscale)"],
+  ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-upscale", "Stable Diffusion 1.5 (upscale)"],
@@ -267,7 +268,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "krea2",
         "krea2",
         // LTX-2.3, which is a different architecture from the LTX-Video
-        // this workflow replaced (§6).
+        // this workflow replaced (§6). Two of them now: the same model, one
+        // imagining its own sound and one lip-syncing to a take (§3).
+        "ltx-2",
         "ltx-2",
         "sd15",
         "sd15",
@@ -298,6 +301,7 @@ Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async 
           image: "abc123.png",
           loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
           // What the audio workflows ask for instead of a prompt.
+          audio: "abc123.wav",
           reference: "abc123.wav",
           transcript: "the exact words of the reference clip",
           text: "(sigh) it is good to hear your voice again",

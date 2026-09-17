@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { type TestApp, withTestApp } from "../fixtures/app.ts";
 import { tinyWav } from "../fixtures/wav.ts";
+import { tinyPng } from "../fixtures/png.ts";
 import type { ApiGraph, Manifest } from "../../src/workflows/types.ts";
 
 /**
@@ -231,5 +232,84 @@ Deno.test("one duration reaches both the encoder and the latent", async () => {
     assertEquals(done.api_graph["7"]!.inputs.bpm, 92);
 
     assertEquals((await latestOutput(app)).kind, "audio");
+  }, { comfy: true });
+});
+
+// ------------------------------------------------------------------ ia2v
+
+/**
+ * The point of all of the above (DESIGN-AUDIO §3): a take made here, carried
+ * into video that is lip-synced to it.
+ *
+ * What makes the mouth match is not that the audio is *present* — `ltx2-i2v`
+ * already carries an audio latent — but that the supplied clip is encoded
+ * into that latent and masked so the sampler keeps it. So the mask and where
+ * the duration lands are the two things worth holding still.
+ */
+Deno.test("image plus audio to video pins the take and sets the length", async () => {
+  await withTestApp(async (app) => {
+    const clip = await uploadClip(app);
+    const frame = new FormData();
+    frame.set(
+      "file",
+      new File(
+        [tinyPng({ width: 64, height: 64 }).buffer as ArrayBuffer],
+        "frame.png",
+      ),
+    );
+    const picture = await app.json<{ filename: string }>("/api/inputs", {
+      method: "POST",
+      body: frame,
+    });
+
+    const done = await settle(
+      app,
+      (await submit(app, "ltx2-ia2v", {
+        image: picture.filename,
+        audio: clip,
+        prompt: "the cactus creature talks to the camera",
+        duration: 6,
+        start: 1.5,
+        fps: 24,
+      })).id,
+    );
+    assertEquals(done.status, "done");
+
+    // The clip is what the graph loads, under the name the store gave it.
+    assertEquals(done.api_graph["55"]!.inputs.audio, clip);
+    assertEquals(done.api_graph["54"]!.inputs.image, picture.filename);
+
+    // A noise mask of 0 means "keep this". It is the whole mechanism: with a
+    // mask of 1 the sampler would regenerate the audio and there would be
+    // nothing to lip-sync to.
+    assertEquals(done.api_graph["44"]!.inputs.value, 0);
+    assertEquals(done.api_graph["38"]!.inputs.mask, ["44", 0]);
+    assertEquals(done.api_graph["38"]!.inputs.samples, ["39", 0]);
+    assertEquals(done.api_graph["39"]!.class_type, "LTXVAudioVAEEncode");
+    assertEquals(done.api_graph["39"]!.inputs.audio, ["43", 0]);
+
+    // One duration trims the clip and sets the frame count — `a * b + 1`
+    // against the frame rate — so the video cannot be a different length
+    // from the sound (§3.3).
+    assertEquals(done.api_graph["42"]!.inputs.value, 6);
+    assertEquals(done.api_graph["43"]!.inputs.duration, ["42", 0]);
+    assertEquals(done.api_graph["43"]!.inputs.start_index, 1.5);
+    assertEquals(done.api_graph["40"]!.inputs.expression, "a * b + 1");
+    assertEquals(done.api_graph["40"]!.inputs["values.a"], ["42", 0]);
+    assertEquals(done.api_graph["40"]!.inputs["values.b"], ["34", 0]);
+    assertEquals(done.api_graph["34"]!.inputs.value, 24);
+
+    // Both files went up before the prompt did, and the result remembers
+    // both of them (§9 step 5).
+    assertEquals(
+      app.fake!.uploads.map((file) => file.name).sort(),
+      [clip, picture.filename].sort(),
+    );
+    const output = await latestOutput(app);
+    assertEquals(output.kind, "video");
+    const links = app.db.prepare(
+      `SELECT param_key FROM output_inputs WHERE output_id = ? ORDER BY param_key`,
+    ).all<{ param_key: string }>(output.id);
+    assertEquals(links.map((row) => row.param_key), ["audio", "image"]);
   }, { comfy: true });
 });

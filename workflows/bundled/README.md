@@ -1,28 +1,29 @@
 # Bundled workflows
 
-The 16 workflows of DESIGN §4.6, shipped with the app and copied into
+The 17 workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
 
-| id                    | name                           | family       | kind  | exposed params                                                                                                                                                                                                                                           |
-| --------------------- | ------------------------------ | ------------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ace-step-song`       | ACE-Step Song                  | ace-step-1.5 | audio | style, lyrics, duration, bpm, key_scale, time_signature, language, seed, model · language_model, vae, steps, audio_codes, encoder_cfg advanced                                                                                                           |
-| `anima`               | Anima                          | anima        | image | prompt, negative, model, size, seed, loras, turbo · steps/cfg (or the turbo pair, `when` turbo), clip, vae advanced                                                                                                                                      |
-| `anima-upscale`       | Anima (upscale)                | anima        | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                  |
-| `breeze-tts-clone`    | Breeze TTS (voice clone)       | —            | audio | reference, transcript, text, direct, instruction (`when` direct), seed · build, cfg_scale (`when` direct), max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                 |
-| `breeze-tts-design`   | Breeze TTS (voice design)      | —            | audio | voice, text, seed · build, cfg_scale, max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                                                                                      |
-| `flux-klein`          | Flux.2 Klein                   | flux2        | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                                                                                                                                                        |
-| `flux-klein-upscale`  | Flux.2 Klein (upscale)         | flux2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, upscale_method, clip, vae, model advanced                                                                       |
-| `illustrious`         | Illustrious XL                 | sdxl         | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                                                                                                                                                         |
-| `illustrious-upscale` | Illustrious XL (upscale)       | sdxl         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                             |
-| `krea2`               | Krea 2 Turbo                   | krea2        | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, max_length (`when` enhance) advanced                                                                                                                                                  |
-| `krea2-upscale`       | Krea 2 Turbo (upscale)         | krea2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                            |
-| `ltx2-i2v`            | LTX-2.3 Image to Video         | ltx-2        | video | image, prompt, negative, size, duration, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced |
-| `sd15`                | Stable Diffusion 1.5           | sd15         | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                |
-| `sd15-upscale`        | Stable Diffusion 1.5 (upscale) | sd15         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                             |
-| `z-image-turbo`       | Z-Image Turbo                  | z-image      | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                                                                      |
-| `z-image-upscale`     | Z-Image Turbo (upscale)        | z-image      | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                     |
+| id                    | name                           | family       | kind  | exposed params                                                                                                                                                                                                                                                         |
+| --------------------- | ------------------------------ | ------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ace-step-song`       | ACE-Step Song                  | ace-step-1.5 | audio | style, lyrics, duration, bpm, key_scale, time_signature, language, seed, model · language_model, vae, steps, audio_codes, encoder_cfg advanced                                                                                                                         |
+| `anima`               | Anima                          | anima        | image | prompt, negative, model, size, seed, loras, turbo · steps/cfg (or the turbo pair, `when` turbo), clip, vae advanced                                                                                                                                                    |
+| `anima-upscale`       | Anima (upscale)                | anima        | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                |
+| `breeze-tts-clone`    | Breeze TTS (voice clone)       | —            | audio | reference, transcript, text, direct, instruction (`when` direct), seed · build, cfg_scale (`when` direct), max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                               |
+| `breeze-tts-design`   | Breeze TTS (voice design)      | —            | audio | voice, text, seed · build, cfg_scale, max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                                                                                                    |
+| `flux-klein`          | Flux.2 Klein                   | flux2        | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                                                                                                                                                                      |
+| `flux-klein-upscale`  | Flux.2 Klein (upscale)         | flux2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, upscale_method, clip, vae, model advanced                                                                                     |
+| `illustrious`         | Illustrious XL                 | sdxl         | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                       |
+| `illustrious-upscale` | Illustrious XL (upscale)       | sdxl         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
+| `krea2`               | Krea 2 Turbo                   | krea2        | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, max_length (`when` enhance) advanced                                                                                                                                                                |
+| `krea2-upscale`       | Krea 2 Turbo (upscale)         | krea2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                          |
+| `ltx2-ia2v`           | LTX-2.3 Image + Audio to Video | ltx-2        | video | image, audio, prompt, negative, size, duration, start, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced |
+| `ltx2-i2v`            | LTX-2.3 Image to Video         | ltx-2        | video | image, prompt, negative, size, duration, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced               |
+| `sd15`                | Stable Diffusion 1.5           | sd15         | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                              |
+| `sd15-upscale`        | Stable Diffusion 1.5 (upscale) | sd15         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
+| `z-image-turbo`       | Z-Image Turbo                  | z-image      | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                                                                                    |
+| `z-image-upscale`     | Z-Image Turbo (upscale)        | z-image      | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                                   |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
@@ -49,6 +50,17 @@ type rather than a wrong guess.
 
 `z-image-turbo`, `anima`, `flux-klein` and `krea2` were rebuilt this way; the
 rest are still the placeholders described below.
+
+`ltx2-ia2v` is the official `video_ltx2_3_ia2v` template, imported by the
+script. Three things in the importer had to grow first, and each was a real gap
+rather than a special case: a `Reroute` is now resolved away as ComfyUI resolves
+it (every consumer is pointed at what the reroute was reading); `SaveVideo`'s
+`format` is a DynamicCombo carrying a `codec` child, which the schema did not
+say; and `TextGenerateLTX2Prompt` was missing its `thinking` and
+`use_default_template` widgets, which the first template to use it got away with
+only because nothing re-read them. Two nodes are added after the import, because
+the subgraph read them from the parent document: `LoadImage` and `LoadAudio`.
+The optional-distilled-LoRA switch is added to match `ltx2-i2v`.
 
 `ace-step-song` follows the official `audio_ace_step1_5_xl_turbo` template — the
 same eight nodes, the same split loaders, the same eight steps at cfg 1 — but
@@ -89,15 +101,16 @@ distilled 4B, which the template ships switched off in favour of the base.
 (`v1-5-pruned-emaonly-fp16.safetensors`), so it runs as shipped and is what the
 contract check generates with (`docs/HARDWARE-CHECKLIST.md`).
 
-The other ten have never been run: this repository has no GPU and none of their
-weights. Every model filename below is a **placeholder** and will not resolve on
-your machine until you point it at a file you actually have.
+The other eleven have never been run: this repository has no GPU and none of
+their weights. Every model filename below is a **placeholder** and will not
+resolve on your machine until you point it at a file you actually have.
 
 | workflow        | placeholder filenames                                                       |
 | --------------- | --------------------------------------------------------------------------- |
 | `illustrious`   | `illustriousXL.safetensors`                                                 |
 | `ltx2-i2v`      | none — it names the files the official template names                       |
 | `ace-step-song` | none — it names the files the official ACE-Step 1.5 XL turbo template names |
+| `ltx2-ia2v`     | none — the same four files `ltx2-i2v` names                                 |
 | `breeze-tts-*`  | none — the pack resolves a build label to a file itself                     |
 
 **Fixing them:** open the workflow from the Workflows screen ("Open in
@@ -144,6 +157,18 @@ saving replaces it with the editor's own.
   workflow: `ComfySwitchNode` sends the save node to either Voice Clone (cfg 1,
   no instruction — the reference is the delivery) or Voice Direction (cfg 4, the
   same voice steered by words), and only the reached branch executes.
+- **`ltx2-ia2v` is where a take becomes a performance.** `ltx2-i2v` already
+  carries an audio latent, but an empty one: the sound it makes is the sound it
+  imagined. Here the supplied clip is encoded into that latent and masked with
+  `SolidMask(value 0)` — a noise mask of 0 means "keep this" — so the sampler
+  cannot regenerate it and has to draw a picture that fits it. That is what
+  makes the mouth match. The delta from `ltx2-i2v` is four nodes in
+  (`LoadAudio`, `TrimAudioDuration`, `LTXVAudioVAEEncode`, `SetLatentNoiseMask`)
+  and one out (`LTXVEmptyLatentAudio`); everything downstream is unchanged.
+- **One number is the length of both.** `duration` trims the clip and, through
+  `a * b + 1` against the frame rate, sets the frame count, so the video and the
+  sound cannot disagree. A clip shorter than the window is padded and the model
+  generates the tail — `LTXVConcatAVLatent` does that itself.
 - **`ace-step-song` sets its length in two places on purpose.** The text encoder
   is told the duration so it writes an arrangement that fits, and the empty
   latent is told so there is somewhere to put it; both read one

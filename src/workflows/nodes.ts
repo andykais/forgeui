@@ -153,6 +153,20 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     },
     outputs: ["STRING"],
   },
+  /**
+   * A mask of one value. In `ltx2-ia2v` the value is `0`, and a noise mask of
+   * 0 means "keep this": it is what pins the supplied audio so the sampler
+   * draws a picture to fit the sound rather than regenerating the sound
+   * (DESIGN-AUDIO §3.2).
+   */
+  SolidMask: {
+    widgets: ["value", "width", "height"],
+    outputs: ["MASK"],
+  },
+  SetLatentNoiseMask: {
+    inputs: ["samples", "mask"],
+    outputs: ["LATENT"],
+  },
   ComfySwitchNode: {
     inputs: ["on_false", "on_true"],
     widgets: ["switch"],
@@ -262,6 +276,15 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     inputs: ["samples", "audio_vae"],
     outputs: ["AUDIO"],
   },
+  /**
+   * The other direction: a supplied clip becomes the audio latent the
+   * sampler carries, which is what `ltx2-ia2v` conditions the picture on
+   * (DESIGN-AUDIO §3.2).
+   */
+  LTXVAudioVAEEncode: {
+    inputs: ["audio", "audio_vae"],
+    outputs: ["LATENT"],
+  },
   /** The sigma schedule written out by hand, rather than built from steps. */
   ManualSigmas: {
     widgets: ["sigmas"],
@@ -297,7 +320,17 @@ export const CORE_NODES: Record<string, NodeSchema> = {
   /** The prompt enhancer of the official graph; Gemma, behind a switch. */
   TextGenerateLTX2Prompt: {
     inputs: ["clip", "image", "video", "audio"],
-    widgets: ["prompt", "max_length", "sampling_mode"],
+    // `thinking` and `use_default_template` follow the sampling expansion,
+    // as they do on the core `TextGenerate`. They were missing here, which
+    // the importer caught on the second template to use this node: twelve
+    // widget values where the schema accounted for ten.
+    widgets: [
+      "prompt",
+      "max_length",
+      "sampling_mode",
+      "thinking",
+      "use_default_template",
+    ],
     dynamic: {
       sampling_mode: {
         on: [
@@ -409,7 +442,18 @@ export const CORE_NODES: Record<string, NodeSchema> = {
   },
   SaveVideo: {
     inputs: ["video"],
+    // `format` is a DynamicCombo whose every option carries a `codec` child,
+    // and a plain `codec` widget follows it (an optional hidden input in the
+    // node's schema). Four values, which is what the editor writes.
     widgets: ["filename_prefix", "format", "codec"],
+    dynamic: {
+      format: {
+        auto: ["codec"],
+        mp4: ["codec"],
+        mkv: ["codec"],
+        webm: ["codec"],
+      },
+    },
     output: true,
   },
   SaveAnimatedWEBP: {
