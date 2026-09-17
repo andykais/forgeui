@@ -1,5 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { ImageProbeError, probeImage } from "../../src/inputs/probe.ts";
+import {
+  ImageProbeError,
+  probeImage,
+  probeMedia,
+} from "../../src/inputs/probe.ts";
+import { tinyWav } from "../fixtures/wav.ts";
 
 /**
  * What the store writes an upload as, and how big it says the picture is
@@ -81,4 +86,58 @@ Deno.test("a JPEG with no frame header says so rather than guessing", () => {
   const truncated = new Uint8Array(24);
   truncated.set([0xff, 0xd8]);
   assertThrows(() => probeImage(truncated), ImageProbeError, "frame header");
+});
+
+/**
+ * Sound goes through the same door (DESIGN-AUDIO §4.3): the magic decides the
+ * extension, and the dimensions a picture would have are simply absent.
+ */
+Deno.test("audio is recognised by its container, and has no dimensions", () => {
+  const wav = probeMedia(tinyWav({ seconds: 1 }));
+  assertEquals(wav.kind, "audio");
+  assertEquals(wav.ext, "wav");
+  assertEquals(wav.contentType, "audio/wav");
+  assertEquals(wav.width, null);
+  assertEquals(wav.height, null);
+
+  const header = (text: string, pad = 32) => {
+    const bytes = new Uint8Array(pad);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+    return bytes;
+  };
+  assertEquals(probeMedia(header("fLaC")).ext, "flac");
+  assertEquals(probeMedia(header("ID3")).ext, "mp3");
+
+  // Ogg names its codec in the first page; Opus gets its own extension so
+  // the file is called what it is.
+  const ogg = header("OggS", 40);
+  assertEquals(probeMedia(ogg).ext, "ogg");
+  const opus = header("OggS", 40);
+  for (const [i, ch] of [..."OpusHead"].entries()) {
+    opus[28 + i] = ch.charCodeAt(0);
+  }
+  assertEquals(probeMedia(opus).ext, "opus");
+
+  // A bare MPEG frame sync, which is an MP3 with no ID3 tag on the front.
+  const bare = new Uint8Array(32);
+  bare[0] = 0xff;
+  bare[1] = 0xfb;
+  assertEquals(probeMedia(bare).ext, "mp3");
+});
+
+Deno.test("a picture still comes back as a picture, with its size", () => {
+  const image = probeMedia(png(640, 360));
+  assertEquals(image.kind, "image");
+  assertEquals(image.ext, "png");
+  assertEquals([image.width, image.height], [640, 360]);
+});
+
+Deno.test("anything that is neither says so, naming both", () => {
+  const junk = new Uint8Array(32).fill(0x7a);
+  assertThrows(
+    () => probeMedia(junk),
+    ImageProbeError,
+    "PNG, JPEG or WebP image",
+  );
+  assertThrows(() => probeMedia(junk), ImageProbeError, "WAV, FLAC, MP3");
 });

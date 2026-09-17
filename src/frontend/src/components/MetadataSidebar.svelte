@@ -9,7 +9,7 @@
   import { api } from "../api.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
-  import { inputMediaUrl } from "../lib/media.ts";
+  import { inputMediaUrl, isAudioUrl } from "../lib/media.ts";
   import Popover from "./Popover.svelte";
   import MediaThumb from "./MediaThumb.svelte";
 
@@ -411,6 +411,11 @@
             </div>
           {:else if typeof value === "string" && hashOfName.has(value)}
             <div class="mono">{@render modelLink(linkTo(value))}</div>
+          {:else if inputMediaUrl(value) && isAudioUrl(String(value))}
+            {@const url = inputMediaUrl(value)!}
+            <!-- A clip is auditioned, not looked at (DESIGN-AUDIO §2.3). -->
+            <audio class="input-audio" src={url} controls preload="metadata"
+            ></audio>
           {:else if inputMediaUrl(value)}
             {@const url = inputMediaUrl(value)!}
             <!--
@@ -673,6 +678,13 @@
   .input {
     display: block;
     margin-top: 2px;
+  }
+
+  .input-audio {
+    display: block;
+    width: 100%;
+    height: 32px;
+    margin-top: 4px;
   }
 
   .input img {

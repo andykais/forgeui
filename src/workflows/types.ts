@@ -62,6 +62,7 @@ export const PARAM_TYPES = [
   "image",
   "mask",
   "video",
+  "audio",
 ] as const;
 export type ParamType = typeof PARAM_TYPES[number];
 
@@ -251,7 +252,7 @@ export interface LoraListParam extends ParamCommon {
 }
 
 export interface MediaParam extends ParamCommon {
-  type: "image" | "mask" | "video";
+  type: "image" | "mask" | "video" | "audio";
   bind: string;
   /** For `mask`: the `image` param it is painted over. */
   of?: string;

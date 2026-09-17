@@ -1263,6 +1263,9 @@ export interface InputRow {
   kind: string;
   width: number | null;
   height: number | null;
+  /** How long a clip runs; null for a picture, and for audio ffmpeg could
+   * not read (DESIGN-AUDIO §4.3). */
+  duration_ms: number | null;
   original_name: string | null;
   /** The output this was adopted from, when it came out of the app itself. */
   derived_from_output: string | null;
@@ -1270,7 +1273,7 @@ export interface InputRow {
 }
 
 const INPUT_COLUMNS =
-  `sha256, path, ext, kind, width, height, original_name, derived_from_output, created_at`;
+  `sha256, path, ext, kind, width, height, duration_ms, original_name, derived_from_output, created_at`;
 
 export function getInput(db: Database, sha256: string): InputRow | null {
   return db.prepare(
@@ -1286,9 +1289,9 @@ export function getInput(db: Database, sha256: string): InputRow | null {
 export function insertInput(db: Database, row: InputRow): void {
   db.prepare(
     `INSERT INTO inputs
-       (sha256, path, ext, kind, width, height, original_name,
+       (sha256, path, ext, kind, width, height, duration_ms, original_name,
         derived_from_output, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(sha256) DO NOTHING`,
   ).run(
     row.sha256,
@@ -1297,6 +1300,7 @@ export function insertInput(db: Database, row: InputRow): void {
     row.kind,
     row.width,
     row.height,
+    row.duration_ms,
     row.original_name,
     row.derived_from_output,
     row.created_at,

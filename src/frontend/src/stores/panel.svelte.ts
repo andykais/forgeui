@@ -215,7 +215,8 @@ class PanelState {
         param.type === "text" ||
         param.type === "image" ||
         param.type === "mask" ||
-        param.type === "video"
+        param.type === "video" ||
+        param.type === "audio"
       ) {
         continue;
       }

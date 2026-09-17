@@ -44,12 +44,13 @@ export function posterFrame(url: string): string {
  *
  * An `image` param holds `<sha256>.<ext>` and nothing else does, so the shape
  * of the value is enough to recognise one — the same test the server applies
- * when it decides what to upload (`jobs/pipeline.ts`). That matters where the
- * manifest is not to hand: the metadata sidebar has an output's params but
- * not the types behind them, and a 64-character hash is no use to anybody as
- * a line of text.
+ * when it decides what to upload (`INPUT_FILENAME` in `inputs/store.ts`, which
+ * this must name the same extensions as). That matters where the manifest is
+ * not to hand: the metadata sidebar has an output's params but not the types
+ * behind them, and a 64-character hash is no use to anybody as a line of text.
  */
-const INPUT_FILENAME = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/;
+const INPUT_FILENAME =
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
 
 export function inputMediaUrl(value: unknown): string | null {
   if (typeof value !== "string" || !INPUT_FILENAME.test(value)) return null;

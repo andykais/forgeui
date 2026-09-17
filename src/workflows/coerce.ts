@@ -151,6 +151,7 @@ function defaultValue(param: Param): unknown {
     case "image":
     case "mask":
     case "video":
+    case "audio":
       return null;
   }
 }
@@ -226,6 +227,7 @@ export function coerceParams(
       case "image":
       case "mask":
       case "video":
+      case "audio":
         values[param.key] = raw ?? null;
         break;
     }

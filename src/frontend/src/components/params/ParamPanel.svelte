@@ -7,6 +7,7 @@
   import SizeParam from "./SizeParam.svelte";
   import LoraListParam from "./LoraListParam.svelte";
   import ModelParam from "./ModelParam.svelte";
+  import AudioParam from "./AudioParam.svelte";
   import ImageParam from "./ImageParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param } from "../../types.ts";
   import { applicableParams } from "../../lib/applies.ts";
@@ -393,6 +394,12 @@
           value={(values[param.key] as string) ?? ""}
           onchange={(filename) => onchange(param.key, filename)}
           onattach={onimage}
+        />
+      {:else if param.type === "audio"}
+        <AudioParam
+          {param}
+          value={(values[param.key] as string) ?? ""}
+          onchange={(filename) => onchange(param.key, filename)}
         />
       {:else}
         <!--

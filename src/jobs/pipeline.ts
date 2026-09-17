@@ -46,7 +46,7 @@ import {
 import { completedProgress, ProgressTracker } from "./progress.ts";
 import { parseSidecar } from "./sidecar.ts";
 import { log, logError, oneLine, seconds } from "../log.ts";
-import type { InputStore } from "../inputs/store.ts";
+import { INPUT_FILENAME, type InputStore } from "../inputs/store.ts";
 
 /**
  * The job pipeline (§5): validate, rewrite, persist, submit, follow the
@@ -309,7 +309,7 @@ export class JobRunner {
     for (const node of Object.values(graph)) {
       for (const value of Object.values(node.inputs)) {
         if (typeof value !== "string") continue;
-        const match = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/.exec(value);
+        const match = INPUT_FILENAME.exec(value);
         if (match) wanted.add(match[1]!);
       }
     }
@@ -318,7 +318,7 @@ export class JobRunner {
       if (!stored) {
         throw new JobRequestError(
           `the input ${sha256.slice(0, 12)}… is not in the store any more; ` +
-            `attach the image again`,
+            `attach it again`,
         );
       }
       const bytes = await this.#inputs.read(sha256);
@@ -335,7 +335,7 @@ export class JobRunner {
     if (!this.#inputs || outputIds.length === 0) return;
     for (const [key, value] of Object.entries(params)) {
       if (typeof value !== "string") continue;
-      const match = /^([0-9a-f]{64})\.(?:png|jpe?g|webp)$/.exec(value);
+      const match = INPUT_FILENAME.exec(value);
       if (!match) continue;
       for (const outputId of outputIds) {
         this.#inputs.link(outputId, match[1]!, key);

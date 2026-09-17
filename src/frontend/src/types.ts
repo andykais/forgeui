@@ -14,7 +14,8 @@ export type ParamType =
   | "lora_list"
   | "image"
   | "mask"
-  | "video";
+  | "video"
+  | "audio";
 
 export interface LoraChain {
   model_from: string;
@@ -460,10 +461,16 @@ export interface InputMedia {
   sha256: string;
   ext: string;
   filename: string;
-  width: number;
-  height: number;
+  kind: "image" | "audio";
+  /** Null for audio, which has no dimensions (DESIGN-AUDIO §4.3). */
+  width: number | null;
+  height: number | null;
+  /** Audio only: how long the clip runs. */
+  duration_ms: number | null;
   bytes: number;
   url: string;
+  /** The drawn waveform of an attached clip (§2.2); null for a picture. */
+  waveform_url: string | null;
   derived_from_output: string | null;
 }
 

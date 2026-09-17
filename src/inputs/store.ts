@@ -9,7 +9,8 @@ import {
   insertOutputInput,
 } from "../db/queries.ts";
 import type { DataPaths } from "../config/paths.ts";
-import { type ProbedImage, probeImage } from "./probe.ts";
+import { type ProbedMedia, probeMedia } from "./probe.ts";
+import { readAudio } from "../media/audio.ts";
 
 /**
  * The content-addressed input store (§9): `inputs/<sha[0:2]>/<sha>.<ext>`.
@@ -25,13 +26,27 @@ export class InputError extends Error {
   override readonly name = "InputError";
 }
 
-export interface StoredInput extends ProbedImage {
+/**
+ * What a stored input is called: its sha256 and the extension the probe
+ * chose. A param's value is exactly this, which is how the submit step finds
+ * the files a frozen graph needs without a manifest to read (§9).
+ *
+ * `src/frontend/src/lib/media.ts` keeps its own copy for the metadata
+ * sidebar, which has an output's params but not the types behind them. The
+ * two must name the same extensions.
+ */
+export const INPUT_FILENAME =
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
+
+export interface StoredInput extends ProbedMedia {
   sha256: string;
   /** Relative to the data dir; what the DB row holds and media serves. */
   path: string;
   /** The name ComfyUI will know it by, once uploaded. */
   filename: string;
   bytes: number;
+  /** Audio only: how long the clip runs (DESIGN-AUDIO §4.3). */
+  duration_ms: number | null;
   derived_from_output: string | null;
 }
 
@@ -68,7 +83,7 @@ export class InputStore {
       derivedFromOutput?: string | null;
     } = {},
   ): Promise<StoredInput> {
-    const probed = probeImage(bytes);
+    const probed = probeMedia(bytes);
     const sha256 = await sha256Hex(bytes);
     const relative = this.#relative(sha256, probed.ext);
     const absolute = this.absolute(relative);
@@ -81,7 +96,10 @@ export class InputStore {
       relative,
       probed,
       bytes: bytes.length,
-      kind: options.kind ?? "image",
+      // An attached clip gets the same treatment a result does: measured, and
+      // drawn, so the param can show the shape of what was attached (§2.3).
+      audio: probed.kind === "audio" ? await readAudio(absolute) : null,
+      kind: options.kind ?? probed.kind,
       originalName: options.originalName ?? null,
       derivedFromOutput: options.derivedFromOutput ?? null,
     });
@@ -105,7 +123,7 @@ export class InputStore {
     } catch {
       throw new InputError(`output "${outputId}" is no longer on disk`);
     }
-    const probed = probeImage(bytes);
+    const probed = probeMedia(bytes);
     const sha256 = await sha256Hex(bytes);
     const relative = this.#relative(sha256, probed.ext);
     const absolute = this.absolute(relative);
@@ -122,7 +140,10 @@ export class InputStore {
       relative,
       probed,
       bytes: bytes.length,
-      kind: "image",
+      // The output already has a waveform beside it, but that one belongs to
+      // the output and goes when it is deleted; the input keeps its own.
+      audio: probed.kind === "audio" ? await readAudio(absolute) : null,
+      kind: probed.kind,
       originalName: null,
       derivedFromOutput: outputId,
     });
@@ -131,8 +152,9 @@ export class InputStore {
   #record(input: {
     sha256: string;
     relative: string;
-    probed: ProbedImage;
+    probed: ProbedMedia;
     bytes: number;
+    audio: { duration_ms: number | null } | null;
     kind: string;
     originalName: string | null;
     derivedFromOutput: string | null;
@@ -144,6 +166,7 @@ export class InputStore {
       kind: input.kind,
       width: input.probed.width,
       height: input.probed.height,
+      duration_ms: input.audio?.duration_ms ?? null,
       original_name: input.originalName,
       derived_from_output: input.derivedFromOutput,
       created_at: this.#now(),
@@ -156,6 +179,7 @@ export class InputStore {
       path: stored.path,
       filename: `${stored.sha256}.${stored.ext}`,
       bytes: input.bytes,
+      duration_ms: stored.duration_ms,
       derived_from_output: stored.derived_from_output,
     };
   }
@@ -170,8 +194,10 @@ export class InputStore {
       ext: row.ext,
       filename: `${row.sha256}.${row.ext}`,
       contentType: contentTypeOf(row.ext),
-      width: row.width ?? 0,
-      height: row.height ?? 0,
+      kind: row.kind === "audio" ? "audio" : "image",
+      width: row.width,
+      height: row.height,
+      duration_ms: row.duration_ms,
       bytes: 0,
       derived_from_output: row.derived_from_output,
     };
@@ -197,5 +223,10 @@ function contentTypeOf(ext: string): string {
   if (ext === "png") return "image/png";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
   if (ext === "webp") return "image/webp";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "flac") return "audio/flac";
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "opus" || ext === "ogg") return "audio/ogg";
+  if (ext === "m4a") return "audio/mp4";
   return "application/octet-stream";
 }

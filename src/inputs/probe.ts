@@ -6,6 +6,10 @@
  * after the point where anything can be said about it. The first bytes of the
  * file are not hearsay, so the extension the store writes and the dimensions
  * it records both come from there.
+ *
+ * Audio is recognised the same way and measured differently: a container
+ * header says what a file is, but how long it runs is `ffprobe`'s answer, and
+ * that needs a path rather than a prefix (DESIGN-AUDIO §4.3).
  */
 
 export class ImageProbeError extends Error {
@@ -18,6 +22,16 @@ export interface ProbedImage {
   contentType: string;
   width: number;
   height: number;
+}
+
+/** A file the store will take: a picture with a size, or sound without one. */
+export interface ProbedMedia {
+  ext: string;
+  contentType: string;
+  kind: "image" | "audio";
+  /** Null for audio, which has no dimensions to record. */
+  width: number | null;
+  height: number | null;
 }
 
 function u16(bytes: Uint8Array, at: number, littleEndian = false): number {
@@ -97,6 +111,45 @@ function webpSize(bytes: Uint8Array): { width: number; height: number } {
   throw new ImageProbeError(`unrecognised WebP chunk "${fourcc}"`);
 }
 
+/**
+ * The audio containers ComfyUI's `LoadAudio` will take.
+ *
+ * Only the magic is read here. Duration comes from ffprobe once the bytes are
+ * on disk, because for MP3 the honest alternatives are trusting a VBR header
+ * or counting every frame, and ffmpeg is already a dependency (§2.2).
+ */
+function probeAudio(bytes: Uint8Array): ProbedMedia | null {
+  const text = (at: number, length: number) =>
+    new TextDecoder().decode(bytes.subarray(at, at + length));
+  const audio = (ext: string, contentType: string): ProbedMedia => ({
+    ext,
+    contentType,
+    kind: "audio",
+    width: null,
+    height: null,
+  });
+
+  if (text(0, 4) === "RIFF" && text(8, 4) === "WAVE") {
+    return audio("wav", "audio/wav");
+  }
+  if (text(0, 4) === "fLaC") return audio("flac", "audio/flac");
+  // Ogg carries several codecs; Opus and Vorbis both name themselves in the
+  // first page, and anything else in an Ogg is still an Ogg to `LoadAudio`.
+  if (text(0, 4) === "OggS") {
+    return text(28, 8) === "OpusHead"
+      ? audio("opus", "audio/ogg")
+      : audio("ogg", "audio/ogg");
+  }
+  // MP3 is either an ID3 tag or a bare frame sync (11 set bits).
+  if (text(0, 3) === "ID3") return audio("mp3", "audio/mpeg");
+  if (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) {
+    return audio("mp3", "audio/mpeg");
+  }
+  // ISO-BMFF: `....ftyp` at offset 4, which is what an m4a/aac file is.
+  if (text(4, 4) === "ftyp") return audio("m4a", "audio/mp4");
+  return null;
+}
+
 /** The formats ComfyUI's `LoadImage` will take, and nothing else. */
 export function probeImage(bytes: Uint8Array): ProbedImage {
   if (bytes.length < 16) {
@@ -122,4 +175,28 @@ export function probeImage(bytes: Uint8Array): ProbedImage {
   throw new ImageProbeError(
     "only PNG, JPEG and WebP can be used as an input image",
   );
+}
+
+/**
+ * What the store takes: a picture or a sound, decided by the bytes.
+ *
+ * Images are tried first because they are the common case and their magic is
+ * unambiguous; the error when neither matches names both, since "only PNG,
+ * JPEG and WebP" is a confusing thing to be told about a `.wav`.
+ */
+export function probeMedia(bytes: Uint8Array): ProbedMedia {
+  if (bytes.length < 16) {
+    throw new ImageProbeError("this file is too short to be media");
+  }
+  const audio = probeAudio(bytes);
+  if (audio) return audio;
+  try {
+    const image = probeImage(bytes);
+    return { ...image, kind: "image" };
+  } catch {
+    throw new ImageProbeError(
+      "an input must be a PNG, JPEG or WebP image, " +
+        "or a WAV, FLAC, MP3, Opus, Ogg or M4A sound",
+    );
+  }
 }

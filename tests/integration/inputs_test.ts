@@ -126,7 +126,7 @@ Deno.test("a file that is not an image is refused with the reason", async () => 
     });
     assertEquals(response.status, 400);
     const body = await response.json() as { error: { message: string } };
-    assertStringIncludes(body.error.message, "PNG, JPEG and WebP");
+    assertStringIncludes(body.error.message, "PNG, JPEG or WebP image");
   }, { comfy: true });
 });
 
@@ -234,7 +234,7 @@ Deno.test("a job naming an input the store has lost says so", async () => {
     });
     assertEquals(response.status, 400);
     const body = await response.json() as { error: { message: string } };
-    assertStringIncludes(body.error.message, "attach the image again");
+    assertStringIncludes(body.error.message, "attach it again");
   }, { comfy: true });
 });
 

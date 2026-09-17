@@ -504,6 +504,7 @@ function validateParam(
     case "image":
     case "mask":
     case "video":
+    case "audio":
       return {
         ...common,
         type,

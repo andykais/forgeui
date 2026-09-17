@@ -42,7 +42,9 @@
   let hover = $state(false);
   let focused = $state(false);
   /** What was attached here, for the thumbnail; the value is only a name. */
-  let preview = $state<{ filename: string; url: string; width: number; height: number } | null>(null);
+  let preview = $state<
+    { filename: string; url: string; width: number | null; height: number | null } | null
+  >(null);
 
   const shown = $derived(preview?.filename === value ? preview : null);
   /**
@@ -90,7 +92,11 @@
         height: media.height,
       };
       onchange(media.filename);
-      onattach?.({ width: media.width, height: media.height });
+      // Only a picture has a shape to match a size to; the store types the
+      // two as nullable now that it takes sound as well (§4.3).
+      if (media.width !== null && media.height !== null) {
+        onattach?.({ width: media.width, height: media.height });
+      }
     } catch (cause) {
       error = cause instanceof ApiError
         ? cause.message
@@ -124,7 +130,9 @@
           height: media.height,
         };
         onchange(media.filename);
-        onattach?.({ width: media.width, height: media.height });
+        if (media.width !== null && media.height !== null) {
+          onattach?.({ width: media.width, height: media.height });
+        }
       } catch (cause) {
         error = cause instanceof Error ? cause.message : String(cause);
       } finally {
@@ -198,7 +206,7 @@
     {#if value !== ""}
       <img class="shot" src={shown?.url ?? fallbackUrl} alt="" />
       <div class="meta mono dim">
-        {#if shown}{shown.width}×{shown.height}{:else}attached{/if}
+        {#if shown?.width && shown?.height}{shown.width}×{shown.height}{:else}attached{/if}
       </div>
     {:else}
       <div class="empty">
