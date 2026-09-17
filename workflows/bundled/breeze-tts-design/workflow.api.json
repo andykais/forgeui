@@ -7,7 +7,7 @@
       "device": "auto",
       "attention": "auto",
       "decode_mode": "eager",
-      "download_if_missing": true
+      "download_if_missing": false
     },
     "_meta": {
       "title": "Load Breeze TTS 2"

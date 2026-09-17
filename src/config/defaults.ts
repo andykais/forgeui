@@ -88,6 +88,8 @@ export function defaultConfig(): Config {
       url: DEFAULT_COMFY_URL,
       python: null,
       extra_args: [],
+      // Deliberate by default: a run should not be a download (§4.6).
+      allow_model_downloads: false,
     },
     model_folders: Object.fromEntries(
       DEFAULT_MODEL_KINDS.map((kind) => [kind, [] as string[]]),

@@ -35,8 +35,16 @@ ARG COMFY_HOME=/opt/ComfyUI
 ARG BREEZE_NODES_REPO=https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2.git
 ARG BREEZE_NODES_COMMIT=3461ca6011b7e833147b2e7edb779da7a08c6259
 
+# Nothing in this image fetches model weights at run time. The bundled
+# speech workflows ask their loader not to (`download_if_missing: false`) and
+# the app refuses a graph that would (`comfy.allow_model_downloads`), but a
+# custom node can always reach for the Hub on its own — these two are the
+# backstop huggingface_hub itself honours, so such a call fails immediately
+# and locally rather than after a DNS timeout.
 ENV DEBIAN_FRONTEND=noninteractive \
     DENO_INSTALL=/usr/local \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
     PATH="/usr/local/bin:${PATH}"
 
 # ffmpeg is the one external binary the app itself shells out to: it draws

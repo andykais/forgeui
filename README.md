@@ -160,17 +160,59 @@ installs into ComfyUI's venv. The pin is the `BREEZE_NODES_COMMIT` build arg;
 override it to try a newer one. `ace-step-song` and the LTX video workflows need
 nothing extra.
 
-The weights are not baked into the image — they are gigabytes, and the pack
-fetches them on first use from
-[`drbaph/Breeze-TTS-2-comfyui`](https://huggingface.co/drbaph/Breeze-TTS-2-comfyui).
+**The weights are yours to put there.** They are not baked into the image, and
+nothing here fetches them while a graph runs: the bundled workflows tell the
+loader `download_if_missing: false`, the app refuses any graph that would
+(`comfy.allow_model_downloads`, below), and the image exports `HF_HUB_OFFLINE=1`
+so a pack reaching for the Hub fails at once rather than after a DNS timeout. A
+generation should take the time a generation takes, not five gigabytes.
+
 There are four builds, and the Load Model node picks between them by label
 rather than by filename: `int8 hybrid (recommended)` (4.5 GiB),
 `bf16 (best quality)` (6.5 GiB), `int8 (smallest, slower)` (4.2 GiB), and
-`int8 text encoder only` (5.8 GiB). Each lands in `/models/breezetts2/` beside a
-`config.json` and a 0.6 GiB audio tokenizer, so expect a little over five
-gigabytes for the recommended build. The download survives a rebuilt image and
-shows up on the Models page like anything else on the volume. The weights carry
-their own licence — check it before you ship anything made with them.
+`int8 text encoder only` (5.8 GiB). Fetch the one you want from
+[`drbaph/Breeze-TTS-2-comfyui`](https://huggingface.co/drbaph/Breeze-TTS-2-comfyui)
+before the first run:
+
+```sh
+huggingface-cli download drbaph/Breeze-TTS-2-comfyui \
+  --include 'config.json' 'generation_config.json' 'tokenizer*' \
+            'special_tokens_map.json' 'audio_tokenizer/*' \
+            'Breeze-TTS-2-int8-hybrid.safetensors' \
+  --local-dir /models/breezetts2/drbaph_Breeze-TTS-2-comfyui
+```
+
+**The subfolder name matters**: the pack looks for
+`<folder>/drbaph_Breeze-TTS-2-comfyui/`, the repo id with `/` replaced by `_`,
+and checks for `config.json`, `audio_tokenizer/model.safetensors` and the
+build's own `.safetensors`. Files loose in `/models/breezetts2` are not found.
+Expect a little over five gigabytes for the recommended build, counting the 0.6
+GiB audio tokenizer. The weights carry their own licence — check it before you
+ship anything made with them.
+
+Point it somewhere else by naming the folder rather than moving it: the
+`breezetts2` key in `model_folders` can be any path (`/models/tts`, say), and
+ForgeUI writes it into the `extra_model_paths.yaml` ComfyUI hands the pack.
+
+### Models are never downloaded by a run
+
+`comfy.allow_model_downloads` defaults to **false**, and with it off the app
+refuses to submit a graph whose inputs would fetch weights mid-run —
+`download_if_missing`, `auto_download`, `download_model` — naming the node and
+the input instead. Custom node packs offer these to be helpful; the cost is that
+a generation either takes ten seconds or several gigabytes depending on what
+happens to be on disk, and fails with a network error rather than a missing
+file. Set it to `true` in `config.yaml` if you would rather have the
+convenience:
+
+```yaml
+comfy:
+  allow_model_downloads: true
+```
+
+The check is a list of input names, not a guarantee: a pack that spells its own
+differently is not covered, which is what `HF_HUB_OFFLINE=1` in the image is
+for.
 
 Running the speech workflows outside the container means doing the same three
 things by hand:

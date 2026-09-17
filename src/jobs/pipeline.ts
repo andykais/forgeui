@@ -127,12 +127,29 @@ export interface JobRunnerOptions {
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Whether a model of this class is on disk under this name (§5.1). */
   modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  /**
+   * Whether a graph may fetch weights while it runs. Read per submit rather
+   * than captured, so changing it in Settings takes effect without a restart.
+   */
+  allowModelDownloads?: () => boolean;
   /** The output-size report; absent in tests that do not care (§7.1). */
   telemetry?: TelemetryStore;
   /** Opens and closes the Memory Usage report's sampling window (§7.1). */
   memory?: MemoryMonitor;
   now?: () => number;
 }
+
+/**
+ * Inputs whose `true` means "fetch the weights from the internet if they are
+ * not here" (§4.6). Read off the packs this repo installs; a pack that
+ * spells it differently is not covered, which is why this is a guard rather
+ * than a guarantee.
+ */
+const DOWNLOAD_INPUTS = [
+  "download_if_missing",
+  "auto_download",
+  "download_model",
+] as const;
 
 export class JobRunner {
   #db: Database;
@@ -144,6 +161,7 @@ export class JobRunner {
   #inputs: InputStore | null;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  #allowModelDownloads?: () => boolean;
   #telemetry?: TelemetryStore;
   #memory?: MemoryMonitor;
   #now: () => number;
@@ -163,6 +181,7 @@ export class JobRunner {
     this.#inputs = options.inputs ?? null;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
+    this.#allowModelDownloads = options.allowModelDownloads;
     this.#telemetry = options.telemetry;
     this.#memory = options.memory;
     this.#now = options.now ?? Date.now;
@@ -209,6 +228,7 @@ export class JobRunner {
     const { values } = coerceParams(workflow.manifest, params);
     try {
       this.#assertModelsPresent(workflow.manifest, values);
+      this.#assertNoRuntimeDownloads(workflow.apiGraph);
       this.#assertConnected();
     } catch (cause) {
       // A refusal never reaches a job row, so this is the only record of it.
@@ -818,6 +838,39 @@ export class JobRunner {
       throw new JobRequestError(
         `not in your model folders: ${missing.join(", ")}. ` +
           `Pick one that is, or add the file and rescan.`,
+      );
+    }
+  }
+
+  /**
+   * Refuse a graph that would fetch weights while it runs (§4.6).
+   *
+   * Several node packs offer an input that downloads a checkpoint on first
+   * use. It is meant kindly, and it makes a generation unpredictable: the
+   * run either takes ten seconds or five gigabytes, depending on what is
+   * already on disk, and it fails with a network error rather than a missing
+   * file. Weights should be something you put there on purpose.
+   *
+   * A name list rather than something cleverer, because the prompt format
+   * carries no notion of "this input reaches the network" — these are the
+   * spellings the packs this repo knows about use. It is not exhaustive and
+   * cannot be; `comfy.allow_model_downloads` turns the whole check off.
+   */
+  #assertNoRuntimeDownloads(graph: ApiGraph): void {
+    if (this.#allowModelDownloads?.() ?? false) return;
+    const offenders: string[] = [];
+    for (const [id, node] of Object.entries(graph)) {
+      for (const input of DOWNLOAD_INPUTS) {
+        if (node.inputs[input] === true) {
+          offenders.push(`node ${id} (${node.class_type}).${input}`);
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      throw new JobRequestError(
+        `this graph would download models while it runs: ` +
+          `${offenders.join(", ")}. Turn that input off and put the weights ` +
+          `on disk yourself, or set comfy.allow_model_downloads: true.`,
       );
     }
   }

@@ -313,3 +313,28 @@ Deno.test("image plus audio to video pins the take and sets the length", async (
     assertEquals(links.map((row) => row.param_key), ["audio", "image"]);
   }, { comfy: true });
 });
+
+/**
+ * The middle of the three (§4.6): the graph itself asks its loader not to
+ * fetch anything. With this off the pack raises a `FileNotFoundError` that
+ * lists every directory it searched — which is the error a missing file
+ * should give — instead of a download, or a DNS failure standing in for one.
+ */
+Deno.test("the speech workflows never ask for a download", async () => {
+  await withTestApp(async (app) => {
+    for (const id of ["breeze-tts-clone", "breeze-tts-design"]) {
+      const detail = await app.json<{ api_json: ApiGraph }>(
+        `/api/workflows/${id}`,
+      );
+      const loaders = Object.entries(detail.api_json).filter(
+        ([, node]) => node.class_type === "BreezeTTS2LoadModel",
+      );
+      assertEquals(loaders.length, 1, `${id} has no loader node`);
+      assertEquals(
+        loaders[0]![1].inputs.download_if_missing,
+        false,
+        `${id} would download its weights mid-run`,
+      );
+    }
+  });
+});

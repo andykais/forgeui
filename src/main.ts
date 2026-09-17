@@ -134,6 +134,7 @@ async function startAppWith(
     inputs,
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
+    allowModelDownloads: () => store.config.comfy.allow_model_downloads,
     telemetry,
     memory,
   });

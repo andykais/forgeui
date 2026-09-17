@@ -134,3 +134,21 @@ Deno.test("the README documents the node pack it installs", async () => {
     );
   }
 });
+
+/**
+ * The image never fetches weights at run time (§4.6). Three things hold that
+ * together and this is the outermost: huggingface_hub reads these two
+ * variables itself, so a pack reaching for the Hub fails immediately and
+ * locally instead of hanging until DNS gives up.
+ */
+Deno.test("the container tells huggingface_hub it is offline", async () => {
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const containerfile = await Deno.readTextFile(join(root, "Containerfile"));
+  for (const variable of ["HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1"]) {
+    assertEquals(
+      containerfile.includes(variable),
+      true,
+      `Containerfile does not set ${variable}`,
+    );
+  }
+});
