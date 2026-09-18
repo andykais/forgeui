@@ -25,6 +25,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 | `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.              |
 | `docs/DESIGN-AGENT-LOOP.md`      | An LLM drives ForgeUI through `forge mcp`, and they take turns with the GPU. The bridge is built; the batch API and job `origin` are not. |
 | `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap and a harness together.                                                                           |
+| `docs/DESIGN-MODEL-IMPORT.md`    | **Proposal, not decided.** `forge models`, the `import/` drop folder, and `source` provenance on imported media; extends §8.3, §11.2.    |
 
 ## Layout
 
