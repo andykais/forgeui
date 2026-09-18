@@ -177,6 +177,7 @@ function applyParam(
     case "image":
     case "mask":
     case "video":
+    case "audio":
       // An optional input the user left empty keeps whatever the graph has.
       if (value === null || value === undefined || value === "") return;
       setScalar(graph, param.bind, value, where);

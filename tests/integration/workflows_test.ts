@@ -43,14 +43,18 @@ const KREA2_SAVE = "9";
 
 /** Listed by display name, which is how `GET /api/workflows` orders them. */
 const BUNDLED = [
+  ["ace-step-song", "ACE-Step Song"],
   ["anima", "Anima"],
   ["anima-upscale", "Anima (upscale)"],
+  ["breeze-tts-clone", "Breeze TTS (voice clone)"],
+  ["breeze-tts-design", "Breeze TTS (voice design)"],
   ["flux-klein", "Flux.2 Klein"],
   ["flux-klein-upscale", "Flux.2 Klein (upscale)"],
   ["illustrious", "Illustrious XL"],
   ["illustrious-upscale", "Illustrious XL (upscale)"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-upscale", "Krea 2 Turbo (upscale)"],
+  ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-upscale", "Stable Diffusion 1.5 (upscale)"],
@@ -248,8 +252,15 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       // Every family that can upscale has two: the workflow and its
       // upscale sibling, in display-name order (§10).
       [
+        // ACE-Step 1.5 is its own family for the same reason LTX-2 is: its
+        // encoder and latent nodes are not 1.0's (§6).
+        "ace-step-1.5",
         "anima",
         "anima",
+        // The two speech workflows have no family: their weights are not
+        // picked from the library at all (DESIGN-AUDIO §4.4).
+        null,
+        null,
         "flux2",
         "flux2",
         "sdxl",
@@ -257,7 +268,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "krea2",
         "krea2",
         // LTX-2.3, which is a different architecture from the LTX-Video
-        // this workflow replaced (§6).
+        // this workflow replaced (§6). Two of them now: the same model, one
+        // imagining its own sound and one lip-syncing to a take (§3).
+        "ltx-2",
         "ltx-2",
         "sd15",
         "sd15",
@@ -271,7 +284,12 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
 Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async () => {
   await withTestApp(async (app) => {
     const dir = await Deno.makeTempDir({ prefix: "forgeui-bundled-" });
-    const fake = await startFakeComfy({ stagingDir: join(dir, "staging") });
+    // With the speech pack installed, because two of the bundled workflows
+    // declare it and a ComfyUI without it would reject them by design (§4.6).
+    const fake = await startFakeComfy({
+      stagingDir: join(dir, "staging"),
+      packs: ["ComfyUI-Breeze-TTS-2"],
+    });
     try {
       for (const workflow of app.workflows.list()) {
         const manifest = workflow.manifest!;
@@ -282,6 +300,13 @@ Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async 
           prompt: "a granite bowl of figs",
           image: "abc123.png",
           loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
+          // What the audio workflows ask for instead of a prompt.
+          audio: "abc123.wav",
+          reference: "abc123.wav",
+          transcript: "the exact words of the reference clip",
+          text: "(sigh) it is good to hear your voice again",
+          voice: "an older man, warm, unhurried",
+          style: "neo-soul, live drums, warm rhodes",
         }, { randomSeed: () => 42 });
         const { graph } = rewriteGraph({
           manifest,

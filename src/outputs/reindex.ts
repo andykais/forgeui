@@ -13,11 +13,11 @@ import {
   refreshModelUsage,
   type SidecarModelRef,
 } from "../db/queries.ts";
-import { promptText } from "../jobs/completion.ts";
+import { promptText, toneText } from "../jobs/completion.ts";
 import { readPngSize } from "../jobs/png.ts";
 import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
 import { sha256Hex } from "../workflows/hash.ts";
-import type { ApiGraph } from "../workflows/types.ts";
+import type { ApiGraph, Manifest } from "../workflows/types.ts";
 
 /**
  * `deno task reindex` (§7): the database is a derived index, so it can be
@@ -44,6 +44,14 @@ export interface ReindexOptions {
    * only sidecars that already carry hashes produce `output_models` rows.
    */
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
+  /**
+   * The workflow a sidecar names, for the two columns that are read out of
+   * the params rather than stored in the file: which param is the prompt, and
+   * which one holds the tone (§4.2, §11.5). Without it both fall back to what
+   * a sidecar alone can say, which is the older guess — a rebuild then leaves
+   * every tone line blank until the workflow is available again.
+   */
+  manifestFor?: (workflowId: string | null) => Manifest | null;
   /** Report progress while walking a large outputs tree. */
   onProgress?: (done: number) => void;
 }
@@ -113,6 +121,8 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
     result.sidecars++;
     const createdAt = sidecarCreatedAt(sidecar);
     const dir = join(sidecarPath, "..");
+    const manifest = options.manifestFor?.(sidecar.workflow?.id ?? null) ??
+      null;
 
     for (const [index, output] of sidecar.outputs.entries()) {
       const id = `${sidecar.job_id}-${index}`;
@@ -161,7 +171,8 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
         workflow_id: sidecar.workflow?.id ?? null,
         workflow_hash: sidecar.workflow?.hash ?? null,
         family: sidecar.workflow?.family ?? null,
-        prompt: promptText(null, sidecar.params),
+        prompt: promptText(manifest, sidecar.params),
+        tone: toneText(manifest, sidecar.params),
         params: sidecar.params,
         deleted_at: null,
         created_at: createdAt,

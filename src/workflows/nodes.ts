@@ -153,6 +153,20 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     },
     outputs: ["STRING"],
   },
+  /**
+   * A mask of one value. In `ltx2-ia2v` the value is `0`, and a noise mask of
+   * 0 means "keep this": it is what pins the supplied audio so the sampler
+   * draws a picture to fit the sound rather than regenerating the sound
+   * (DESIGN-AUDIO §3.2).
+   */
+  SolidMask: {
+    widgets: ["value", "width", "height"],
+    outputs: ["MASK"],
+  },
+  SetLatentNoiseMask: {
+    inputs: ["samples", "mask"],
+    outputs: ["LATENT"],
+  },
   ComfySwitchNode: {
     inputs: ["on_false", "on_true"],
     widgets: ["switch"],
@@ -262,6 +276,15 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     inputs: ["samples", "audio_vae"],
     outputs: ["AUDIO"],
   },
+  /**
+   * The other direction: a supplied clip becomes the audio latent the
+   * sampler carries, which is what `ltx2-ia2v` conditions the picture on
+   * (DESIGN-AUDIO §3.2).
+   */
+  LTXVAudioVAEEncode: {
+    inputs: ["audio", "audio_vae"],
+    outputs: ["LATENT"],
+  },
   /** The sigma schedule written out by hand, rather than built from steps. */
   ManualSigmas: {
     widgets: ["sigmas"],
@@ -297,7 +320,17 @@ export const CORE_NODES: Record<string, NodeSchema> = {
   /** The prompt enhancer of the official graph; Gemma, behind a switch. */
   TextGenerateLTX2Prompt: {
     inputs: ["clip", "image", "video", "audio"],
-    widgets: ["prompt", "max_length", "sampling_mode"],
+    // `thinking` and `use_default_template` follow the sampling expansion,
+    // as they do on the core `TextGenerate`. They were missing here, which
+    // the importer caught on the second template to use this node: twelve
+    // widget values where the schema accounted for ten.
+    widgets: [
+      "prompt",
+      "max_length",
+      "sampling_mode",
+      "thinking",
+      "use_default_template",
+    ],
     dynamic: {
       sampling_mode: {
         on: [
@@ -409,7 +442,18 @@ export const CORE_NODES: Record<string, NodeSchema> = {
   },
   SaveVideo: {
     inputs: ["video"],
+    // `format` is a DynamicCombo whose every option carries a `codec` child,
+    // and a plain `codec` widget follows it (an optional hidden input in the
+    // node's schema). Four values, which is what the editor writes.
     widgets: ["filename_prefix", "format", "codec"],
+    dynamic: {
+      format: {
+        auto: ["codec"],
+        mp4: ["codec"],
+        mkv: ["codec"],
+        webm: ["codec"],
+      },
+    },
     output: true,
   },
   SaveAnimatedWEBP: {
@@ -417,16 +461,220 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["filename_prefix", "fps", "lossless", "quality", "method"],
     output: true,
   },
+
+  // ---------------------------------------------------------------- audio
+  // The generic core audio nodes (`comfy_extras/nodes_audio.py`). Every save
+  // node here reports its files under ComfyUI's `audio` key rather than
+  // `images`, which is the difference the app had to learn (§4.1).
+  LoadAudio: {
+    widgets: ["audio"],
+    outputs: ["AUDIO"],
+  },
+  EmptyLatentAudio: {
+    widgets: ["seconds", "batch_size"],
+    outputs: ["LATENT"],
+  },
+  VAEEncodeAudio: {
+    inputs: ["audio", "vae"],
+    outputs: ["LATENT"],
+  },
+  VAEDecodeAudio: {
+    inputs: ["samples", "vae"],
+    outputs: ["AUDIO"],
+  },
+  TrimAudioDuration: {
+    inputs: ["audio"],
+    widgets: ["start_index", "duration"],
+    outputs: ["AUDIO"],
+  },
+  SaveAudio: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  SaveAudioMP3: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "quality"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  SaveAudioOpus: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "quality"],
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  // `format` is a DynamicCombo: flac takes no further widget, mp3 and opus
+  // each add their own quality combo after it (comfy_api/latest/_io.py).
+  SaveAudioAdvanced: {
+    inputs: ["audio"],
+    widgets: ["filename_prefix", "format"],
+    dynamic: {
+      format: {
+        flac: [],
+        mp3: ["quality"],
+        opus: ["quality"],
+      },
+    },
+    outputs: ["AUDIO"],
+    output: true,
+  },
+  PreviewAudio: {
+    inputs: ["audio"],
+    output: true,
+  },
+
+  // ---- ACE-Step 1.5, the song model (`comfy_extras/nodes_ace.py`) --------
+  // Core nodes, so `ace-step-song` runs on stock ComfyUI (DESIGN-AUDIO
+  // §2.1.1). `seed` carries the same `control_after_generate` combo a
+  // sampler's does, and the encoder holds the musical parameters — bpm, key,
+  // time signature — that a picture model has no equivalent of.
+  "TextEncodeAceStepAudio1.5": {
+    inputs: ["clip"],
+    widgets: [
+      "tags",
+      "lyrics",
+      "seed",
+      "bpm",
+      "duration",
+      "timesignature",
+      "language",
+      "keyscale",
+      "generate_audio_codes",
+      "cfg_scale",
+      "temperature",
+      "top_p",
+      "top_k",
+      "min_p",
+    ],
+    after: { seed: "fixed" },
+    outputs: ["CONDITIONING"],
+  },
+  "EmptyAceStep1.5LatentAudio": {
+    widgets: ["seconds", "batch_size"],
+    outputs: ["LATENT"],
+  },
 };
 
 export const CORE_NODE_TYPES: readonly string[] = Object.keys(CORE_NODES);
+
+/**
+ * A custom node pack a workflow may need (§4.6).
+ *
+ * Everything else this repo ships runs on stock ComfyUI. The two speech
+ * workflows do not, which is a change in what the project promises, so the
+ * requirement is written down rather than discovered: a manifest names the
+ * pack in `requires`, the loader checks that the pack it names actually
+ * covers the nodes the graph uses, and the message a user gets says which
+ * pack to install instead of "node type not found".
+ *
+ * `id` is the folder name under `custom_nodes/`, which is what both the
+ * Containerfile and the manual instructions use.
+ */
+export interface NodePack {
+  id: string;
+  name: string;
+  url: string;
+  /** What the container pins; the version this repo's graphs were built on. */
+  version: string;
+  nodes: Record<string, NodeSchema>;
+}
+
+/**
+ * The Breeze TTS 2 pack, read off its `nodes.py` rather than guessed.
+ *
+ * Three generation nodes matter here. `VoiceClone` copies a reference voice
+ * at CFG 1 and takes no instruction, because the reference *is* the delivery.
+ * `VoiceDesign` invents a voice from a description at CFG 4. `VoiceDirection`
+ * is the pair of them: a cloned voice delivered to an instruction. All three
+ * end in the same nine sampling widgets, whose order is what a rebuilt
+ * LiteGraph document depends on.
+ */
+const BREEZE_CONTROLS = [
+  "max_new_tokens",
+  "temperature",
+  "top_k",
+  "top_p",
+  "repetition_penalty",
+  "depth_temperature",
+  "depth_top_k",
+  "depth_top_p",
+  "seed",
+];
+
+export const NODE_PACKS: Record<string, NodePack> = {
+  "ComfyUI-Breeze-TTS-2": {
+    id: "ComfyUI-Breeze-TTS-2",
+    name: "Breeze TTS 2",
+    url: "https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2",
+    version: "1.4.6",
+    nodes: {
+      // No filename widget: the loader takes one of four build labels and
+      // resolves the file itself, which is why the speech workflows expose an
+      // `enum` rather than a `model` picker (§4.4).
+      BreezeTTS2LoadModel: {
+        widgets: [
+          "model",
+          "dtype",
+          "device",
+          "attention",
+          "decode_mode",
+          "download_if_missing",
+        ],
+        outputs: ["BREEZE_TTS2_MODEL"],
+      },
+      BreezeTTS2VoiceClone: {
+        inputs: ["breeze_model", "reference_audio"],
+        widgets: ["text", "reference_text", "cfg_scale", ...BREEZE_CONTROLS],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+      BreezeTTS2VoiceDesign: {
+        inputs: ["breeze_model"],
+        widgets: ["text", "instruction", "cfg_scale", ...BREEZE_CONTROLS],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+      BreezeTTS2VoiceDirection: {
+        inputs: ["breeze_model", "reference_audio"],
+        widgets: [
+          "text",
+          "reference_text",
+          "instruction",
+          "cfg_scale",
+          "stitch_reference",
+          ...BREEZE_CONTROLS,
+        ],
+        after: { seed: "fixed" },
+        outputs: ["AUDIO"],
+      },
+    },
+  },
+};
+
+/** Every node type any known pack provides, mapped to the pack providing it. */
+export const PACK_OF_NODE: Record<string, NodePack> = Object.fromEntries(
+  Object.values(NODE_PACKS).flatMap((pack) =>
+    Object.keys(pack.nodes).map((type) => [type, pack] as const)
+  ),
+);
+
+/**
+ * What the app knows about a node type: core first, then any pack's. Every
+ * reader goes through this rather than `CORE_NODES` directly, so a pack node
+ * gets the same widget order and slot names a core one does.
+ */
+export function nodeSchema(classType: string): NodeSchema | undefined {
+  return CORE_NODES[classType] ?? PACK_OF_NODE[classType]?.nodes[classType];
+}
 
 export const OUTPUT_NODE_TYPES: readonly string[] = Object.entries(CORE_NODES)
   .filter(([, schema]) => schema.output)
   .map(([type]) => type);
 
 export function isOutputNodeType(classType: string): boolean {
-  return CORE_NODES[classType]?.output === true;
+  return nodeSchema(classType)?.output === true;
 }
 
 /**
@@ -439,7 +687,7 @@ export function outputSlot(
   outputName: string,
 ): number | null {
   if (/^\d+$/.test(outputName)) return Number(outputName);
-  const outputs = CORE_NODES[classType]?.outputs;
+  const outputs = nodeSchema(classType)?.outputs;
   if (!outputs) return null;
   const index = outputs.indexOf(outputName);
   return index < 0 ? null : index;

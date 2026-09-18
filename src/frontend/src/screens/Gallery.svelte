@@ -423,7 +423,7 @@
       </div>
 
       <div class="row kinds">
-        {#each [["", "All"], ["image", "Image"], ["video", "Video"]] as const as [value, text] (value)}
+        {#each [["", "All"], ["image", "Image"], ["video", "Video"], ["audio", "Audio"]] as const as [value, text] (value)}
           <button
             class:active={(filters.kind ?? "") === value}
             onclick={() => setQuery({ kind: value || null })}

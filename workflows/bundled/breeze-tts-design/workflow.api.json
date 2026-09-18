@@ -1,0 +1,66 @@
+{
+  "1": {
+    "class_type": "BreezeTTS2LoadModel",
+    "inputs": {
+      "model": "int8 hybrid (recommended)",
+      "dtype": "auto",
+      "device": "auto",
+      "attention": "auto",
+      "decode_mode": "eager",
+      "download_if_missing": false
+    },
+    "_meta": {
+      "title": "Load Breeze TTS 2"
+    }
+  },
+  "2": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 42
+    },
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "3": {
+    "class_type": "BreezeTTS2VoiceDesign",
+    "inputs": {
+      "text": "(sigh) Welcome aboard. Your journey begins now.",
+      "instruction": "A warm, thoughtful young woman with a clear voice and a calm, reflective delivery.",
+      "cfg_scale": 4.0,
+      "max_new_tokens": 1500,
+      "temperature": 0.9,
+      "top_k": 50,
+      "top_p": 1.0,
+      "repetition_penalty": 1.1,
+      "depth_temperature": 0.9,
+      "depth_top_k": 50,
+      "depth_top_p": 1.0,
+      "seed": [
+        "2",
+        0
+      ],
+      "breeze_model": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Voice Design"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "filename_prefix": "audio/breeze-tts-design",
+      "format": "flac",
+      "audio": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Audio"
+    }
+  }
+}

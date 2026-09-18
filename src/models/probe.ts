@@ -177,6 +177,14 @@ export function detectFamily(header: Header): string | null {
     return shape("cap_embedder.1.weight")?.[0] === 3840 ? "z-image" : null;
   }
 
+  // ACE-Step, the song model. ComfyUI tells the two generations apart by the
+  // same keys: 1.5 rebuilt the text side around a lyric encoder, 1.0 carries
+  // a genre embedder (`comfy/model_detection.py`).
+  if (has("encoder.lyric_encoder.layers.0.input_layernorm.weight")) {
+    return "ace-step-1.5";
+  }
+  if (has("genre_embedder.weight")) return "ace-step";
+
   // Wan. `head.modulation` is the whole test in ComfyUI, and it is the same
   // test for 2.1 and 2.2 — one family, as §8.1 says.
   if (has("head.modulation")) return "wan2";

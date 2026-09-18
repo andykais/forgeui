@@ -8,6 +8,7 @@
  * read from the other end.
  */
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".mov"];
+const AUDIO_EXTENSIONS = [".flac", ".mp3", ".opus", ".wav", ".ogg", ".m4a"];
 
 export function isVideoUrl(url: string | null | undefined): boolean {
   if (!url) return false;
@@ -16,6 +17,32 @@ export function isVideoUrl(url: string | null | undefined): boolean {
   const dot = path.lastIndexOf(".");
   if (dot < 0) return false;
   return VIDEO_EXTENSIONS.includes(path.slice(dot).toLowerCase());
+}
+
+/** The same question for sound: what a `<audio>` should be pointed at. */
+export function isAudioUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const path = url.split(/[?#]/)[0] ?? "";
+  const dot = path.lastIndexOf(".");
+  if (dot < 0) return false;
+  return AUDIO_EXTENSIONS.includes(path.slice(dot).toLowerCase());
+}
+
+/**
+ * The picture that stands in for a sound file.
+ *
+ * ffmpeg draws one PNG per audio file at completion, named by convention
+ * beside the media (`src/media/audio.ts`), so the URL is derivable wherever
+ * the media URL is known. That matters for every small thumbnail whose
+ * caller has a path and nothing else — a workflow's last run, a model tile,
+ * a lineage node — which would otherwise point an `<img>` at a `.flac` and
+ * draw the browser's broken-image outline.
+ */
+export const WAVEFORM_SUFFIX = ".waveform.png";
+
+export function waveformUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.endsWith(WAVEFORM_SUFFIX) ? url : `${url}${WAVEFORM_SUFFIX}`;
 }
 
 /**
@@ -34,12 +61,13 @@ export function posterFrame(url: string): string {
  *
  * An `image` param holds `<sha256>.<ext>` and nothing else does, so the shape
  * of the value is enough to recognise one — the same test the server applies
- * when it decides what to upload (`jobs/pipeline.ts`). That matters where the
- * manifest is not to hand: the metadata sidebar has an output's params but
- * not the types behind them, and a 64-character hash is no use to anybody as
- * a line of text.
+ * when it decides what to upload (`INPUT_FILENAME` in `inputs/store.ts`, which
+ * this must name the same extensions as). That matters where the manifest is
+ * not to hand: the metadata sidebar has an output's params but not the types
+ * behind them, and a 64-character hash is no use to anybody as a line of text.
  */
-const INPUT_FILENAME = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/;
+const INPUT_FILENAME =
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
 
 export function inputMediaUrl(value: unknown): string | null {
   if (typeof value !== "string" || !INPUT_FILENAME.test(value)) return null;

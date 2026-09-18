@@ -67,6 +67,8 @@ export interface OutputRow {
   workflow_hash: string | null;
   family: string | null;
   prompt: string | null;
+  /** What the take was asked to sound like; audio only (DESIGN-AUDIO §11.5). */
+  tone: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -269,8 +271,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
   db.prepare(
     `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, width, height,
                           duration_ms, sha256, workflow_id, workflow_hash,
-                          family, prompt, params_json, deleted_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          family, prompt, tone, params_json, deleted_at,
+                          created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -285,6 +288,7 @@ export function insertOutput(db: Database, output: OutputRow): void {
     output.workflow_hash,
     output.family,
     output.prompt,
+    output.tone,
     JSON.stringify(output.params),
     output.deleted_at,
     output.created_at,
@@ -330,7 +334,7 @@ export function normalizeModelHash(hash: string): string {
 }
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
-  duration_ms, sha256, workflow_id, workflow_hash, family, prompt,
+  duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
   params_json, deleted_at, created_at`;
 
 type OutputRecord = [
@@ -342,6 +346,7 @@ type OutputRecord = [
   number | null,
   number | null,
   number | null,
+  string | null,
   string | null,
   string | null,
   string | null,
@@ -367,9 +372,10 @@ function toOutput(record: OutputRecord): OutputRow {
     workflow_hash: record[10],
     family: record[11],
     prompt: record[12],
-    params: parse<Record<string, unknown>>(record[13], {}),
-    deleted_at: record[14],
-    created_at: record[15],
+    tone: record[13],
+    params: parse<Record<string, unknown>>(record[14], {}),
+    deleted_at: record[15],
+    created_at: record[16],
   };
 }
 
@@ -1263,6 +1269,9 @@ export interface InputRow {
   kind: string;
   width: number | null;
   height: number | null;
+  /** How long a clip runs; null for a picture, and for audio ffmpeg could
+   * not read (DESIGN-AUDIO §4.3). */
+  duration_ms: number | null;
   original_name: string | null;
   /** The output this was adopted from, when it came out of the app itself. */
   derived_from_output: string | null;
@@ -1270,7 +1279,7 @@ export interface InputRow {
 }
 
 const INPUT_COLUMNS =
-  `sha256, path, ext, kind, width, height, original_name, derived_from_output, created_at`;
+  `sha256, path, ext, kind, width, height, duration_ms, original_name, derived_from_output, created_at`;
 
 export function getInput(db: Database, sha256: string): InputRow | null {
   return db.prepare(
@@ -1286,9 +1295,9 @@ export function getInput(db: Database, sha256: string): InputRow | null {
 export function insertInput(db: Database, row: InputRow): void {
   db.prepare(
     `INSERT INTO inputs
-       (sha256, path, ext, kind, width, height, original_name,
+       (sha256, path, ext, kind, width, height, duration_ms, original_name,
         derived_from_output, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(sha256) DO NOTHING`,
   ).run(
     row.sha256,
@@ -1297,6 +1306,7 @@ export function insertInput(db: Database, row: InputRow): void {
     row.kind,
     row.width,
     row.height,
+    row.duration_ms,
     row.original_name,
     row.derived_from_output,
     row.created_at,

@@ -1,4 +1,4 @@
-import { CORE_NODES } from "./nodes.ts";
+import { nodeSchema } from "./nodes.ts";
 import { type ApiGraph, isLink } from "./types.ts";
 
 /**
@@ -7,7 +7,7 @@ import { type ApiGraph, isLink } from "./types.ts";
  * bundled ones do — §4.6 expects the user to open each, fix the placeholder
  * model names and re-save, which writes a real `workflow.ui.json`).
  *
- * Widget order comes from {@link CORE_NODES}; for a node the app has no
+ * Widget order comes from {@link nodeSchema}; for a node the app has no
  * schema for, the literal inputs are emitted in the order the graph lists
  * them, which is what ComfyUI's own api export produces.
  */
@@ -67,7 +67,7 @@ function widgetValuesOf(
   classType: string,
   inputs: Record<string, unknown>,
 ): unknown[] {
-  const schema = CORE_NODES[classType];
+  const schema = nodeSchema(classType);
   const declared = schema?.widgets;
   const literals = Object.keys(inputs).filter((name) => !isLink(inputs[name]));
   if (!declared) return literals.map((name) => inputs[name]);
@@ -101,7 +101,7 @@ function linkOrder(
   classType: string,
   inputs: Record<string, unknown>,
 ): string[] {
-  const declared = CORE_NODES[classType]?.inputs;
+  const declared = nodeSchema(classType)?.inputs;
   const links = Object.keys(inputs).filter((name) => isLink(inputs[name]));
   if (!declared) return links;
   return [
@@ -168,7 +168,7 @@ export function apiGraphToLiteGraph(graph: ApiGraph): LiteGraphDocument {
         numericId(targetId, ids.indexOf(targetId)),
         // Must match the order the node's input slots are emitted in.
         linkOrder(target.class_type, target.inputs).indexOf(inputName),
-        CORE_NODES[graph[sourceId]!.class_type]?.outputs?.[slot] ?? "*",
+        nodeSchema(graph[sourceId]!.class_type)?.outputs?.[slot] ?? "*",
       ]);
       if (!inputLink.has(targetId)) inputLink.set(targetId, new Map());
       inputLink.get(targetId)!.set(inputName, linkId);
@@ -180,7 +180,7 @@ export function apiGraphToLiteGraph(graph: ApiGraph): LiteGraphDocument {
 
   for (const [index, id] of order.entries()) {
     const apiNode = graph[id]!;
-    const schema = CORE_NODES[apiNode.class_type];
+    const schema = nodeSchema(apiNode.class_type);
     const column = depth.get(id) ?? 0;
     const row = perColumn.get(column) ?? 0;
     perColumn.set(column, row + 1);

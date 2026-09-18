@@ -14,7 +14,8 @@ export type ParamType =
   | "lora_list"
   | "image"
   | "mask"
-  | "video";
+  | "video"
+  | "audio";
 
 export interface LoraChain {
   model_from: string;
@@ -41,6 +42,8 @@ export interface Param {
   min?: number;
   max?: number;
   step?: number;
+  /** A length that follows an `audio` param's clip, by key (§11.3). */
+  follows?: string;
   options?: string[];
   source?: string;
   filter?: { family?: string; class?: string };
@@ -53,18 +56,24 @@ export interface Manifest {
   id: string;
   name: string;
   family: string | null;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   category: string | null;
   description: string | null;
+  /** Custom node packs this workflow needs, by folder name (§4.6). */
+  requires: string[];
+  /** The param holding the words the gallery captions a take with (§11.5). */
+  prompt: string | null;
+  /** The params that say what it sounds like, best first (§11.5). */
+  tone: string[];
   params: Param[];
-  outputs: { node: string; kind: "image" | "video" }[];
+  outputs: { node: string; kind: "image" | "video" | "audio" }[];
 }
 
 export interface WorkflowSummary {
   id: string;
   name: string;
   family: string | null;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   category: string | null;
   description: string | null;
   source: "bundled" | "user";
@@ -157,6 +166,17 @@ export interface Output {
   deleted_at: number | null;
   created_at: number;
   media_url: string;
+  /** The drawn waveform of an audio output (§2.2); null for every other kind. */
+  waveform_url: string | null;
+  /**
+   * What this take was asked to sound like — the voice, the direction, the
+   * style tags — which a tile shows above the waveform (§11.5). Null for
+   * every other kind, and for a take whose workflow does not say where its
+   * tone lives.
+   */
+  tone: string | null;
+  /** The hue that tone picked, and that its waveform is drawn in (§11.5). */
+  tone_color: string | null;
   generation_ms: number | null;
   models: { model_hash: string; role: string }[];
 }
@@ -302,6 +322,8 @@ export const FAMILIES = [
   "wan2",
   "qwen-image",
   "sd15",
+  "ace-step",
+  "ace-step-1.5",
 ] as const;
 
 export interface FamilyCount {
@@ -458,10 +480,16 @@ export interface InputMedia {
   sha256: string;
   ext: string;
   filename: string;
-  width: number;
-  height: number;
+  kind: "image" | "audio";
+  /** Null for audio, which has no dimensions (DESIGN-AUDIO §4.3). */
+  width: number | null;
+  height: number | null;
+  /** Audio only: how long the clip runs. */
+  duration_ms: number | null;
   bytes: number;
   url: string;
+  /** The drawn waveform of an attached clip (§2.2); null for a picture. */
+  waveform_url: string | null;
   derived_from_output: string | null;
 }
 

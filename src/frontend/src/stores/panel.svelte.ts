@@ -215,7 +215,8 @@ class PanelState {
         param.type === "text" ||
         param.type === "image" ||
         param.type === "mask" ||
-        param.type === "video"
+        param.type === "video" ||
+        param.type === "audio"
       ) {
         continue;
       }
@@ -290,6 +291,32 @@ class PanelState {
     return next;
   }
 
+  /**
+   * Generate for as long as the clip that was just attached (§11.3).
+   *
+   * The same argument as a size following its picture: `ltx2-ia2v` trims the
+   * take to the duration and makes that many frames of video, so the two are
+   * one decision — and the panel made you take it twice, the second time
+   * from memory. Getting it wrong cuts a word off the end, minutes later.
+   *
+   * Rounded *up* to the param's step. Overshooting leaves a moment of
+   * padding, which the model fills; undershooting cuts the take, and a
+   * sentence that stops mid-word is not a rounding error anybody wants.
+   */
+  durationFromAudio(audioKey: string, durationMs: number | null): number | null {
+    if (durationMs === null || durationMs <= 0) return null;
+    const param = this.params.find((other) => other.follows === audioKey);
+    if (!param) return null;
+    const step = param.step && param.step > 0 ? param.step : 1;
+    const seconds = Math.ceil((durationMs / 1000) / step) * step;
+    const low = param.min ?? 0;
+    const high = param.max ?? Number.MAX_SAFE_INTEGER;
+    const next = Number(Math.min(Math.max(seconds, low), high).toFixed(3));
+    if (this.values[param.key] === next) return null;
+    this.set(param.key, next);
+    return next;
+  }
+
   // -------------------------------------------------------------- the LoRAs
 
   /** The `lora_list` param, if this workflow has one at all. */
@@ -337,11 +364,17 @@ class PanelState {
     return this.params.find((param) => param.type === "seed") ?? null;
   }
 
-  /** 🎲 re-rolls immediately, in either state (§11.3). */
+  /**
+   * 🎲 re-rolls immediately, in either state (§11.3), inside whatever range
+   * the workflow says its node takes. Breeze TTS 2 stops at 2^31 - 1, and
+   * rolling past it refused the generation over a number the app picked.
+   */
   rollSeed(): void {
     const param = this.seedParam;
     if (!param) return;
-    const seed = Math.floor(Math.random() * 2 ** 32);
+    const low = Math.max(0, param.min ?? 0);
+    const high = Math.min(param.max ?? 2 ** 32 - 1, Number.MAX_SAFE_INTEGER);
+    const seed = low + Math.floor(Math.random() * (high - low + 1));
     this.set(param.key, seed);
     this.seedLocked = true;
   }

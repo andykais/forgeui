@@ -234,8 +234,8 @@ Deno.test("scenario: multi-output", async () => {
       "out_00002_.png",
     ]);
     const entry = (await h.history())[prompt_id]!;
-    assertEquals(entry.outputs["9"]?.images.length, 2);
-    assertEquals(entry.outputs["10"]?.images.length, 1);
+    assertEquals(entry.outputs["9"]?.images?.length, 2);
+    assertEquals(entry.outputs["10"]?.images?.length, 1);
   });
 });
 

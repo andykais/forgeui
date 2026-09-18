@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Output } from "../types.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
   import { dimensions, duration } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
@@ -76,6 +77,8 @@
       <tr
         class:selected={output.id === selectedId}
         data-output-id={output.id}
+        draggable="true"
+        ondragstart={(event) => startOutputDrag(event, output)}
         onclick={() => onopen(output)}
         tabindex="0"
         onkeydown={(event) => {
@@ -87,6 +90,15 @@
             {#if output.kind === "video"}
               <!-- svelte-ignore a11y_media_has_caption -->
               <video src={output.media_url} muted preload="metadata"></video>
+            {:else if output.kind === "audio"}
+              {#if output.waveform_url}
+                <img
+                  class="wave"
+                  src={output.waveform_url}
+                  alt=""
+                  loading="lazy"
+                />
+              {/if}
             {:else}
               <img src={output.media_url} alt="" loading="lazy" />
             {/if}
@@ -197,6 +209,12 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /* Contain, not cover: a cropped waveform is the middle of a take, and can
+     easily be the sixth where nobody is speaking. */
+  .thumb img.wave {
+    object-fit: contain;
   }
 
   .prompt {

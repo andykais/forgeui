@@ -2,6 +2,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { Job, Output } from "../types.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
   import { app } from "../stores/app.svelte.ts";
   import { queuePosition } from "../lib/queue.ts";
 
@@ -77,16 +78,31 @@
         {/if}
       {/each}
       {#each outputs as output (output.id)}
+        <!--
+          Draggable like a grid tile: the strip is where a take you just made
+          is, and "drag it into the panel" should not depend on which of the
+          four places you are looking at it in (§11.2).
+        -->
         <button
           class="thumb"
           class:selected={output.id === selectedId}
           data-strip-id={output.id}
           title={output.prompt ?? output.id}
+          draggable="true"
+          ondragstart={(event) => startOutputDrag(event, output)}
           onclick={() => onselect(output)}
         >
           {#if output.kind === "video"}
             <!-- svelte-ignore a11y_media_has_caption -->
             <video src={output.media_url} muted preload="metadata"></video>
+          {:else if output.kind === "audio"}
+            {#if output.waveform_url}
+              <img
+                class="wave"
+                src={output.waveform_url}
+                alt={output.prompt ?? output.id}
+              />
+            {/if}
           {:else}
             <img src={output.media_url} alt={output.prompt ?? output.id} />
           {/if}
@@ -186,6 +202,16 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /*
+   * A waveform is wider than tall, so cropping it to a square thumb shows
+   * only its middle
+   * of one take — and where that sixth happens to be silent, the thumb is
+   * empty. The whole shape, letterboxed, is the only honest crop of a sound.
+   */
+  .thumb img.wave {
+    object-fit: contain;
   }
 
   /* A preview frame is tiny; show all of it rather than a crop of it. */

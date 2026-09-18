@@ -571,6 +571,8 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(
       families.map((entry) => entry.family).sort(),
       [
+        "ace-step",
+        "ace-step-1.5",
         "anima",
         "chroma",
         "flux",
@@ -600,7 +602,9 @@ Deno.test("families come back with model and workflow counts", async () => {
     // The video workflow is LTX-2.3 now, and none of these graphs upscale a
     // video — so `ltx` is a family the app still knows and ships nothing for.
     assertEquals(byName.get("ltx")?.workflows, 0);
-    assertEquals(byName.get("ltx-2")?.workflows, 1);
+    // Two LTX-2.3 workflows: one that imagines its own sound, one that
+    // lip-syncs to a take you supply (DESIGN-AUDIO §3).
+    assertEquals(byName.get("ltx-2")?.workflows, 2);
   });
 });
 

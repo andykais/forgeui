@@ -24,6 +24,7 @@ CREATE TABLE outputs (
   sha256 TEXT,
   workflow_id TEXT, workflow_hash TEXT, family TEXT,
   prompt TEXT,                    -- denormalised for search
+  tone TEXT,                      -- audio: what it was asked to sound like (DESIGN-AUDIO §11.5)
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL
@@ -78,8 +79,9 @@ CREATE INDEX output_models_model ON output_models(model_hash);
 CREATE TABLE inputs (
   sha256 TEXT PRIMARY KEY,
   path TEXT NOT NULL, ext TEXT NOT NULL,
-  kind TEXT NOT NULL,             -- image|mask|video
-  width INTEGER, height INTEGER,
+  kind TEXT NOT NULL,             -- image|mask|video|audio
+  width INTEGER, height INTEGER,  -- null for audio, which has neither
+  duration_ms INTEGER,            -- audio only, from ffprobe
   original_name TEXT, derived_from_output TEXT,
   created_at INTEGER NOT NULL
 );

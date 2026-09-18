@@ -1,0 +1,245 @@
+{
+  "id": "ltx2-ia2v",
+  "name": "LTX-2.3 Image + Audio to Video",
+  "family": "ltx-2",
+  "kind": "video",
+  "category": null,
+  "description": "The official Comfy-Org LTX-2.3 image-audio-to-video graph: a first frame and a take you supply become video lip-synced to it. The clip is encoded into the audio latent and masked so the sampler keeps it, which is what makes the model draw a picture that fits the sound. Length comes from the duration you set: duration x fps + 1 frame, with the clip trimmed to the same window.",
+  "requires": [],
+  "params": [
+    {
+      "key": "image",
+      "label": "First frame",
+      "type": "image",
+      "required": true,
+      "bind": "54.image"
+    },
+    {
+      "key": "audio",
+      "label": "Audio",
+      "description": "The take to lip-sync to. Drag one in from the results, or drop a file.",
+      "type": "audio",
+      "required": true,
+      "bind": "55.audio"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "bind": "33.value"
+    },
+    {
+      "key": "negative",
+      "label": "Negative",
+      "type": "text",
+      "default": "pc game, console game, video game, cartoon, childish, ugly",
+      "bind": "28.text"
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1280,
+        720
+      ],
+      "step": 8,
+      "bind": {
+        "w": "41.value",
+        "h": "35.value"
+      }
+    },
+    {
+      "key": "duration",
+      "label": "Duration (s)",
+      "description": "How much of the clip to use, and therefore how long the video is: the same number trims the audio and sets duration x fps + 1 frames. Attaching a clip sets this to its length, rounded up to the next half second. A clip shorter than this is padded and the model generates the tail.",
+      "type": "float",
+      "default": 9.0,
+      "min": 1.0,
+      "max": 60.0,
+      "step": 0.5,
+      "bind": "42.value",
+      "follows": "audio"
+    },
+    {
+      "key": "start",
+      "label": "Start (s)",
+      "description": "Where in the clip to start. Everything before it is trimmed away.",
+      "type": "float",
+      "default": 0.0,
+      "min": 0.0,
+      "max": 600.0,
+      "step": 0.5,
+      "bind": "43.start_index"
+    },
+    {
+      "key": "fps",
+      "label": "FPS",
+      "type": "int",
+      "default": 24,
+      "min": 1,
+      "max": 60,
+      "bind": "34.value"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "2.noise_seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "ltx-2"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "56.output",
+          "clip_from": null,
+          "model_to": [
+            "6.model",
+            "29.model"
+          ],
+          "clip_to": null
+        }
+      }
+    },
+    {
+      "key": "use_distilled",
+      "label": "Distilled LoRA",
+      "type": "bool",
+      "default": true,
+      "description": "LTX-2.3's distilled LoRA, which is what makes these short schedules enough. Off, the checkpoint runs undistilled: lengthen the sigma lists and raise CFG above 1, or the result is mush. The file is not even opened while this is off.",
+      "bind": "56.switch"
+    },
+    {
+      "key": "enhance",
+      "label": "Enhance the prompt",
+      "type": "bool",
+      "default": false,
+      "bind": "51.value",
+      "description": "Rewrite the prompt with Gemma before encoding it. Needs the enhancer LoRA and the text encoder; off, that branch never runs."
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "family": "ltx-2"
+      },
+      "bind": [
+        "31.ckpt_name",
+        "46.ckpt_name",
+        "32.ckpt_name"
+      ],
+      "description": "Read three times over: the diffusion model, the audio VAE and the AV text-encoder pairing all come out of this one file."
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "32.text_encoder"
+    },
+    {
+      "key": "distilled_lora",
+      "label": "Distilled LoRA",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "lora"
+      },
+      "bind": "9.lora_name",
+      "when": {
+        "param": "use_distilled",
+        "is": true
+      }
+    },
+    {
+      "key": "distilled_strength",
+      "label": "Distilled strength",
+      "type": "float",
+      "advanced": true,
+      "default": 0.5,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "bind": "9.strength_model",
+      "description": "How much of the distilled LoRA to apply. The official graph runs it at 0.5.",
+      "when": {
+        "param": "use_distilled",
+        "is": true
+      }
+    },
+    {
+      "key": "latent_upscale_model",
+      "label": "Latent upscaler",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "upscale"
+      },
+      "bind": "27.model_name",
+      "description": "The spatial upscaler between the two sampling passes."
+    },
+    {
+      "key": "enhancer_lora",
+      "label": "Enhancer LoRA",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "lora"
+      },
+      "when": {
+        "param": "enhance",
+        "is": true
+      },
+      "bind": "47.lora_name"
+    },
+    {
+      "key": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "advanced": true,
+      "default": "euler",
+      "bind": "4.sampler_name",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "dpmpp_2m",
+        "dpmpp_sde",
+        "ddim",
+        "res_multistep"
+      ]
+    },
+    {
+      "key": "sigmas_base",
+      "label": "Sigmas (first pass)",
+      "type": "text",
+      "advanced": true,
+      "default": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0",
+      "description": "The low-resolution pass's schedule, written out rather than built from a step count: nine sigmas are eight steps.",
+      "bind": "22.sigmas"
+    },
+    {
+      "key": "sigmas",
+      "label": "Sigmas (refine pass)",
+      "type": "text",
+      "advanced": true,
+      "default": "0.85, 0.7250, 0.4219, 0.0",
+      "bind": "5.sigmas",
+      "description": "The refine pass's schedule, written out rather than built from a step count."
+    }
+  ],
+  "outputs": [
+    {
+      "node": "53",
+      "kind": "video"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Output } from "../types.ts";
   import { clock } from "../lib/format.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
 
   /**
    * One media tile (§11.5): always a square cell with the whole image fitted
@@ -25,23 +26,9 @@
 
   let video = $state<HTMLVideoElement | undefined>(undefined);
   const isVideo = $derived(output.kind === "video");
+  const isAudio = $derived(output.kind === "audio");
 
-  /**
-   * A tile can be dragged straight into an `image` param (§11.2). What
-   * travels is the output's id rather than its bytes: the server already has
-   * them, so the drop adopts the file into the input store instead of
-   * uploading a copy of something it wrote itself (§9).
-   */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
-  function onDragStart(event: DragEvent) {
-    if (!event.dataTransfer) return;
-    event.dataTransfer.setData(OUTPUT_MIME, output.id);
-    // So a drop somewhere else in the world gets something it can use.
-    event.dataTransfer.setData("text/uri-list", output.media_url);
-    event.dataTransfer.setData("text/plain", output.media_url);
-    event.dataTransfer.effectAllowed = "copy";
-  }
+  /** A tile can be dragged straight into a media param (§11.2, lib/drag.ts). */
 </script>
 
 <div
@@ -50,7 +37,7 @@
   role="group"
   data-output-id={output.id}
   draggable="true"
-  ondragstart={onDragStart}
+  ondragstart={(event) => startOutputDrag(event, output)}
   onmouseenter={() => video?.play().catch(() => {})}
   onmouseleave={() => video?.pause()}
 >
@@ -69,16 +56,41 @@
         playsinline
         preload="metadata"
       ></video>
+    {:else if isAudio}
+      <!--
+        A drawn waveform (§2.2), which is the only picture sound has. It is
+        wider than the cell, so it sits across the middle of the tile rather
+        than filling it — and a take with no waveform yet still gets its
+        duration and prompt from the strip below.
+      -->
+      <span class="wave">
+        {#if output.waveform_url}
+          <img src={output.waveform_url} alt="" loading="lazy" />
+        {/if}
+      </span>
     {:else}
       <img src={output.media_url} alt={output.prompt ?? output.id} loading="lazy" />
     {/if}
   </button>
 
-  {#if isVideo}
-    <span class="badge kind">Video</span>
+  {#if isVideo || isAudio}
+    <span class="badge kind">{isVideo ? "Video" : "Audio"}</span>
     {#if output.duration_ms}
       <span class="length mono">{clock(output.duration_ms)}</span>
     {/if}
+  {/if}
+
+  <!--
+    What it was asked to sound like, above the waveform and in the same hue it
+    was drawn in (§11.5). Drawn by the tile rather than baked into the picture:
+    it stays crisp at every tile size, where text rendered into a 1000px-wide
+    PNG and scaled down to 200 is a smudge.
+  -->
+  {#if isAudio && output.tone}
+    <span
+      class="tone mono"
+      style={`color: ${output.tone_color ?? "var(--text-3)"}`}
+    >{output.tone}</span>
   {/if}
 
   <div class="strip">
@@ -130,6 +142,23 @@
     background: var(--control-selected);
   }
 
+  /* Centred in the cell: a 2.5:1 waveform in a square tile is a band, and
+     stretching it to fill would say something false about the sound. */
+  .wave {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .wave img {
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
   /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */
   img,
   video {
@@ -168,6 +197,23 @@
     position: absolute;
     top: 6px;
     left: 6px;
+  }
+
+  /*
+   * Under the badge row and clear of it, on one line: the tone is a label, not
+   * the prompt, and a tone that wrapped to three lines would bury the shape
+   * it is supposed to be introducing.
+   */
+  .tone {
+    position: absolute;
+    inset: 26px 7px auto 7px;
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.92;
+    pointer-events: none;
   }
 
   .length {

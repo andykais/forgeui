@@ -22,6 +22,12 @@ export const DEFAULT_MODEL_KINDS = [
   "upscale_models",
   "latent_upscale_models",
   "embeddings",
+  // Not a ComfyUI folder key: the Breeze TTS 2 node pack registers this one
+  // itself and searches any `breezetts2:` mapping it finds in
+  // extra_model_paths.yaml (docs/DESIGN-AUDIO.md §4.4). Listing it here is
+  // what puts six gigabytes of speech model on the Models page instead of
+  // leaving it invisible to the page whose job is "what is on disk".
+  "breezetts2",
 ] as const;
 
 /**
@@ -48,6 +54,10 @@ const KIND_CLASSES: Record<string, ModelClass> = {
   upscale_models: "upscale",
   latent_upscale_models: "upscale",
   embeddings: "embedding",
+  // Speech weights drive a generation, but not through a model picker: the
+  // pack's loader node takes one of four fixed build labels and resolves the
+  // file itself, so these rows are informational (§4.4).
+  breezetts2: "other",
 };
 
 /** Kinds whose folders are pooled so any of them loads through any loader. */
@@ -78,6 +88,8 @@ export function defaultConfig(): Config {
       url: DEFAULT_COMFY_URL,
       python: null,
       extra_args: [],
+      // Deliberate by default: a run should not be a download (§4.6).
+      allow_model_downloads: false,
     },
     model_folders: Object.fromEntries(
       DEFAULT_MODEL_KINDS.map((kind) => [kind, [] as string[]]),

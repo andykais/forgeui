@@ -151,6 +151,7 @@ function defaultValue(param: Param): unknown {
     case "image":
     case "mask":
     case "video":
+    case "audio":
       return null;
   }
 }
@@ -206,10 +207,14 @@ export function coerceParams(
         break;
       }
       case "seed": {
+        // A workflow may take a narrower range than the app's own; rolling
+        // outside it is a refusal the user never asked for (§4.3).
+        const low = Math.max(0, param.min ?? 0);
+        const high = Math.min(param.max ?? MAX_SEED, MAX_SEED);
         const seed = Math.round(toNumber(raw ?? -1, param));
         values[param.key] = seed < 0
-          ? (options.randomSeed ?? randomSeed)()
-          : Math.min(seed, MAX_SEED);
+          ? low + (options.randomSeed ?? randomSeed)() % (high - low + 1)
+          : clamp(seed, low, high);
         break;
       }
       case "size":
@@ -226,6 +231,7 @@ export function coerceParams(
       case "image":
       case "mask":
       case "video":
+      case "audio":
         values[param.key] = raw ?? null;
         break;
     }
