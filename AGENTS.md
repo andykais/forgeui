@@ -23,6 +23,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 | `docs/HARDWARE-CHECKLIST.md`     | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                   |
 | `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
 | `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.             |
+| `docs/DESIGN-MODEL-IMPORT.md`    | **Proposal, not decided.** `forgecli models`, the `import/` drop folder, and `source` provenance on imported media; extends §8.3, §11.2. |
 
 ## Layout
 
