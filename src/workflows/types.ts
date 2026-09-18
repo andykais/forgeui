@@ -315,6 +315,32 @@ export interface Manifest {
    * into "node type not found" on somebody's machine.
    */
   requires: string[];
+  /**
+   * The param holding the words — what the gallery shows under a tile and
+   * what search reads (§11.5).
+   *
+   * Without it the prompt is guessed as the first `text` param, which was
+   * right while every workflow had exactly one. A speech workflow has two or
+   * three, and the first of them describes the voice rather than saying
+   * anything: `breeze-tts-design` would have captioned every take with
+   * "a warm, thoughtful young woman" and never with a word that was spoken.
+   */
+  prompt: string | null;
+  /**
+   * The params that say what this sounds like, best first (§11.5).
+   *
+   * Sound has no picture, so its tile is built out of what was asked for: the
+   * tone above the waveform, and the waveform coloured by it. Colouring by
+   * tone rather than by prompt is the point — takes of the same voice group
+   * by eye however different the words are, which is how a grid of speech is
+   * actually read.
+   *
+   * A list because a workflow can hold the answer in more than one place:
+   * `breeze-tts-clone` is directed when the direction is on, and described by
+   * its reference transcript when it is not. The first entry that applies
+   * (§4.3) and is not empty wins.
+   */
+  tone: string[];
   params: Param[];
   outputs: ManifestOutput[];
 }

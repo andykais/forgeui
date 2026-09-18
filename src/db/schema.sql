@@ -24,6 +24,7 @@ CREATE TABLE outputs (
   sha256 TEXT,
   workflow_id TEXT, workflow_hash TEXT, family TEXT,
   prompt TEXT,                    -- denormalised for search
+  tone TEXT,                      -- audio: what it was asked to sound like (DESIGN-AUDIO §11.5)
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL

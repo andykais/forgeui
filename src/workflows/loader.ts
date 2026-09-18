@@ -186,6 +186,8 @@ function stubManifest(id: string, name: string): Manifest {
     category: null,
     description: null,
     requires: [],
+    prompt: null,
+    tone: [],
     params: [],
     outputs: [],
   };

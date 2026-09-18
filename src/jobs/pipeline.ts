@@ -882,9 +882,10 @@ export class JobRunner {
   }
 
   /**
-   * The workflow's first text param, which is the prompt everywhere it
-   * matters. A rerun has no workflow to ask, so it falls back to the names a
-   * prompt goes by.
+   * What the log line calls this run by: the param the workflow names as its
+   * prompt, then its first text param, which is the same thing everywhere a
+   * workflow has only one. A rerun has no workflow to ask, so it falls back
+   * to the names a prompt goes by.
    */
   #promptOf(
     workflowId: string | null,
@@ -894,9 +895,12 @@ export class JobRunner {
       ? this.#workflows.get(workflowId)?.manifest
       : null;
     const keys = manifest
-      ? manifest.params.filter((param) => param.type === "text").map((param) =>
-        param.key
-      )
+      ? [
+        ...(manifest.prompt ? [manifest.prompt] : []),
+        ...manifest.params.filter((param) => param.type === "text").map((
+          param,
+        ) => param.key),
+      ]
       : ["prompt", "positive", "text"];
     for (const key of keys) {
       const value = params[key];

@@ -17,10 +17,13 @@ import { extname } from "@std/path";
 export const WAVEFORM_SUFFIX = ".waveform.png";
 
 /**
- * One grey, on transparency, for both themes. The waveform is a shape rather
- * than a colour — it has to read on the dark plate a tile sits on and on the
- * lighter one the viewer uses, and a single mid-tone does that where an accent
- * would fight one of them.
+ * What a take with no tone is drawn in: one grey, on transparency, for both
+ * themes. It has to read on the dark plate a tile sits on and on the lighter
+ * one the viewer uses, and a single mid-tone does that where an accent would
+ * fight one of them.
+ *
+ * A take that does have a tone is drawn in that tone's colour instead
+ * (`media/tone.ts`), which is what makes a grid of speech group by voice.
  */
 const WAVEFORM_COLOUR = "0x8a8a8aff";
 /**
@@ -159,7 +162,10 @@ async function peakGainDb(path: string): Promise<number> {
  * Mono, because two channels stacked in a tile is a smear rather than a
  * shape, and one waveform is what a person means by "the waveform".
  */
-export async function drawWaveform(path: string): Promise<string | null> {
+export async function drawWaveform(
+  path: string,
+  colour?: string | null,
+): Promise<string | null> {
   const destination = waveformPathFor(path);
   const gain = await peakGainDb(path);
   const { ok } = await run("ffmpeg", [
@@ -171,7 +177,7 @@ export async function drawWaveform(path: string): Promise<string | null> {
     path,
     "-filter_complex",
     `aformat=channel_layouts=mono,volume=${gain}dB,` +
-    `showwavespic=s=${WAVEFORM_SIZE}:colors=${WAVEFORM_COLOUR}`,
+    `showwavespic=s=${WAVEFORM_SIZE}:colors=${colour ?? WAVEFORM_COLOUR}`,
     "-frames:v",
     "1",
     destination,
@@ -194,12 +200,19 @@ export interface AudioFacts {
 /**
  * Both answers for one file, in one place: what completion needs after moving
  * an audio output, and what the input store needs after writing an upload.
+ *
+ * `colour` is `media/tone.ts`'s answer for whatever the take was asked to
+ * sound like (§11.5). An upload has no tone — nobody described it, it was
+ * recorded — so it keeps the grey.
  */
-export async function readAudio(path: string): Promise<AudioFacts> {
+export async function readAudio(
+  path: string,
+  colour?: string | null,
+): Promise<AudioFacts> {
   if (!await ffmpegAvailable()) return { duration_ms: null, waveform: null };
   const [duration_ms, waveform] = await Promise.all([
     probeDuration(path),
-    drawWaveform(path),
+    drawWaveform(path, colour),
   ]);
   return { duration_ms, waveform };
 }

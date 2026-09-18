@@ -6,6 +6,7 @@ import {
   readAudio,
   waveformPathFor,
 } from "../../src/media/audio.ts";
+import { toneColour, waveformColour } from "../../src/media/tone.ts";
 
 /**
  * The audio side of a media file (DESIGN-AUDIO §2.2). ffmpeg is what answers
@@ -171,6 +172,84 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "a take with a tone is drawn in that tone's colour",
+  ignore: !haveFfmpeg,
+  fn: async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      const plain = join(dir, "plain.wav");
+      const toned = join(dir, "toned.wav");
+      await writeTone(plain);
+      await writeTone(toned);
+
+      await readAudio(plain);
+      await readAudio(toned, waveformColour("an older man, unhurried"));
+
+      // Untold, it is still the one grey both themes were chosen for.
+      const grey = await inkColour(waveformPathFor(plain));
+      assertEquals(grey[0], grey[1]);
+      assertEquals(grey[1], grey[2]);
+
+      // Told, it is the hue the tile will draw its tone line in — the same
+      // mapping, so the caption and the shape under it always agree (§11.5).
+      const [r, g, b] = await inkColour(waveformPathFor(toned));
+      const wanted = toneColour("an older man, unhurried")!;
+      const expected = [1, 3, 5].map((at) =>
+        Number.parseInt(wanted.slice(at, at + 2), 16)
+      );
+      for (const [i, channel] of [r, g, b].entries()) {
+        assert(
+          Math.abs(channel - expected[i]!) <= 4,
+          `channel ${i}: drew ${channel}, asked for ${expected[i]}`,
+        );
+      }
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  },
+});
+
+/**
+ * The brightest pixel in the drawn PNG, as `[r, g, b]`. The waveform is drawn
+ * on transparency and `rgb24` composites that onto black, so the ink is the
+ * one thing in the picture that is not black.
+ */
+async function inkColour(path: string): Promise<[number, number, number]> {
+  const { code, stdout } = await new Deno.Command("ffmpeg", {
+    args: [
+      "-nostdin",
+      "-v",
+      "error",
+      "-i",
+      path,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "-",
+    ],
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  assertEquals(code, 0, `could not read ${path}`);
+  let brightest: [number, number, number] = [0, 0, 0];
+  let best = -1;
+  for (let at = 0; at + 2 < stdout.length; at += 3) {
+    const pixel: [number, number, number] = [
+      stdout[at]!,
+      stdout[at + 1]!,
+      stdout[at + 2]!,
+    ];
+    const sum = pixel[0] + pixel[1] + pixel[2];
+    if (sum > best) {
+      best = sum;
+      brightest = pixel;
+    }
+  }
+  return brightest;
+}
 
 /** The PNG header's width and height, which is all IHDR is needed for here. */
 async function pngSize(path: string): Promise<[number, number]> {

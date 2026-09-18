@@ -80,6 +80,19 @@
     {/if}
   {/if}
 
+  <!--
+    What it was asked to sound like, above the waveform and in the same hue it
+    was drawn in (§11.5). Drawn by the tile rather than baked into the picture:
+    it stays crisp at every tile size, where text rendered into a 1000px-wide
+    PNG and scaled down to 200 is a smudge.
+  -->
+  {#if isAudio && output.tone}
+    <span
+      class="tone mono"
+      style={`color: ${output.tone_color ?? "var(--text-3)"}`}
+    >{output.tone}</span>
+  {/if}
+
   <div class="strip">
     <span class="prompt">{output.prompt ?? output.id}</span>
     <span class="meta mono dim">{output.family ?? output.workflow_id ?? ""}</span>
@@ -184,6 +197,23 @@
     position: absolute;
     top: 6px;
     left: 6px;
+  }
+
+  /*
+   * Under the badge row and clear of it, on one line: the tone is a label, not
+   * the prompt, and a tone that wrapped to three lines would bury the shape
+   * it is supposed to be introducing.
+   */
+  .tone {
+    position: absolute;
+    inset: 26px 7px auto 7px;
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.92;
+    pointer-events: none;
   }
 
   .length {

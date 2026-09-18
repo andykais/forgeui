@@ -18,6 +18,8 @@ function manifestWith(params: Param[]): Manifest {
     family: "flux",
     kind: "image",
     category: null,
+    prompt: null,
+    tone: [],
     description: null,
     requires: [],
     params,

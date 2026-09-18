@@ -6,6 +6,10 @@
   "category": null,
   "description": "A song from style tags and lyrics: ACE-Step 1.5 XL Turbo at eight steps, singing over its own backing. Duration sets the length of the piece, not a crop of it.",
   "requires": [],
+  "prompt": "lyrics",
+  "tone": [
+    "style"
+  ],
   "params": [
     {
       "key": "style",

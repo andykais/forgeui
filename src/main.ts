@@ -276,7 +276,7 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     if (args.command === "reindex") {
-      const { store, db, paths } = await bootstrap(args);
+      const { store, db, paths, workflows } = await bootstrap(args);
       try {
         // Scan (but do not hash) so sidecars that name a model the library
         // has already hashed get their `output_models` rows back (§8.1).
@@ -291,6 +291,10 @@ async function main(argv: string[]): Promise<number> {
           db,
           paths,
           resolveModels: (refs) => models.resolveModels(refs),
+          // Which param is the prompt, and which one holds the tone, are
+          // the workflow's to say (§4.2, §11.5).
+          manifestFor: (id) =>
+            id === null ? null : workflows.get(id)?.manifest ?? null,
         });
         // Node timings are derived from the same sidecars (§5.1).
         const timings = await seedNodeTimings({ db, paths });

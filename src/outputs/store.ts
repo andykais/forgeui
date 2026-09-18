@@ -1,6 +1,7 @@
 import type { Database } from "@db/sqlite";
 import { join } from "@std/path";
 import { WAVEFORM_SUFFIX, waveformPathFor } from "../media/audio.ts";
+import { toneColour } from "../media/tone.ts";
 import type { DataPaths } from "../config/paths.ts";
 import {
   countLiveOutputsForSidecar,
@@ -55,6 +56,13 @@ export interface OutputView extends OutputRow {
    * gets null shows the duration on a plain plate instead.
    */
   waveform_url: string | null;
+  /**
+   * The tone's colour as `#rrggbb` (§11.5), so the tile can draw the line
+   * above the waveform in the same hue the waveform itself was drawn in.
+   * Derived here rather than sent as a palette the client repeats: one copy
+   * of the mapping, on the side that already used it to call ffmpeg.
+   */
+  tone_color: string | null;
   /** Wall-clock generation time, for the table's DURATION column. */
   generation_ms: number | null;
   models: { model_hash: string; role: string }[];
@@ -356,6 +364,7 @@ export class OutputStore {
       ...row,
       media_url: mediaUrl(row.path),
       waveform_url: waveformUrl(row),
+      tone_color: toneColour(row.tone),
       generation_ms: row.job_id ? times.get(row.job_id) ?? null : null,
       models: (models.get(row.id) ?? []).map(({ model_hash, role }) => ({
         model_hash,

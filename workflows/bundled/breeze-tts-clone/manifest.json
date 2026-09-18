@@ -8,6 +8,11 @@
   "requires": [
     "ComfyUI-Breeze-TTS-2"
   ],
+  "prompt": "text",
+  "tone": [
+    "instruction",
+    "transcript"
+  ],
   "params": [
     {
       "key": "reference",

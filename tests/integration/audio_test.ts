@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import { type TestApp, withTestApp } from "../fixtures/app.ts";
 import { tinyWav } from "../fixtures/wav.ts";
 import { ffmpegAvailable } from "../../src/media/audio.ts";
+import { toneColour } from "../../src/media/tone.ts";
 import type { Sidecar } from "../../src/jobs/sidecar.ts";
 
 /**
@@ -312,4 +313,91 @@ Deno.test({
         { input_sha256: clip.sha256, param_key: "reference" },
       ]);
     }, { comfy: true, files: voiceFiles }),
+});
+
+// ------------------------------------------------------------------- tone
+
+/**
+ * The same graph, with two text params: one that says what it sounds like
+ * and one that says what it says (§11.5). Which is which is the manifest's
+ * to declare — by position alone the voice would win, and every take in the
+ * gallery would be captioned with its own voice description.
+ */
+function tonedFiles(jobId: string): Record<string, string> {
+  const graph = {
+    ...songGraph(jobId),
+    "6": { class_type: "CLIPTextEncode", inputs: { text: "", clip: ["1", 1] } },
+    "7": { class_type: "CLIPTextEncode", inputs: { text: "", clip: ["1", 1] } },
+  };
+  return {
+    "workflows/user/toned/manifest.json": JSON.stringify(
+      {
+        id: "toned",
+        name: "Toned",
+        family: null,
+        kind: "audio",
+        prompt: "text",
+        tone: ["voice"],
+        params: [
+          { key: "voice", label: "Voice", type: "text", bind: "6.text" },
+          { key: "text", label: "Text", type: "text", bind: "7.text" },
+        ],
+        outputs: [{ node: "9", kind: "audio" }],
+      },
+      null,
+      2,
+    ),
+    "workflows/user/toned/workflow.api.json": JSON.stringify(graph, null, 2),
+  };
+}
+
+async function runToRest(app: TestApp, id: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  let status = "queued";
+  while (!TERMINAL.includes(status)) {
+    if (Date.now() > deadline) throw new Error(`job ${id} stuck`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    status = (await app.json<{ status: string }>(`/api/jobs/${id}`)).status;
+  }
+  assertEquals(status, "done");
+  await app.jobs.idle();
+}
+
+Deno.test({
+  name: "a take carries the tone it was asked for, and its colour",
+  ignore: !haveFfmpeg,
+  fn: () =>
+    withTestApp(async (app) => {
+      const voice = "an older man, warm, unhurried, faint Irish accent";
+      const job = await app.json<{ id: string }>("/api/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: "toned",
+          params: { voice, text: "Welcome aboard. Your journey begins now." },
+        }),
+      });
+      await runToRest(app, job.id);
+
+      type Row = {
+        id: string;
+        prompt: string | null;
+        tone: string | null;
+        tone_color: string | null;
+      };
+      const page = await app.json<{ outputs: Row[] }>("/api/outputs?limit=5");
+      const output = page.outputs[0];
+      assert(output, "the run produced no output row");
+
+      // The words go under the tile; the voice goes above the waveform.
+      assertEquals(output.prompt, "Welcome aboard. Your journey begins now.");
+      assertEquals(output.tone, voice);
+      assertEquals(output.tone_color, toneColour(voice));
+
+      // The index is derived from the files, and a rebuild has to reach the
+      // same answer — which it can only do by asking the workflow.
+      await app.fetch("/api/maintenance/reindex", { method: "POST" });
+      const after = await app.json<Row>(`/api/outputs/${output.id}`);
+      assertEquals(after.tone, voice);
+      assertEquals(after.tone_color, toneColour(voice));
+    }, { comfy: true, files: tonedFiles("toned") }),
 });

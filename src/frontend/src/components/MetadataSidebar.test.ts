@@ -117,6 +117,8 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
     path: "outputs/a.png",
     sidecar_path: "outputs/a.json",
     kind: "image",
+    tone: null,
+    tone_color: null,
     width: 1024,
     height: 1024,
     duration_ms: null,

@@ -563,6 +563,29 @@ export interface ValidateManifestOptions {
  * about — a graph using, say, a Breeze node while claiming to need nothing —
  * where saying so at load beats "node type not found" at queue time.
  */
+/**
+ * A manifest field that names a `text` param, checked against the params the
+ * manifest actually declares. Only text, because both fields are captions:
+ * pointing `prompt` at a seed would put a number under every tile.
+ */
+function textParamKey(
+  value: unknown,
+  params: Param[],
+  where: string,
+): string {
+  const key = nonEmptyStr(value, where);
+  const param = params.find((candidate) => candidate.key === key);
+  if (!param) {
+    throw new ManifestError(`${where}: no param "${key}"`);
+  }
+  if (param.type !== "text") {
+    throw new ManifestError(
+      `${where}: "${key}" is a ${param.type} param, and only text can be read`,
+    );
+  }
+  return key;
+}
+
 function assertNodesCovered(graph: ApiGraph, requires: string[]): void {
   const declared = new Set(requires);
   for (const [id, node] of Object.entries(graph)) {
@@ -670,6 +693,23 @@ export function validateManifest(
     );
   if (graph) assertNodesCovered(graph, requires);
 
+  // Both name params, so both are checked against the list that was just
+  // built: a key that no longer exists is a caption that silently disappears,
+  // which is exactly the kind of thing nobody notices for a month.
+  const prompt = nullable(
+    raw.prompt,
+    (value) => textParamKey(value, params, "manifest.prompt"),
+  );
+  const tone = raw.tone === undefined ? [] : array(raw.tone, "manifest.tone")
+    .map((key, i) => textParamKey(key, params, `manifest.tone[${i}]`));
+  const toneSeen = new Set<string>();
+  for (const key of tone) {
+    if (toneSeen.has(key)) {
+      throw new ManifestError(`manifest.tone: duplicate key "${key}"`);
+    }
+    toneSeen.add(key);
+  }
+
   return {
     id,
     name: nonEmptyStr(raw.name, "manifest.name"),
@@ -688,6 +728,8 @@ export function validateManifest(
       (v) => str(v, "manifest.description"),
     ),
     requires,
+    prompt,
+    tone,
     params,
     // An empty list is a draft: it loads and lists, but cannot be submitted.
     outputs: array(raw.outputs, "manifest.outputs").map((output, i) =>
@@ -706,6 +748,8 @@ export function serializeManifest(manifest: Manifest): string {
     category: manifest.category,
     description: manifest.description,
     requires: manifest.requires,
+    prompt: manifest.prompt,
+    tone: manifest.tone,
     params: manifest.params,
     outputs: manifest.outputs,
   };

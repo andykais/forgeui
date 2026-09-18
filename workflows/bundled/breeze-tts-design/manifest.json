@@ -8,6 +8,10 @@
   "requires": [
     "ComfyUI-Breeze-TTS-2"
   ],
+  "prompt": "text",
+  "tone": [
+    "voice"
+  ],
   "params": [
     {
       "key": "voice",

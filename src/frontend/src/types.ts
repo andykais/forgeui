@@ -61,6 +61,10 @@ export interface Manifest {
   description: string | null;
   /** Custom node packs this workflow needs, by folder name (§4.6). */
   requires: string[];
+  /** The param holding the words the gallery captions a take with (§11.5). */
+  prompt: string | null;
+  /** The params that say what it sounds like, best first (§11.5). */
+  tone: string[];
   params: Param[];
   outputs: { node: string; kind: "image" | "video" | "audio" }[];
 }
@@ -164,6 +168,15 @@ export interface Output {
   media_url: string;
   /** The drawn waveform of an audio output (§2.2); null for every other kind. */
   waveform_url: string | null;
+  /**
+   * What this take was asked to sound like — the voice, the direction, the
+   * style tags — which a tile shows above the waveform (§11.5). Null for
+   * every other kind, and for a take whose workflow does not say where its
+   * tone lives.
+   */
+  tone: string | null;
+  /** The hue that tone picked, and that its waveform is drawn in (§11.5). */
+  tone_color: string | null;
   generation_ms: number | null;
   models: { model_hash: string; role: string }[];
 }

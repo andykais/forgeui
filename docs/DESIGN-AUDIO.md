@@ -253,6 +253,30 @@ that was spoken. The waveform is what makes a grid of speech scannable — a
 three-second line and a thirty-second paragraph should not look alike, and
 silence at the front of a take should be visible before it is audible.
 
+**And a tone line above it, in a colour the waveform shares** (§11.5 below).
+The waveform alone turned out to be scannable for length and not for anything
+else: forty takes of speech are forty grey hedges, and what actually
+distinguishes them — the voice, the direction, the style tags — is the one
+thing an amplitude plot cannot draw. So the tile says it three ways, each
+once:
+
+- **above the waveform**, the tone as text, one line, ellipsised. Drawn by
+  the tile rather than baked into the PNG, so it stays crisp at every tile
+  size and follows an edited prompt without redrawing a file;
+- **the waveform itself**, drawn in a colour picked from that tone. Takes of
+  one voice come out one hue whatever the words are, so a grid groups by ear
+  without being read;
+- **below, in the strip that was already there**, the words. Unchanged.
+
+The hue is picked from the tone and never from the prompt. Colouring by the
+words would give a single voice a different colour every take, which is the
+opposite of the grouping this is for. Ten muted hues (`src/media/tone.ts`)
+rather than a full wheel: forty saturated tiles is a bag of sweets, and the
+hue only has to say "same" or "not the same".
+
+A take with no tone — an old row, an uploaded clip, a workflow that does not
+say where its tone lives — keeps the grey it always had and shows no line.
+
 **Where the waveform comes from: ffmpeg, at completion.** ffmpeg is a
 reasonable thing for this stack to require — it is one apt package, every
 machine that runs ComfyUI has room for it, and it removes three problems at
@@ -535,6 +559,40 @@ peaks array, no sidecar field for it, no endpoint for the browser to write one
 back, and no canvas. A file the server already knows how to serve is less to
 build and less to get wrong.
 
+**The colour is chosen when the file is drawn**, from the take's tone (§2.2).
+That is the one thing that makes the PNG depend on the job rather than only on
+the bytes: `drawWaveform` takes a colour, `media/tone.ts` maps a tone to one,
+and the API sends the same hex to the client as `tone_color` so the tile's
+tone line and the shape under it cannot drift apart. A take drawn before this
+existed stays grey until it is generated again — the picture is a cache of the
+audio, and nothing is rewritten to chase a colour.
+
+### 4.5.1 `prompt` and `tone` on a manifest
+
+Two optional manifest fields, because a speech workflow has several text
+params and the gallery has to know which is which:
+
+- **`prompt`** names the param holding the words — what a tile captions a
+  take with and what search reads. Without it the prompt is guessed as the
+  first `text` param, which is right for every image workflow and wrong for
+  all three speech ones: `breeze-tts-design` would caption every take with
+  its own voice description and never with a word that was said.
+- **`tone`** is an ordered list of the params that say what it sounds like.
+  A list because a workflow can hold the answer in more than one place —
+  `breeze-tts-clone` is directed when Direct the read is on and described by
+  its reference transcript when it is not — and the first entry that applies
+  (§4.3) and is not empty wins.
+
+Both are validated against the params the manifest declares, and both have to
+name a `text` param: pointing `prompt` at a seed would put a number under
+every tile.
+
+| Workflow | `prompt` | `tone` |
+| --- | --- | --- |
+| `breeze-tts-design` | `text` | `voice` |
+| `breeze-tts-clone` | `text` | `instruction`, `transcript` |
+| `ace-step-song` | `lyrics` | `style` |
+
 ### 4.6 A custom-node requirement
 
 The two speech workflows are the first in this repo that cannot run on stock
@@ -562,13 +620,22 @@ gets an inscrutable ComfyUI error.
 | `inputs` | `kind = 'audio'`; `width`/`height` null | **none** — same (`schema.sql:78`) |
 | `inputs` | duration of a clip | **one additive column**, `duration_ms INTEGER`, nullable |
 | `outputs` | duration of a take | **none** — `duration_ms` exists and is currently written as null |
+| `outputs` | the tone a take was asked for | **one additive column**, `tone TEXT`, nullable (§2.2) |
 | sidecars | `kind: "audio"` | no migration; **validator change** (see below) |
 | waveform PNGs | one per audio file, named by convention | **none** — a file beside the audio, not a row (§4.5) |
 | `config.yaml` | no new keys | **none** |
 
-So: one migration, version 6, adding `inputs.duration_ms`. It follows the
-established shape — additive, nullable, no backfill, also present in
-`schema.sql` so a fresh database gets it at version 1.
+So: two migrations. Version 6 adds `inputs.duration_ms`; version 7 adds
+`outputs.tone`. Both follow the established shape — additive, nullable, no
+backfill, also present in `schema.sql` so a fresh database gets them at
+version 1.
+
+`tone` is denormalised out of the params the same way `prompt` is, and like
+`prompt` it is derived rather than authoritative: `deno task reindex` rebuilds
+it from the sidecar's params and the workflow's manifest, which is why
+`reindex` now takes a `manifestFor` resolver. Without one it can still rebuild
+every other column — it just leaves the tone lines blank, since a sidecar
+alone cannot say which param held the tone.
 
 **The compatibility note that matters more than the migration.** The sidecar
 validator rejects any kind that is not `image` or `video`

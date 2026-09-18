@@ -307,6 +307,8 @@ Deno.test("serialising a manifest keeps the §4.2 field order", () => {
     "category",
     "description",
     "requires",
+    "prompt",
+    "tone",
     "params",
     "outputs",
   ]);
@@ -571,4 +573,50 @@ Deno.test("a duration can only follow an audio param that exists", () => {
     ManifestError,
   );
   assertStringIncludes(wrongType.message, "only an audio param has a length");
+});
+
+/**
+ * Which param holds the words, and which one holds the tone (§4.2, §11.5).
+ * Both name a param, so both are only as good as that name.
+ */
+
+const textParam = { key: "text", type: "text", bind: "6.text" };
+const voiceParam = { key: "voice", type: "text", bind: "6.text" };
+
+Deno.test("a manifest can name the param its prompt lives in", () => {
+  const parsed = validateManifest(
+    manifest([voiceParam, textParam], { prompt: "text", tone: ["voice"] }),
+    { graph },
+  );
+  assertEquals(parsed.prompt, "text");
+  assertEquals(parsed.tone, ["voice"]);
+});
+
+Deno.test("a manifest that says nothing has no prompt and no tone", () => {
+  const parsed = validateManifest(manifest([textParam]), { graph });
+  assertEquals(parsed.prompt, null);
+  assertEquals(parsed.tone, []);
+});
+
+Deno.test("prompt and tone have to name a param that exists", () => {
+  invalid([textParam], 'manifest.prompt: no param "missing"', {
+    prompt: "missing",
+  });
+  invalid([textParam], 'manifest.tone[0]: no param "missing"', {
+    tone: ["missing"],
+  });
+});
+
+Deno.test("prompt and tone have to name a text param", () => {
+  invalid(
+    [textParam, { key: "seed", type: "seed", bind: "3.seed" }],
+    'manifest.tone[0]: "seed" is a seed param',
+    { tone: ["seed"] },
+  );
+});
+
+Deno.test("a tone param is not listed twice", () => {
+  invalid([voiceParam, textParam], 'manifest.tone: duplicate key "voice"', {
+    tone: ["voice", "voice"],
+  });
 });

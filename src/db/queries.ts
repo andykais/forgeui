@@ -67,6 +67,8 @@ export interface OutputRow {
   workflow_hash: string | null;
   family: string | null;
   prompt: string | null;
+  /** What the take was asked to sound like; audio only (DESIGN-AUDIO §11.5). */
+  tone: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -269,8 +271,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
   db.prepare(
     `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, width, height,
                           duration_ms, sha256, workflow_id, workflow_hash,
-                          family, prompt, params_json, deleted_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          family, prompt, tone, params_json, deleted_at,
+                          created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -285,6 +288,7 @@ export function insertOutput(db: Database, output: OutputRow): void {
     output.workflow_hash,
     output.family,
     output.prompt,
+    output.tone,
     JSON.stringify(output.params),
     output.deleted_at,
     output.created_at,
@@ -330,7 +334,7 @@ export function normalizeModelHash(hash: string): string {
 }
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
-  duration_ms, sha256, workflow_id, workflow_hash, family, prompt,
+  duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
   params_json, deleted_at, created_at`;
 
 type OutputRecord = [
@@ -342,6 +346,7 @@ type OutputRecord = [
   number | null,
   number | null,
   number | null,
+  string | null,
   string | null,
   string | null,
   string | null,
@@ -367,9 +372,10 @@ function toOutput(record: OutputRecord): OutputRow {
     workflow_hash: record[10],
     family: record[11],
     prompt: record[12],
-    params: parse<Record<string, unknown>>(record[13], {}),
-    deleted_at: record[14],
-    created_at: record[15],
+    tone: record[13],
+    params: parse<Record<string, unknown>>(record[14], {}),
+    deleted_at: record[15],
+    created_at: record[16],
   };
 }
 

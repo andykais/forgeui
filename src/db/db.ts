@@ -118,6 +118,26 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 7,
+    name: "output tone",
+    // What a take was asked to sound like, which colours its waveform and
+    // captions its tile (DESIGN-AUDIO §11.5). Also in schema.sql, so a fresh
+    // database gets it at version 1 and this does nothing there. NULL is
+    // "no tone", which every existing row is and every image always will be
+    // — `deno task reindex` fills it in for the takes whose workflow says
+    // where it lives.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(outputs)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("tone")) {
+        db.exec("ALTER TABLE outputs ADD COLUMN tone TEXT");
+      }
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

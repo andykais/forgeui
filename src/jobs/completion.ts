@@ -14,6 +14,8 @@ import type { ComfyImageRef } from "../comfy/events.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import type { Manifest, WorkflowKind } from "../workflows/types.ts";
 import { readAudio } from "../media/audio.ts";
+import { waveformColour } from "../media/tone.ts";
+import { paramApplies } from "../workflows/visibility.ts";
 import { collectModels } from "./models.ts";
 import { readPngSize, SIDECAR_KEYWORD, withTextChunk } from "./png.ts";
 import {
@@ -96,11 +98,22 @@ function kindFor(
   return manifest?.kind ?? "image";
 }
 
-/** The prompt text the gallery searches on; denormalised into `outputs`. */
+/**
+ * The prompt text the gallery searches on; denormalised into `outputs`.
+ *
+ * A manifest that names its prompt param settles it (§4.2). Otherwise it is
+ * a `prompt` key, then the first text param — which was the whole rule while
+ * every workflow had one text field, and is still right for all of them.
+ */
 export function promptText(
   manifest: Manifest | null,
   params: Record<string, unknown>,
 ): string | null {
+  const declared = manifest?.prompt;
+  if (declared) {
+    const value = params[declared];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
   if (typeof params.prompt === "string" && params.prompt.length > 0) {
     return params.prompt;
   }
@@ -108,6 +121,29 @@ export function promptText(
     if (param.type !== "text") continue;
     const value = params[param.key];
     if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+/**
+ * What this take was asked to sound like: the voice, the direction, or the
+ * style tags, whichever the workflow says holds it (§11.5).
+ *
+ * The first candidate that applies and is not empty wins — `breeze-tts-clone`
+ * lists its direction ahead of its reference transcript, and the direction
+ * only applies while the box that turns it on is ticked (§4.3).
+ */
+export function toneText(
+  manifest: Manifest | null,
+  params: Record<string, unknown>,
+): string | null {
+  for (const key of manifest?.tone ?? []) {
+    const param = manifest?.params.find((candidate) => candidate.key === key);
+    if (!param || !paramApplies(param, params)) continue;
+    const value = params[key];
+    if (typeof value !== "string") continue;
+    const text = value.trim();
+    if (text.length > 0) return text;
   }
   return null;
 }
@@ -158,6 +194,11 @@ export async function completeJob(
     durationMs: number | null;
   }
 
+  // One answer for the whole job: every take in it was asked for in the same
+  // words, and it decides both the colour the waveform is drawn in and the
+  // line the tile shows above it (§11.5).
+  const tone = toneText(manifest, job.params);
+
   const moved: Moved[] = [];
   for (const [index, entry] of files.entries()) {
     const ext = extname(entry.file.filename) || ".png";
@@ -185,7 +226,9 @@ export async function completeJob(
     // duration is read from the container rather than guessed (§2.2). Both
     // are best-effort: a machine without ffmpeg still gets its output.
     const kind = kindFor(name, entry.node, manifest);
-    const audio = kind === "audio" ? await readAudio(destination) : null;
+    const audio = kind === "audio"
+      ? await readAudio(destination, waveformColour(tone))
+      : null;
     moved.push({
       id: `${job.id}-${index}`,
       node: entry.node,
@@ -267,6 +310,7 @@ export async function completeJob(
       workflow_hash: job.workflow_hash,
       family: manifest?.family ?? null,
       prompt: promptText(manifest, job.params),
+      tone,
       params: job.params,
       deleted_at: null,
       created_at: createdAt.getTime(),
