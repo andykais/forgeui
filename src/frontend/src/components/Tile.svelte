@@ -59,9 +59,8 @@
     {:else if isAudio}
       <!--
         A drawn waveform (§2.2), which is the only picture sound has. It is
-        wider than the cell, so it sits across the middle of the tile rather
-        than filling it — and a take with no waveform yet still gets its
-        duration and prompt from the strip below.
+        two thirds of the tile and sits on the strip — and a take with no
+        waveform yet still gets its duration and prompt from the strip below.
       -->
       <span class="wave">
         {#if output.waveform_url}
@@ -100,6 +99,8 @@
 
 <style>
   .tile {
+    /* What the waveform stands on, in one place (§11.5). */
+    --strip-height: 30px;
     position: relative;
     aspect-ratio: 1;
     border-radius: var(--radius-input);
@@ -141,21 +142,30 @@
     background: var(--control-selected);
   }
 
-  /* Centred in the cell: a 2.5:1 waveform in a square tile is a band, and
-     stretching it to fill would say something false about the sound. */
+  /*
+   * Edge to edge, and standing on the strip rather than floating in the
+   * middle of the cell. The picture is drawn at 3:2 (`media/audio.ts`), so
+   * full width makes it two thirds of a square tile, and the band left above
+   * it is the tone line's. Centred, the same drawing read as a thing
+   * suspended in an empty box; sitting on the strip it reads as a chart,
+   * with the quiet end of the take where quiet belongs.
+   *
+   * Not stretched to fill: the y axis is amplitude, and scaling it would say
+   * something false about the sound. A take drawn before this — an old row,
+   * still 2.5:1 — is simply shorter, and sits in the same place.
+   */
   .wave {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: var(--strip-height);
+    display: block;
   }
 
   .wave img {
+    display: block;
     width: 100%;
     height: auto;
-    max-height: 100%;
-    object-fit: contain;
   }
 
   /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */
@@ -177,7 +187,7 @@
   .strip {
     position: absolute;
     inset: auto 0 0 0;
-    height: 30px;
+    height: var(--strip-height);
     display: flex;
     align-items: center;
     gap: 6px;

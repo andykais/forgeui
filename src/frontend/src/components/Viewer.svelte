@@ -308,10 +308,17 @@
     padding: 0 16px;
   }
 
+  /*
+   * Bounded on both axes rather than stretched to the box and capped: with
+   * `width: 100%` and a max height, the element stayed 760px wide and
+   * `contain` letterboxed the picture inside it — so making the drawing
+   * taller (3:2, `media/audio.ts`) made the waveform *narrower*. Sized by
+   * whichever limit it reaches first, it simply gets as large as it fits.
+   */
   .audio .wave {
-    width: 100%;
-    height: auto;
-    max-height: 200px;
+    width: auto;
+    max-width: 100%;
+    max-height: 420px;
     object-fit: contain;
   }
 

@@ -253,6 +253,14 @@ that was spoken. The waveform is what makes a grid of speech scannable — a
 three-second line and a thirty-second paragraph should not look alike, and
 silence at the front of a take should be visible before it is audible.
 
+It is drawn at **3:2 and stands on the metadata strip**, which makes it two
+thirds of a square tile rather than the fifth it began as. Centred, a wide
+picture in a square cell is a band floating in an empty box; on the strip it
+reads as a chart, and the room it gains is room the shape actually uses. The
+strip of tile left above it is the tone line's (below). Everywhere else the
+waveform appears — the table's 38px thumb, the filmstrip, the viewer — takes
+the same drawing and only sizes it.
+
 **And a tone line above it, in a colour the waveform shares** (§11.5 below).
 The waveform alone turned out to be scannable for length and not for anything
 else: forty takes of speech are forty grey hedges, and what actually

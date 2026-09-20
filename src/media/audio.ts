@@ -27,11 +27,16 @@ export const WAVEFORM_SUFFIX = ".waveform.png";
  */
 const WAVEFORM_COLOUR = "0x8a8a8aff";
 /**
- * 2.5:1 rather than the 6:1 strip this started as. A tile is close to
- * square, and a strip that wide letterboxes down to a thread across the
- * middle of it — the picture was there, it was just too small to read.
+ * 3:2, which is two thirds of a square tile once it is drawn edge to edge.
+ *
+ * This started as a 6:1 strip and went to 2.5:1, and both were the same
+ * mistake at different sizes: a wide picture letterboxed into a square cell
+ * is a band across the middle of it, and a fifth of the tile is not enough
+ * room to tell a shape from a smudge. The tile anchors it to the bottom
+ * rather than centring it, so the height the drawing gains is height the
+ * take actually fills.
  */
-const WAVEFORM_SIZE = "1000x400";
+const WAVEFORM_SIZE = "1000x660";
 /**
  * The most a quiet take is lifted by. A generated line often peaks around
  * -30 dBFS, and drawn as-is it is a flat line in a large empty box; scaled so
