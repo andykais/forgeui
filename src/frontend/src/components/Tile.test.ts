@@ -59,17 +59,14 @@ describe("an audio tile", () => {
   });
 
   test("a picture has no tone, whatever its params say", () => {
-    render(
-      Tile,
-      {
-        output: output({
-          kind: "image",
-          tone: "a warm, thoughtful young woman",
-          tone_color: "#d0a06a",
-          waveform_url: null,
-        }),
-      },
-    );
+    render(Tile, {
+      output: output({
+        kind: "image",
+        tone: "a warm, thoughtful young woman",
+        tone_color: "#d0a06a",
+        waveform_url: null,
+      }),
+    });
     expect(document.querySelector(".tone")).toBe(null);
   });
 });

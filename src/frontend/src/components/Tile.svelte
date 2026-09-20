@@ -87,10 +87,9 @@
     PNG and scaled down to 200 is a smudge.
   -->
   {#if isAudio && output.tone}
-    <span
-      class="tone mono"
-      style={`color: ${output.tone_color ?? "var(--text-3)"}`}
-    >{output.tone}</span>
+    <span class="tone mono" style={`color: ${output.tone_color ?? "var(--text-3)"}`}
+      >{output.tone}</span
+    >
   {/if}
 
   <div class="strip">
@@ -168,16 +167,23 @@
     display: block;
   }
 
+  /*
+   * The body size, 13px, rather than the 11px this started at. A tile is
+   * read at arm's length beside a panel of 13px text, and shrinking the one
+   * line that says what a take is made it the hardest thing on the screen to
+   * read. It costs words on a small tile — the prompt is the first few rather
+   * than the first phrase — and the title attribute still carries all of it.
+   */
   .strip {
     position: absolute;
     inset: auto 0 0 0;
-    height: 25px;
+    height: 30px;
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 0 7px;
     background: rgb(13 13 13 / 82%);
-    font-size: 11px;
+    font-size: 13px;
     pointer-events: none;
   }
 
@@ -190,7 +196,7 @@
   }
 
   .meta {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .badge.kind {
@@ -206,8 +212,8 @@
    */
   .tone {
     position: absolute;
-    inset: 26px 7px auto 7px;
-    font-size: 10px;
+    inset: 27px 7px auto 7px;
+    font-size: 13px;
     line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
