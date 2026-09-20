@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
   ManifestError,
   resolveDefaults,
@@ -257,9 +257,14 @@ Deno.test("workflow-level fields are checked", () => {
       "wan2, qwen-image, sd15",
   );
   assertThrows(
-    () => validateManifest(manifest([], { kind: "audio" }), { graph }),
+    () => validateManifest(manifest([], { kind: "hologram" }), { graph }),
     ManifestError,
-    "one of image, video",
+    "one of image, video, audio",
+  );
+  // Audio joined the two the day a workflow could make sound (§4.1).
+  validateManifest(
+    manifest([], { kind: "audio", outputs: [{ node: "9", kind: "audio" }] }),
+    { graph },
   );
   // `upscale` joined `img2img` when the Upscale action gained something to
   // route to (§10); a category nobody routes on is still refused.
@@ -301,6 +306,9 @@ Deno.test("serialising a manifest keeps the §4.2 field order", () => {
     "kind",
     "category",
     "description",
+    "requires",
+    "prompt",
+    "tone",
     "params",
     "outputs",
   ]);
@@ -449,4 +457,166 @@ Deno.test("a default the graph cannot supply is left alone", () => {
       param.key,
     );
   }
+});
+
+/**
+ * `requires` (§4.6). The check is narrow on purpose: it catches the case the
+ * app can be sure about — a node it knows belongs to a pack — and leaves a
+ * node type it has never heard of alone, because a user may have installed
+ * anything and the app holds no list of every node in the world.
+ */
+Deno.test("a pack node has to be declared, and an unknown one need not be", () => {
+  const speechGraph: ApiGraph = {
+    "1": {
+      class_type: "BreezeTTS2LoadModel",
+      inputs: { model: "int8 hybrid (recommended)" },
+    },
+    "2": {
+      class_type: "SaveAudio",
+      inputs: { filename_prefix: "audio/take", audio: ["1", 0] },
+    },
+  };
+
+  const undeclared = assertThrows(
+    () =>
+      validateManifest(
+        manifest([], {
+          kind: "audio",
+          outputs: [{ node: "2", kind: "audio" }],
+        }),
+        { graph: speechGraph },
+      ),
+    ManifestError,
+  );
+  assertStringIncludes(undeclared.message, "ComfyUI-Breeze-TTS-2");
+  assertStringIncludes(undeclared.message, "add it to requires");
+
+  const declared = validateManifest(
+    manifest([], {
+      kind: "audio",
+      requires: ["ComfyUI-Breeze-TTS-2"],
+      outputs: [{ node: "2", kind: "audio" }],
+    }),
+    { graph: speechGraph },
+  );
+  assertEquals(declared.requires, ["ComfyUI-Breeze-TTS-2"]);
+
+  // Somebody else's pack, which this app has never heard of: not an error,
+  // because the alternative is refusing to load a workflow that works.
+  const mystery: ApiGraph = {
+    "1": { class_type: "SomeoneElsesSampler", inputs: { steps: 4 } },
+    "2": {
+      class_type: "SaveImage",
+      inputs: { filename_prefix: "ForgeUI/out", images: ["1", 0] },
+    },
+  };
+  const loaded = validateManifest(
+    manifest([], { outputs: [{ node: "2", kind: "image" }] }),
+    { graph: mystery },
+  );
+  assertEquals(loaded.requires, []);
+});
+
+/**
+ * A length that follows a clip (§11.3). The reference has to be real and it
+ * has to be audio: a size follows a picture because a picture has a shape,
+ * and this follows a clip because a clip has a length. Nothing else does.
+ */
+Deno.test("a duration can only follow an audio param that exists", () => {
+  const audioGraph: ApiGraph = {
+    "1": { class_type: "LoadAudio", inputs: { audio: "take.wav" } },
+    "2": { class_type: "PrimitiveFloat", inputs: { value: 9 } },
+    "3": {
+      class_type: "SaveAudio",
+      inputs: { filename_prefix: "audio/take", audio: ["1", 0] },
+    },
+  };
+  const withParams = (params: unknown[]) =>
+    manifest(params, {
+      kind: "audio",
+      outputs: [{ node: "3", kind: "audio" }],
+    });
+
+  const good = validateManifest(
+    withParams([
+      { key: "clip", type: "audio", bind: "1.audio" },
+      { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+    ]),
+    { graph: audioGraph },
+  );
+  assertEquals(
+    good.params.find((param) => param.key === "seconds")?.type,
+    "float",
+  );
+
+  const missing = assertThrows(
+    () =>
+      validateManifest(
+        withParams([
+          { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+        ]),
+        { graph: audioGraph },
+      ),
+    ManifestError,
+  );
+  assertStringIncludes(missing.message, 'no param "clip"');
+
+  const wrongType = assertThrows(
+    () =>
+      validateManifest(
+        withParams([
+          { key: "clip", type: "text", bind: "1.audio" },
+          { key: "seconds", type: "float", follows: "clip", bind: "2.value" },
+        ]),
+        { graph: audioGraph },
+      ),
+    ManifestError,
+  );
+  assertStringIncludes(wrongType.message, "only an audio param has a length");
+});
+
+/**
+ * Which param holds the words, and which one holds the tone (§4.2, §11.5).
+ * Both name a param, so both are only as good as that name.
+ */
+
+const textParam = { key: "text", type: "text", bind: "6.text" };
+const voiceParam = { key: "voice", type: "text", bind: "6.text" };
+
+Deno.test("a manifest can name the param its prompt lives in", () => {
+  const parsed = validateManifest(
+    manifest([voiceParam, textParam], { prompt: "text", tone: ["voice"] }),
+    { graph },
+  );
+  assertEquals(parsed.prompt, "text");
+  assertEquals(parsed.tone, ["voice"]);
+});
+
+Deno.test("a manifest that says nothing has no prompt and no tone", () => {
+  const parsed = validateManifest(manifest([textParam]), { graph });
+  assertEquals(parsed.prompt, null);
+  assertEquals(parsed.tone, []);
+});
+
+Deno.test("prompt and tone have to name a param that exists", () => {
+  invalid([textParam], 'manifest.prompt: no param "missing"', {
+    prompt: "missing",
+  });
+  invalid([textParam], 'manifest.tone[0]: no param "missing"', {
+    tone: ["missing"],
+  });
+});
+
+Deno.test("prompt and tone have to name a text param", () => {
+  invalid(
+    [textParam, { key: "seed", type: "seed", bind: "3.seed" }],
+    'manifest.tone[0]: "seed" is a seed param',
+    { tone: ["seed"] },
+  );
+});
+
+Deno.test("a tone param is not listed twice", () => {
+  invalid([voiceParam, textParam], 'manifest.tone: duplicate key "voice"', {
+    tone: ["voice", "voice"],
+  });
 });

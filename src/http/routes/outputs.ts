@@ -4,6 +4,7 @@ import { CursorError, decodeCursor } from "../../outputs/cursor.ts";
 import { serveMedia } from "../media.ts";
 import { json } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
+import { WORKFLOW_KINDS } from "../../workflows/types.ts";
 
 /** All gallery filters travel as URL params, so a view is a link (§11.2). */
 function filtersFrom(url: URL): OutputFilters {
@@ -16,8 +17,8 @@ function filtersFrom(url: URL): OutputFilters {
   if (workflow) filters.workflow = workflow;
   const kind = url.searchParams.get("kind");
   if (kind) {
-    if (kind !== "image" && kind !== "video") {
-      throw new CursorError("kind: expected image or video");
+    if (!(WORKFLOW_KINDS as readonly string[]).includes(kind)) {
+      throw new CursorError(`kind: expected ${WORKFLOW_KINDS.join(", ")}`);
     }
     filters.kind = kind;
   }

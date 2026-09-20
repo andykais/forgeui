@@ -117,6 +117,8 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
     path: "outputs/a.png",
     sidecar_path: "outputs/a.json",
     kind: "image",
+    tone: null,
+    tone_color: null,
     width: 1024,
     height: 1024,
     duration_ms: null,
@@ -129,6 +131,7 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
     deleted_at: null,
     created_at: 1_789_000_000_000,
     media_url: "/api/media/outputs/a.png",
+    waveform_url: null,
     generation_ms: 228,
     // Both LoRAs share the one role, which is the shape that used to defeat
     // the by-role lookup.

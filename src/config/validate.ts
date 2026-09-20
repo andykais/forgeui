@@ -207,7 +207,14 @@ export function validatePartialConfig(
   if ("comfy" in raw) {
     const comfy = record(raw.comfy, `${where}.comfy`);
     const at = `${where}.comfy`;
-    rejectUnknown(comfy, at, ["mode", "path", "url", "python", "extra_args"]);
+    rejectUnknown(comfy, at, [
+      "mode",
+      "path",
+      "url",
+      "python",
+      "extra_args",
+      "allow_model_downloads",
+    ]);
     out.comfy = {};
     if ("mode" in comfy) {
       out.comfy.mode = oneOf(
@@ -223,6 +230,7 @@ export function validatePartialConfig(
     pick(comfy, "url", out.comfy, str, at);
     pick(comfy, "python", out.comfy, nullableStr, at);
     pick(comfy, "extra_args", out.comfy, strArray, at);
+    pick(comfy, "allow_model_downloads", out.comfy, bool, at);
   }
 
   if ("model_folders" in raw) {

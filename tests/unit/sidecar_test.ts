@@ -86,10 +86,21 @@ Deno.test("malformed sidecars are rejected with the field that is wrong", () => 
   assertThrows(
     () =>
       parseSidecar(
-        JSON.stringify({ ...sidecar, outputs: [{ file: "x", kind: "audio" }] }),
+        JSON.stringify({
+          ...sidecar,
+          outputs: [{ file: "x", kind: "hologram" }],
+        }),
       ),
     SidecarError,
-    "expected image or video",
+    "expected image, video or audio",
+  );
+  // Audio is one of the three now. A build that rejected it would refuse to
+  // reindex a data directory a newer one had written into (§5).
+  parseSidecar(
+    JSON.stringify({
+      ...sidecar,
+      outputs: [{ file: "x.flac", kind: "audio" }],
+    }),
   );
 });
 

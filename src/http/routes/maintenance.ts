@@ -17,6 +17,8 @@ export function maintenanceRoutes(ctx: AppContext): Route[] {
           db: ctx.db,
           paths: ctx.paths,
           resolveModels: (models) => ctx.models.resolveModels(models),
+          manifestFor: (id) =>
+            id === null ? null : ctx.workflows.get(id)?.manifest ?? null,
         });
         // Deleted rows may have gone; drop any timers that pointed at them.
         await ctx.outputs.resumeDeletions();

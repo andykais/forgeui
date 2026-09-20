@@ -36,6 +36,17 @@ export interface ComfyConfig {
   python: string | null;
   /** Appended verbatim to the generated launch flags. */
   extra_args: string[];
+  /**
+   * Whether a graph may fetch model weights while it runs (§4.6).
+   *
+   * Several custom node packs "helpfully" download a checkpoint the first
+   * time a node executes. That turns a generation into an unannounced
+   * multi-gigabyte transfer, and makes a run's behaviour depend on what a
+   * remote host served that day. Off, a graph carrying such an input is
+   * refused at submit, naming the node — so weights are something you put on
+   * disk deliberately, before the run.
+   */
+  allow_model_downloads: boolean;
 }
 
 /** `kind` → folders, mirroring ComfyUI's `extra_model_paths.yaml` keys. */

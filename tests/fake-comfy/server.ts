@@ -10,6 +10,7 @@ function asciiJson(value: unknown): string {
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
 }
+import { tinyWav } from "../fixtures/wav.ts";
 import { tinyPng } from "../fixtures/png.ts";
 import {
   type ApiGraph,
@@ -46,6 +47,8 @@ export interface FakeComfyOptions {
   /** Overrides the size taken from the graph's latent node. */
   imageSize?: { width: number; height: number };
   extraNodeTypes?: readonly string[];
+  /** Custom node packs this ComfyUI pretends to have installed (§4.6). */
+  packs?: readonly string[];
   /** Pause between steps; 0 keeps tests fast but ordered. */
   stepDelayMs?: number;
 }
@@ -89,12 +92,22 @@ export type RunStatus =
 
 export interface HistoryEntry {
   prompt: [number, string, ApiGraph, Record<string, unknown>, string[]];
-  outputs: Record<string, { images: ImageRef[] }>;
+  outputs: Record<string, NodeOutput>;
   status: {
     status_str: "success" | "error";
     completed: boolean;
     messages: [string, Record<string, unknown>][];
   };
+}
+
+/**
+ * What a node reports it wrote. ComfyUI files each medium under its own key —
+ * `images`, `gifs`, `videos`, `audio` — and an app that reads only some of
+ * them sees a successful run that produced nothing (§4.1).
+ */
+interface NodeOutput {
+  images?: ImageRef[];
+  audio?: ImageRef[];
 }
 
 interface Run {
@@ -106,7 +119,7 @@ interface Run {
   scenario: Scenario;
   outputNodes: string[];
   status: RunStatus;
-  outputs: Record<string, { images: ImageRef[] }>;
+  outputs: Record<string, NodeOutput>;
   messages: [string, Record<string, unknown>][];
   executed: string[];
   counters: Map<string, number>;
@@ -370,6 +383,7 @@ export class FakeComfy {
     }
     const validation = validateGraph(body.prompt, {
       extraNodeTypes: this.#options.extraNodeTypes,
+      packs: this.#options.packs,
     });
     if (!validation.ok) {
       return this.#promptError(validation.message, validation.nodeErrors);
@@ -707,13 +721,13 @@ export class FakeComfy {
       case "executed": {
         const node = this.#resolve(run, step.node);
         if (node === null) return;
-        const images = await this.#writeImages(run, node, step.images ?? 1);
-        run.outputs[node] = { images };
+        const output = await this.#writeFiles(run, node, step.images ?? 1);
+        run.outputs[node] = output;
         run.executed.push(node);
         this.#emit(run, "executed", {
           node,
           display_node: node,
-          output: { images },
+          output,
           prompt_id: run.prompt_id,
         });
         return;
@@ -809,12 +823,20 @@ export class FakeComfy {
     return { width: 64, height: 64 };
   }
 
-  /** Write files exactly where `SaveImage` would, then report them. */
-  async #writeImages(
+  /**
+   * Write files exactly where the node's real counterpart would, then report
+   * them under the key that counterpart uses.
+   *
+   * A save-audio node writes real WAV bytes rather than a PNG with a
+   * misleading name: the app runs ffprobe and ffmpeg over what it finds, and
+   * a file that is not what its extension claims would pass a test the real
+   * thing fails.
+   */
+  async #writeFiles(
     run: Run,
     nodeId: string,
     count: number,
-  ): Promise<ImageRef[]> {
+  ): Promise<NodeOutput> {
     const node = run.graph[nodeId]!;
     const filenamePrefix = String(node.inputs.filename_prefix ?? "ComfyUI");
     const { subfolder, prefix } = splitFilenamePrefix(filenamePrefix);
@@ -823,14 +845,17 @@ export class FakeComfy {
       : this.#options.stagingDir;
     await Deno.mkdir(dir, { recursive: true });
 
+    const audio = String(node.class_type ?? "").startsWith("SaveAudio") ||
+      node.class_type === "PreviewAudio";
     const { width, height } = this.#imageSize(run.graph);
-    const images: ImageRef[] = [];
+    const files: ImageRef[] = [];
     for (let i = 0; i < count; i++) {
       const key = `${subfolder}/${prefix}`;
       const index = (run.counters.get(key) ?? 0) + 1;
       run.counters.set(key, index);
-      const filename = `${prefix}_${String(index).padStart(5, "0")}_.png`;
-      const bytes = withTextChunk(
+      const stem = `${prefix}_${String(index).padStart(5, "0")}_`;
+      const filename = `${stem}${audio ? ".wav" : ".png"}`;
+      const bytes = audio ? tinyWav({ seconds: 2 }) : withTextChunk(
         tinyPng({ width, height, color: [0x6f, 0xb6, 0xc8] }),
         "prompt",
         // `tEXt` is Latin-1, and a graph may hold anything a prompt does —
@@ -840,9 +865,9 @@ export class FakeComfy {
         asciiJson(run.graph),
       );
       await Deno.writeFile(join(dir, filename), bytes);
-      images.push({ filename, subfolder, type: "output" });
+      files.push({ filename, subfolder, type: "output" });
     }
-    return images;
+    return audio ? { audio: files } : { images: files };
   }
 
   // ------------------------------------------------------------- websockets

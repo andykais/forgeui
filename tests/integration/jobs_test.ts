@@ -655,3 +655,67 @@ Deno.test("submitting refuses unknown or unrunnable workflows", async () => {
     );
   }, { comfy: true });
 });
+
+/**
+ * A graph that would fetch weights while it runs is refused (§4.6).
+ *
+ * Several custom node packs offer an input that downloads a checkpoint on
+ * first use. It is meant kindly, and it makes a run unpredictable: ten
+ * seconds or five gigabytes depending on what is already on disk, failing
+ * with a network error rather than a missing file. Weights are something you
+ * put there on purpose.
+ */
+const FETCHING_GRAPH = {
+  "1": {
+    class_type: "CheckpointLoaderSimple",
+    inputs: {
+      ckpt_name: "test-checkpoint.safetensors",
+      download_if_missing: true,
+    },
+  },
+  "2": {
+    class_type: "SaveImage",
+    inputs: { filename_prefix: "ForgeUI/out", images: ["1", 0] },
+  },
+};
+
+const FETCHING_FILES = {
+  "workflows/user/fetcher/workflow.api.json": JSON.stringify(FETCHING_GRAPH),
+  "workflows/user/fetcher/manifest.json": JSON.stringify({
+    id: "fetcher",
+    name: "Fetcher",
+    family: null,
+    kind: "image",
+    params: [],
+    outputs: [{ node: "2", kind: "image" }],
+  }),
+};
+
+Deno.test("a graph that would download weights mid-run is refused", async () => {
+  await withTestApp(async (app) => {
+    const response = await app.fetch("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: "fetcher", params: {} }),
+    });
+    assertEquals(response.status, 400);
+    const body = await response.json() as { error: { message: string } };
+    // Which node, and what to do about it.
+    assertStringIncludes(body.error.message, "node 1");
+    assertStringIncludes(body.error.message, "download_if_missing");
+    assertStringIncludes(body.error.message, "allow_model_downloads");
+  }, { comfy: true, files: FETCHING_FILES });
+});
+
+Deno.test("the same graph runs once downloads are allowed", async () => {
+  await withTestApp(async (app) => {
+    const job = await submit(app, {}, "fetcher");
+    const done = await awaitJob(app, job.id);
+    assertEquals(done.status, "done");
+  }, {
+    comfy: true,
+    files: {
+      ...FETCHING_FILES,
+      "config.yaml": "comfy:\n  allow_model_downloads: true\n",
+    },
+  });
+});

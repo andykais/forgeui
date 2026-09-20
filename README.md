@@ -19,6 +19,7 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 | `docs/PHASE-2-HANDOFF.md`    | What Phase 2 delivered, the screens it added, and where Phase 3 picks up.                  |
 | `docs/IMPLEMENT-PHASE-2.md`  | Work plan for the model library, samples and node-timing ETA (M5–M9).                      |
 | `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, and what it still does not.                    |
+| `docs/DESIGN-AUDIO.md`       | Proposal: audio as a result, TTS voices, song, and lip-synced video. Not implemented.      |
 | `AGENTS.md`                  | How to navigate and build the repo, and the conventions a coding agent must follow.        |
 
 Phase 1 is complete and has been verified against a real ComfyUI; see the
@@ -106,6 +107,12 @@ a pinned ComfyUI (`docs/HARDWARE-CHECKLIST.md`'s verified version) with CUDA
 Everything needed to launch the app is baked in at build time; only your data is
 expected to come from volumes.
 
+It also installs **`ffmpeg`**, which is the one external binary the app itself
+runs: an audio result has no thumbnail of its own, so ffmpeg draws its waveform
+beside it and reads how long the clip is. Running the app outside the container
+means installing ffmpeg too — without it, audio still generates and plays, it
+just has no waveform and no duration.
+
 Build:
 
 ```sh
@@ -133,14 +140,98 @@ podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
 `Stable-Diffusion`, `diffusion_models`, `unet`, `loras`, `vae`, `text_encoders`,
-`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings` — matching
-how the container's entrypoint wires up `--models-dir` (see `Containerfile`'s
-`CMD`). A folder you do not use can simply be absent; a missing folder scans as
-empty.
+`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings`,
+`breezetts2` — matching how the container's entrypoint wires up `--models-dir`
+(see `Containerfile`'s `CMD`). A folder you do not use can simply be absent; a
+missing folder scans as empty.
 
 Anything that can drive a generation is one _class_ to the app, so
 `checkpoints`, `diffusion_models` and `unet` are listed together in a workflow's
 model picker regardless of which of them a file sits in.
+
+### Speech: the one custom node pack
+
+Everything else in this repo runs on stock ComfyUI. The two speech workflows do
+not: they need
+[`ComfyUI-Breeze-TTS-2`](https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2)
+(Apache-2.0, an unofficial pack — Breeze TTS 2 has no official ComfyUI nodes),
+which the image clones at a pinned commit and whose lightweight dependencies it
+installs into ComfyUI's venv. The pin is the `BREEZE_NODES_COMMIT` build arg;
+override it to try a newer one. `ace-step-song` and the LTX video workflows need
+nothing extra.
+
+**The weights are yours to put there.** They are not baked into the image, and
+nothing here fetches them while a graph runs: the bundled workflows tell the
+loader `download_if_missing: false`, the app refuses any graph that would
+(`comfy.allow_model_downloads`, below), and the image exports `HF_HUB_OFFLINE=1`
+so a pack reaching for the Hub fails at once rather than after a DNS timeout. A
+generation should take the time a generation takes, not five gigabytes.
+
+There are four builds, and the Load Model node picks between them by label
+rather than by filename: `int8 hybrid (recommended)` (4.5 GiB),
+`bf16 (best quality)` (6.5 GiB), `int8 (smallest, slower)` (4.2 GiB), and
+`int8 text encoder only` (5.8 GiB). Fetch the one you want from
+[`drbaph/Breeze-TTS-2-comfyui`](https://huggingface.co/drbaph/Breeze-TTS-2-comfyui)
+before the first run:
+
+```sh
+huggingface-cli download drbaph/Breeze-TTS-2-comfyui \
+  --include 'config.json' 'generation_config.json' 'tokenizer*' \
+            'special_tokens_map.json' 'audio_tokenizer/*' \
+            'Breeze-TTS-2-int8-hybrid.safetensors' \
+  --local-dir /models/breezetts2/drbaph_Breeze-TTS-2-comfyui
+```
+
+**The subfolder name matters**: the pack looks for
+`<folder>/drbaph_Breeze-TTS-2-comfyui/`, the repo id with `/` replaced by `_`,
+and checks for `config.json`, `audio_tokenizer/model.safetensors` and the
+build's own `.safetensors`. Files loose in `/models/breezetts2` are not found.
+Expect a little over five gigabytes for the recommended build, counting the 0.6
+GiB audio tokenizer. The weights carry their own licence — check it before you
+ship anything made with them.
+
+Point it somewhere else by naming the folder rather than moving it: the
+`breezetts2` key in `model_folders` can be any path (`/models/tts`, say), and
+ForgeUI writes it into the `extra_model_paths.yaml` ComfyUI hands the pack.
+
+### Models are never downloaded by a run
+
+`comfy.allow_model_downloads` defaults to **false**, and with it off the app
+refuses to submit a graph whose inputs would fetch weights mid-run —
+`download_if_missing`, `auto_download`, `download_model` — naming the node and
+the input instead. Custom node packs offer these to be helpful; the cost is that
+a generation either takes ten seconds or several gigabytes depending on what
+happens to be on disk, and fails with a network error rather than a missing
+file. Set it to `true` in `config.yaml` if you would rather have the
+convenience:
+
+```yaml
+comfy:
+  allow_model_downloads: true
+```
+
+The check is a list of input names, not a guarantee: a pack that spells its own
+differently is not covered, which is what `HF_HUB_OFFLINE=1` in the image is
+for.
+
+Running the speech workflows outside the container means doing the same three
+things by hand:
+
+```sh
+git clone https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2 \
+  <comfyui>/custom_nodes/ComfyUI-Breeze-TTS-2
+<comfyui>/venv/bin/pip install -r \
+  <comfyui>/custom_nodes/ComfyUI-Breeze-TTS-2/requirements.txt
+# then restart ComfyUI
+```
+
+The pack needs `transformers >= 4.57`, which current ComfyUI already installs.
+It finds weights through the `breezetts2:` key ForgeUI writes into
+`extra_model_paths.yaml`, so pointing a `breezetts2` folder at your model
+library in Settings is enough — but its _first download_ always goes to
+`<comfyui>/models/breezetts2`, which no config can redirect. The container
+symlinks that path onto `/models`; outside it, either symlink it the same way or
+let the download land there and move it afterwards.
 
 `/workspace` is ForgeUI's data directory (`--data-dir`, §3): `config.yaml`,
 `app.db`, `workflows/user`, `outputs`, `samples`, and everything else the app

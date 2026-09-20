@@ -17,6 +17,9 @@ if (import.meta.main) {
       "extra-model-paths-config",
       "scenario",
       "step-delay",
+      // Custom node packs this stand-in pretends to have installed, comma
+      // separated — the speech workflows need one (§4.6).
+      "packs",
     ],
     unknown: () => true,
   });
@@ -36,6 +39,7 @@ if (import.meta.main) {
     scenario: (flags.scenario as ScenarioName) ?? "success",
     // Pacing, so a demo can show progress arriving rather than a blink.
     stepDelayMs: Number(flags["step-delay"] ?? "0"),
+    packs: (flags.packs ?? "").split(",").filter((pack) => pack.length > 0),
   });
 
   // Lines the log route can show, in the spirit of ComfyUI's own startup.

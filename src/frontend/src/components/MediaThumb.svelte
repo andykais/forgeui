@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { isVideoUrl, posterFrame } from "../lib/media.ts";
+  import {
+    isAudioUrl,
+    isVideoUrl,
+    posterFrame,
+    waveformUrl,
+  } from "../lib/media.ts";
 
   /**
    * One thumbnail, whatever the media is (§11.5).
@@ -22,9 +27,26 @@
   let { src, kind = null, alt = "", lazy = false }: Props = $props();
 
   const video = $derived(kind ? kind === "video" : isVideoUrl(src));
+  /**
+   * Sound has no frame to show, so the thumbnail is the waveform ffmpeg drew
+   * beside it. Pointing an `<img>` at the audio file itself is what put a
+   * broken-image outline on the workflow card and the model tiles.
+   */
+  const audio = $derived(kind ? kind === "audio" : isAudioUrl(src));
+  const picture = $derived(audio ? waveformUrl(src) : src);
+
+  /**
+   * And if that picture is not there — no ffmpeg on the machine, a file
+   * deleted underneath — nothing is better than a broken plate.
+   */
+  let broken = $state(false);
+  $effect(() => {
+    picture;
+    broken = false;
+  });
 </script>
 
-{#if src}
+{#if picture && !broken}
   {#if video}
     <!--
       Muted and silent: a wall of thumbnails is not something to hear, and a
@@ -34,14 +56,20 @@
     -->
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
-      src={posterFrame(src)}
+      src={posterFrame(picture)}
       muted
       playsinline
       preload="metadata"
       tabindex="-1"
     ></video>
   {:else}
-    <img {src} {alt} loading={lazy ? "lazy" : undefined} />
+    <img
+      src={picture}
+      {alt}
+      class:wave={audio}
+      loading={lazy ? "lazy" : undefined}
+      onerror={() => (broken = true)}
+    />
   {/if}
 {/if}
 
@@ -57,5 +85,15 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /*
+   * A waveform is a wide strip, and cropping one to a square thumb keeps a
+   * sixth of a take — often the quiet middle, which reads as an empty box.
+   * The whole clip, letterboxed, is the only honest version at this size.
+   */
+  img.wave {
+    object-fit: contain;
+    opacity: 0.85;
   }
 </style>

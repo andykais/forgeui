@@ -79,6 +79,7 @@ Deno.test("first run writes config.yaml with defaults and a keys block", async (
       upscale_models: [],
       latent_upscale_models: [],
       embeddings: [],
+      breezetts2: [],
     });
 
     // A second boot reads the file instead of recreating it.

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Output } from "../types.ts";
   import { clock } from "../lib/format.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
 
   /**
    * One media tile (§11.5): always a square cell with the whole image fitted
@@ -25,23 +26,9 @@
 
   let video = $state<HTMLVideoElement | undefined>(undefined);
   const isVideo = $derived(output.kind === "video");
+  const isAudio = $derived(output.kind === "audio");
 
-  /**
-   * A tile can be dragged straight into an `image` param (§11.2). What
-   * travels is the output's id rather than its bytes: the server already has
-   * them, so the drop adopts the file into the input store instead of
-   * uploading a copy of something it wrote itself (§9).
-   */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
-  function onDragStart(event: DragEvent) {
-    if (!event.dataTransfer) return;
-    event.dataTransfer.setData(OUTPUT_MIME, output.id);
-    // So a drop somewhere else in the world gets something it can use.
-    event.dataTransfer.setData("text/uri-list", output.media_url);
-    event.dataTransfer.setData("text/plain", output.media_url);
-    event.dataTransfer.effectAllowed = "copy";
-  }
+  /** A tile can be dragged straight into a media param (§11.2, lib/drag.ts). */
 </script>
 
 <div
@@ -50,7 +37,7 @@
   role="group"
   data-output-id={output.id}
   draggable="true"
-  ondragstart={onDragStart}
+  ondragstart={(event) => startOutputDrag(event, output)}
   onmouseenter={() => video?.play().catch(() => {})}
   onmouseleave={() => video?.pause()}
 >
@@ -69,16 +56,39 @@
         playsinline
         preload="metadata"
       ></video>
+    {:else if isAudio}
+      <!--
+        A drawn waveform (§2.2), which is the only picture sound has. It is
+        two thirds of the tile and sits on the strip — and a take with no
+        waveform yet still gets its duration and prompt from the strip below.
+      -->
+      <span class="wave">
+        {#if output.waveform_url}
+          <img src={output.waveform_url} alt="" loading="lazy" />
+        {/if}
+      </span>
     {:else}
       <img src={output.media_url} alt={output.prompt ?? output.id} loading="lazy" />
     {/if}
   </button>
 
-  {#if isVideo}
-    <span class="badge kind">Video</span>
+  {#if isVideo || isAudio}
+    <span class="badge kind">{isVideo ? "Video" : "Audio"}</span>
     {#if output.duration_ms}
       <span class="length mono">{clock(output.duration_ms)}</span>
     {/if}
+  {/if}
+
+  <!--
+    What it was asked to sound like, above the waveform and in the same hue it
+    was drawn in (§11.5). Drawn by the tile rather than baked into the picture:
+    it stays crisp at every tile size, where text rendered into a 1000px-wide
+    PNG and scaled down to 200 is a smudge.
+  -->
+  {#if isAudio && output.tone}
+    <span class="tone mono" style={`color: ${output.tone_color ?? "var(--text-3)"}`}
+      >{output.tone}</span
+    >
   {/if}
 
   <div class="strip">
@@ -89,6 +99,8 @@
 
 <style>
   .tile {
+    /* What the waveform stands on, in one place (§11.5). */
+    --strip-height: 30px;
     position: relative;
     aspect-ratio: 1;
     border-radius: var(--radius-input);
@@ -130,6 +142,32 @@
     background: var(--control-selected);
   }
 
+  /*
+   * Edge to edge, and standing on the strip rather than floating in the
+   * middle of the cell. The picture is drawn at 3:2 (`media/audio.ts`), so
+   * full width makes it two thirds of a square tile, and the band left above
+   * it is the tone line's. Centred, the same drawing read as a thing
+   * suspended in an empty box; sitting on the strip it reads as a chart,
+   * with the quiet end of the take where quiet belongs.
+   *
+   * Not stretched to fill: the y axis is amplitude, and scaling it would say
+   * something false about the sound. A take drawn before this — an old row,
+   * still 2.5:1 — is simply shorter, and sits in the same place.
+   */
+  .wave {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: var(--strip-height);
+    display: block;
+  }
+
+  .wave img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
   /* Fit, not fill: a portrait or panoramic result is shown whole (§11.5). */
   img,
   video {
@@ -139,16 +177,23 @@
     display: block;
   }
 
+  /*
+   * The body size, 13px, rather than the 11px this started at. A tile is
+   * read at arm's length beside a panel of 13px text, and shrinking the one
+   * line that says what a take is made it the hardest thing on the screen to
+   * read. It costs words on a small tile — the prompt is the first few rather
+   * than the first phrase — and the title attribute still carries all of it.
+   */
   .strip {
     position: absolute;
     inset: auto 0 0 0;
-    height: 25px;
+    height: var(--strip-height);
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 0 7px;
     background: rgb(13 13 13 / 82%);
-    font-size: 11px;
+    font-size: 13px;
     pointer-events: none;
   }
 
@@ -161,13 +206,30 @@
   }
 
   .meta {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .badge.kind {
     position: absolute;
     top: 6px;
     left: 6px;
+  }
+
+  /*
+   * Under the badge row and clear of it, on one line: the tone is a label, not
+   * the prompt, and a tone that wrapped to three lines would bury the shape
+   * it is supposed to be introducing.
+   */
+  .tone {
+    position: absolute;
+    inset: 27px 7px auto 7px;
+    font-size: 13px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.92;
+    pointer-events: none;
   }
 
   .length {

@@ -46,7 +46,7 @@ import {
 import { completedProgress, ProgressTracker } from "./progress.ts";
 import { parseSidecar } from "./sidecar.ts";
 import { log, logError, oneLine, seconds } from "../log.ts";
-import type { InputStore } from "../inputs/store.ts";
+import { INPUT_FILENAME, type InputStore } from "../inputs/store.ts";
 
 /**
  * The job pipeline (§5): validate, rewrite, persist, submit, follow the
@@ -127,12 +127,29 @@ export interface JobRunnerOptions {
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Whether a model of this class is on disk under this name (§5.1). */
   modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  /**
+   * Whether a graph may fetch weights while it runs. Read per submit rather
+   * than captured, so changing it in Settings takes effect without a restart.
+   */
+  allowModelDownloads?: () => boolean;
   /** The output-size report; absent in tests that do not care (§7.1). */
   telemetry?: TelemetryStore;
   /** Opens and closes the Memory Usage report's sampling window (§7.1). */
   memory?: MemoryMonitor;
   now?: () => number;
 }
+
+/**
+ * Inputs whose `true` means "fetch the weights from the internet if they are
+ * not here" (§4.6). Read off the packs this repo installs; a pack that
+ * spells it differently is not covered, which is why this is a guard rather
+ * than a guarantee.
+ */
+const DOWNLOAD_INPUTS = [
+  "download_if_missing",
+  "auto_download",
+  "download_model",
+] as const;
 
 export class JobRunner {
   #db: Database;
@@ -144,6 +161,7 @@ export class JobRunner {
   #inputs: InputStore | null;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  #allowModelDownloads?: () => boolean;
   #telemetry?: TelemetryStore;
   #memory?: MemoryMonitor;
   #now: () => number;
@@ -163,6 +181,7 @@ export class JobRunner {
     this.#inputs = options.inputs ?? null;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
+    this.#allowModelDownloads = options.allowModelDownloads;
     this.#telemetry = options.telemetry;
     this.#memory = options.memory;
     this.#now = options.now ?? Date.now;
@@ -209,6 +228,7 @@ export class JobRunner {
     const { values } = coerceParams(workflow.manifest, params);
     try {
       this.#assertModelsPresent(workflow.manifest, values);
+      this.#assertNoRuntimeDownloads(workflow.apiGraph);
       this.#assertConnected();
     } catch (cause) {
       // A refusal never reaches a job row, so this is the only record of it.
@@ -309,7 +329,7 @@ export class JobRunner {
     for (const node of Object.values(graph)) {
       for (const value of Object.values(node.inputs)) {
         if (typeof value !== "string") continue;
-        const match = /^([0-9a-f]{64})\.(png|jpe?g|webp)$/.exec(value);
+        const match = INPUT_FILENAME.exec(value);
         if (match) wanted.add(match[1]!);
       }
     }
@@ -318,7 +338,7 @@ export class JobRunner {
       if (!stored) {
         throw new JobRequestError(
           `the input ${sha256.slice(0, 12)}… is not in the store any more; ` +
-            `attach the image again`,
+            `attach it again`,
         );
       }
       const bytes = await this.#inputs.read(sha256);
@@ -335,7 +355,7 @@ export class JobRunner {
     if (!this.#inputs || outputIds.length === 0) return;
     for (const [key, value] of Object.entries(params)) {
       if (typeof value !== "string") continue;
-      const match = /^([0-9a-f]{64})\.(?:png|jpe?g|webp)$/.exec(value);
+      const match = INPUT_FILENAME.exec(value);
       if (!match) continue;
       for (const outputId of outputIds) {
         this.#inputs.link(outputId, match[1]!, key);
@@ -822,6 +842,39 @@ export class JobRunner {
     }
   }
 
+  /**
+   * Refuse a graph that would fetch weights while it runs (§4.6).
+   *
+   * Several node packs offer an input that downloads a checkpoint on first
+   * use. It is meant kindly, and it makes a generation unpredictable: the
+   * run either takes ten seconds or five gigabytes, depending on what is
+   * already on disk, and it fails with a network error rather than a missing
+   * file. Weights should be something you put there on purpose.
+   *
+   * A name list rather than something cleverer, because the prompt format
+   * carries no notion of "this input reaches the network" — these are the
+   * spellings the packs this repo knows about use. It is not exhaustive and
+   * cannot be; `comfy.allow_model_downloads` turns the whole check off.
+   */
+  #assertNoRuntimeDownloads(graph: ApiGraph): void {
+    if (this.#allowModelDownloads?.() ?? false) return;
+    const offenders: string[] = [];
+    for (const [id, node] of Object.entries(graph)) {
+      for (const input of DOWNLOAD_INPUTS) {
+        if (node.inputs[input] === true) {
+          offenders.push(`node ${id} (${node.class_type}).${input}`);
+        }
+      }
+    }
+    if (offenders.length > 0) {
+      throw new JobRequestError(
+        `this graph would download models while it runs: ` +
+          `${offenders.join(", ")}. Turn that input off and put the weights ` +
+          `on disk yourself, or set comfy.allow_model_downloads: true.`,
+      );
+    }
+  }
+
   /** The workflow's name if it still exists, else the id the job carries. */
   #labelFor(workflowId: string | null): string {
     if (!workflowId) return "a frozen graph";
@@ -829,9 +882,10 @@ export class JobRunner {
   }
 
   /**
-   * The workflow's first text param, which is the prompt everywhere it
-   * matters. A rerun has no workflow to ask, so it falls back to the names a
-   * prompt goes by.
+   * What the log line calls this run by: the param the workflow names as its
+   * prompt, then its first text param, which is the same thing everywhere a
+   * workflow has only one. A rerun has no workflow to ask, so it falls back
+   * to the names a prompt goes by.
    */
   #promptOf(
     workflowId: string | null,
@@ -841,9 +895,12 @@ export class JobRunner {
       ? this.#workflows.get(workflowId)?.manifest
       : null;
     const keys = manifest
-      ? manifest.params.filter((param) => param.type === "text").map((param) =>
-        param.key
-      )
+      ? [
+        ...(manifest.prompt ? [manifest.prompt] : []),
+        ...manifest.params.filter((param) => param.type === "text").map((
+          param,
+        ) => param.key),
+      ]
       : ["prompt", "positive", "text"];
     for (const key of keys) {
       const value = params[key];

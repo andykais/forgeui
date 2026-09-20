@@ -1,0 +1,168 @@
+{
+  "1": {
+    "class_type": "BreezeTTS2LoadModel",
+    "inputs": {
+      "model": "int8 hybrid (recommended)",
+      "dtype": "auto",
+      "device": "auto",
+      "attention": "auto",
+      "decode_mode": "eager",
+      "download_if_missing": false
+    },
+    "_meta": {
+      "title": "Load Breeze TTS 2"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "reference.wav"
+    },
+    "_meta": {
+      "title": "Reference voice"
+    }
+  },
+  "3": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "This is the exact transcript of the reference audio."
+    },
+    "_meta": {
+      "title": "Transcript"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "(sigh) It is good to hear your voice again after all this time."
+    },
+    "_meta": {
+      "title": "Text"
+    }
+  },
+  "5": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 42
+    },
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "6": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": false
+    },
+    "_meta": {
+      "title": "Direct the read"
+    }
+  },
+  "7": {
+    "class_type": "BreezeTTS2VoiceClone",
+    "inputs": {
+      "cfg_scale": 1.0,
+      "max_new_tokens": 1500,
+      "temperature": 0.9,
+      "top_k": 50,
+      "top_p": 1.0,
+      "repetition_penalty": 1.1,
+      "depth_temperature": 0.9,
+      "depth_top_k": 50,
+      "depth_top_p": 1.0,
+      "seed": [
+        "5",
+        0
+      ],
+      "breeze_model": [
+        "1",
+        0
+      ],
+      "reference_audio": [
+        "2",
+        0
+      ],
+      "text": [
+        "4",
+        0
+      ],
+      "reference_text": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Voice Clone"
+    }
+  },
+  "8": {
+    "class_type": "BreezeTTS2VoiceDirection",
+    "inputs": {
+      "instruction": "Speak slowly, with a restrained, serious tone.",
+      "cfg_scale": 4.0,
+      "stitch_reference": "none",
+      "max_new_tokens": 1500,
+      "temperature": 0.9,
+      "top_k": 50,
+      "top_p": 1.0,
+      "repetition_penalty": 1.1,
+      "depth_temperature": 0.9,
+      "depth_top_k": 50,
+      "depth_top_p": 1.0,
+      "seed": [
+        "5",
+        0
+      ],
+      "breeze_model": [
+        "1",
+        0
+      ],
+      "reference_audio": [
+        "2",
+        0
+      ],
+      "text": [
+        "4",
+        0
+      ],
+      "reference_text": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Voice Direction"
+    }
+  },
+  "9": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": false,
+      "on_false": [
+        "7",
+        0
+      ],
+      "on_true": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clone or direct"
+    }
+  },
+  "10": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "filename_prefix": "audio/breeze-tts-clone",
+      "format": "flac",
+      "audio": [
+        "9",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Audio"
+    }
+  }
+}

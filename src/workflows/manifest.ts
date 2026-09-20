@@ -22,7 +22,7 @@ import {
   type WorkflowCategory,
   type WorkflowKind,
 } from "./types.ts";
-import { outputSlot } from "./nodes.ts";
+import { CORE_NODES, outputSlot, PACK_OF_NODE } from "./nodes.ts";
 import { whenChain } from "./visibility.ts";
 
 export class ManifestError extends Error {
@@ -351,6 +351,9 @@ function validateParam(
         ...(min !== undefined ? { min } : {}),
         ...(max !== undefined ? { max } : {}),
         ...(step !== undefined ? { step } : {}),
+        ...(raw.follows !== undefined
+          ? { follows: nonEmptyStr(raw.follows, `${at}.follows`) }
+          : {}),
       };
     }
     case "bool": {
@@ -412,7 +415,12 @@ function validateParam(
         ...(value !== undefined ? { default: value } : {}),
       };
     }
-    case "seed":
+    case "seed": {
+      const min = raw.min === undefined ? undefined : num(raw.min, `${at}.min`);
+      const max = raw.max === undefined ? undefined : num(raw.max, `${at}.max`);
+      if (min !== undefined && max !== undefined && min > max) {
+        throw new ManifestError(`${at}: min is greater than max`);
+      }
       return {
         ...common,
         type,
@@ -420,7 +428,10 @@ function validateParam(
         ...(raw.default !== undefined
           ? { default: num(raw.default, `${at}.default`) }
           : {}),
+        ...(min !== undefined ? { min } : {}),
+        ...(max !== undefined ? { max } : {}),
       };
+    }
     case "size": {
       const bind = record(raw.bind, `${at}.bind`);
       const w = nonEmptyStr(bind.w, `${at}.bind.w`);
@@ -504,6 +515,7 @@ function validateParam(
     case "image":
     case "mask":
     case "video":
+    case "audio":
       return {
         ...common,
         type,
@@ -538,6 +550,54 @@ export interface ValidateManifestOptions {
   id?: string;
   /** When given, every bind is checked against the graph. */
   graph?: ApiGraph | null;
+}
+
+/**
+ * A node from a pack the app knows about must be declared in `requires`
+ * (§4.6).
+ *
+ * This is the half of the requirement that can be checked without a running
+ * ComfyUI. It is deliberately narrow: a node type the app has never heard of
+ * passes, because a user may install any pack and the app has no list of
+ * every node in the world. What it catches is the one case it can be sure
+ * about — a graph using, say, a Breeze node while claiming to need nothing —
+ * where saying so at load beats "node type not found" at queue time.
+ */
+/**
+ * A manifest field that names a `text` param, checked against the params the
+ * manifest actually declares. Only text, because both fields are captions:
+ * pointing `prompt` at a seed would put a number under every tile.
+ */
+function textParamKey(
+  value: unknown,
+  params: Param[],
+  where: string,
+): string {
+  const key = nonEmptyStr(value, where);
+  const param = params.find((candidate) => candidate.key === key);
+  if (!param) {
+    throw new ManifestError(`${where}: no param "${key}"`);
+  }
+  if (param.type !== "text") {
+    throw new ManifestError(
+      `${where}: "${key}" is a ${param.type} param, and only text can be read`,
+    );
+  }
+  return key;
+}
+
+function assertNodesCovered(graph: ApiGraph, requires: string[]): void {
+  const declared = new Set(requires);
+  for (const [id, node] of Object.entries(graph)) {
+    const type = node.class_type;
+    if (type in CORE_NODES) continue;
+    const provider = PACK_OF_NODE[type];
+    if (!provider || declared.has(provider.id)) continue;
+    throw new ManifestError(
+      `manifest.requires: node ${id} is "${type}", which comes from ` +
+        `${provider.id}; add it to requires`,
+    );
+  }
 }
 
 /**
@@ -579,6 +639,23 @@ export function validateManifest(
       );
     }
   }
+  // A length that follows a clip has to name one (§11.3).
+  for (const param of params) {
+    if (param.type !== "int" && param.type !== "float") continue;
+    if (param.follows === undefined) continue;
+    const followed = params.find((other) => other.key === param.follows);
+    if (!followed) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).follows: no param "${param.follows}"`,
+      );
+    }
+    if (followed.type !== "audio") {
+      throw new ManifestError(
+        `manifest.params (${param.key}).follows: "${param.follows}" is a ` +
+          `${followed.type} param, and only an audio param has a length`,
+      );
+    }
+  }
   for (const param of params) {
     const when = param.when;
     if (!when) continue;
@@ -609,6 +686,30 @@ export function validateManifest(
     );
   }
 
+  const requires = raw.requires === undefined
+    ? []
+    : array(raw.requires, "manifest.requires").map((pack, i) =>
+      nonEmptyStr(pack, `manifest.requires[${i}]`)
+    );
+  if (graph) assertNodesCovered(graph, requires);
+
+  // Both name params, so both are checked against the list that was just
+  // built: a key that no longer exists is a caption that silently disappears,
+  // which is exactly the kind of thing nobody notices for a month.
+  const prompt = nullable(
+    raw.prompt,
+    (value) => textParamKey(value, params, "manifest.prompt"),
+  );
+  const tone = raw.tone === undefined ? [] : array(raw.tone, "manifest.tone")
+    .map((key, i) => textParamKey(key, params, `manifest.tone[${i}]`));
+  const toneSeen = new Set<string>();
+  for (const key of tone) {
+    if (toneSeen.has(key)) {
+      throw new ManifestError(`manifest.tone: duplicate key "${key}"`);
+    }
+    toneSeen.add(key);
+  }
+
   return {
     id,
     name: nonEmptyStr(raw.name, "manifest.name"),
@@ -626,6 +727,9 @@ export function validateManifest(
       raw.description,
       (v) => str(v, "manifest.description"),
     ),
+    requires,
+    prompt,
+    tone,
     params,
     // An empty list is a draft: it loads and lists, but cannot be submitted.
     outputs: array(raw.outputs, "manifest.outputs").map((output, i) =>
@@ -643,6 +747,9 @@ export function serializeManifest(manifest: Manifest): string {
     kind: manifest.kind,
     category: manifest.category,
     description: manifest.description,
+    requires: manifest.requires,
+    prompt: manifest.prompt,
+    tone: manifest.tone,
     params: manifest.params,
     outputs: manifest.outputs,
   };

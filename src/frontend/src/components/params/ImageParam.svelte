@@ -3,6 +3,7 @@
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
   import { api, ApiError } from "../../api.ts";
+  import { draggedOutput } from "../../lib/drag.ts";
   import type { Param } from "../../types.ts";
 
   /**
@@ -42,7 +43,9 @@
   let hover = $state(false);
   let focused = $state(false);
   /** What was attached here, for the thumbnail; the value is only a name. */
-  let preview = $state<{ filename: string; url: string; width: number; height: number } | null>(null);
+  let preview = $state<
+    { filename: string; url: string; width: number | null; height: number | null } | null
+  >(null);
 
   const shown = $derived(preview?.filename === value ? preview : null);
   /**
@@ -90,7 +93,11 @@
         height: media.height,
       };
       onchange(media.filename);
-      onattach?.({ width: media.width, height: media.height });
+      // Only a picture has a shape to match a size to; the store types the
+      // two as nullable now that it takes sound as well (§4.3).
+      if (media.width !== null && media.height !== null) {
+        onattach?.({ width: media.width, height: media.height });
+      }
     } catch (cause) {
       error = cause instanceof ApiError
         ? cause.message
@@ -102,21 +109,24 @@
     }
   }
 
-  /** What a dragged result carries, so a drop knows it is one (§11.2). */
-  const OUTPUT_MIME = "application/x-forgeui-output";
-
   async function onDrop(event: DragEvent) {
     event.preventDefault();
     over = false;
     // A tile dragged out of the results: the bytes are already on the server,
     // so it is adopted rather than uploaded — the same path the Upscale
     // action takes, and it costs a hard link rather than a copy (§9).
-    const outputId = event.dataTransfer?.getData(OUTPUT_MIME);
-    if (outputId) {
+    const dragged = draggedOutput(event);
+    if (dragged) {
+      // Sound is not a picture. Dropping a take here used to be accepted in
+      // silence, leaving an input with no image in it (§11.2).
+      if (dragged.kind === "audio") {
+        error = "an audio take is not a picture — this takes an image";
+        return;
+      }
       busy = true;
       error = null;
       try {
-        const media = await api.adoptOutput(outputId);
+        const media = await api.adoptOutput(dragged.id);
         preview = {
           filename: media.filename,
           url: media.url,
@@ -124,7 +134,9 @@
           height: media.height,
         };
         onchange(media.filename);
-        onattach?.({ width: media.width, height: media.height });
+        if (media.width !== null && media.height !== null) {
+          onattach?.({ width: media.width, height: media.height });
+        }
       } catch (cause) {
         error = cause instanceof Error ? cause.message : String(cause);
       } finally {
@@ -198,7 +210,7 @@
     {#if value !== ""}
       <img class="shot" src={shown?.url ?? fallbackUrl} alt="" />
       <div class="meta mono dim">
-        {#if shown}{shown.width}×{shown.height}{:else}attached{/if}
+        {#if shown?.width && shown?.height}{shown.width}×{shown.height}{:else}attached{/if}
       </div>
     {:else}
       <div class="empty">

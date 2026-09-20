@@ -27,6 +27,14 @@ import type { ApiGraph, ApiNode } from "../src/workflows/types.ts";
  */
 const CANVAS_ONLY = new Set(["MarkdownNote", "Note"]);
 
+/**
+ * Nodes that are wire, not work. `Reroute` exists to bend a link around the
+ * canvas; ComfyUI resolves it away at `graphToPrompt()` time, and so does
+ * this — every consumer is pointed at whatever the reroute was reading,
+ * following a chain of them if the author drew one.
+ */
+const WIRE_ONLY = new Set(["Reroute"]);
+
 /** `origin_id` of a link fed by the subgraph's own boundary. */
 const BOUNDARY = -10;
 /** `target_id` of a link leaving the subgraph through one of its outputs. */
@@ -157,14 +165,29 @@ function widgetsOf(node: UiNode): Record<string, unknown> {
   return out;
 }
 
-/** Follow a link back to the node and slot that produced it. */
+/**
+ * Follow a link back to the node and slot that produced it, stepping through
+ * any reroute on the way (see {@link WIRE_ONLY}).
+ */
 function sourceOf(
   links: Map<number, UiLink>,
   linkId: number,
+  byId: Map<number, UiNode> = new Map(),
 ): { node: number; slot: number } | null {
-  const link = links.get(linkId);
-  if (!link || link.origin_id === BOUNDARY) return null;
-  return { node: link.origin_id, slot: link.origin_slot };
+  let link = links.get(linkId);
+  // A reroute has one input; a chain of them is still one value. The bound is
+  // a guard against a cyclic document rather than an expected depth.
+  for (let hop = 0; hop < 32; hop++) {
+    if (!link || link.origin_id === BOUNDARY) return null;
+    const origin = byId.get(link.origin_id);
+    if (!origin || !WIRE_ONLY.has(origin.type)) {
+      return { node: link.origin_id, slot: link.origin_slot };
+    }
+    const upstream = origin.inputs?.[0]?.link;
+    if (upstream === null || upstream === undefined) return null;
+    link = links.get(upstream);
+  }
+  throw new ImportError("a reroute chain loops back on itself");
 }
 
 export interface FlattenOptions {
@@ -190,10 +213,11 @@ export function flatten(
 
   const inner = definition.nodes ?? [];
   const links = linkMap(definition.links);
+  const byId = new Map(inner.map((node) => [node.id, node]));
 
   const graph: ApiGraph = {};
   for (const node of inner) {
-    if (CANVAS_ONLY.has(node.type)) continue;
+    if (CANVAS_ONLY.has(node.type) || WIRE_ONLY.has(node.type)) continue;
     // Mode 2 and 4 are "muted" and "bypassed": the editor keeps them, the
     // prompt does not.
     if (node.mode === 2 || node.mode === 4) continue;
@@ -203,7 +227,7 @@ export function flatten(
     };
     for (const slot of node.inputs ?? []) {
       if (slot.link === null || slot.link === undefined) continue;
-      const source = sourceOf(links, slot.link);
+      const source = sourceOf(links, slot.link, byId);
       // A boundary link carries a value the parent supplies; the inner node
       // keeps its own widget value for it, which widgetsOf already took.
       if (!source) continue;
@@ -249,13 +273,13 @@ function appendOutputs(
   innerLinks: Map<number, UiLink>,
 ): void {
   // Which inner node produces each of the subgraph's output slots.
+  const byId = new Map((definition.nodes ?? []).map((node) => [node.id, node]));
   const producers = new Map<number, { node: number; slot: number }>();
   for (const link of innerLinks.values()) {
     if (link.target_id !== OUTPUT_BOUNDARY) continue;
-    producers.set(link.target_slot, {
-      node: link.origin_id,
-      slot: link.origin_slot,
-    });
+    const source = sourceOf(innerLinks, link.id, byId);
+    if (!source) continue;
+    producers.set(link.target_slot, source);
   }
 
   const outerLinks = linkMap(document.links);

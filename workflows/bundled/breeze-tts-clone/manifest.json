@@ -1,0 +1,142 @@
+{
+  "id": "breeze-tts-clone",
+  "name": "Breeze TTS (voice clone)",
+  "family": null,
+  "kind": "audio",
+  "category": null,
+  "description": "Speech in a cloned voice. Give it a clean reference clip and that clip's exact transcript, and it says whatever you write in the same voice. Tick \"Direct the read\" to keep the voice but steer the delivery.",
+  "requires": [
+    "ComfyUI-Breeze-TTS-2"
+  ],
+  "prompt": "text",
+  "tone": [
+    "instruction",
+    "transcript"
+  ],
+  "params": [
+    {
+      "key": "reference",
+      "label": "Reference voice",
+      "description": "A clean clip of the voice to copy. Ten to thirty seconds of ordinary speech does more than a minute of anything noisy.",
+      "type": "audio",
+      "required": true,
+      "bind": "2.audio"
+    },
+    {
+      "key": "transcript",
+      "label": "Transcript",
+      "description": "Exactly what the reference clip says, word for word. The model lines the two up, so a wrong transcript is heard as a worse clone.",
+      "type": "text",
+      "required": true,
+      "bind": "3.value"
+    },
+    {
+      "key": "text",
+      "label": "Text",
+      "description": "What you want it to say. (sigh), (laugh), (cough) and (clears throat) work inline; punctuation and line breaks are where it pauses.",
+      "type": "text",
+      "required": true,
+      "bind": "4.value"
+    },
+    {
+      "key": "direct",
+      "label": "Direct the read",
+      "description": "Keep the cloned voice but steer tone, emotion and pace. Plain cloning takes no instruction: the reference is the delivery.",
+      "type": "bool",
+      "default": false,
+      "bind": "9.switch"
+    },
+    {
+      "key": "instruction",
+      "label": "Direction",
+      "description": "How to deliver the line, in words: \"slowly, restrained, serious\".",
+      "type": "text",
+      "default": "Speak slowly, with a restrained, serious tone.",
+      "when": {
+        "param": "direct",
+        "is": true
+      },
+      "bind": "8.instruction"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "5.value",
+      "min": 1,
+      "max": 2147483647,
+      "description": "Breeze TTS 2 takes a seed up to 2^31 - 1, and reads 0 as \"use the current random state\" \u2014 so a roll here lands between 1 and that."
+    },
+    {
+      "key": "build",
+      "label": "Model build",
+      "description": "The pack's loader picks a build by name and fetches it on first use; it is not a file from the model library.",
+      "type": "enum",
+      "default": "int8 hybrid (recommended)",
+      "options": [
+        "int8 hybrid (recommended)",
+        "bf16 (best quality)",
+        "int8 (smallest, slower)",
+        "int8 text encoder only"
+      ],
+      "advanced": true,
+      "bind": "1.model"
+    },
+    {
+      "key": "cfg_scale",
+      "label": "Direction strength",
+      "description": "How hard the instruction is pushed. Only the directed read uses it; plain cloning runs at 1.0, which is what \"copy the reference\" means.",
+      "type": "float",
+      "default": 4.0,
+      "min": 1.0,
+      "max": 10.0,
+      "step": 0.5,
+      "advanced": true,
+      "when": {
+        "param": "direct",
+        "is": true
+      },
+      "bind": "8.cfg_scale"
+    },
+    {
+      "key": "max_new_tokens",
+      "label": "Maximum length",
+      "description": "Audio frames to generate at 12.5 per second; the model stops at the end of the text by itself.",
+      "type": "int",
+      "default": 1500,
+      "min": 64,
+      "max": 3000,
+      "advanced": true,
+      "bind": "7.max_new_tokens"
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "advanced": true,
+      "bind": "7.temperature"
+    },
+    {
+      "key": "repetition_penalty",
+      "label": "Repetition penalty",
+      "type": "float",
+      "default": 1.1,
+      "min": 0.0,
+      "max": 2.0,
+      "step": 0.05,
+      "advanced": true,
+      "bind": "7.repetition_penalty"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "10",
+      "kind": "audio"
+    }
+  ]
+}

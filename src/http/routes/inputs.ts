@@ -1,4 +1,5 @@
 import { InputError, type StoredInput } from "../../inputs/store.ts";
+import { WAVEFORM_SUFFIX } from "../../media/audio.ts";
 import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 
@@ -15,11 +16,18 @@ function view(input: StoredInput) {
     sha256: input.sha256,
     ext: input.ext,
     filename: input.filename,
+    kind: input.kind,
     width: input.width,
     height: input.height,
+    /** Audio only; a picture has no length (DESIGN-AUDIO §4.3). */
+    duration_ms: input.duration_ms,
     bytes: input.bytes,
     /** What the panel shows as a thumbnail, and the viewer as lineage. */
     url: `/api/media/${input.path}`,
+    /** The drawn waveform of an attached clip, where there is one (§2.2). */
+    waveform_url: input.kind === "audio"
+      ? `/api/media/${input.path}${WAVEFORM_SUFFIX}`
+      : null,
     derived_from_output: input.derived_from_output,
   };
 }
@@ -39,7 +47,7 @@ async function fileFrom(
   }
   const file = form.get("file") ?? form.get("image");
   if (!(file instanceof File)) {
-    throw new BodyError("expected a `file` part holding the image");
+    throw new BodyError("expected a `file` part holding the media");
   }
   return {
     bytes: new Uint8Array(await file.arrayBuffer()),

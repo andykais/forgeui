@@ -18,7 +18,10 @@ function manifestWith(params: Param[]): Manifest {
     family: "flux",
     kind: "image",
     category: null,
+    prompt: null,
+    tone: [],
     description: null,
+    requires: [],
     params,
     outputs: [{ node: "9", kind: "image" }],
   };
@@ -365,6 +368,19 @@ describe("each param type renders from the manifest", () => {
     ]);
     expect(screen.getByText(/Choose, drop or paste an image/)).toBeTruthy();
     expect(screen.getByLabelText("Image: choose, drop or paste an image")).toBeTruthy();
+  });
+
+  test("audio takes a clip, and offers no paste", () => {
+    // A clipboard rarely holds audio, and hover-to-paste exists for
+    // screenshots; what a reference voice needs is a file and a player.
+    mount([
+      { key: "reference", label: "Reference voice", type: "audio", bind: "2.audio" },
+    ]);
+    expect(screen.getByText(/Choose or drop an audio clip/)).toBeTruthy();
+    expect(
+      screen.getByLabelText("Reference voice: choose or drop an audio clip"),
+    ).toBeTruthy();
+    expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
   });
 
   test("mask and video still say why they cannot run yet", () => {
