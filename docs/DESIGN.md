@@ -1311,9 +1311,28 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - One popover component (326px) serves the LoRA picker, the models filter,
   the use-in-workflow menu and the promote-to-sample target picker.
 
-- **Narrow windows** (desktop-only app, no real breakpoints): the metadata
-  sidebar collapses first, then the media centre shrinks; the params panel is
-  the last to give. The filmstrip stays unless the user collapses it.
+- **Narrow windows.** Down to half a 16:9 screen the layout does not move:
+  the metadata sidebar collapses first, then the media centre shrinks, and
+  the params panel is the last to give. The filmstrip stays unless the user
+  collapses it.
+
+  Below that — `max-aspect-ratio: 8/9`, which is the app in one half of a
+  split monitor — there is **one breakpoint**, and the layout turns rather
+  than shrinks. Side by side, 360px of params and 306px of metadata left the
+  media around 240px: a 1024px picture shown at 20%, with the button that
+  would have given it its width back pushed off the end of a header that had
+  run out of room. Instead:
+
+  - the params panel takes **half the width**, the viewer the other half;
+  - inside the viewer, the media takes the **top half of the height** and the
+    metadata the bottom half, full width each;
+  - the header sheds what it cannot afford — the output id and the words on
+    the Back button — and the metadata toggle is the one control that may
+    never be squeezed out, because collapsing is what gives the media the
+    whole column back. Collapsed, the sidebar's thin edge turns with the
+    layout: a bar under the media rather than a strip beside it.
+
+  Gallery gets this too; it is the same viewer.
 
 - **ComfyUI state.** The **Generate** button is disabled whenever ComfyUI is
   not connected, and whenever any `required` param is empty. While ComfyUI

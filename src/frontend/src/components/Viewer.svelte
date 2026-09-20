@@ -176,8 +176,10 @@
 <div class="viewer">
   <div class="main">
     <header>
-      <button class="back" onclick={onclose}>
-        <ArrowLeft size={13} /> Back to grid <span class="key mono">esc</span>
+      <button class="back" onclick={onclose} title="Back to grid">
+        <ArrowLeft size={13} />
+        <span class="back-label">Back to grid</span>
+        <span class="key mono">esc</span>
       </button>
       <span class="spacer"></span>
       <div class="row nav">
@@ -363,6 +365,10 @@
     gap: 6px;
     font-size: 12px;
     background: var(--raised-2);
+    /* It used to wrap to three lines in a narrow window, taking the header
+       with it and pushing the metadata toggle off the right edge. */
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .key {
@@ -382,10 +388,27 @@
     background: var(--control-selected);
   }
 
+  /*
+   * The one thing here that may be cut short: a ULID is 26 characters of
+   * mono, it is the widest item in the row, and nothing is decided by it.
+   */
   .id {
     font-size: 11px;
     color: var(--text-3);
     padding: 0 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /*
+   * And the one thing that may never be: with the sidebar open in a narrow
+   * window, this button is the only way to get the media its width back, and
+   * it was the first thing the header dropped off the edge.
+   */
+  .toggle {
+    flex: 0 0 auto;
   }
 
   .media {
@@ -475,6 +498,46 @@
 
   .edge:hover {
     background: var(--raised-2);
+  }
+
+  /*
+   * Narrower than half a 16:9 screen — the app in one half of a split
+   * monitor, which is how it is actually used beside an editor (§11.3).
+   *
+   * Side by side, the two fixed columns (360px of params, 306px of metadata)
+   * leave the media about 240px: a sliver, with a 1024px picture shown at
+   * 20%. There is no width to take from, so the metadata takes height
+   * instead — media above, metadata below, half each. `Escape` and the
+   * toggle both still do what they did.
+   */
+  @media (max-aspect-ratio: 8 / 9) {
+    .viewer {
+      flex-direction: column;
+    }
+
+    .main {
+      /* Half the height, and free to be shorter than its filmstrip. */
+      flex: 1 1 50%;
+      min-height: 0;
+    }
+
+    .sidebar-loading {
+      width: 100%;
+      flex: 0 0 50%;
+    }
+
+    /* The collapsed edge turns with the layout: a bar under the media. */
+    .edge {
+      width: 100%;
+      height: 10px;
+    }
+
+    /* What the row can no longer afford. The id is in the sidebar. */
+    .id,
+    .back-label,
+    .key {
+      display: none;
+    }
   }
 
   .fullscreen {
