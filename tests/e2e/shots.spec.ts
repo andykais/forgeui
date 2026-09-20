@@ -104,7 +104,7 @@ test("photograph every screen", async ({ page }) => {
 
   // The focused view: the panel stays, the viewer layout is Gallery's (§11.2).
   await page.locator(".tile .surface").first().click();
-  await expect(page.getByRole("button", { name: "Edit in Generate →" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reuse parameters →" })).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${shots}/generate-focused.png` });
   await page.keyboard.press("Escape");

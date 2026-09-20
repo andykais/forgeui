@@ -10,6 +10,18 @@ const here = dirname(fileURLToPath(import.meta.url));
  */
 const port = 7899;
 
+/**
+ * The browser to drive. `channel: "chrome"` uses the one already on the
+ * machine, which is what a developer has and why nothing is downloaded here.
+ * A container or a CI runner has Playwright's own chromium instead and no
+ * Chrome at all, where that channel fails before the first test
+ * (`Chromium distribution 'chrome' is not found`) — so it can say where its
+ * browser is and the same suite runs unchanged:
+ *
+ *     FORGEUI_E2E_BROWSER=/opt/pw-browsers/chromium deno task test:e2e
+ */
+const browser = process.env.FORGEUI_E2E_BROWSER;
+
 export default defineConfig({
   testDir: ".",
   /**
@@ -26,7 +38,9 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
-    channel: "chrome",
+    ...(browser
+      ? { launchOptions: { executablePath: browser } }
+      : { channel: "chrome" as const }),
     viewport: { width: 1440, height: 900 },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",

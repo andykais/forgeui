@@ -16,12 +16,20 @@ const HALF = { width: 960, height: 1080 };
 /** The suite's own viewport: a normal window, where nothing may change. */
 const WIDE = { width: 1440, height: 900 };
 
+/**
+ * Something to open, made with a workflow of this file's own.
+ *
+ * Not Krea 2 Turbo: the panel refills itself from the last job for whichever
+ * workflow is selected, so running one here would leave `smoke.spec.ts` —
+ * which sorts after this file — a pre-filled prompt where it asserts that a
+ * required field starts empty and gates the Generate button.
+ */
 async function anOutput(page: import("@playwright/test").Page) {
   await page.goto("/generate");
   await expect(page.getByText("ComfyUI connected")).toBeVisible();
   if (await page.locator(".tile").count() > 0) return;
   await page.locator(".workflow-card").click();
-  await page.getByRole("button", { name: /^Krea 2 Turbo prompt/ }).click();
+  await page.getByRole("button", { name: /^Illustrious XL prompt/ }).click();
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
   await page.locator('[data-param="prompt"] textarea').fill("a heron in reeds");
   await page.getByRole("button", { name: "Generate", exact: true }).click();

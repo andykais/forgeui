@@ -19,7 +19,7 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
   await expect(page.locator(".workflow-card")).toContainText("Krea 2 Turbo");
 
-  // The panel renders from the manifest alone: this workflow's six params.
+  // The panel renders from the manifest alone, whatever it declares.
   const prompt = page.locator('[data-param="prompt"] textarea');
   await expect(prompt).toBeVisible();
   await expect(page.locator('[data-param="size"]')).toBeVisible();
@@ -66,16 +66,20 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
 test("the workflows screen lists the bundled workflows", async ({ page }) => {
   await page.goto("/workflows");
   await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
+  // One of each kind, by the name its manifest carries today. This list
+  // went stale silently once already, which is what a `name` assertion is
+  // for: the row is what the Generate picker offers.
   for (
     const name of [
       "Krea 2 Turbo",
       "Krea 2 Turbo (upscale)",
       "Illustrious XL",
-      "LTX-2.3 Image to Video",
       "Anima",
       "Flux.2 Klein",
       "Z-Image Turbo",
       "Stable Diffusion 1.5",
+      "LTX-2.3 Image to Video",
+      "ACE-Step Song",
     ]
   ) {
     await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
@@ -166,11 +170,16 @@ test("the LoRA picker lists the scanned folder, and rows link their strengths", 
   await expect(page.getByRole("button", { name: /soft-studio-light/ })).toBeVisible();
   await option.click();
 
-  // Linked strengths are the default; ⛓ splits them into two (§11.3).
-  await expect(page.getByLabel("film-grain-35mm.safetensors strength", { exact: true })).toBeVisible();
+  // Linked strengths are the default; ⛓ splits them into two (§11.3). The
+  // row is labelled by what the workflow binds — the path under the loras
+  // folder — and `exact` keeps the slider apart from its number box.
+  const lora = "film-grain-35mm.safetensors";
+  await expect(page.getByLabel(`${lora} strength`, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Unlink strengths" }).click();
-  await expect(page.getByLabel("film-grain-35mm.safetensors model strength", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("film-grain-35mm.safetensors clip strength", { exact: true })).toBeVisible();
+  await expect(page.getByLabel(`${lora} model strength`, { exact: true }))
+    .toBeVisible();
+  await expect(page.getByLabel(`${lora} clip strength`, { exact: true }))
+    .toBeVisible();
 
   // Already-added LoRAs stay listed, marked rather than offered twice.
   await page.getByRole("button", { name: /Add/ }).click();
@@ -230,7 +239,8 @@ test("scan, hash, then find a generation from the model that made it", async ({
   // Promote it to a sample of that LoRA, from the viewer.
   await page.locator(".tile .surface").first().click();
   await page.getByRole("button", { name: "Save as sample" }).click();
-  await page.getByRole("button", { name: "Film grain 35mm lora" }).click();
+  await page.getByRole("button", { name: "Film grain 35mm lora", exact: true })
+    .click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Saved as 1 sample/)).toBeVisible();
 
