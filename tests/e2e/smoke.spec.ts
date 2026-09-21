@@ -98,9 +98,12 @@ test("settings shows the connection, the folders and the bindings", async ({ pag
   await expect(page.getByRole("heading", { name: "Keyboard" })).toBeVisible();
   await expect(page.getByText("select_prev")).toBeVisible();
 
-  // Reindex is the only maintenance action in Phase 1 (§M4).
+  // Reindex is the only maintenance action in Phase 1 (§M4). Match the count
+  // the run reports, not the word "sidecars" — that is also in the static
+  // description above the button, so a bare /sidecars/ passes before the run
+  // finishes and then breaks strict mode once the result lands beside it.
   await page.getByRole("button", { name: "Run reindex" }).click();
-  await expect(page.getByText(/sidecars/)).toBeVisible();
+  await expect(page.getByText(/\d+ outputs from \d+ sidecars/)).toBeVisible();
 });
 
 /**
