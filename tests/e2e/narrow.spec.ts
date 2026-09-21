@@ -110,19 +110,22 @@ test("the five layouts put the three panes where they say", async ({ page }) => 
   expect(seen.meta!.x).toBeGreaterThan(seen.media.x + seen.media.width - 1);
   expect(seen.inputs.height).toBe(seen.screen.height);
 
-  // Inputs beside, media over metadata.
+  // Inputs beside, media over metadata — and the split is down the middle.
   await choose(page, "split");
   seen = await boxes(page);
   expect(seen.inputs.height).toBe(seen.screen.height);
   expect(seen.meta!.y).toBeGreaterThan(seen.media.y + seen.media.height - 1);
   expect(seen.meta!.x).toBeGreaterThan(seen.inputs.x + seen.inputs.width - 1);
+  expectHalf(seen.inputs.width, seen.screen.width, "split inputs");
 
-  // Inputs beside, media alone.
+  // Inputs beside, media alone. Halves again.
   await choose(page, "wide");
   seen = await boxes(page);
   expect(seen.meta).toBeNull();
   expect(seen.media.x).toBeGreaterThan(seen.inputs.x + seen.inputs.width - 1);
   expect(seen.inputs.height).toBe(seen.screen.height);
+  expectHalf(seen.inputs.width, seen.screen.width, "wide inputs");
+  expectHalf(seen.media.width, seen.screen.width, "wide media");
 
   // Media across the top, inputs the full width underneath.
   await choose(page, "top");
@@ -139,6 +142,34 @@ test("the five layouts put the three panes where they say", async ({ page }) => 
   expect(seen.meta!.x).toBeGreaterThan(seen.inputs.x + seen.inputs.width - 1);
   expect(Math.round(seen.inputs.width + seen.meta!.width))
     .toBe(Math.round(seen.screen.width));
+  expectHalf(seen.inputs.width, seen.screen.width, "top-split inputs");
+  expectHalf(seen.meta!.width, seen.screen.width, "top-split metadata");
+});
+
+/**
+ * Only `columns` has fixed panes. Everything else splits down the middle, at
+ * every width — 360px of inputs is a quarter of a 1600px window and half of
+ * a 960px one, which made one arrangement look like two.
+ */
+function expectHalf(width: number, screen: number, what: string) {
+  expect(Math.abs(width - screen / 2), what).toBeLessThan(2);
+}
+
+test("the diagrams give each pane its own colour", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await anOutput(page);
+  await page.locator(".trigger").first().click();
+
+  // Three panes, three fills: with two of them the same grey, which side a
+  // pane was on was the only thing telling the inputs from the metadata.
+  const roles = await page.locator(".option").first().evaluateAll((options) =>
+    [...options[0].querySelectorAll("svg rect")].map((rect) =>
+      getComputedStyle(rect).fill
+    )
+  );
+  expect(roles).toHaveLength(3);
+  expect(new Set(roles).size).toBe(3);
+  await page.keyboard.press("Escape");
 });
 
 test("the layout control does not move when the layout does", async ({ page }) => {

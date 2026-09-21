@@ -1324,6 +1324,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   | `top` | media across the top, inputs underneath |
   | `top-split` | media across the top, inputs and metadata underneath |
 
+  **Only `columns` has fixed panes** — 360px of params, 306px of metadata,
+  the media between them — because it is the only one with three of them.
+  Every other split is down the middle, at every width. It was 360px against
+  the rest, which is a quarter of a 1600px window and half of a 960px one:
+  one arrangement that looked like two, and a diagram that could only be
+  right about one of them.
+
   and they are a per-screen preference in `config.yaml`, like the tile size.
   The control sits in the screen's **top-right corner** and stays there: it
   began in the media pane's header, which is only against the right edge in
@@ -1334,7 +1341,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   silently swapped: below the breakpoint, that is `columns`.
   Gallery and a model's page have no inputs panel, so they are offered only
   the first three — and the diagrams there draw two panes rather than three,
-  because a picture of a screen that does not exist is worse than no picture; `sidebar_collapsed` is what this replaces, and stays a
+  because a picture of a screen that does not exist is worse than no picture.
+  Each pane has its own colour in those diagrams, so an arrangement is read
+  by which pane is where and not only by shape; `sidebar_collapsed` is what this replaces, and stays a
   valid key so an older `config.yaml` still loads.
 
   Two consequences worth stating. Browsing a grid of results nothing is

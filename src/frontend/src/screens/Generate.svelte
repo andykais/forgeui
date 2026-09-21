@@ -594,8 +594,16 @@
     grid-template-areas: "inputs media meta";
   }
 
+  /*
+   * Halves, at every width. Only `columns` keeps fixed panes, because only
+   * `columns` has three of them and a media column that has to live between
+   * two — everything else is one split down the middle, and says so in the
+   * picker's diagram. It used to be 360px of inputs against everything else,
+   * which is a quarter of a 1600px window and half of a 960px one: the same
+   * arrangement looking like two different ones depending on the screen.
+   */
   .generate[data-layout="split"] {
-    grid-template-columns: var(--panel-width) minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
       "inputs media"
@@ -603,7 +611,7 @@
   }
 
   .generate[data-layout="wide"] {
-    grid-template-columns: var(--panel-width) minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas: "inputs media";
   }
 
@@ -614,13 +622,8 @@
       "inputs";
   }
 
-  /*
-   * The inputs take the room here, not the metadata: params are fields that
-   * use width — a prompt, a row of LoRAs — and the metadata is a list of
-   * short values that does not get better for being 1200px wide.
-   */
   .generate[data-layout="top-split"] {
-    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
       "media media"
@@ -637,29 +640,18 @@
   }
 
   /*
-   * Too narrow for three columns (§11.3). 360px of params against a 1400px
-   * window is a quarter of it; against a 960px one there is nothing left to
-   * hold a picture. So the columns go to half each, and the one arrangement
-   * that cannot fit — the media between two fixed panes — becomes the one
-   * where the metadata takes height instead.
+   * Too narrow for three columns (§11.3): 360px of params and 306px of
+   * metadata against a 960px window leave the media a sliver. The other four
+   * arrangements are halves at every width and need nothing here; this one
+   * becomes `split`, which is halves too.
    */
   @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
     .generate[data-layout="columns"] {
-      grid-template-columns: 50% minmax(0, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
       grid-template-areas:
         "inputs media"
         "inputs meta";
-    }
-
-    .generate[data-layout="split"],
-    .generate[data-layout="wide"] {
-      grid-template-columns: 50% minmax(0, 1fr);
-    }
-
-    /* Under a full-width media, half and half. */
-    .generate[data-layout="top-split"] {
-      grid-template-columns: 50% minmax(0, 1fr);
     }
   }
 

@@ -34,41 +34,52 @@
   let trigger = $state<HTMLButtonElement | undefined>(undefined);
 
   /**
-   * Each layout as rectangles in a 26×15 box — the proportions of a window
-   * rather than a square, and the cells in the proportions the grid actually
-   * gives them: at 1600px the three columns are 360, 878 and 306, which is
-   * about 6, 12 and 6 of these units.
+   * Each layout as rectangles in a 26×15 box — a window's proportions, and
+   * the panes in the proportions the grid really gives them.
    *
-   * `media` is the filled one, because the media is what an arrangement is
-   * chosen for.
+   * Every split is down the middle, because every layout but one is: only
+   * `columns` has fixed panes, and it is the only one with three. Drawing a
+   * quarter-width inputs pane for `split` was a picture of what the grid did
+   * at 1600px and not at 960px — the same arrangement, two different
+   * pictures, neither of them the one on screen.
    */
   type Cell = { x: number; y: number; w: number; h: number; role: Role };
   type Role = "inputs" | "media" | "meta";
 
+  /** Halves, with a gap wide enough to read as two panes and not one. */
+  const LEFT = { x: 0, w: 12 };
+  const RIGHT = { x: 14, w: 12 };
+  const TOP = { y: 0, h: 7 };
+  const BOTTOM = { y: 8, h: 7 };
+  const FULL_W = { x: 0, w: 26 };
+  const FULL_H = { y: 0, h: 15 };
+
   /** With an inputs panel — Generate. */
   const WITH_INPUTS: Record<Layout, Cell[]> = {
+    // The one with fixed panes: 360, the rest, and 306 — about 6, 12 and 6
+    // of these units in a 1600px window.
     columns: [
       { x: 0, y: 0, w: 6, h: 15, role: "inputs" },
       { x: 7, y: 0, w: 12, h: 15, role: "media" },
       { x: 20, y: 0, w: 6, h: 15, role: "meta" },
     ],
     split: [
-      { x: 0, y: 0, w: 6, h: 15, role: "inputs" },
-      { x: 7, y: 0, w: 19, h: 7, role: "media" },
-      { x: 7, y: 8, w: 19, h: 7, role: "meta" },
+      { ...LEFT, ...FULL_H, role: "inputs" },
+      { ...RIGHT, ...TOP, role: "media" },
+      { ...RIGHT, ...BOTTOM, role: "meta" },
     ],
     wide: [
-      { x: 0, y: 0, w: 6, h: 15, role: "inputs" },
-      { x: 7, y: 0, w: 19, h: 15, role: "media" },
+      { ...LEFT, ...FULL_H, role: "inputs" },
+      { ...RIGHT, ...FULL_H, role: "media" },
     ],
     top: [
-      { x: 0, y: 0, w: 26, h: 7, role: "media" },
-      { x: 0, y: 8, w: 26, h: 7, role: "inputs" },
+      { ...FULL_W, ...TOP, role: "media" },
+      { ...FULL_W, ...BOTTOM, role: "inputs" },
     ],
     "top-split": [
-      { x: 0, y: 0, w: 26, h: 7, role: "media" },
-      { x: 0, y: 8, w: 19, h: 7, role: "inputs" },
-      { x: 20, y: 8, w: 6, h: 7, role: "meta" },
+      { ...FULL_W, ...TOP, role: "media" },
+      { ...LEFT, ...BOTTOM, role: "inputs" },
+      { ...RIGHT, ...BOTTOM, role: "meta" },
     ],
   };
 
@@ -78,15 +89,16 @@
    * are two, and a sliver of media where the media is the whole thing.
    */
   const WITHOUT_INPUTS: Partial<Record<Layout, Cell[]>> = {
+    // Still the fixed 306px of metadata beside everything else.
     columns: [
       { x: 0, y: 0, w: 19, h: 15, role: "media" },
       { x: 20, y: 0, w: 6, h: 15, role: "meta" },
     ],
     split: [
-      { x: 0, y: 0, w: 26, h: 7, role: "media" },
-      { x: 0, y: 8, w: 26, h: 7, role: "meta" },
+      { ...FULL_W, ...TOP, role: "media" },
+      { ...FULL_W, ...BOTTOM, role: "meta" },
     ],
-    wide: [{ x: 0, y: 0, w: 26, h: 15, role: "media" }],
+    wide: [{ ...FULL_W, ...FULL_H, role: "media" }],
   };
 
   const hasInputs = $derived(screen === "generate");
@@ -201,16 +213,22 @@
     display: block;
   }
 
-  /* The panes as fills, not outlines: at 18px a stroke is the whole cell. */
-  .diagram .pane-inputs,
-  .diagram .pane-meta {
-    fill: var(--text-4);
-    opacity: 0.55;
-  }
-
+  /*
+   * The panes as fills, not outlines: at 15px a stroke is the whole cell.
+   * One colour each, so an arrangement is read by shape *and* by which pane
+   * is where — with two of the three the same grey, the only thing telling
+   * the inputs from the metadata was which side they were on.
+   */
   .diagram .pane-media {
     fill: var(--accent);
-    opacity: 0.85;
+  }
+
+  .diagram .pane-inputs {
+    fill: var(--series-2);
+  }
+
+  .diagram .pane-meta {
+    fill: var(--text-4);
   }
 
   .option {
