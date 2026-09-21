@@ -1,5 +1,5 @@
 import { dirname, join } from "@std/path";
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import {
   getInput,

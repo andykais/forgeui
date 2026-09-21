@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "./sqlite.ts";
 import type { ApiGraph } from "../workflows/types.ts";
 
 /**

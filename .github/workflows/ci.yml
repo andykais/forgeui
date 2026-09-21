@@ -1,5 +1,4 @@
 name: CI
-description: "Runs the ForgeUI test suite"
 
 permissions:
   contents: read
@@ -12,6 +11,11 @@ on:
 defaults:
   run:
     working-directory: "."
+
+env:
+  DENO_VERSION: "2.9"
+  FFMPEG_VERSION: "8.1"
+  NODE_VERSION: "22"
 
 jobs:
   test:
@@ -31,11 +35,49 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: setup
-        uses: "./.github/actions/shared_setup"
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      ################################################################################################################
+      # ffmpeg is the one external binary the app shells out to (src/media/audio.ts). It is optional at runtime — a    #
+      # machine without it loses waveforms — but tests/integration/audio_test.ts skips itself when ffmpeg is absent,   #
+      # so without this step those tests would quietly not run.                                                       #
+      ################################################################################################################
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          version: ${{ env.FFMPEG_VERSION }}
+
+      # The frontend and the Playwright specs are the only npm parts of the repo.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: |
+            src/frontend/package-lock.json
+            tests/e2e/package-lock.json
+
+      ################################################################################################################
+      # The Deno cache lives outside the checkout on purpose: `deno fmt --check`, `lint` and `check` walk the working  #
+      # tree, and a cache directory inside it is thousands of files of someone else's source for them to fail on.     #
+      ################################################################################################################
+      - name: Point Deno at the cached dependency directory
+        run: echo "DENO_DIR=${{ runner.temp }}/deno_dependency_cache" >> "$GITHUB_ENV"
+
+      - name: Cache Deno dependencies
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/deno_dependency_cache
+          key: "deno:${{ env.DENO_VERSION }}:deno.lock:${{ hashFiles('deno.lock') }}"
+
+      - name: Install Deno dependencies
+        run: deno install
 
       - name: Format
         run: deno fmt --check
@@ -93,8 +135,8 @@ jobs:
       #     uses: actions/setup-python@v5                                                                             #
       #     with:                                                                                                     #
       #       python-version: '3.12'                                                                                  #
-      #   - name: Provision ComfyUI                                                                                    #
-      #     run: deno task comfy:setup                                                                                 #
-      #   - name: Contract check                                                                                       #
-      #     run: deno task test:comfy                                                                                  #
+      #   - name: Provision ComfyUI                                                                                   #
+      #     run: deno task comfy:setup                                                                                #
+      #   - name: Contract check                                                                                      #
+      #     run: deno task test:comfy                                                                                 #
       ################################################################################################################

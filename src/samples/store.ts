@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { extname, join } from "@std/path";
 import { ulid } from "@std/ulid";
 import type { DataPaths } from "../config/paths.ts";

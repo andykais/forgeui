@@ -68,12 +68,14 @@ those use the npm toolchain. Run both sides before you call something green.
 
 ## Conventions
 
-- TypeScript strict, Deno std + `@db/sqlite`, no ORM. Every SQL statement lives
+- TypeScript strict, Deno std + `node:sqlite`, no ORM. Every SQL statement lives
   in `src/db/queries.ts`, one function per query — with the same rule inside
   `src/telemetry/queries.ts` for the telemetry database, which is its own file
   and its own migration chain (§7.1).
-- **Open SQLite only through `openDatabase()` / `DATABASE_OPTIONS`.** The driver
-  truncates integers above 2³¹ without `int64`, which is every `created_at`.
+- **Open SQLite only through `openDatabase()`** (`src/db/db.ts`), and reach the
+  driver only through `src/db/sqlite.ts` — the small wrapper over Deno's
+  built-in `node:sqlite` that gives back the positional rows the queries are
+  written against. Nothing else imports `node:sqlite`.
 - The sidecar is the source of truth; the database is a derived index that
   `deno task reindex` can rebuild. Anything you would store only in the DB about
   an output must also go in the sidecar — and in DESIGN.md first.

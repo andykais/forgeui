@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { CursorError, decodeCursor, encodeCursor } from "../outputs/cursor.ts";
 import { type Dimension, DIMENSIONS } from "./reports.ts";
 
@@ -77,12 +77,12 @@ export function insertTelemetryEntry(
   db: Database,
   entry: NewTelemetryEntry,
 ): number {
-  db.prepare(
+  return db.prepare(
     `INSERT INTO entries (
        report, at, value, label, method, route, status,
        family, model_class, change, series, data_json
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
+  ).lastInsertRowId(
     entry.report,
     entry.at,
     entry.value,
@@ -96,7 +96,6 @@ export function insertTelemetryEntry(
     entry.series ?? null,
     JSON.stringify(entry.data ?? {}),
   );
-  return Number(db.lastInsertRowId);
 }
 
 function rowToEntry(row: Record<string, unknown>): TelemetryEntryRow {

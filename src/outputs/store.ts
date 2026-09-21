@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { join } from "@std/path";
 import { WAVEFORM_SUFFIX, waveformPathFor } from "../media/audio.ts";
 import { toneColour } from "../media/tone.ts";

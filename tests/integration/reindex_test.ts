@@ -1,8 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
-import { Database } from "@db/sqlite";
+import { Database } from "../../src/db/sqlite.ts";
 import { startTestApp, type TestApp, withTestApp } from "../fixtures/app.ts";
-import { DATABASE_OPTIONS } from "../../src/db/db.ts";
 import type { ReindexResult } from "../../src/outputs/reindex.ts";
 import { buildSidecar, serializeSidecar } from "../../src/jobs/sidecar.ts";
 import { writeTinyPng } from "../fixtures/png.ts";
@@ -132,7 +131,7 @@ Deno.test("reindex rebuilds an identical index from the sidecars on disk", async
   assertStringIncludes(stdout, "reindexed 4 outputs from 3 sidecars");
   assertStringIncludes(stdout, "recreated 3 job rows");
 
-  const rebuilt = new Database(join(dataDir, "app.db"), DATABASE_OPTIONS);
+  const rebuilt = new Database(join(dataDir, "app.db"));
   try {
     const after = snapshot(rebuilt);
 

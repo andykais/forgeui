@@ -102,12 +102,10 @@ COPY src/ ./src/
 COPY workflows/ ./workflows/
 COPY --from=frontend /app/src/frontend/dist/ ./src/frontend/dist/
 
-# Pre-fetch Deno's module cache, and force @db/sqlite's native library
-# download (it fetches its prebuilt binary via @denosaurs/plug on first use),
-# so the container doesn't need network access at startup.
-RUN deno cache src/main.ts && \
-    deno eval --allow-ffi --allow-net --allow-read --allow-write --allow-env \
-      "import { Database } from 'jsr:@db/sqlite@^0.12.0'; new Database(':memory:').close();"
+# Pre-fetch Deno's module cache so the container doesn't need network access
+# at startup. SQLite itself is `node:sqlite`, which is built into Deno, so
+# there is no native library to download here.
+RUN deno cache src/main.ts
 
 # /workspace is the data dir (config.yaml, app.db, workflows/user, samples,
 # ...); outputs always lives at <data-dir>/outputs, i.e. /workspace/outputs,

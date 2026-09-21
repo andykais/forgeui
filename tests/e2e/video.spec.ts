@@ -16,7 +16,7 @@ test("a generation, watched from the browser", async ({ page }) => {
   // Pick a workflow from the card's picker: grouped by family and kind.
   await page.locator(".workflow-card").click();
   await page.waitForTimeout(900);
-  await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await page.getByRole("button", { name: /^Krea 2 Turbo prompt/ }).click();
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
   await page.waitForTimeout(500);
 

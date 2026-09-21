@@ -17,12 +17,12 @@ const shots = process.env.FORGEUI_SHOTS_DIR ??
   join(here, "..", "..", "docs", "screenshots", "phase-1");
 
 const RUNS: [string, string][] = [
-  ["Flux Krea 2", "overgrown concrete stairwell at dusk, volumetric fog, 35mm"],
-  ["Flux Krea 2", "a granite bowl of figs, north light"],
+  ["Krea 2 Turbo", "overgrown concrete stairwell at dusk, volumetric fog, 35mm"],
+  ["Krea 2 Turbo", "a granite bowl of figs, north light"],
   ["Illustrious XL", "a heron in reeds at dawn, soft key"],
-  ["Flux Krea 2", "ivy on a stairwell wall, wider lens"],
+  ["Krea 2 Turbo", "ivy on a stairwell wall, wider lens"],
   ["Illustrious XL", "a fox asleep on warm stone"],
-  ["Flux Krea 2", "stairwell, cooler grade, rain on the landing"],
+  ["Krea 2 Turbo", "stairwell, cooler grade, rain on the landing"],
 ];
 
 test.describe.configure({ mode: "serial" });
@@ -144,7 +144,7 @@ test("photograph every screen", async ({ page }) => {
   await page.screenshot({ path: `${shots}/workflows.png` });
 
   // The manifest editor (§4.7), with the live panel preview.
-  await page.getByRole("cell", { name: "Flux Krea 2", exact: true }).click();
+  await page.getByRole("cell", { name: "Krea 2 Turbo", exact: true }).click();
   await expect(page.getByText("Panel preview")).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${shots}/workflow-manifest-editor.png` });

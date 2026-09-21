@@ -1,5 +1,5 @@
-import { Database } from "@db/sqlite";
-import { applyPragmas, DATABASE_OPTIONS, type Migration } from "../db/db.ts";
+import { Database } from "../db/sqlite.ts";
+import { applyPragmas, type Migration } from "../db/db.ts";
 import schemaSql from "./schema.sql" with { type: "text" };
 
 /**
@@ -60,7 +60,7 @@ export function migrateTelemetry(db: Database): number {
 }
 
 export function openTelemetryDatabase(path: string): Database {
-  const db = new Database(path, DATABASE_OPTIONS);
+  const db = new Database(path);
   try {
     applyPragmas(db);
     migrateTelemetry(db);

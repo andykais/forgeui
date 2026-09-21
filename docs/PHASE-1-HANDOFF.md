@@ -96,12 +96,14 @@ workflows/bundled/<id>/   the seven of §4.6, plus their README
 
 ## Decisions worth knowing before you touch anything
 
-**SQLite must be opened with `int64`.** `@db/sqlite` binds integers through a
-32-bit path otherwise and silently truncates them, which is every `created_at`
-in §7. Always open through `openDatabase()` / `DATABASE_OPTIONS`
-(`src/db/db.ts`). A generation once landed in `outputs/1970/01/22/` because of
-this, and the tests missed it — they compared the day directory against the
-same broken value.
+**SQLite integers must survive the driver.** Phase 1 used `@db/sqlite`, which
+binds integers through a 32-bit path unless opened with `int64`, and silently
+truncates them otherwise — which is every `created_at` in §7. A generation once
+landed in `outputs/1970/01/22/` because of this, and the tests missed it: they
+compared the day directory against the same broken value. The driver is now
+Deno's built-in `node:sqlite`, behind `src/db/sqlite.ts`, and it returns those
+integers intact with no flag to remember. Still open through `openDatabase()`
+(`src/db/db.ts`), and keep `node:sqlite` itself behind that one wrapper.
 
 **The app chooses the `prompt_id`** and writes it to the job row *before*
 `POST /prompt`. ComfyUI honours a supplied id; a build that ignores it and
