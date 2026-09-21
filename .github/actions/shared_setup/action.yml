@@ -1,0 +1,66 @@
+name: "Setup Deno, FFMPEG, Node, install dependencies"
+description: "Sets up deno, ffmpeg and node, installs and caches dependencies"
+
+inputs:
+  DENO_VERSION:
+    default: "2.9"
+  FFMPEG_VERSION:
+    default: "8.1"
+  NODE_VERSION:
+    default: "22"
+  DENO_DIR:
+    default: "deno_dependency_cache"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: "${{ inputs.DENO_VERSION }}"
+
+    ####################################################################################################################
+    # ffmpeg is the one external binary the app shells out to (src/media/audio.ts). It is optional at runtime — a       #
+    # machine without it loses waveforms — but tests/integration/audio_test.ts skips itself when ffmpeg is absent, so   #
+    # without this step those tests would quietly not run.                                                             #
+    ####################################################################################################################
+    - name: Setup FFmpeg
+      uses: AnimMouse/setup-ffmpeg@v1
+      with:
+        version: "${{ inputs.FFMPEG_VERSION }}"
+
+    # The frontend and the Playwright specs are the only npm parts of the repo.
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "${{ inputs.NODE_VERSION }}"
+        cache: "npm"
+        cache-dependency-path: |
+          src/frontend/package-lock.json
+          tests/e2e/package-lock.json
+
+    - name: Point Deno at the cached dependency directory
+      run: echo "DENO_DIR=${{ github.workspace }}/${{ inputs.DENO_DIR }}" >> "$GITHUB_ENV"
+      shell: bash
+
+    - name: Cache Deno dependencies
+      uses: actions/cache@v6
+      with:
+        path: ${{ inputs.DENO_DIR }}
+        key: "deno:${{ inputs.DENO_VERSION }}:deno.lock:${{ hashFiles('deno.lock') }}"
+
+    - name: Install deno dependencies
+      run: deno install
+      shell: bash
+
+    ####################################################################################################################
+    # @db/sqlite fetches its prebuilt native library on first use, and the redirect lands on                            #
+    # release-assets.githubusercontent.com, which the `test` task's --allow-net list does not include. Warming the      #
+    # cache here with unrestricted net is what the Containerfile does for the same reason; without it every            #
+    # database-touching test fails on a cold runner with "Failed to load SQLite3 Dynamic Library".                      #
+    ####################################################################################################################
+    - name: Warm the SQLite native library cache
+      run: >
+        deno eval --allow-ffi --allow-net --allow-read --allow-write --allow-env
+        "import { Database } from 'jsr:@db/sqlite@^0.12.0'; new Database(':memory:').close();"
+      shell: bash
