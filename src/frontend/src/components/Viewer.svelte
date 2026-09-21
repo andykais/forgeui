@@ -501,16 +501,26 @@
   }
 
   /*
-   * Narrower than half a 16:9 screen — the app in one half of a split
-   * monitor, which is how it is actually used beside an editor (§11.3).
+   * Too narrow for three columns — the app in one half of a split monitor,
+   * which is how it is actually used beside an editor (§11.3).
    *
    * Side by side, the two fixed columns (360px of params, 306px of metadata)
-   * leave the media about 240px: a sliver, with a 1024px picture shown at
-   * 20%. There is no width to take from, so the metadata takes height
-   * instead — media above, metadata below, half each. `Escape` and the
-   * toggle both still do what they did.
+   * plus the rail leave the media `width - 722`: 238px in a half-screen 1080p
+   * window, a sliver with a 1024px picture shown at 20%. 1100px is where that
+   * remainder falls below the width of the params panel itself, and there is
+   * no width left to take from — so the metadata takes height instead: media
+   * above, metadata below, half each. `Escape` and the toggle both still do
+   * what they did.
+   *
+   * Width *and* aspect, because aspect alone does not survive a real browser:
+   * a window occupying half of a 1920×1080 screen is 960×1080 on the outside
+   * but 960×990 or so inside, once the tab strip and the address bar have
+   * taken their share — 0.97, comfortably above 8/9, so the rule never fired
+   * for anyone who was not running a browser with no chrome at all. The
+   * aspect clause stays for the case width alone misses: a tall, narrow
+   * window on a large monitor, where a portrait display wants stacking too.
    */
-  @media (max-aspect-ratio: 8 / 9) {
+  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
     .viewer {
       flex-direction: column;
     }

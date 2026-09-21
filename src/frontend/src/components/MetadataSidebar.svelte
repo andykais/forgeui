@@ -610,11 +610,11 @@
   }
 
   /*
-   * Narrower than half a 16:9 screen, the viewer stacks and this is the
-   * lower half of it rather than a column beside the media (§11.3). Same
-   * rows, same scroll, turned ninety degrees.
+   * Too narrow for three columns, so the viewer stacks and this is the lower
+   * half of it rather than a column beside the media (§11.3). Same rows,
+   * same scroll, turned ninety degrees.
    */
-  @media (max-aspect-ratio: 8 / 9) {
+  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
     .sidebar {
       width: 100%;
       flex: 0 0 50%;

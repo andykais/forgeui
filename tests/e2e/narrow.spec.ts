@@ -11,8 +11,19 @@ import { expect, test } from "@playwright/test";
  * what is left.
  */
 
-/** Exactly half of a 1920×1080 screen, which is the case being fixed. */
-const HALF = { width: 960, height: 1080 };
+/**
+ * Half of a 1920×1080 screen as a browser really reports it.
+ *
+ * The window is 960×1080 on the outside; the tab strip and the address bar
+ * take their share, so the page gets about 960×990. This number is the whole
+ * point of the test: an earlier version asserted 960×1080, which is the
+ * viewport of a browser with no chrome at all, and that is the one aspect
+ * ratio at which a rule written as `max-aspect-ratio: 8/9` still fired. It
+ * passed, and the app did not work.
+ */
+const HALF = { width: 960, height: 990 };
+/** The same window with a fuller chrome — a bookmarks bar, a smaller screen. */
+const HALF_SHORT = { width: 960, height: 900 };
 /** The suite's own viewport: a normal window, where nothing may change. */
 const WIDE = { width: 1440, height: 900 };
 
@@ -51,6 +62,20 @@ test("in half a 16:9 window the metadata sits under the media", async ({ page })
   await page.locator(".tile .surface").first().click();
   await showMetadata(page);
 
+  await expectStacked(page);
+});
+
+/** And with more chrome than that, or a shorter screen behind it. */
+test("a shorter window of the same width stacks too", async ({ page }) => {
+  await page.setViewportSize(HALF_SHORT);
+  await anOutput(page);
+  await page.locator(".tile .surface").first().click();
+  await showMetadata(page);
+
+  await expectStacked(page);
+});
+
+async function expectStacked(page: import("@playwright/test").Page) {
   const panel = (await page.locator(".panel").boundingBox())!;
   const viewer = (await page.locator(".viewer").boundingBox())!;
   const media = (await page.locator(".media").boundingBox())!;
@@ -62,7 +87,7 @@ test("in half a 16:9 window the metadata sits under the media", async ({ page })
   expect(sidebar.y).toBeGreaterThan(media.y + media.height - 1);
   expect(Math.abs(sidebar.width - viewer.width)).toBeLessThan(2);
   expect(Math.abs(sidebar.height - viewer.height / 2)).toBeLessThan(4);
-});
+}
 
 test("the metadata toggle is reachable, and gives the media the column", async ({ page }) => {
   await page.setViewportSize(HALF);

@@ -559,12 +559,12 @@
   }
 
   /*
-   * Narrower than half a 16:9 screen (§11.3). 360px of params against a
-   * 900px window is a quarter of it; against a 500px one it is most of the
-   * screen, and what is left cannot hold a picture. Half each, and the
-   * viewer stacks its own two halves inside the other one.
+   * Too narrow for three columns (§11.3). 360px of params against a 1400px
+   * window is a quarter of it; against a 960px one there is nothing left to
+   * hold a picture. Half each, and the viewer stacks its own two halves
+   * inside the other one.
    */
-  @media (max-aspect-ratio: 8 / 9) {
+  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
     .panel {
       width: 50%;
     }

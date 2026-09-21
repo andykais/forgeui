@@ -1316,9 +1316,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   the params panel is the last to give. The filmstrip stays unless the user
   collapses it.
 
-  Below that — `max-aspect-ratio: 8/9`, which is the app in one half of a
-  split monitor — there is **one breakpoint**, and the layout turns rather
-  than shrinks. Side by side, 360px of params and 306px of metadata left the
+  Below that there is **one breakpoint** — the app in one half of a split
+  monitor — and the layout turns rather than shrinks. The rule is
+  `(max-width: 1100px), (max-aspect-ratio: 8/9)`: width first, because the
+  three columns cost `56 + 360 + 306` and 1100px is where what is left over
+  falls below the width of the params panel itself. Aspect ratio alone was
+  tried and does not survive a real browser — half of a 1920×1080 screen is
+  960×1080 as a window but about 960×990 as a viewport, once the tab strip
+  and the address bar have taken their share, and 0.97 is nowhere near 8/9.
+  The aspect clause is kept for what width misses: a tall, narrow window on
+  a large monitor. Side by side, 360px of params and 306px of metadata left the
   media around 240px: a 1024px picture shown at 20%, with the button that
   would have given it its width back pushed off the end of a header that had
   run out of room. Instead:
