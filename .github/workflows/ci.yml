@@ -135,14 +135,8 @@ jobs:
       # The browser half, `deno task test:e2e:comfy`, is not here yet; it would slot in after the contract check on  #
       # the same install.                                                                                           #
       ################################################################################################################
-      - name: Decide whether to run against a real ComfyUI
-        id: comfy
-        env:
-          SHOULD_RUN: ${{ github.ref == 'refs/heads/main' }}
-        run: echo "run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
-
       - name: Setup Python
-        if: steps.comfy.outputs.run == 'true'
+        if: github.ref == 'refs/heads/main'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -154,14 +148,14 @@ jobs:
       # what retires the cache when the pin moves.                                                                   #
       ################################################################################################################
       - name: Cache the ComfyUI install
-        if: steps.comfy.outputs.run == 'true'
+        if: github.ref == 'refs/heads/main'
         uses: actions/cache@v6
         with:
           path: ~/.forgeui-comfy
           key: "comfy:${{ runner.os }}:py${{ env.PYTHON_VERSION }}:${{ hashFiles('scripts/setup-comfy.sh') }}"
 
       - name: Provision ComfyUI
-        if: steps.comfy.outputs.run == 'true'
+        if: github.ref == 'refs/heads/main'
         run: deno task comfy:setup
 
       ################################################################################################################
@@ -170,5 +164,5 @@ jobs:
       # tests/fake-comfy/, the fake is what changes.                                                                 #
       ################################################################################################################
       - name: Contract check against a real ComfyUI
-        if: steps.comfy.outputs.run == 'true'
+        if: github.ref == 'refs/heads/main'
         run: deno task test:comfy
