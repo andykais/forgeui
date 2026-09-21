@@ -55,6 +55,8 @@
   --rail-width: 56px;
   --rail-width-open: 196px;
   --panel-width: 360px;
+  /* The metadata column, where a layout gives it one (§11.3). */
+  --sidebar-width: 306px;
   --queue-height: 34px;
   --queue-height-collapsed: 6px;
 

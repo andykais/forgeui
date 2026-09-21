@@ -599,26 +599,21 @@
     text-decoration: underline;
   }
 
+  /*
+   * A pane of the §11.3 grid, wherever that grid happens to be: beside the
+   * media, under it, or beside the inputs with the media over both. How wide
+   * and how tall is the track's business — this used to be a fixed 306px,
+   * which then had to be undone in every arrangement that was not a column.
+   */
   .sidebar {
-    width: 306px;
-    flex: 0 0 auto;
+    grid-area: meta;
+    min-width: 0;
+    min-height: 0;
     background: var(--panel);
     padding: 10px;
     display: flex;
     flex-direction: column;
     gap: 14px;
-  }
-
-  /*
-   * Too narrow for three columns, so the viewer stacks and this is the lower
-   * half of it rather than a column beside the media (§11.3). Same rows,
-   * same scroll, turned ninety degrees.
-   */
-  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
-    .sidebar {
-      width: 100%;
-      flex: 0 0 50%;
-    }
   }
 
   .actions {

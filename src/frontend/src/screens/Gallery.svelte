@@ -358,6 +358,7 @@
   <Viewer
     bind:this={viewer}
     screen="gallery"
+    layout={app.layout("gallery")}
     outputs={viewerOutputs}
     {selected}
     onselect={select}

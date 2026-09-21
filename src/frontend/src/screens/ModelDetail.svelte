@@ -265,7 +265,8 @@
 
 {#if selected}
   <Viewer
-    screen="models"
+screen="models"
+    layout={app.layout("models")}
     {outputs}
     {selected}
     onselect={(output) => (selectedId = output.id)}

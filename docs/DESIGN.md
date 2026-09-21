@@ -99,7 +99,7 @@ in SQLite (which sits inside the data dir and is a rebuildable index).
 | Layer | Holds | Set by |
 |---|---|---|
 | Bootstrap | data dir only | `--data-dir` flag or `FORGEUI_DATA_DIR` env; default `~/.forgeui` |
-| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
+| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, layout per screen (§11.3), filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
 | Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--comfy-mode`, `--models-dir kind=path`, `--host`, `--port`), applied for that process only, never written back |
 
 First run: if `config.yaml` is absent the app writes one with defaults and
@@ -1311,13 +1311,47 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - One popover component (326px) serves the LoRA picker, the models filter,
   the use-in-workflow menu and the promote-to-sample target picker.
 
+- **Layout (§11.2).** Generate has three panes — the inputs, the media, the
+  metadata — and the arrangement is the user's to pick, from a control whose
+  options are drawn rather than named: at a glance you are choosing a shape,
+  and five words would each have to be read. The five are
+
+  | `ui.layout` | Where things go |
+  | --- | --- |
+  | `columns` | inputs \| media \| metadata — three across, the default |
+  | `split` | inputs \| media over metadata |
+  | `wide` | inputs \| media, and no metadata |
+  | `top` | media across the top, inputs underneath |
+  | `top-split` | media across the top, inputs and metadata underneath |
+
+  and they are a per-screen preference in `config.yaml`, like the tile size.
+  Gallery and a model's page have no inputs panel, so they are offered only
+  the first three; `sidebar_collapsed` is what this replaces, and stays a
+  valid key so an older `config.yaml` still loads.
+
+  Two consequences worth stating. Browsing a grid of results nothing is
+  selected, so the layout in force is whichever of the five has no metadata
+  pane — an empty 306px column beside the tiles would be worse than none.
+  And `top-split` gives the leftover width to the inputs rather than the
+  metadata: params are fields that use width, and a list of short values
+  does not get better for being 1200px wide.
+
+  The panes are placed by **one CSS grid with named areas**, which the viewer
+  dissolves into (`display: contents`) rather than nesting inside: one of the
+  five puts the metadata beside the *inputs*, and no arrangement of nested
+  boxes gets it there.
+
 - **Narrow windows.** Down to half a 16:9 screen the layout does not move:
   the metadata sidebar collapses first, then the media centre shrinks, and
   the params panel is the last to give. The filmstrip stays unless the user
   collapses it.
 
   Below that there is **one breakpoint** — the app in one half of a split
-  monitor — and the layout turns rather than shrinks. The rule is
+  monitor — and the arrangement turns rather than shrinks. Four of the five
+  layouts already fit a narrow window; the one that cannot is `columns`,
+  which has no width for a media column between two fixed panes, so it
+  becomes `split` — the same thing arrived at by the window rather than by
+  the picker. The rule is
   `(max-width: 1100px), (max-aspect-ratio: 8/9)`: width first, because the
   three columns cost `56 + 360 + 306` and 1100px is where what is left over
   falls below the width of the params panel itself. Aspect ratio alone was

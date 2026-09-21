@@ -5,6 +5,7 @@ import {
   FAMILIES,
   type HashingProgress,
   type Job,
+  type Layout,
   type ModelEntry,
   type Output,
   type RescanProgress,
@@ -454,6 +455,21 @@ class AppState {
   setTileSize(screen: UiScreen, size: TileSize): void {
     this.#patchUi({ tile_size: { [screen]: size } }, (ui) => {
       ui.tile_size[screen] = size;
+    });
+  }
+
+  /**
+   * How this screen is arranged (§11.3). The layout carries what the
+   * metadata toggle used to: three of the five have a metadata pane and two
+   * do not, so there is one answer rather than two that can disagree.
+   */
+  layout(screen: UiScreen): Layout {
+    return this.config?.ui.layout[screen] ?? "columns";
+  }
+
+  setLayout(screen: UiScreen, layout: Layout): void {
+    this.#patchUi({ layout: { [screen]: layout } }, (ui) => {
+      ui.layout[screen] = layout;
     });
   }
 

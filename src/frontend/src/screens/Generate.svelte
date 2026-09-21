@@ -12,6 +12,8 @@
   import { afterRemoval } from "../lib/neighbour.ts";
   import { queuePosition } from "../lib/queue.ts";
   import type { Output, TileSize } from "../types.ts";
+  import { withoutMetadata } from "../types.ts";
+  import LayoutPicker from "../components/LayoutPicker.svelte";
   import ParamPanel from "../components/params/ParamPanel.svelte";
   import Popover from "../components/Popover.svelte";
   import Tile from "../components/Tile.svelte";
@@ -73,6 +75,16 @@
     return sessionOutputs.find((output) => output.id === selectedId) ?? null;
   });
   const isFocused = $derived(focusRequested && focused !== null);
+
+  /**
+   * The arrangement this screen is in (§11.3), and the one it can manage
+   * right now: browsing the results there is nothing selected, so a layout
+   * that keeps a metadata pane would keep an empty one.
+   */
+  const chosenLayout = $derived(app.layout("generate"));
+  const layout = $derived(
+    isFocused ? chosenLayout : withoutMetadata(chosenLayout),
+  );
 
   /** The workflow is chosen in the URL, so a refresh keeps the panel (§11.2). */
   $effect(() => {
@@ -326,7 +338,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="generate">
+<div class="generate" data-layout={layout}>
   <!--
     `data-panel-loading` is how anything outside can tell that the panel is
     still being filled from the last job for this workflow: values applied
@@ -450,6 +462,8 @@
     <Viewer
       bind:this={viewer}
       screen="generate"
+      {layout}
+      dissolve
       outputs={sessionOutputs}
       selected={focused}
       {activeJobs}
@@ -507,6 +521,7 @@
             </button>
           {/each}
         </div>
+        <LayoutPicker screen="generate" />
       </header>
 
       {#if tileSize === "table"}
@@ -542,17 +557,71 @@
 </div>
 
 <style>
+  /*
+   * The three panes of §11.3 — the inputs, the media, the metadata — and
+   * five ways to arrange them. Named areas rather than nested boxes, because
+   * one of the five puts the metadata beside the *inputs* with the media
+   * over both, and no amount of nesting gets it there: the viewer dissolves
+   * into this grid (`display: contents`) so its media and its metadata are
+   * items of it rather than of itself.
+   *
+   * Browsing the results, `layout` is already the metadata-less form of
+   * whatever was chosen, so the `meta` area simply has no item in it.
+   */
   .generate {
     flex: 1;
-    display: flex;
+    display: grid;
     min-height: 0;
     /* The panel and the results share the width; neither may claim more. */
     min-width: 0;
+    background: var(--canvas);
+  }
+
+  .generate[data-layout="columns"] {
+    grid-template-columns:
+      var(--panel-width)
+      minmax(0, 1fr)
+      var(--sidebar-width);
+    grid-template-areas: "inputs media meta";
+  }
+
+  .generate[data-layout="split"] {
+    grid-template-columns: var(--panel-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "inputs media"
+      "inputs meta";
+  }
+
+  .generate[data-layout="wide"] {
+    grid-template-columns: var(--panel-width) minmax(0, 1fr);
+    grid-template-areas: "inputs media";
+  }
+
+  .generate[data-layout="top"] {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "media"
+      "inputs";
+  }
+
+  /*
+   * The inputs take the room here, not the metadata: params are fields that
+   * use width — a prompt, a row of LoRAs — and the metadata is a list of
+   * short values that does not get better for being 1200px wide.
+   */
+  .generate[data-layout="top-split"] {
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "media media"
+      "inputs meta";
   }
 
   .panel {
-    width: var(--panel-width);
-    flex: 0 0 auto;
+    grid-area: inputs;
+    min-width: 0;
+    min-height: 0;
     background: var(--panel);
     display: flex;
     flex-direction: column;
@@ -561,12 +630,27 @@
   /*
    * Too narrow for three columns (§11.3). 360px of params against a 1400px
    * window is a quarter of it; against a 960px one there is nothing left to
-   * hold a picture. Half each, and the viewer stacks its own two halves
-   * inside the other one.
+   * hold a picture. So the columns go to half each, and the one arrangement
+   * that cannot fit — the media between two fixed panes — becomes the one
+   * where the metadata takes height instead.
    */
   @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
-    .panel {
-      width: 50%;
+    .generate[data-layout="columns"] {
+      grid-template-columns: 50% minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas:
+        "inputs media"
+        "inputs meta";
+    }
+
+    .generate[data-layout="split"],
+    .generate[data-layout="wide"] {
+      grid-template-columns: 50% minmax(0, 1fr);
+    }
+
+    /* Under a full-width media, half and half. */
+    .generate[data-layout="top-split"] {
+      grid-template-columns: 50% minmax(0, 1fr);
     }
   }
 
@@ -692,9 +776,11 @@
     color: var(--error);
   }
 
+  /* The media area, when what the media is is a grid of results. */
   .results {
-    flex: 1;
+    grid-area: media;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
   }

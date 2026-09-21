@@ -223,6 +223,50 @@ export interface ComfyStatus {
 export type TileSize = "small" | "large" | "table";
 export type UiScreen = "generate" | "gallery" | "models";
 
+/**
+ * Where a screen puts its inputs, its media and its metadata (§11.3). The
+ * name says where the media goes:
+ *
+ * - `columns`     inputs | media | metadata
+ * - `split`       inputs | media over metadata
+ * - `wide`        inputs | media, no metadata
+ * - `top`         media across the top, inputs underneath
+ * - `top-split`   media across the top, inputs and metadata underneath
+ */
+export const LAYOUTS = [
+  "columns",
+  "split",
+  "wide",
+  "top",
+  "top-split",
+] as const;
+export type Layout = (typeof LAYOUTS)[number];
+
+/** The layouts with a metadata pane; the rest simply have none. */
+export const LAYOUTS_WITH_METADATA: readonly Layout[] = [
+  "columns",
+  "split",
+  "top-split",
+];
+
+/** Gallery has no inputs panel, so only these three differ there. */
+export const GALLERY_LAYOUTS: readonly Layout[] = ["columns", "split", "wide"];
+
+export function hasMetadata(layout: Layout): boolean {
+  return LAYOUTS_WITH_METADATA.includes(layout);
+}
+
+/**
+ * The same arrangement with its metadata pane taken out.
+ *
+ * Nothing is selected while the grid of results is up, so there is no
+ * metadata to put anywhere — and a layout that still reserved the column
+ * would hold 306px of empty panel open beside the tiles.
+ */
+export function withoutMetadata(layout: Layout): Layout {
+  return layout === "top" || layout === "top-split" ? "top" : "wide";
+}
+
 export interface Config {
   server: { host: string; port: number };
   comfy: {
@@ -237,6 +281,8 @@ export interface Config {
   ui: {
     rail_expanded: boolean;
     tile_size: Record<UiScreen, TileSize>;
+    /** Where the inputs, the media and the metadata go (§11.3). */
+    layout: Record<UiScreen, Layout>;
     sidebar_collapsed: Record<UiScreen, boolean>;
     filmstrip_collapsed: Record<UiScreen, boolean>;
     /** Workflow ids the user dragged into place, most wanted first (§4.6). */

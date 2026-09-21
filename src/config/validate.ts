@@ -1,6 +1,7 @@
 import {
   KEY_ACTIONS,
   type KeyAction,
+  LAYOUTS,
   MODEL_CLASSES,
   MODEL_THUMBNAILS,
   type ModelClass,
@@ -111,6 +112,7 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
   rejectUnknown(raw, where, [
     "rail_expanded",
     "tile_size",
+    "layout",
     "sidebar_collapsed",
     "filmstrip_collapsed",
     "workflow_order",
@@ -124,6 +126,13 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       raw.tile_size,
       `${where}.tile_size`,
       (v, w) => oneOf(v, w, ["small", "large", "table"] as const),
+    );
+  }
+  if ("layout" in raw) {
+    ui.layout = screenMap(
+      raw.layout,
+      `${where}.layout`,
+      (v, w) => oneOf(v, w, LAYOUTS),
     );
   }
   if ("sidebar_collapsed" in raw) {
