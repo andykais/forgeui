@@ -16,6 +16,7 @@ env:
   DENO_VERSION: "2.9"
   FFMPEG_VERSION: "8.1"
   NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   test:
@@ -126,17 +127,50 @@ jobs:
         run: deno task test:e2e
 
       ################################################################################################################
-      # Not run here: `deno task test:comfy` and `test:e2e:comfy`, which drive a real ComfyUI. `deno task comfy:setup` #
-      # clones a pinned ComfyUI, installs CPU torch and downloads a two-gigabyte SD 1.5 checkpoint — several minutes   #
-      # and some gigabytes on every run, for a pipeline the fake already covers. To add it, install Python with        #
-      # actions/setup-python, cache ~/.forgeui-comfy on the setup script's inputs, then run the two tasks:             #
-      #                                                                                                               #
-      #   - name: Setup Python                                                                                        #
-      #     uses: actions/setup-python@v5                                                                             #
-      #     with:                                                                                                     #
-      #       python-version: '3.12'                                                                                  #
-      #   - name: Provision ComfyUI                                                                                   #
-      #     run: deno task comfy:setup                                                                                #
-      #   - name: Contract check                                                                                      #
-      #     run: deno task test:comfy                                                                                 #
+      # The real ComfyUI (docs/HARDWARE-CHECKLIST.md): a pinned clone, CPU torch wheels and a ~2 GB SD 1.5           #
+      # checkpoint, all under ~/.forgeui-comfy and none of it in the repo. Too slow and too large for every pull     #
+      # request, so it runs on main — and, for now, on claude/github-actions-ci too, so it can be proved before it   #
+      # merges. Drop that second branch from the condition below once it has passed there.                          #
+      #                                                                                                             #
+      # The browser half, `deno task test:e2e:comfy`, is not here yet; it would slot in after the contract check on  #
+      # the same install.                                                                                           #
       ################################################################################################################
+      - name: Decide whether to run against a real ComfyUI
+        id: comfy
+        env:
+          # Delete the second line once the contract check has passed on this branch.
+          SHOULD_RUN: ${{ github.ref == 'refs/heads/main'
+            || github.head_ref == 'claude/github-actions-ci' }}
+        run: echo "run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        if: steps.comfy.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      ################################################################################################################
+      # The checkpoint alone is ~2 GB and the CPU torch wheels several more, so the whole install is cached rather   #
+      # than the download alone. setup-comfy.sh skips each step whose result is already there, so a partial or stale #
+      # restore is topped up rather than rebuilt. The pinned ComfyUI version lives in that script, so hashing it is  #
+      # what retires the cache when the pin moves.                                                                   #
+      ################################################################################################################
+      - name: Cache the ComfyUI install
+        if: steps.comfy.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.forgeui-comfy
+          key: "comfy:${{ runner.os }}:py${{ env.PYTHON_VERSION }}:${{ hashFiles('scripts/setup-comfy.sh') }}"
+
+      - name: Provision ComfyUI
+        if: steps.comfy.outputs.run == 'true'
+        run: deno task comfy:setup
+
+      ################################################################################################################
+      # §14.1: the contract check against a real ComfyUI, then the app-level run that generates with sd15 — the one  #
+      # bundled workflow whose weights are a download rather than a choice. When this disagrees with                 #
+      # tests/fake-comfy/, the fake is what changes.                                                                 #
+      ################################################################################################################
+      - name: Contract check against a real ComfyUI
+        if: steps.comfy.outputs.run == 'true'
+        run: deno task test:comfy
