@@ -129,8 +129,8 @@ jobs:
       ################################################################################################################
       # The real ComfyUI (docs/HARDWARE-CHECKLIST.md): a pinned clone, CPU torch wheels and a ~2 GB SD 1.5           #
       # checkpoint, all under ~/.forgeui-comfy and none of it in the repo. Too slow and too large for every pull     #
-      # request, so it runs on main — and, for now, on claude/github-actions-ci too, so it can be proved before it   #
-      # merges. Drop that second branch from the condition below once it has passed there.                          #
+      # request, so it runs on main only; a pull request is covered by tests/fake-comfy/ as before. Measured at      #
+      # 1m37s on a warm cache, against the ~5m it takes to provision from cold.                                      #
       #                                                                                                             #
       # The browser half, `deno task test:e2e:comfy`, is not here yet; it would slot in after the contract check on  #
       # the same install.                                                                                           #
@@ -138,9 +138,7 @@ jobs:
       - name: Decide whether to run against a real ComfyUI
         id: comfy
         env:
-          # Delete the second line once the contract check has passed on this branch.
-          SHOULD_RUN: ${{ github.ref == 'refs/heads/main'
-            || github.head_ref == 'claude/github-actions-ci' }}
+          SHOULD_RUN: ${{ github.ref == 'refs/heads/main' }}
         run: echo "run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
 
       - name: Setup Python
