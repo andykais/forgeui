@@ -1,9 +1,8 @@
-import { Database } from "@db/sqlite";
+import { Database } from "../../src/db/sqlite.ts";
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   applyPragmas,
-  DATABASE_OPTIONS,
   migrate,
   MIGRATIONS,
   openDatabase,
@@ -92,7 +91,7 @@ Deno.test("migrations are idempotent across reopens", async () => {
 Deno.test("a database from before the probes table gains it, keeping its rows", async () => {
   await withDbDir((path) => {
     // A version-1 database: the schema as it shipped, with no model_probes.
-    const old = new Database(path, DATABASE_OPTIONS);
+    const old = new Database(path);
     old.exec(MIGRATIONS[0]!.sql!);
     old.exec("DROP TABLE model_probes");
     old.exec("PRAGMA user_version = 1");
@@ -128,7 +127,7 @@ Deno.test("a database from before the probes table gains it, keeping its rows", 
 Deno.test("an existing library gains the strength columns, keeping its rows", async () => {
   await withDbDir((path) => {
     // A version-2 database: the models table before it had a strength range.
-    const old = new Database(path, DATABASE_OPTIONS);
+    const old = new Database(path);
     old.exec(MIGRATIONS[0]!.sql!);
     old.exec("ALTER TABLE models DROP COLUMN strength_min");
     old.exec("ALTER TABLE models DROP COLUMN strength_max");
@@ -183,7 +182,7 @@ Deno.test("full-text search over prompts works", async () => {
 });
 
 Deno.test("a fresh in-memory database gets the same pragmas and schema", () => {
-  const db = new Database(":memory:", DATABASE_OPTIONS);
+  const db = new Database(":memory:");
   try {
     applyPragmas(db);
     migrate(db);

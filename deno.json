@@ -1,12 +1,12 @@
 {
   "version": "0.1.0",
   "tasks": {
-    "start": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-run --allow-write src/main.ts",
-    "reindex": "deno run --allow-env --allow-ffi --allow-net --allow-read --allow-write src/main.ts reindex",
-    "test": "deno test --allow-run --allow-env --allow-ffi --allow-net=127.0.0.1,localhost,github.com,objects.githubusercontent.com --allow-read --allow-write",
+    "start": "deno run --allow-env --allow-net --allow-read --allow-run --allow-write src/main.ts",
+    "reindex": "deno run --allow-env --allow-net --allow-read --allow-write src/main.ts reindex",
+    "test": "deno test --allow-run --allow-env --allow-net=127.0.0.1,localhost --allow-read --allow-write",
     "comfy:setup": "bash scripts/setup-comfy.sh",
     "comfy:serve": "deno run --allow-all scripts/with_comfy.ts --serve",
-    "test:comfy": "deno run --allow-all scripts/with_comfy.ts deno test --allow-env --allow-ffi --allow-net --allow-read --allow-run --allow-write tests/contract/",
+    "test:comfy": "deno run --allow-all scripts/with_comfy.ts deno test --allow-env --allow-net --allow-read --allow-run --allow-write tests/contract/",
     "check": "deno check src tests",
     "fmt": "deno fmt",
     "lint": "deno lint",
@@ -21,7 +21,6 @@
     "shots:phase2": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && FORGEUI_E2E_COMFY_APP_PORT=7897 FORGEUI_SHOTS_DIR=$PWD/docs/screenshots/phase-2 npx playwright test --config playwright.shots.config.ts\""
   },
   "imports": {
-    "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
     "@std/assert": "jsr:@std/assert@^1.0.14",
     "@std/async": "jsr:@std/async@^1.0.14",
     "@std/cli": "jsr:@std/cli@^1.0.22",

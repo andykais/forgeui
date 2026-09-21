@@ -1,0 +1,168 @@
+name: CI
+
+permissions:
+  contents: read
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+defaults:
+  run:
+    working-directory: "."
+
+env:
+  DENO_VERSION: "2.9"
+  FFMPEG_VERSION: "8.1"
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+
+          ##############################################################################################################
+          # Linux only for now. The app shells out to ffmpeg and spawns a ComfyUI child process, so the other runners   #
+          # are worth adding deliberately rather than by default — add them here when someone is ready to chase the     #
+          # path and process differences they will turn up.                                                            #
+          ##############################################################################################################
+          # - macos-15-intel
+          # - windows-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      ################################################################################################################
+      # ffmpeg is the one external binary the app shells out to (src/media/audio.ts). It is optional at runtime — a    #
+      # machine without it loses waveforms — but tests/integration/audio_test.ts skips itself when ffmpeg is absent,   #
+      # so without this step those tests would quietly not run.                                                       #
+      ################################################################################################################
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          version: ${{ env.FFMPEG_VERSION }}
+
+      # The frontend and the Playwright specs are the only npm parts of the repo.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: |
+            src/frontend/package-lock.json
+            tests/e2e/package-lock.json
+
+      ################################################################################################################
+      # The Deno cache lives outside the checkout on purpose: `deno fmt --check`, `lint` and `check` walk the working  #
+      # tree, and a cache directory inside it is thousands of files of someone else's source for them to fail on.     #
+      ################################################################################################################
+      - name: Point Deno at the cached dependency directory
+        run: echo "DENO_DIR=${{ runner.temp }}/deno_dependency_cache" >> "$GITHUB_ENV"
+
+      - name: Cache Deno dependencies
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/deno_dependency_cache
+          key: "deno:${{ env.DENO_VERSION }}:deno.lock:${{ hashFiles('deno.lock') }}"
+
+      - name: Install Deno dependencies
+        run: deno install
+
+      - name: Format
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno task lint
+
+      - name: Typecheck
+        run: deno task check
+
+      ################################################################################################################
+      # The default suite needs no GPU, no models and no real ComfyUI: tests/fake-comfy/ stands in for it (§14). The   #
+      # contract tests under tests/contract/ ignore themselves unless FORGEUI_COMFY_URL is set, so they are skipped    #
+      # here rather than excluded.                                                                                    #
+      ################################################################################################################
+      - name: Test
+        run: deno task test
+
+      - name: Install frontend dependencies
+        run: deno task ui:install
+
+      - name: Typecheck frontend
+        run: deno task ui:check
+
+      - name: Test frontend
+        run: deno task test:ui
+
+      # The end-to-end smoke test serves the built SPA, so this has to come first.
+      - name: Build frontend
+        run: deno task ui:build
+
+      ################################################################################################################
+      # playwright.config.ts asks for `channel: "chrome"`, which is Google Chrome rather than bundled Chromium. The    #
+      # runner image ships it today, but installing it explicitly costs half a minute and turns a whole class of       #
+      # image-drift failure into a non-event.                                                                         #
+      ################################################################################################################
+      - name: Install end-to-end dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: tests/e2e
+
+      - name: Install Chrome for Playwright
+        run: npx playwright install chrome
+        working-directory: tests/e2e
+
+      - name: End-to-end smoke test
+        run: deno task test:e2e
+
+      ################################################################################################################
+      # The real ComfyUI (docs/HARDWARE-CHECKLIST.md): a pinned clone, CPU torch wheels and a ~2 GB SD 1.5           #
+      # checkpoint, all under ~/.forgeui-comfy and none of it in the repo. Too slow and too large for every pull     #
+      # request, so it runs on main only; a pull request is covered by tests/fake-comfy/ as before. Measured at      #
+      # 1m37s on a warm cache, against the ~5m it takes to provision from cold.                                      #
+      #                                                                                                             #
+      # The browser half, `deno task test:e2e:comfy`, is not here yet; it would slot in after the contract check on  #
+      # the same install.                                                                                           #
+      ################################################################################################################
+      - name: Setup Python
+        if: github.ref == 'refs/heads/main'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      ################################################################################################################
+      # The checkpoint alone is ~2 GB and the CPU torch wheels several more, so the whole install is cached rather   #
+      # than the download alone. setup-comfy.sh skips each step whose result is already there, so a partial or stale #
+      # restore is topped up rather than rebuilt. The pinned ComfyUI version lives in that script, so hashing it is  #
+      # what retires the cache when the pin moves.                                                                   #
+      ################################################################################################################
+      - name: Cache the ComfyUI install
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@v6
+        with:
+          path: ~/.forgeui-comfy
+          key: "comfy:${{ runner.os }}:py${{ env.PYTHON_VERSION }}:${{ hashFiles('scripts/setup-comfy.sh') }}"
+
+      - name: Provision ComfyUI
+        if: github.ref == 'refs/heads/main'
+        run: deno task comfy:setup
+
+      ################################################################################################################
+      # §14.1: the contract check against a real ComfyUI, then the app-level run that generates with sd15 — the one  #
+      # bundled workflow whose weights are a download rather than a choice. When this disagrees with                 #
+      # tests/fake-comfy/, the fake is what changes.                                                                 #
+      ################################################################################################################
+      - name: Contract check against a real ComfyUI
+        if: github.ref == 'refs/heads/main'
+        run: deno task test:comfy

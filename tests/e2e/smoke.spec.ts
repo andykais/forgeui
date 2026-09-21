@@ -15,9 +15,9 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
 
   // Pick a workflow through the card's picker popover (§11.2).
   await page.locator(".workflow-card").click();
-  await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await page.getByRole("button", { name: /^Krea 2 Turbo prompt/ }).click();
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
-  await expect(page.locator(".workflow-card")).toContainText("Flux Krea 2");
+  await expect(page.locator(".workflow-card")).toContainText("Krea 2 Turbo");
 
   // The panel renders from the manifest alone: this workflow's six params.
   const prompt = page.locator('[data-param="prompt"] textarea');
@@ -52,9 +52,9 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
 
   // Opening it shows the viewer with the sidecar's metadata.
   await page.locator(".tile .surface").first().click();
-  await expect(page.getByRole("button", { name: "Edit in Generate →" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reuse parameters →" })).toBeVisible();
   await expect(page.getByText("Files")).toBeVisible();
-  await expect(page.getByText("Flux Krea 2", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("Krea 2 Turbo", { exact: false }).first()).toBeVisible();
   // The sidecar's own numbers, not the row's.
   await expect(page.getByText("duration")).toBeVisible();
 
@@ -68,12 +68,12 @@ test("the workflows screen lists the bundled workflows", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
   for (
     const name of [
-      "Flux Krea 2",
-      "Flux Krea 2 (img2img)",
+      "Krea 2 Turbo",
+      "Krea 2 Turbo (upscale)",
       "Illustrious XL",
-      "LTX Video",
+      "LTX-2.3 Image to Video",
       "Anima",
-      "Flux Klein",
+      "Flux.2 Klein",
       "Z-Image Turbo",
       "Stable Diffusion 1.5",
     ]
@@ -82,7 +82,7 @@ test("the workflows screen lists the bundled workflows", async ({ page }) => {
   }
 
   // The manifest editor opens with the panel preview beside the inputs (§4.7).
-  await page.getByRole("cell", { name: "Flux Krea 2", exact: true }).click();
+  await page.getByRole("cell", { name: "Krea 2 Turbo", exact: true }).click();
   await expect(page.getByText("Panel preview")).toBeVisible();
   // The chain row is synthetic and excluded from the literal-input count.
   await expect(page.getByText("synthetic · rewrites the graph")).toBeVisible();
@@ -98,9 +98,12 @@ test("settings shows the connection, the folders and the bindings", async ({ pag
   await expect(page.getByRole("heading", { name: "Keyboard" })).toBeVisible();
   await expect(page.getByText("select_prev")).toBeVisible();
 
-  // Reindex is the only maintenance action in Phase 1 (§M4).
+  // Reindex is the only maintenance action in Phase 1 (§M4). Match the count
+  // the run reports, not the word "sidecars" — that is also in the static
+  // description above the button, so a bare /sidecars/ passes before the run
+  // finishes and then breaks strict mode once the result lands beside it.
   await page.getByRole("button", { name: "Run reindex" }).click();
-  await expect(page.getByText(/sidecars/)).toBeVisible();
+  await expect(page.getByText(/\d+ outputs from \d+ sidecars/)).toBeVisible();
 });
 
 /**
@@ -154,21 +157,20 @@ test("the LoRA picker lists the scanned folder, and rows link their strengths", 
 }) => {
   await page.goto("/generate");
   await page.locator(".workflow-card").click();
-  await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await page.getByRole("button", { name: /^Krea 2 Turbo prompt/ }).click();
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
 
   await page.getByRole("button", { name: /Add/ }).click();
   const option = page.getByRole("button", { name: /film-grain-35mm/ });
   await expect(option).toBeVisible();
-  // Display names fall back to the filename minus its extension (§8.1).
   await expect(page.getByRole("button", { name: /soft-studio-light/ })).toBeVisible();
   await option.click();
 
   // Linked strengths are the default; ⛓ splits them into two (§11.3).
-  await expect(page.getByLabel("film-grain-35mm strength")).toBeVisible();
+  await expect(page.getByLabel("film-grain-35mm.safetensors strength", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Unlink strengths" }).click();
-  await expect(page.getByLabel("film-grain-35mm model strength")).toBeVisible();
-  await expect(page.getByLabel("film-grain-35mm clip strength")).toBeVisible();
+  await expect(page.getByLabel("film-grain-35mm.safetensors model strength", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("film-grain-35mm.safetensors clip strength", { exact: true })).toBeVisible();
 
   // Already-added LoRAs stay listed, marked rather than offered twice.
   await page.getByRole("button", { name: /Add/ }).click();
@@ -189,7 +191,7 @@ test("scan, hash, then find a generation from the model that made it", async ({
   // Generate with a LoRA, so there is something to attribute.
   await page.goto("/generate");
   await page.locator(".workflow-card").click();
-  await page.getByRole("button", { name: /^Flux Krea 2 prompt/ }).click();
+  await page.getByRole("button", { name: /^Krea 2 Turbo prompt/ }).click();
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
 
   const promptText = `a heron in reeds, models take ${Date.now()}`;
@@ -227,10 +229,10 @@ test("scan, hash, then find a generation from the model that made it", async ({
 
   // Promote it to a sample of that LoRA, from the viewer.
   await page.locator(".tile .surface").first().click();
-  await page.getByRole("button", { name: "Promote to sample" }).click();
-  await page.getByRole("button", { name: /Film grain 35mm/ }).click();
-  await page.getByRole("button", { name: "Promote", exact: true }).click();
-  await expect(page.getByText(/Promoted to 1 sample/)).toBeVisible();
+  await page.getByRole("button", { name: "Save as sample" }).click();
+  await page.getByRole("button", { name: "Film grain 35mm lora" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Saved as 1 sample/)).toBeVisible();
 
   // The sample is on the model page, and can become its thumbnail (§8.3).
   await page.keyboard.press("Escape");

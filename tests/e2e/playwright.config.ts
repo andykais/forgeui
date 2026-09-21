@@ -35,7 +35,7 @@ export default defineConfig({
     // --config is explicit because this directory has its own package.json,
     // which otherwise stops Deno looking further up for deno.json.
     command:
-      "deno run --config ../../deno.json --allow-env --allow-ffi --allow-net " +
+      "deno run --config ../../deno.json --allow-env --allow-net " +
       "--allow-read --allow-run --allow-write serve.ts",
     cwd: here,
     url: `http://127.0.0.1:${port}/api/system/status`,

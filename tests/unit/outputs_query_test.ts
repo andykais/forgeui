@@ -13,8 +13,8 @@ import {
 import { mediaUrl } from "../../src/outputs/store.ts";
 import { MediaPathError, resolveMediaPath } from "../../src/http/media.ts";
 import { dataPaths } from "../../src/config/paths.ts";
-import { Database } from "@db/sqlite";
-import { applyPragmas, DATABASE_OPTIONS, migrate } from "../../src/db/db.ts";
+import { Database } from "../../src/db/sqlite.ts";
+import { applyPragmas, migrate } from "../../src/db/db.ts";
 
 Deno.test("cursors round-trip and reject anything else", () => {
   const cursor = { created_at: 1788577384416, id: "01JZM4T-0" };
@@ -76,7 +76,7 @@ Deno.test("filters build the SQL the gallery needs", () => {
 });
 
 Deno.test("the keyset query is ordered and bounded", () => {
-  const db = new Database(":memory:", DATABASE_OPTIONS);
+  const db = new Database(":memory:");
   applyPragmas(db);
   migrate(db);
   try {
@@ -155,7 +155,7 @@ Deno.test("media urls are built from the stored path", () => {
 });
 
 Deno.test("a model is pictured by its newest output, video or not", () => {
-  const db = new Database(":memory:", DATABASE_OPTIONS);
+  const db = new Database(":memory:");
   applyPragmas(db);
   migrate(db);
   try {

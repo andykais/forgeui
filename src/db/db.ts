@@ -1,4 +1,4 @@
-import { Database } from "@db/sqlite";
+import { Database } from "./sqlite.ts";
 import schemaSql from "./schema.sql" with { type: "text" };
 
 export interface Migration {
@@ -143,15 +143,6 @@ export const MIGRATIONS: readonly Migration[] = [
 export const SCHEMA_VERSION: number =
   MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
 
-/**
- * Every database this app opens must be opened with these options. `int64` is
- * load-bearing rather than an optimisation: without it the driver binds
- * integers through a 32-bit path and silently truncates anything larger, which
- * is every `created_at` in §7 (epoch milliseconds passed 2³¹ in 1971). Values
- * still come back as plain numbers while they fit in a double.
- */
-export const DATABASE_OPTIONS = { int64: true } as const;
-
 /** Production pragmas; tests open databases through the same function. */
 export function applyPragmas(db: Database): void {
   db.exec("PRAGMA journal_mode = WAL");
@@ -192,7 +183,7 @@ export function migrate(db: Database): number {
 
 /** Open `app.db` in WAL mode and bring it up to `SCHEMA_VERSION`. */
 export function openDatabase(path: string): Database {
-  const db = new Database(path, DATABASE_OPTIONS);
+  const db = new Database(path);
   try {
     applyPragmas(db);
     migrate(db);

@@ -29,7 +29,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "deno run --config ../../deno.json --allow-env --allow-ffi --allow-net " +
+      "deno run --config ../../deno.json --allow-env --allow-net " +
       "--allow-read --allow-run --allow-write serve-comfy.ts",
     cwd: here,
     url: `http://127.0.0.1:${port}/api/system/status`,

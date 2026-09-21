@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
 import { delay } from "@std/async/delay";

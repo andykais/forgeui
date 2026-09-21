@@ -1,4 +1,4 @@
-import type { Database } from "@db/sqlite";
+import type { Database } from "../db/sqlite.ts";
 import { basename, extname } from "@std/path";
 import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
 import type { DataPaths } from "../config/paths.ts";

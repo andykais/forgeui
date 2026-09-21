@@ -2,8 +2,8 @@
 
 You are implementing Phase 2 of ForgeUI. `docs/DESIGN.md` is **authoritative**;
 if code and DESIGN.md disagree, stop and ask. Read `docs/PHASE-1-HANDOFF.md`
-before touching anything — its "Decisions worth knowing" section (int64
-SQLite, client-chosen `prompt_id`, second-truncated `created_at`, sidecars
+before touching anything — its "Decisions worth knowing" section (SQLite
+integers, client-chosen `prompt_id`, second-truncated `created_at`, sidecars
 outrank the DB, shared WS payload shapes) all still apply and are not
 repeated here.
 
