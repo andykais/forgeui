@@ -2,12 +2,12 @@ import type {
   Config,
   FamilyCount,
   HashingProgress,
+  InputMedia,
   Job,
   Lineage,
   LiteralInput,
   Manifest,
   ModelDetail,
-  InputMedia,
   ModelEntry,
   Output,
   OutputDetail,
@@ -46,7 +46,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await response.text();
   const body = text.length > 0 ? JSON.parse(text) : null;
   if (!response.ok) {
-    const error = (body as { error?: { code: string; message: string } })?.error;
+    const error = (body as { error?: { code: string; message: string } })
+      ?.error;
     throw new ApiError(
       response.status,
       error?.code ?? "error",
@@ -126,16 +127,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  jobs: (query: { status?: string; workflow_id?: string; limit?: number } = {}) => {
+  jobs: (
+    query: { status?: string; workflow_id?: string; limit?: number } = {},
+  ) => {
     const params = new URLSearchParams();
     if (query.status) params.set("status", query.status);
     if (query.workflow_id) params.set("workflow_id", query.workflow_id);
     if (query.limit) params.set("limit", String(query.limit));
-    return request<{ jobs: Job[] }>(`/api/jobs?${params}`).then((body) => body.jobs);
+    return request<{ jobs: Job[] }>(`/api/jobs?${params}`).then((body) =>
+      body.jobs
+    );
   },
   job: (id: string) => request<Job>(`/api/jobs/${id}`),
-  cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
-  clearQueue: () => request<{ cancelled: Job[] }>("/api/jobs/clear", { method: "POST" }),
+  cancelJob: (id: string) =>
+    request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  clearQueue: () =>
+    request<{ cancelled: Job[] }>("/api/jobs/clear", { method: "POST" }),
 
   outputs: (query: OutputQuery = {}) => {
     const params = outputQueryParams(query);
@@ -146,14 +153,17 @@ export const api = {
     );
   },
   outputCount: (query: OutputQuery = {}) =>
-    request<{ count: number }>(`/api/outputs/count?${outputQueryParams(query)}`).then(
-      (body) => body.count,
-    ),
+    request<{ count: number }>(`/api/outputs/count?${outputQueryParams(query)}`)
+      .then(
+        (body) => body.count,
+      ),
   outputDays: (dates: string[], query: OutputQuery = {}) => {
     const params = outputQueryParams(query);
     params.set("dates", dates.join(","));
     params.set("tz_offset", String(new Date().getTimezoneOffset()));
-    return request<{ days: Record<string, number> }>(`/api/outputs/days?${params}`).then(
+    return request<{ days: Record<string, number> }>(
+      `/api/outputs/days?${params}`,
+    ).then(
       (body) => body.days,
     );
   },
@@ -208,7 +218,8 @@ export const api = {
     request<{ models: ModelEntry[] }>(`/api/models?class=${modelClass}`).then(
       (body) => body.models,
     ),
-  model: (id: string) => request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
+  model: (id: string) =>
+    request<ModelDetail>(`/api/models/${encodeURIComponent(id)}`),
   /** Re-read one model's file from scratch (§8.1); a debugging action. */
   rescanModel: (id: string) =>
     request<ModelDetail>(`/api/models/${encodeURIComponent(id)}/rescan`, {
@@ -232,11 +243,16 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   families: () =>
-    request<{ families: FamilyCount[] }>("/api/families").then((body) => body.families),
+    request<{ families: FamilyCount[] }>("/api/families").then((body) =>
+      body.families
+    ),
   rescanModels: () =>
-    request<{ models: number; queued: number }>("/api/maintenance/rescan-models", {
-      method: "POST",
-    }),
+    request<{ models: number; queued: number }>(
+      "/api/maintenance/rescan-models",
+      {
+        method: "POST",
+      },
+    ),
 
   /**
    * Put an image into the content-addressed store and get back the name a
@@ -251,7 +267,8 @@ export const api = {
     const text = await response.text();
     const body = text.length > 0 ? JSON.parse(text) : null;
     if (!response.ok) {
-      const error = (body as { error?: { code: string; message: string } })?.error;
+      const error = (body as { error?: { code: string; message: string } })
+        ?.error;
       throw new ApiError(
         response.status,
         error?.code ?? "error",
@@ -273,14 +290,18 @@ export const api = {
   uploadSample: async (hash: string, file: File) => {
     const form = new FormData();
     form.set("file", file);
-    const response = await fetch(`/api/models/${encodeURIComponent(hash)}/samples`, {
-      method: "POST",
-      body: form,
-    });
+    const response = await fetch(
+      `/api/models/${encodeURIComponent(hash)}/samples`,
+      {
+        method: "POST",
+        body: form,
+      },
+    );
     const text = await response.text();
     const body = text.length > 0 ? JSON.parse(text) : null;
     if (!response.ok) {
-      const error = (body as { error?: { code: string; message: string } })?.error;
+      const error = (body as { error?: { code: string; message: string } })
+        ?.error;
       throw new ApiError(
         response.status,
         error?.code ?? "error",
@@ -306,7 +327,9 @@ export const api = {
    * answers.
    */
   telemetryReports: () =>
-    request<{ reports: TelemetryReport[]; bytes: number }>("/api/telemetry/reports"),
+    request<{ reports: TelemetryReport[]; bytes: number }>(
+      "/api/telemetry/reports",
+    ),
   telemetrySeries: (report: string, filters: URLSearchParams) =>
     request<TelemetrySeries>(`/api/telemetry/${report}/series?${filters}`),
   telemetryEntries: (
@@ -317,7 +340,9 @@ export const api = {
     const params = new URLSearchParams(filters);
     if (options.cursor) params.set("cursor", options.cursor);
     if (options.limit) params.set("limit", String(options.limit));
-    return request<TelemetryEntryPage>(`/api/telemetry/${report}/entries?${params}`);
+    return request<TelemetryEntryPage>(
+      `/api/telemetry/${report}/entries?${params}`,
+    );
   },
 
   systemStatus: () =>
@@ -332,9 +357,12 @@ export const api = {
       "/api/system/comfy/log",
     ),
   restartComfy: () =>
-    request<{ comfy: import("./types.ts").ComfyStatus }>("/api/system/comfy/restart", {
-      method: "POST",
-    }),
+    request<{ comfy: import("./types.ts").ComfyStatus }>(
+      "/api/system/comfy/restart",
+      {
+        method: "POST",
+      },
+    ),
   reindex: () =>
     request<{
       sidecars: number;

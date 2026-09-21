@@ -244,7 +244,8 @@ class PanelState {
   ): Promise<void> {
     const media = await api.adoptOutput(output.id);
     const manifest = (await api.workflow(workflowId)).manifest;
-    const imageKey = manifest?.params.find((param) => param.type === "image")?.key;
+    const imageKey = manifest?.params.find((param) => param.type === "image")
+      ?.key;
     if (!imageKey) {
       throw new Error(`"${workflowId}" has no image param to upscale into`);
     }
@@ -254,7 +255,9 @@ class PanelState {
     // from the picture, and saying so on every upscale is noise.
     const shared: Record<string, unknown> = {};
     for (const param of manifest?.params ?? []) {
-      if (param.key in sourceParams) shared[param.key] = sourceParams[param.key];
+      if (param.key in sourceParams) {
+        shared[param.key] = sourceParams[param.key];
+      }
     }
     // The picture last: it is the one thing the source run cannot supply.
     await this.editWith(workflowId, { ...shared, [imageKey]: media.filename });
@@ -286,7 +289,9 @@ class PanelState {
     const next = sizeForImage(param, width, height);
     if (!next) return null;
     const current = this.values[param.key] as [number, number] | undefined;
-    if (current && current[0] === next[0] && current[1] === next[1]) return null;
+    if (current && current[0] === next[0] && current[1] === next[1]) {
+      return null;
+    }
     this.set(param.key, next);
     return next;
   }
@@ -303,7 +308,10 @@ class PanelState {
    * padding, which the model fills; undershooting cuts the take, and a
    * sentence that stops mid-word is not a rounding error anybody wants.
    */
-  durationFromAudio(audioKey: string, durationMs: number | null): number | null {
+  durationFromAudio(
+    audioKey: string,
+    durationMs: number | null,
+  ): number | null {
     if (durationMs === null || durationMs <= 0) return null;
     const param = this.params.find((other) => other.follows === audioKey);
     if (!param) return null;

@@ -23,7 +23,9 @@ function workflow(patch: Partial<WorkflowSummary>): WorkflowSummary {
   } as WorkflowSummary;
 }
 
-const output = (patch: Partial<{ family: string | null; kind: string }> = {}) => ({
+const output = (
+  patch: Partial<{ family: string | null; kind: string }> = {},
+) => ({
   family: "krea2",
   kind: "image",
   ...patch,
@@ -37,7 +39,9 @@ describe("what Upscale routes to", () => {
       workflow({ id: "krea2", category: null }),
       workflow({ id: "krea2-old", category: "img2img" }),
     ];
-    expect(app.upscalersFor(output()).map((w) => w.id)).toEqual(["krea2-upscale"]);
+    expect(app.upscalersFor(output()).map((w) => w.id)).toEqual([
+      "krea2-upscale",
+    ]);
   });
 
   test("several are offered, so the choice is the user's", () => {

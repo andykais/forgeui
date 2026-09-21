@@ -71,7 +71,8 @@ describe("the model page header", () => {
     patchModel.mockResolvedValue(detail({ display_name: "Grain" }));
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input =
+      (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.value).toBe("Film grain 35mm");
     await fireEvent.input(input, { target: { value: "Grain" } });
     await fireEvent.blur(input);
@@ -84,7 +85,8 @@ describe("the model page header", () => {
     model.mockResolvedValue(detail());
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input =
+      (await screen.findByLabelText("Display name")) as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "Something else" } });
     await fireEvent.keyDown(input, { key: "Escape" });
     await fireEvent.blur(input);
@@ -109,9 +111,11 @@ describe("the model page header", () => {
     render(ModelDetail, { id: "path:abc" });
 
     expect(await screen.findByText("hashing")).toBeTruthy();
-    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input =
+      (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.disabled).toBe(true);
-    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).disabled)
+      .toBe(true);
     // Tags are edited through the picker, which is not offered at all until
     // the model has an identity to hang them off.
     expect(screen.queryByTitle(/Add a tag/)).toBeNull();
@@ -167,14 +171,18 @@ describe("the model page header", () => {
     // resyncing every draft from it would throw the notes away.
     model.mockResolvedValue(detail());
     let resolveTags: (value: unknown) => void = () => {};
-    patchModel.mockImplementation((_id: string, body: Record<string, unknown>) => {
-      if ("tags" in body) {
-        return new Promise((resolve) => {
-          resolveTags = resolve;
-        });
-      }
-      return Promise.resolve(detail({ notes: "typed while the tag was saving" }));
-    });
+    patchModel.mockImplementation(
+      (_id: string, body: Record<string, unknown>) => {
+        if ("tags" in body) {
+          return new Promise((resolve) => {
+            resolveTags = resolve;
+          });
+        }
+        return Promise.resolve(
+          detail({ notes: "typed while the tag was saving" }),
+        );
+      },
+    );
     render(ModelDetail, { id: "a".repeat(64) });
 
     await fireEvent.click(await screen.findByTitle(/Add a tag/));
@@ -183,7 +191,9 @@ describe("the model page header", () => {
     await fireEvent.click(await screen.findByText(/Create “grain”/));
 
     const notes = screen.getByLabelText("Notes") as HTMLTextAreaElement;
-    await fireEvent.input(notes, { target: { value: "typed while the tag was saving" } });
+    await fireEvent.input(notes, {
+      target: { value: "typed while the tag was saving" },
+    });
     resolveTags(detail({ tags: ["film", "grain"] }));
     await waitFor(() => expect(patchModel).toHaveBeenCalledTimes(1));
 

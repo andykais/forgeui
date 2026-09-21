@@ -340,6 +340,15 @@
 
 <div class="generate" data-layout={layout}>
   <!--
+    The screen's top-right corner, on its own layer: in the viewer's header
+    this control sat inside the media pane, and the media pane is only at the
+    right edge in three of the five arrangements — so it moved when the
+    layout did, which is the one thing a layout control must not do (§11.3).
+  -->
+  <div class="corner">
+    <LayoutPicker screen="generate" />
+  </div>
+  <!--
     `data-panel-loading` is how anything outside can tell that the panel is
     still being filled from the last job for this workflow: values applied
     while a field is being edited would fight the edit.
@@ -521,7 +530,6 @@
             </button>
           {/each}
         </div>
-        <LayoutPicker screen="generate" />
       </header>
 
       {#if tileSize === "table"}
@@ -571,6 +579,7 @@
   .generate {
     flex: 1;
     display: grid;
+    position: relative;
     min-height: 0;
     /* The panel and the results share the width; neither may claim more. */
     min-width: 0;
@@ -776,6 +785,14 @@
     color: var(--error);
   }
 
+  .corner {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    /* Over the panes, under the fullscreen overlay. */
+    z-index: 5;
+  }
+
   /* The media area, when what the media is is a grid of results. */
   .results {
     grid-area: media;
@@ -791,6 +808,9 @@
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
+    /* After the shorthand, or the shorthand puts it back. The corner is
+       spoken for (§11.3). */
+    padding-right: var(--corner-reserve);
   }
 
   .filters button,

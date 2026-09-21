@@ -23,7 +23,11 @@ class ToastState {
    * websocket tells every client, but a screen holding its own page of
    * results has to be handed the row itself (§11.2).
    */
-  undo(output: Output, windowMs: number, onrestore?: (restored: Output) => void): void {
+  undo(
+    output: Output,
+    windowMs: number,
+    onrestore?: (restored: Output) => void,
+  ): void {
     const id = `delete:${output.id}`;
     this.#push({
       id,
@@ -34,7 +38,9 @@ class ToastState {
           const { output: restored } = await api.restoreOutput(output.id);
           onrestore?.(restored);
         } catch (cause) {
-          this.message(cause instanceof Error ? cause.message : "could not restore it");
+          this.message(
+            cause instanceof Error ? cause.message : "could not restore it",
+          );
         }
       },
       windowMs,

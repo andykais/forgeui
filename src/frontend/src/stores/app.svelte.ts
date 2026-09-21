@@ -93,7 +93,9 @@ class AppState {
   }
 
   get activeJobs(): Job[] {
-    return this.jobs.filter((job) => job.status === "queued" || job.status === "running");
+    return this.jobs.filter((job) =>
+      job.status === "queued" || job.status === "running"
+    );
   }
 
   get runningJob(): Job | null {
@@ -130,7 +132,8 @@ class AppState {
     return job.outputs
       .map((id) => this.outputs[id])
       .filter(
-        (output): output is Output => output !== undefined && output.deleted_at === null,
+        (output): output is Output =>
+          output !== undefined && output.deleted_at === null,
       );
   }
 
@@ -181,14 +184,15 @@ class AppState {
   }
 
   async refreshModels(): Promise<void> {
-    const [loras, checkpoints, clips, vaes, upscalers, families] = await Promise.all([
-      api.modelsOfKind("loras").catch(() => []),
-      api.modelsOfClass("diffusion").catch(() => []),
-      api.modelsOfClass("clip").catch(() => []),
-      api.modelsOfClass("vae").catch(() => []),
-      api.modelsOfClass("upscale").catch(() => []),
-      api.families().catch(() => []),
-    ]);
+    const [loras, checkpoints, clips, vaes, upscalers, families] = await Promise
+      .all([
+        api.modelsOfKind("loras").catch(() => []),
+        api.modelsOfClass("diffusion").catch(() => []),
+        api.modelsOfClass("clip").catch(() => []),
+        api.modelsOfClass("vae").catch(() => []),
+        api.modelsOfClass("upscale").catch(() => []),
+        api.families().catch(() => []),
+      ]);
     this.loras = loras;
     this.checkpoints = checkpoints;
     this.clips = clips;
@@ -260,7 +264,9 @@ class AppState {
   model(hash: string | null | undefined): ModelEntry | null {
     if (!hash) return null;
     return (
-      this.allModels.find((model) => model.hash === hash || model.id === hash) ?? null
+      this.allModels.find((model) =>
+        model.hash === hash || model.id === hash
+      ) ?? null
     );
   }
 
@@ -330,7 +336,9 @@ class AppState {
 
   #onMessage(event: MessageEvent): void {
     if (typeof event.data !== "string") {
-      const frame = decodePreviewFrame(new Uint8Array(event.data as ArrayBuffer));
+      const frame = decodePreviewFrame(
+        new Uint8Array(event.data as ArrayBuffer),
+      );
       if (!frame) return;
       const url = URL.createObjectURL(
         new Blob([frame.image as BlobPart], {

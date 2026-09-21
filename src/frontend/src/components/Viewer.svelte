@@ -8,7 +8,6 @@
   import { clock, dimensions } from "../lib/format.ts";
   import MetadataSidebar from "./MetadataSidebar.svelte";
   import Filmstrip from "./Filmstrip.svelte";
-  import LayoutPicker from "./LayoutPicker.svelte";
 
   /**
    * The one viewer component (§11.2), shared by Gallery's viewer and
@@ -213,7 +212,6 @@
         <button class:active={!fit} onclick={() => (fit = false)}>1:1</button>
       </div>
       <span class="id mono">{selected.id}</span>
-      <LayoutPicker {screen} />
     </header>
 
     <div class="media" class:one-to-one={!fit} bind:this={mediaBox}>
@@ -276,6 +274,7 @@
   {#if showMetadata}
     {#if detail}
       <MetadataSidebar
+        topRight={layout === "columns"}
         output={detail}
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}
@@ -286,7 +285,9 @@
         onopen={onopenoutput}
       />
     {:else}
-      <aside class="sidebar-loading"><span class="dim">loading metadata…</span></aside>
+      <aside class="sidebar-loading" class:top-right={layout === "columns"}>
+        <span class="dim">loading metadata…</span>
+      </aside>
     {/if}
   {/if}
 </div>
@@ -382,6 +383,9 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
+    /* The screen's top-right corner belongs to the layout picker, which
+       floats above whichever pane happens to be under it (§11.3). */
+    padding-right: var(--corner-reserve);
     background: var(--app);
   }
 
@@ -504,6 +508,10 @@
     background: var(--panel);
     padding: 12px;
     font-size: 12px;
+  }
+
+  .sidebar-loading.top-right {
+    padding-top: var(--corner-clear);
   }
 
   /*

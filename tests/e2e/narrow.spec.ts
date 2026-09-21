@@ -141,6 +141,31 @@ test("the five layouts put the three panes where they say", async ({ page }) => 
     .toBe(Math.round(seen.screen.width));
 });
 
+test("the layout control does not move when the layout does", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await anOutput(page);
+
+  // The corner it sits in, measured from the right edge of the window.
+  const corner = async () => {
+    const box = (await page.locator(".trigger").first().boundingBox())!;
+    return {
+      right: Math.round(WIDE.width - (box.x + box.width)),
+      top: Math.round(box.y),
+    };
+  };
+  // Browsing the results, before anything is open.
+  const home = await corner();
+
+  await page.locator(".tile .surface").first().click();
+  await expect(page.locator(".main")).toBeVisible();
+  for (const layout of Object.keys(LABELS) as (keyof typeof LABELS)[]) {
+    await choose(page, layout);
+    // It used to live in the media pane's header, and three of the five
+    // arrangements do not put that pane against the right edge.
+    expect(await corner(), layout).toEqual(home);
+  }
+});
+
 test("browsing the grid, no layout holds an empty metadata pane", async ({ page }) => {
   await page.setViewportSize(WIDE);
   await openOne(page);
@@ -175,6 +200,26 @@ test("Gallery is offered only the layouts it can use", async ({ page }) => {
   await expect(page.locator(".option")).toHaveCount(3);
   await expect(page.getByRole("button", { name: "Media on top", exact: true }))
     .toHaveCount(0);
+
+  // And the diagrams draw the screen that exists: two panes, not three. They
+  // drew an inputs column here at first, which is a picture of Generate.
+  const panes = await page.locator(".option").evaluateAll((options) =>
+    options.map((option) => option.querySelectorAll("svg rect").length)
+  );
+  expect(panes).toEqual([2, 2, 1]);
+  await page.keyboard.press("Escape");
+});
+
+test("three columns is offered but greyed out in a narrow window", async ({ page }) => {
+  await page.setViewportSize(HALF);
+  await openOne(page);
+
+  await page.locator(".trigger").first().click();
+  const columns = page.locator(".option").first();
+  await expect(columns).toContainText("Metadata beside");
+  // Picking it would silently get `split`, so it does not offer itself.
+  await expect(columns).toBeDisabled();
+  await expect(columns).toHaveAttribute("title", /No room for three columns/);
   await page.keyboard.press("Escape");
 });
 
@@ -212,8 +257,9 @@ test("the layout control is reachable in a narrow window", async ({ page }) => {
   await openOne(page);
 
   // Whatever else the header drops, this stays on screen: it is what gets
-  // the media its room back.
-  const trigger = page.locator(".viewer .trigger, .main .trigger").first();
+  // the media its room back. It lives in the screen's corner, not in the
+  // media pane's header — the pane moves, the corner does not.
+  const trigger = page.locator(".corner .trigger").first();
   await expect(trigger).toBeVisible();
   const box = (await trigger.boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(HALF.width);

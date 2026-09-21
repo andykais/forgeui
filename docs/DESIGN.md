@@ -1325,8 +1325,16 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   | `top-split` | media across the top, inputs and metadata underneath |
 
   and they are a per-screen preference in `config.yaml`, like the tile size.
+  The control sits in the screen's **top-right corner** and stays there: it
+  began in the media pane's header, which is only against the right edge in
+  three of the five arrangements, so the layout control moved when the layout
+  did. It floats over whatever pane is under the corner, and that pane leaves
+  the room — a header reserves the width, the metadata pane the height.
+  An arrangement this window cannot honour is offered greyed out rather than
+  silently swapped: below the breakpoint, that is `columns`.
   Gallery and a model's page have no inputs panel, so they are offered only
-  the first three; `sidebar_collapsed` is what this replaces, and stays a
+  the first three — and the diagrams there draw two panes rather than three,
+  because a picture of a screen that does not exist is worse than no picture; `sidebar_collapsed` is what this replaces, and stays a
   valid key so an older `config.yaml` still loads.
 
   Two consequences worth stating. Browsing a grid of results nothing is

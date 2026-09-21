@@ -31,11 +31,13 @@ describe("afterRemoval", () => {
 
   it("reads the other way round when the list is oldest first", () => {
     // Oldest first: older is the *previous* entry, not the next.
-    expect(afterRemoval(list("a", "b", "c"), "b", { oldestFirst: true })).toEqual({
-      id: "a",
-    });
-    expect(afterRemoval(list("a", "b", "c"), "a", { oldestFirst: true })).toEqual({
-      id: "b",
-    });
+    expect(afterRemoval(list("a", "b", "c"), "b", { oldestFirst: true }))
+      .toEqual({
+        id: "a",
+      });
+    expect(afterRemoval(list("a", "b", "c"), "a", { oldestFirst: true }))
+      .toEqual({
+        id: "b",
+      });
   });
 });

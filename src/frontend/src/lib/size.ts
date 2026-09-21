@@ -42,7 +42,11 @@ export function resolveRatio(param: Param, a: number, b: number): Size {
  * resolution, which is the app deciding something the person attaching a
  * 2720x1536 frame has already decided. The size row is right there to adjust.
  */
-export function sizeForImage(param: Param, width: number, height: number): Size | null {
+export function sizeForImage(
+  param: Param,
+  width: number,
+  height: number,
+): Size | null {
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
   if (width <= 0 || height <= 0) return null;
   const step = stepOf(param);
