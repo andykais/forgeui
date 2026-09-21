@@ -1332,6 +1332,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   right about one of them.
 
   and they are a per-screen preference in `config.yaml`, like the tile size.
+  The options in the picker are **diagrams and nothing else** — a column of
+  five sentences had to be read through to find the one you can see — and
+  each carries the words in `title` and `aria-label`, naming every panel it
+  shows in the order it shows them ("3 vertical columns: input, media,
+  metadata").
   The control sits in the screen's **top-right corner** and stays there: it
   began in the media pane's header, which is only against the right edge in
   three of the five arrangements, so the layout control moved when the layout

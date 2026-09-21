@@ -107,14 +107,33 @@
       WITH_INPUTS[layout]
   );
 
-  /** Short enough for one line; the diagram beside each says the rest. */
-  const LABELS: Record<Layout, string> = {
-    columns: "Metadata beside",
-    split: "Metadata below",
-    wide: "No metadata",
-    top: "Media on top",
-    "top-split": "Media on top, metadata beside",
+  /**
+   * What each arrangement is, in words, for the tooltip and for anything
+   * that cannot see the diagram.
+   *
+   * Every panel the layout shows is named, in the order it appears: with no
+   * text in the list, this is the only place the names exist, and "metadata
+   * beside" left the reader to work out what the other two panes were.
+   */
+  const DESCRIPTIONS: Record<Layout, string> = {
+    columns: "3 vertical columns: input, media, metadata",
+    split: "2 vertical columns: input, then media above metadata",
+    wide: "2 vertical columns: input, media — no metadata",
+    top: "2 horizontal rows: media, then input — no metadata",
+    "top-split": "Media across the top; input and metadata in 2 columns below",
   };
+
+  /** The same, for a screen with no input panel (§11.3). */
+  const DESCRIPTIONS_NO_INPUTS: Partial<Record<Layout, string>> = {
+    columns: "2 vertical columns: media, metadata",
+    split: "2 horizontal rows: media, then metadata",
+    wide: "Media only — no metadata",
+  };
+
+  const describe = $derived((layout: Layout): string =>
+    (hasInputs ? undefined : DESCRIPTIONS_NO_INPUTS[layout]) ??
+      DESCRIPTIONS[layout]
+  );
 
   /**
    * The window is too narrow for a media column between two fixed panes, so
@@ -161,38 +180,46 @@
 <button
   class="trigger"
   bind:this={trigger}
-  title={`Layout: ${LABELS[current]}`}
-  aria-label={`Layout: ${LABELS[current]}`}
+  title={`Layout — ${describe(current)}`}
+  aria-label={`Layout — ${describe(current)}`}
   onclick={() => (open = !open)}
 >
   {@render diagram(current)}
   <ChevronDown size={11} />
 </button>
 
+<!--
+  Diagrams and nothing else: the shape is the thing being chosen, and a
+  column of five sentences made you read all five to find the one you can
+  see. The words live in `title` and `aria-label`, where they are there for
+  a hover and for a screen reader without being in the way of the eye.
+-->
 <Popover
   {open}
-  width={250}
+  width={offered.length * 46 + 16}
   align="right"
   anchor={anchor ?? trigger ?? null}
   title="Layout"
   onclose={() => (open = false)}
 >
-  {#each offered as layout (layout)}
-    <button
-      class="option"
-      class:chosen={layout === current}
-      class:unavailable={unavailable(layout)}
-      aria-pressed={layout === current}
-      disabled={unavailable(layout)}
-      title={unavailable(layout)
-        ? "No room for three columns in a window this narrow"
-        : LABELS[layout]}
-      onclick={() => choose(layout)}
-    >
-      {@render diagram(layout)}
-      <span class="name">{LABELS[layout]}</span>
-    </button>
-  {/each}
+  <div class="options">
+    {#each offered as layout (layout)}
+      <button
+        class="option"
+        class:chosen={layout === current}
+        class:unavailable={unavailable(layout)}
+        aria-pressed={layout === current}
+        disabled={unavailable(layout)}
+        title={unavailable(layout)
+          ? `${describe(layout)} — no room for it in a window this narrow`
+          : describe(layout)}
+        aria-label={describe(layout)}
+        onclick={() => choose(layout)}
+      >
+        {@render diagram(layout)}
+      </button>
+    {/each}
+  </div>
 </Popover>
 
 <style>
@@ -231,23 +258,33 @@
     fill: var(--text-4);
   }
 
+  /* A row of them: five diagrams side by side read as a set of shapes. */
+  .options {
+    display: flex;
+    gap: 2px;
+  }
+
   .option {
     display: flex;
     align-items: center;
-    gap: 9px;
-    width: 100%;
-    padding: 6px 8px;
+    justify-content: center;
+    padding: 6px;
     background: transparent;
     border-radius: var(--radius-control);
-    text-align: left;
   }
 
   .option:hover {
     background: var(--control);
   }
 
+  /*
+   * With no text, the chosen one has to be obvious from the plate alone —
+   * a tint the same width as every other option is not enough.
+   */
   .option.chosen {
     background: var(--accent-tint);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   /*
@@ -263,13 +300,4 @@
     background: transparent;
   }
 
-  .option.chosen .name {
-    color: var(--text);
-  }
-
-  .name {
-    font-size: 12px;
-    color: var(--text-2);
-    min-width: 0;
-  }
 </style>

@@ -27,12 +27,25 @@ const HALF_SHORT = { width: 960, height: 900 };
 /** A normal window, where every layout has room to be itself. */
 const WIDE = { width: 1600, height: 950 };
 
+/**
+ * The options carry no text — the diagram is the option — so what names them
+ * is the description in `aria-label`, which says every panel the arrangement
+ * shows and in what order.
+ */
 const LABELS = {
-  columns: "Metadata beside",
-  split: "Metadata below",
-  wide: "No metadata",
-  top: "Media on top",
-  "top-split": "Media on top, metadata beside",
+  columns: "3 vertical columns: input, media, metadata",
+  split: "2 vertical columns: input, then media above metadata",
+  wide: "2 vertical columns: input, media — no metadata",
+  top: "2 horizontal rows: media, then input — no metadata",
+  "top-split":
+    "Media across the top; input and metadata in 2 columns below",
+} as const;
+
+/** Gallery has no input panel, so it names two panes rather than three. */
+const GALLERY_LABELS = {
+  columns: "2 vertical columns: media, metadata",
+  split: "2 horizontal rows: media, then metadata",
+  wide: "Media only — no metadata",
 } as const;
 
 async function anOutput(page: import("@playwright/test").Page) {
@@ -155,6 +168,23 @@ function expectHalf(width: number, screen: number, what: string) {
   expect(Math.abs(width - screen / 2), what).toBeLessThan(2);
 }
 
+test("the options are diagrams, and the words are in the title", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await anOutput(page);
+  await page.locator(".trigger").first().click();
+
+  const options = page.locator(".option");
+  await expect(options).toHaveCount(5);
+  for (const [layout, label] of Object.entries(LABELS)) {
+    const option = page.getByRole("button", { name: label, exact: true });
+    await expect(option, layout).toHaveCount(1);
+    // Nothing to read in the list itself; the name is on the attribute.
+    await expect(option, layout).toHaveText("");
+    await expect(option, layout).toHaveAttribute("title", label);
+  }
+  await page.keyboard.press("Escape");
+});
+
 test("the diagrams give each pane its own colour", async ({ page }) => {
   await page.setViewportSize(WIDE);
   await anOutput(page);
@@ -229,8 +259,15 @@ test("Gallery is offered only the layouts it can use", async ({ page }) => {
   // No inputs panel there, so the two arrangements that mention one are not
   // offered at all.
   await expect(page.locator(".option")).toHaveCount(3);
-  await expect(page.getByRole("button", { name: "Media on top", exact: true }))
-    .toHaveCount(0);
+  for (const label of Object.values(GALLERY_LABELS)) {
+    await expect(page.getByRole("button", { name: label, exact: true }))
+      .toHaveCount(1);
+  }
+  // Nothing here mentions an input panel, because there is not one.
+  for (const label of Object.values(LABELS)) {
+    await expect(page.getByRole("button", { name: label, exact: true }))
+      .toHaveCount(0);
+  }
 
   // And the diagrams draw the screen that exists: two panes, not three. They
   // drew an inputs column here at first, which is a picture of Generate.
@@ -247,10 +284,10 @@ test("three columns is offered but greyed out in a narrow window", async ({ page
 
   await page.locator(".trigger").first().click();
   const columns = page.locator(".option").first();
-  await expect(columns).toContainText("Metadata beside");
+  await expect(columns).toHaveAttribute("aria-label", LABELS.columns);
   // Picking it would silently get `split`, so it does not offer itself.
   await expect(columns).toBeDisabled();
-  await expect(columns).toHaveAttribute("title", /No room for three columns/);
+  await expect(columns).toHaveAttribute("title", /no room for it/);
   await page.keyboard.press("Escape");
 });
 
