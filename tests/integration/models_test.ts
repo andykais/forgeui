@@ -104,6 +104,25 @@ async function models(
   return await app.json<ModelsResponse>(`/api/models${query}`);
 }
 
+/**
+ * One of the fixture's two LoRAs, by filename rather than by position.
+ *
+ * `models[0]` is not this model: the list is newest added first (§8.1), the
+ * two fixture files are written in the same breath, and whether their
+ * `added_at` ties — leaving the name to break it, which put this one first —
+ * comes down to which millisecond each write lands in. On a machine where
+ * the writes straddle a tick, the other one is newest and sorts first.
+ */
+async function fixtureLora(
+  app: TestApp,
+  filename = "film-grain-35mm.safetensors",
+): Promise<ModelView> {
+  const found = (await models(app, "?kind=loras")).models
+    .find((model) => model.filename === filename);
+  assert(found, `the fixture LoRA ${filename} is not in the library`);
+  return found;
+}
+
 Deno.test("the response says what class each configured folder holds", async () => {
   await withModels(async (app) => {
     const listed = await models(app);
@@ -376,7 +395,7 @@ Deno.test("hashing fills in identity, and only re-reads what changed", async () 
 Deno.test("a hashed model can be named, filed and tagged", async () => {
   await withModels(async (app) => {
     await scanAndHash(app);
-    const lora = (await models(app, "?kind=loras")).models[0]!;
+    const lora = await fixtureLora(app);
 
     const patched = await app.json<ModelView>(`/api/models/${lora.hash}`, {
       method: "PATCH",
@@ -528,7 +547,7 @@ Deno.test("a family the config hides takes its models with it", async () => {
 Deno.test("a bad family or an unknown model is refused", async () => {
   await withModels(async (app) => {
     await scanAndHash(app);
-    const lora = (await models(app, "?kind=loras")).models[0]!;
+    const lora = await fixtureLora(app);
 
     const badFamily = await app.fetch(`/api/models/${lora.hash}`, {
       method: "PATCH",
@@ -556,7 +575,7 @@ Deno.test("a bad family or an unknown model is refused", async () => {
 Deno.test("families come back with model and workflow counts", async () => {
   await withModels(async (app) => {
     await scanAndHash(app);
-    const lora = (await models(app, "?kind=loras")).models[0]!;
+    const lora = await fixtureLora(app);
     await app.json(`/api/models/${lora.hash}`, {
       method: "PATCH",
       body: JSON.stringify({ family: "flux" }),
