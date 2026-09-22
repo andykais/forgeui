@@ -24,10 +24,12 @@ vi.mock("../stores/app.svelte.ts", () => ({
     get loras() {
       return library;
     },
-    modelByName: (name: string) => library.find((model) => model.name === name) ?? null,
+    modelByName: (name: string) =>
+      library.find((model) => model.name === name) ?? null,
     modelName: (hash: string) =>
       library.find((model) => model.hash === hash)?.display_name ?? "unknown",
-    model: (hash: string) => library.find((model) => model.hash === hash) ?? null,
+    model: (hash: string) =>
+      library.find((model) => model.hash === hash) ?? null,
   },
 }));
 
@@ -169,7 +171,7 @@ describe("the metadata sidebar", () => {
     // first hash, and both chips the same name.
     mount();
     const names = [...document.querySelectorAll(".lora-name")].map((el) =>
-      el.textContent?.trim(),
+      el.textContent?.trim()
     );
     expect(names).toEqual(["glow", "grain"]);
   });
@@ -177,7 +179,7 @@ describe("the metadata sidebar", () => {
   test("each LoRA links to its own model page", () => {
     mount();
     const links = [...document.querySelectorAll(".lora-name a")].map((el) =>
-      el.getAttribute("href"),
+      el.getAttribute("href")
     );
     expect(links).toEqual([`/models/${A}`, `/models/${B}`]);
   });
@@ -186,7 +188,7 @@ describe("the metadata sidebar", () => {
     library.length = 0;
     mount();
     const names = [...document.querySelectorAll(".lora-name")].map((el) =>
-      el.textContent?.trim(),
+      el.textContent?.trim()
     );
     expect(names).toEqual(["glow.safetensors", "grain.safetensors"]);
   });
@@ -220,7 +222,9 @@ describe("the metadata sidebar", () => {
   test("the prompt is shown exactly as it was written", () => {
     mount();
     const prompt = [...document.querySelectorAll(".field")]
-      .find((row) => row.querySelector(".key")?.textContent?.trim() === "prompt")
+      .find((row) =>
+        row.querySelector(".key")?.textContent?.trim() === "prompt"
+      )
       ?.querySelector(".selectable");
     expect(prompt?.textContent).toBe("a red firetruck\n\non a wet street");
   });
@@ -235,7 +239,9 @@ describe("the metadata sidebar", () => {
   test("offers each LoRA to the workflow open in the panel", async () => {
     panelTakesLoras();
     mount();
-    const add = await screen.findByLabelText("Add grain at 0.5 to Krea 2 Turbo");
+    const add = await screen.findByLabelText(
+      "Add grain at 0.5 to Krea 2 Turbo",
+    );
     await add.click();
     // The strengths come from the run, not from the model's own defaults:
     // what makes a LoRA usable is the number somebody already found for it.

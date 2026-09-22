@@ -70,7 +70,7 @@ test("generate with Stable Diffusion 1.5 and watch it land", async ({ page }) =>
 
   // The viewer reads the sidecar the app wrote beside the file.
   await page.locator(".tile .surface").first().click();
-  await expect(page.getByRole("button", { name: "Edit in Generate →" }))
+  await expect(page.getByRole("button", { name: "Reuse parameters →" }))
     .toBeVisible();
   await expect(page.getByText("Stable Diffusion 1.5").first()).toBeVisible();
   await expect(page.getByText(promptText.slice(0, 24)).first()).toBeVisible();
@@ -161,10 +161,10 @@ test("the model library, from the card to the thumbnail", async ({ page }) => {
 
   // Promote the generation it made, from the viewer on this page.
   await page.locator(".tile .surface").first().click();
-  await page.getByRole("button", { name: "Promote to sample" }).click();
+  await page.getByRole("button", { name: "Save as sample" }).click();
   await page.getByRole("button", { name: /Stable Diffusion 1\.5/ }).click();
-  await page.getByRole("button", { name: "Promote", exact: true }).click();
-  await expect(page.getByText(/Promoted to 1 sample/)).toBeVisible();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Saved as 1 sample/)).toBeVisible();
 
   await page.keyboard.press("Escape");
   await page.reload();

@@ -92,7 +92,9 @@ export function dayLabel(date: string): string {
     .toLocaleDateString(undefined, {
       day: "numeric",
       month: "short",
-      year: parsed.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+      year: parsed.getFullYear() === new Date().getFullYear()
+        ? undefined
+        : "numeric",
     })
     .toUpperCase();
 }
@@ -100,9 +102,13 @@ export function dayLabel(date: string): string {
 /** `YYYY-MM-DD` in the browser's timezone, which is what the dividers use. */
 export function localDate(at: Date | number): string {
   const date = typeof at === "number" ? new Date(at) : at;
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${
+    String(date.getMonth() + 1).padStart(2, "0")
+  }-${
+    String(
+      date.getDate(),
+    ).padStart(2, "0")
+  }`;
 }
 
 export function vram(free: number | null, total: number | null): string {
@@ -112,7 +118,10 @@ export function vram(free: number | null, total: number | null): string {
 }
 
 /** A telemetry value in the unit its report declares (§7.1). */
-export function measure(value: number | null | undefined, unit: "ms" | "bytes"): string {
+export function measure(
+  value: number | null | undefined,
+  unit: "ms" | "bytes",
+): string {
   if (value === null || value === undefined) return "—";
   if (unit === "bytes") return bytes(value);
   // A local API call is often under a millisecond, and `0ms` for every row
@@ -128,7 +137,10 @@ export function measure(value: number | null | undefined, unit: "ms" | "bytes"):
 export function axisTime(at: number, spanMs: number): string {
   const date = new Date(at);
   if (spanMs >= 3 * 86_400_000) {
-    return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    return date.toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+    });
   }
   if (spanMs >= 86_400_000) {
     return date.toLocaleString(undefined, {

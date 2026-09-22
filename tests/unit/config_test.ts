@@ -221,6 +221,41 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
     ConfigError,
     'unknown key "nowhere"',
   );
+  assertThrows(
+    () => validatePartialConfig({ ui: { layout: { generate: "sideways" } } }),
+    ConfigError,
+    "one of columns, split, wide, top, top-split",
+  );
+});
+
+/**
+ * The arrangement of the three panes (§11.3). It is a per-screen key like
+ * the tile size, and `sidebar_collapsed` — which it supersedes — is still
+ * accepted, because a config.yaml written before it exists must still load.
+ */
+Deno.test("the layout is a per-screen preference, and the old key still loads", async () => {
+  await withTempDir(async (dir) => {
+    const { store } = await loadConfig({ dataDir: dir });
+    assertEquals(store.config.ui.layout, {
+      generate: "columns",
+      gallery: "columns",
+      models: "columns",
+    });
+
+    await store.patch({ ui: { layout: { generate: "top-split" } } });
+    const reloaded = (await loadConfig({ dataDir: dir })).store;
+    assertEquals(reloaded.config.ui.layout, {
+      generate: "top-split",
+      gallery: "columns",
+      models: "columns",
+    });
+
+    // The key the layouts replaced is still a key.
+    const older = validatePartialConfig({
+      ui: { sidebar_collapsed: { gallery: true } },
+    });
+    assertEquals(older.ui?.sidebar_collapsed, { gallery: true });
+  });
 });
 
 Deno.test("an empty config.yaml means all defaults", () => {

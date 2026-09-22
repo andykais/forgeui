@@ -60,12 +60,14 @@ function mergeUi(
   if (!layer) return { ...base };
   const ui: PartialUiConfig = { ...base, ...layer };
   const tile_size = mergeSection(base.tile_size, layer.tile_size);
+  const layout = mergeSection(base.layout, layer.layout);
   const sidebar = mergeSection(base.sidebar_collapsed, layer.sidebar_collapsed);
   const filmstrip = mergeSection(
     base.filmstrip_collapsed,
     layer.filmstrip_collapsed,
   );
   if (tile_size) ui.tile_size = tile_size;
+  if (layout) ui.layout = layout;
   if (sidebar) ui.sidebar_collapsed = sidebar;
   if (filmstrip) ui.filmstrip_collapsed = filmstrip;
   return ui;
@@ -106,6 +108,7 @@ export function effectiveConfig(...layers: PartialConfig[]): Config {
       ...base.ui,
       ...layer.ui,
       tile_size: { ...base.ui.tile_size, ...layer.ui?.tile_size },
+      layout: { ...base.ui.layout, ...layer.ui?.layout },
       sidebar_collapsed: {
         ...base.ui.sidebar_collapsed,
         ...layer.ui?.sidebar_collapsed,

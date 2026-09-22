@@ -19,7 +19,11 @@ const fakeApi = {
     url: "/api/media/inputs/aa/x.png",
     derived_from_output: id,
   })),
-  workflow: vi.fn(async () => ({ id: "up", name: "Up", manifest: upscaleManifest })),
+  workflow: vi.fn(async () => ({
+    id: "up",
+    name: "Up",
+    manifest: upscaleManifest,
+  })),
   jobs: vi.fn(async () => []),
 };
 vi.mock("../api.ts", () => ({ api: fakeApi }));
@@ -189,7 +193,13 @@ describe("what blocks Generate", () => {
       bind: "6.image",
       when: { param: "upscale", is: true },
     },
-    { key: "prompt", label: "Prompt", type: "text", required: true, bind: "4.text" },
+    {
+      key: "prompt",
+      label: "Prompt",
+      type: "text",
+      required: true,
+      bind: "4.text",
+    },
   ];
 
   beforeEach(() => load(params));
@@ -304,9 +314,11 @@ describe("the duration follows the attached clip", () => {
   });
 
   test("a duration that follows nothing is not touched", () => {
-    load(params.map((param) =>
-      param.key === "duration" ? { ...param, follows: undefined } : param
-    ));
+    load(
+      params.map((param) =>
+        param.key === "duration" ? { ...param, follows: undefined } : param
+      ),
+    );
     panel.values = { duration: 9 };
     expect(panel.durationFromAudio("audio", 11_400)).toBeNull();
     expect(panel.values.duration).toBe(9);

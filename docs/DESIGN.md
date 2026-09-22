@@ -99,7 +99,7 @@ in SQLite (which sits inside the data dir and is a rebuildable index).
 | Layer | Holds | Set by |
 |---|---|---|
 | Bootstrap | data dir only | `--data-dir` flag or `FORGEUI_DATA_DIR` env; default `~/.forgeui` |
-| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, sidebar/filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
+| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, layout per screen (§11.3), filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
 | Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--comfy-mode`, `--models-dir kind=path`, `--host`, `--port`), applied for that process only, never written back |
 
 First run: if `config.yaml` is absent the app writes one with defaults and
@@ -1311,9 +1311,100 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - One popover component (326px) serves the LoRA picker, the models filter,
   the use-in-workflow menu and the promote-to-sample target picker.
 
-- **Narrow windows** (desktop-only app, no real breakpoints): the metadata
-  sidebar collapses first, then the media centre shrinks; the params panel is
-  the last to give. The filmstrip stays unless the user collapses it.
+- **Layout (§11.2).** Generate has three panes — the inputs, the media, the
+  metadata — and the arrangement is the user's to pick, from a control whose
+  options are drawn rather than named: at a glance you are choosing a shape,
+  and five words would each have to be read. The five are
+
+  | `ui.layout` | Where things go |
+  | --- | --- |
+  | `columns` | inputs \| media \| metadata — three across, the default |
+  | `split` | inputs \| media over metadata |
+  | `wide` | inputs \| media, and no metadata |
+  | `top` | media across the top, inputs underneath |
+  | `top-split` | media across the top, inputs and metadata underneath |
+
+  **Only `columns` has fixed panes** — 360px of params, 306px of metadata,
+  the media between them — because it is the only one with three of them.
+  Every other split is down the middle, at every width. It was 360px against
+  the rest, which is a quarter of a 1600px window and half of a 960px one:
+  one arrangement that looked like two, and a diagram that could only be
+  right about one of them.
+
+  and they are a per-screen preference in `config.yaml`, like the tile size.
+  The options in the picker are **diagrams and nothing else** — a column of
+  five sentences had to be read through to find the one you can see — and
+  each carries the words in `title` and `aria-label`, naming every panel it
+  shows in the order it shows them ("3 vertical columns: input, media,
+  metadata").
+  The control sits in the screen's **top-right corner** and stays there: it
+  began in the media pane's header, which is only against the right edge in
+  three of the five arrangements, so the layout control moved when the layout
+  did. It floats over whatever pane is under the corner, and that pane leaves
+  the room — a header reserves the width, the metadata pane the height.
+  An arrangement this window cannot honour is offered greyed out rather than
+  silently swapped: below the breakpoint, that is `columns`.
+  Gallery and a model's page have no inputs panel, so they are offered only
+  the first three — and the diagrams there draw two panes rather than three,
+  because a picture of a screen that does not exist is worse than no picture.
+  Each pane has its own colour in those diagrams, so an arrangement is read
+  by which pane is where and not only by shape; `sidebar_collapsed` is what this replaces, and stays a
+  valid key so an older `config.yaml` still loads.
+
+  Two consequences worth stating. Browsing a grid of results nothing is
+  selected, so the layout in force is whichever of the five has no metadata
+  pane — an empty 306px column beside the tiles would be worse than none.
+  And `top-split` gives the leftover width to the inputs rather than the
+  metadata: params are fields that use width, and a list of short values
+  does not get better for being 1200px wide.
+
+  The panes are placed by **one CSS grid with named areas**, which the viewer
+  dissolves into (`display: contents`) rather than nesting inside: one of the
+  five puts the metadata beside the *inputs*, and no arrangement of nested
+  boxes gets it there.
+
+  The **filmstrip is a row of that grid**, not the last thing in the media
+  pane, because "under the media" and "along the bottom" stopped being the
+  same place once the metadata could sit below the media: in `split` a strip
+  inside the media pane landed halfway down the page with the metadata under
+  it. Where the metadata is beside the media the two places coincide, and
+  there the sidebar keeps its full height rather than being cut short by a
+  strip that has nothing to do with it. On Generate the grid is the screen's,
+  not the viewer's, and there the strip stays with the media.
+
+- **Narrow windows.** Down to half a 16:9 screen the layout does not move:
+  the metadata sidebar collapses first, then the media centre shrinks, and
+  the params panel is the last to give. The filmstrip stays unless the user
+  collapses it.
+
+  Below that there is **one breakpoint** — the app in one half of a split
+  monitor — and the arrangement turns rather than shrinks. Four of the five
+  layouts already fit a narrow window; the one that cannot is `columns`,
+  which has no width for a media column between two fixed panes, so it
+  becomes `split` — the same thing arrived at by the window rather than by
+  the picker. The rule is
+  `(max-width: 1100px), (max-aspect-ratio: 8/9)`: width first, because the
+  three columns cost `56 + 360 + 306` and 1100px is where what is left over
+  falls below the width of the params panel itself. Aspect ratio alone was
+  tried and does not survive a real browser — half of a 1920×1080 screen is
+  960×1080 as a window but about 960×990 as a viewport, once the tab strip
+  and the address bar have taken their share, and 0.97 is nowhere near 8/9.
+  The aspect clause is kept for what width misses: a tall, narrow window on
+  a large monitor. Side by side, 360px of params and 306px of metadata left the
+  media around 240px: a 1024px picture shown at 20%, with the button that
+  would have given it its width back pushed off the end of a header that had
+  run out of room. Instead:
+
+  - the params panel takes **half the width**, the viewer the other half;
+  - inside the viewer, the media takes the **top half of the height** and the
+    metadata the bottom half, full width each;
+  - the header sheds what it cannot afford — the output id and the words on
+    the Back button — and the metadata toggle is the one control that may
+    never be squeezed out, because collapsing is what gives the media the
+    whole column back. Collapsed, the sidebar's thin edge turns with the
+    layout: a bar under the media rather than a strip beside it.
+
+  Gallery gets this too; it is the same viewer.
 
 - **ComfyUI state.** The **Generate** button is disabled whenever ComfyUI is
   not connected, and whenever any `required` param is empty. While ComfyUI
@@ -1353,6 +1444,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   A chord is never one of these: a binding is a bare key, and several are
   plain letters, so an event carrying ctrl, meta or alt matches nothing —
   otherwise `Ctrl+A` would move the selection on its way to selecting all.
+
+  **Every screen that shows the viewer owes it these keys.** The model page
+  showed the viewer and bound none of them, so its Back button said `esc`
+  while the key did nothing — a control that advertises a binding the screen
+  does not answer. `esc` unwinds one step at a time there as everywhere: out
+  of fullscreen first, then back to the grid. Inside a text field the
+  bindings are off, which is what leaves `esc` to revert an edit-in-place
+  header (§8.1).
 
   A first run writes the whole default tree into `config.yaml`, which makes
   the file self-documenting and also **freezes every value in it**: a default

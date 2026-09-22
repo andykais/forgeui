@@ -47,12 +47,19 @@ describe("the model card", () => {
     expect(screen.getByText("Film grain 35mm")).toBeTruthy();
     expect(screen.getByText("sd15")).toBeTruthy();
     const outputs = screen.getByText("12 outputs") as HTMLAnchorElement;
-    expect(outputs.getAttribute("href")).toBe(`/gallery?models=${"a".repeat(64)}`);
+    expect(outputs.getAttribute("href")).toBe(
+      `/gallery?models=${"a".repeat(64)}`,
+    );
   });
 
   test("a model with no hash yet says so and offers no family control", () => {
     render(ModelCard, {
-      model: model({ hash: null, id: "path:abc", hashing: true, family: "unset" }),
+      model: model({
+        hash: null,
+        id: "path:abc",
+        hashing: true,
+        family: "unset",
+      }),
       onfamily: vi.fn(),
     });
 

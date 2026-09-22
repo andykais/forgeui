@@ -92,7 +92,11 @@ interface Handlers {
   onseedlock: ReturnType<typeof vi.fn>;
 }
 
-function diffusionModel(name: string, family: string, kind = "checkpoints"): ModelEntry {
+function diffusionModel(
+  name: string,
+  family: string,
+  kind = "checkpoints",
+): ModelEntry {
   return {
     path: `/models/${kind}/${name}`,
     name,
@@ -151,8 +155,8 @@ function mount(
       checkpoints: extra.checkpoints ?? [],
       modelsOfClass: (modelClass: string | undefined) =>
         (modelClass === undefined ? undefined : extra.byClass?.[modelClass]) ??
-        extra.checkpoints ??
-        [],
+          extra.checkpoints ??
+          [],
       warnings: extra.warnings ?? [],
       ...handlers,
     },
@@ -175,7 +179,14 @@ describe("each param type renders from the manifest", () => {
   test("int and float", async () => {
     const { handlers } = mount(
       [
-        { key: "steps", label: "Steps", type: "int", min: 1, max: 100, bind: "3.steps" },
+        {
+          key: "steps",
+          label: "Steps",
+          type: "int",
+          min: 1,
+          max: 100,
+          bind: "3.steps",
+        },
         { key: "cfg", label: "CFG", type: "float", step: 0.1, bind: "3.cfg" },
       ],
       { steps: 28, cfg: 3.5 },
@@ -241,7 +252,9 @@ describe("each param type renders from the manifest", () => {
       { size: [1024, 1024] },
     );
 
-    expect((screen.getByLabelText("Width") as HTMLInputElement).value).toBe("1024");
+    expect((screen.getByLabelText("Width") as HTMLInputElement).value).toBe(
+      "1024",
+    );
     // 16:9 of a 1024×1024 base, snapped to the model's 64px grid (§11.3).
     const preset = screen.getByRole("button", { name: "16:9" });
     expect(preset.getAttribute("title")).toBe("1344 × 768");
@@ -299,7 +312,10 @@ describe("each param type renders from the manifest", () => {
     // A model from checkpoints/ is selectable in a workflow whose loader is
     // a UNETLoader: one class, one list (§3).
     await fireEvent.click(screen.getByText("illustriousXL"));
-    expect(handlers.onchange).toHaveBeenCalledWith("model", "illustriousXL.safetensors");
+    expect(handlers.onchange).toHaveBeenCalledWith(
+      "model",
+      "illustriousXL.safetensors",
+    );
   });
 
   test("a model that is not on disk is flagged in the panel", async () => {
@@ -308,13 +324,19 @@ describe("each param type renders from the manifest", () => {
       // What a bundled workflow ships: the template's filename, which is not
       // the filename on this machine.
       { model: "krea2_turbo_fp8_scaled.safetensors" },
-      { checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")] },
+      {
+        checkpoints: [diffusionModel("krea2_turbo_bf16.safetensors", "krea2")],
+      },
     );
     expect(screen.getByText("not found")).toBeTruthy();
   });
 
   test("a text_encoder param picks from the clip class, not diffusion", async () => {
-    const encoder = diffusionModel("qwen3vl_4b.safetensors", "unset", "text_encoders");
+    const encoder = diffusionModel(
+      "qwen3vl_4b.safetensors",
+      "unset",
+      "text_encoders",
+    );
     encoder.class = "clip";
     const { handlers } = mount(
       [
@@ -337,7 +359,10 @@ describe("each param type renders from the manifest", () => {
     // The diffusion model is not offered for a text encoder slot.
     expect(screen.queryByText("flux1-dev")).toBeNull();
     await fireEvent.click(screen.getByText("qwen3vl_4b"));
-    expect(handlers.onchange).toHaveBeenCalledWith("clip", "qwen3vl_4b.safetensors");
+    expect(handlers.onchange).toHaveBeenCalledWith(
+      "clip",
+      "qwen3vl_4b.safetensors",
+    );
   });
 
   test("the model picker searches across folders", async () => {
@@ -364,17 +389,29 @@ describe("each param type renders from the manifest", () => {
     // The picker, a drop, and a paste: a screenshot only ever lives on the
     // clipboard, and making somebody save it to disk first serves nothing.
     mount([
-      { key: "image", label: "Image", type: "image", required: true, bind: "10.image" },
+      {
+        key: "image",
+        label: "Image",
+        type: "image",
+        required: true,
+        bind: "10.image",
+      },
     ]);
     expect(screen.getByText(/Choose, drop or paste an image/)).toBeTruthy();
-    expect(screen.getByLabelText("Image: choose, drop or paste an image")).toBeTruthy();
+    expect(screen.getByLabelText("Image: choose, drop or paste an image"))
+      .toBeTruthy();
   });
 
   test("audio takes a clip, and offers no paste", () => {
     // A clipboard rarely holds audio, and hover-to-paste exists for
     // screenshots; what a reference voice needs is a file and a player.
     mount([
-      { key: "reference", label: "Reference voice", type: "audio", bind: "2.audio" },
+      {
+        key: "reference",
+        label: "Reference voice",
+        type: "audio",
+        bind: "2.audio",
+      },
     ]);
     expect(screen.getByText(/Choose or drop an audio clip/)).toBeTruthy();
     expect(
@@ -393,10 +430,16 @@ describe("the panel's own behaviour", () => {
   test("required params are marked, and order is required then optional", () => {
     mount([
       { key: "negative", label: "Negative", type: "text", bind: "7.text" },
-      { key: "prompt", label: "Prompt", type: "text", required: true, bind: "6.text" },
+      {
+        key: "prompt",
+        label: "Prompt",
+        type: "text",
+        required: true,
+        bind: "6.text",
+      },
     ]);
     const keys = [...document.querySelectorAll("[data-param]")].map((node) =>
-      node.getAttribute("data-param"),
+      node.getAttribute("data-param")
     );
     expect(keys).toEqual(["prompt", "negative"]);
     expect(screen.getByText("required")).toBeTruthy();
@@ -406,8 +449,20 @@ describe("the panel's own behaviour", () => {
     mount(
       [
         { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
-        { key: "steps", label: "Steps", type: "int", advanced: true, bind: "3.steps" },
-        { key: "cfg", label: "CFG", type: "float", advanced: true, bind: "3.cfg" },
+        {
+          key: "steps",
+          label: "Steps",
+          type: "int",
+          advanced: true,
+          bind: "3.steps",
+        },
+        {
+          key: "cfg",
+          label: "CFG",
+          type: "float",
+          advanced: true,
+          bind: "3.cfg",
+        },
       ],
       { steps: 28, cfg: 3.5 },
     );
@@ -422,8 +477,14 @@ describe("the panel's own behaviour", () => {
   });
 
   test("Reset to defaults is offered on the header", async () => {
-    const { handlers } = mount([{ key: "prompt", type: "text", bind: "6.text" }]);
-    await fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    const { handlers } = mount([{
+      key: "prompt",
+      type: "text",
+      bind: "6.text",
+    }]);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Reset to defaults" }),
+    );
     expect(handlers.onreset).toHaveBeenCalled();
   });
 
@@ -441,17 +502,26 @@ describe("the panel's own behaviour", () => {
 });
 
 describe("the seed", () => {
-  const seedParam: Param = { key: "seed", label: "Seed", type: "seed", bind: "3.seed" };
+  const seedParam: Param = {
+    key: "seed",
+    label: "Seed",
+    type: "seed",
+    bind: "3.seed",
+  };
 
   test("unlocked shows the last-used seed greyed with the random hint", () => {
     mount([seedParam], { seed: -1 }, { seedLocked: false, lastSeed: 4242 });
-    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe("4242");
+    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe(
+      "4242",
+    );
     expect(screen.getByText(/random each run/)).toBeTruthy();
   });
 
   test("locked shows the pinned seed and says it is reused", () => {
     mount([seedParam], { seed: 4242 }, { seedLocked: true, lastSeed: 4242 });
-    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe("4242");
+    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe(
+      "4242",
+    );
     expect(screen.getByText(/reused until unlocked/)).toBeTruthy();
   });
 
@@ -465,7 +535,9 @@ describe("the seed", () => {
 
   test("typing in the field reports the typed value", async () => {
     const { handlers } = mount([seedParam], { seed: 1 }, { seedLocked: true });
-    await fireEvent.input(screen.getByLabelText("Seed"), { target: { value: "99" } });
+    await fireEvent.input(screen.getByLabelText("Seed"), {
+      target: { value: "99" },
+    });
     expect(handlers.onseededit).toHaveBeenCalledWith(99);
   });
 });
@@ -488,19 +560,31 @@ describe("the LoRA list", () => {
   test("a row is added from the picker at full strength, linked", async () => {
     const { handlers } = mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /krea\/film-grain/ }),
+    );
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
-      { name: "krea/film-grain.safetensors", strength_model: 1, strength_clip: 1 },
+      {
+        name: "krea/film-grain.safetensors",
+        strength_model: 1,
+        strength_clip: 1,
+      },
     ]);
   });
 
   test("a row's sliders reach as far as its model says", async () => {
     mount([loraParam], {
       loras: [
-        { name: "krea/film-grain.safetensors", strength_model: 1, strength_clip: 1 },
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 1,
+          strength_clip: 1,
+        },
       ],
     });
-    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
+    const slider = screen.getByLabelText(
+      "krea/film-grain.safetensors strength",
+    );
     // The fixture leaves the bounds at the default.
     expect(slider.getAttribute("min")).toBe("-2");
     expect(slider.getAttribute("max")).toBe("2");
@@ -509,7 +593,11 @@ describe("the LoRA list", () => {
   test("an added LoRA is marked rather than offered twice", async () => {
     mount([loraParam], {
       loras: [
-        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 0.8,
+          strength_clip: 0.8,
+        },
       ],
     });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
@@ -519,13 +607,23 @@ describe("the LoRA list", () => {
   test("one slider drives both strengths until they are unlinked", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 0.8,
+          strength_clip: 0.8,
+        },
       ],
     });
-    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
+    const slider = screen.getByLabelText(
+      "krea/film-grain.safetensors strength",
+    );
     await fireEvent.input(slider, { target: { value: "0.5" } });
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
-      { name: "krea/film-grain.safetensors", strength_model: 0.5, strength_clip: 0.5 },
+      {
+        name: "krea/film-grain.safetensors",
+        strength_model: 0.5,
+        strength_clip: 0.5,
+      },
     ]);
 
     await fireEvent.click(screen.getByLabelText("Unlink strengths"));
@@ -540,11 +638,17 @@ describe("the LoRA list", () => {
   test("a row can be removed", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 0.8,
+          strength_clip: 0.8,
+        },
         { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
       ],
     });
-    await fireEvent.click(screen.getByLabelText("Remove krea/film-grain.safetensors"));
+    await fireEvent.click(
+      screen.getByLabelText("Remove krea/film-grain.safetensors"),
+    );
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
     ]);
@@ -553,7 +657,11 @@ describe("the LoRA list", () => {
   test("rows can be dragged into a new order, because order is chain order", async () => {
     const { handlers } = mount([loraParam], {
       loras: [
-        { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 0.8,
+          strength_clip: 0.8,
+        },
         { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
       ],
     });
@@ -562,7 +670,11 @@ describe("the LoRA list", () => {
     await fireEvent.drop(rows[0]!);
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
-      { name: "krea/film-grain.safetensors", strength_model: 0.8, strength_clip: 0.8 },
+      {
+        name: "krea/film-grain.safetensors",
+        strength_model: 0.8,
+        strength_clip: 0.8,
+      },
     ]);
   });
 });
@@ -575,7 +687,10 @@ describe("Reuse Parameters maps by key", () => {
   ]);
 
   test("known keys are filled and missing ones fall back to defaults", () => {
-    const { values, warnings } = fillValues(manifest, { prompt: "figs", seed: 7 });
+    const { values, warnings } = fillValues(manifest, {
+      prompt: "figs",
+      seed: 7,
+    });
     expect(values).toEqual({ prompt: "figs", seed: 7, steps: 28 });
     expect(warnings).toEqual([]);
   });
@@ -593,7 +708,11 @@ describe("Reuse Parameters maps by key", () => {
 
 describe("the panel header and the prompt", () => {
   test("Edit is offered beside Reset to defaults", async () => {
-    const { handlers } = mount([{ key: "prompt", type: "text", bind: "6.text" }]);
+    const { handlers } = mount([{
+      key: "prompt",
+      type: "text",
+      bind: "6.text",
+    }]);
     await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(handlers.onedit).toHaveBeenCalled();
   });
@@ -621,7 +740,9 @@ describe("the panel header and the prompt", () => {
       { prompt: "figs", model: "" },
       { checkpoints: [diffusionModel("flux-dev.safetensors", "flux")] },
     );
-    await fireEvent.click(screen.getByRole("button", { name: /choose a model/ }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /choose a model/ }),
+    );
     await fireEvent.click(screen.getByRole("button", { name: /flux-dev/ }));
     // The focus is taken on the microtask after the picker closes.
     await Promise.resolve();
@@ -647,21 +768,30 @@ describe("Advanced says when the problem is inside it", () => {
     mount(
       params,
       { prompt: "figs", vae: "ae.safetensors" },
-      { byClass: { vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")] } },
+      {
+        byClass: {
+          vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")],
+        },
+      },
     );
     await tick();
     // Open, so the field that has to be fixed is the one on screen.
     expect(screen.getByText("VAE")).toBeTruthy();
     expect(screen.getByText("not found")).toBeTruthy();
     // And said on the header, so a section closed again still reads as wrong.
-    expect(screen.getByRole("button", { name: /Advanced/ }).textContent).toContain("1");
+    expect(screen.getByRole("button", { name: /Advanced/ }).textContent)
+      .toContain("1");
   });
 
   test("a section with nothing wrong in it stays collapsed", async () => {
     mount(
       params,
       { prompt: "figs", vae: "flux-vae.safetensors" },
-      { byClass: { vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")] } },
+      {
+        byClass: {
+          vae: [diffusionModel("flux-vae.safetensors", "flux", "vae")],
+        },
+      },
     );
     await tick();
     expect(screen.queryByText("VAE")).toBeNull();
@@ -710,12 +840,17 @@ describe("the LoRA search box", () => {
     // a LoRA is not: you are working in this list, usually about to add
     // another, and being thrown back up to the prompt took the panel's scroll
     // with it.
-    mount([{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }, loraParam], {
+    mount([
+      { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
+      loraParam,
+    ], {
       prompt: "figs",
       loras: [],
     });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /krea\/film-grain/ }),
+    );
     await tick();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(document.activeElement).not.toBe(screen.getByLabelText("Prompt"));
@@ -745,12 +880,15 @@ describe("the LoRA search box", () => {
 
     const search = screen.getByLabelText("Search LoRAs");
     await fireEvent.input(search, { target: { value: "krea.*grain" } });
-    expect(screen.getByRole("button", { name: /krea\/film-grain/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /detail\.safetensors/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /krea\/film-grain/ }))
+      .toBeTruthy();
+    expect(screen.queryByRole("button", { name: /detail\.safetensors/ }))
+      .toBeNull();
 
     // A half-typed pattern falls back to a substring rather than emptying it.
     await fireEvent.input(search, { target: { value: "detail(" } });
-    expect(screen.queryByRole("button", { name: /krea\/film-grain/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /krea\/film-grain/ }))
+      .toBeNull();
   });
 });
 
@@ -782,13 +920,21 @@ describe("a param that only sometimes applies", () => {
   };
 
   test("only the side the switch is on is rendered", () => {
-    mount([turbo, steps, turboSteps], { turbo: false, steps: 30, turbo_steps: 8 });
+    mount([turbo, steps, turboSteps], {
+      turbo: false,
+      steps: 30,
+      turbo_steps: 8,
+    });
     expect(screen.getByText("Steps")).toBeTruthy();
     expect(screen.queryByText("Turbo steps")).toBeNull();
   });
 
   test("and it swaps when the switch does", () => {
-    mount([turbo, steps, turboSteps], { turbo: true, steps: 30, turbo_steps: 8 });
+    mount([turbo, steps, turboSteps], {
+      turbo: true,
+      steps: 30,
+      turbo_steps: 8,
+    });
     expect(screen.queryByText("Steps")).toBeNull();
     expect(screen.getByText("Turbo steps")).toBeTruthy();
   });

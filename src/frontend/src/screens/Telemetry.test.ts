@@ -115,7 +115,9 @@ describe("the telemetry table", () => {
     entries = [entry({ label: "01JOUT", data: {} })];
     await mount();
 
-    expect(document.querySelector("tbody td a")?.textContent?.trim()).toBe("01JOUT");
+    expect(document.querySelector("tbody td a")?.textContent?.trim()).toBe(
+      "01JOUT",
+    );
   });
 
   test("a model links to its own page", async () => {
@@ -191,7 +193,10 @@ describe("pointing at a row", () => {
     // come from different routes and are ordered as each is read.
     entries = WHEN.map((at, index) => entry({ id: index + 1, at })).reverse();
     series = [
-      { key: null, points: WHEN.map((at, index) => ({ id: index + 1, at, value: 10 })) },
+      {
+        key: null,
+        points: WHEN.map((at, index) => ({ id: index + 1, at, value: 10 })),
+      },
     ];
   });
 

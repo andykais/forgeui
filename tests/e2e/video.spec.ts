@@ -60,7 +60,7 @@ test("a generation, watched from the browser", async ({ page }) => {
 
   // Open it: the focused view keeps the panel and uses the gallery's viewer.
   await page.locator(".tile .surface").first().click();
-  await expect(page.getByRole("button", { name: "Edit in Generate →" }))
+  await expect(page.getByRole("button", { name: "Reuse parameters →" }))
     .toBeVisible();
   await page.waitForTimeout(2000);
 

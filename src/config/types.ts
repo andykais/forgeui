@@ -83,10 +83,50 @@ export type KeyBindings = Record<KeyAction, string[]>;
 export const MODEL_THUMBNAILS = ["first_sample", "latest_generated"] as const;
 export type ModelThumbnail = typeof MODEL_THUMBNAILS[number];
 
+/**
+ * How a screen arranges its three pieces: the inputs, the media, and the
+ * metadata (§11.3).
+ *
+ * The names say where the media goes, because the media is what the
+ * arrangement is for:
+ *
+ * - `columns`     inputs | media | metadata — three across, the default
+ * - `split`       inputs | media over metadata
+ * - `wide`        inputs | media, and no metadata
+ * - `top`         media across the top, inputs underneath
+ * - `top-split`   media across the top, inputs and metadata underneath
+ *
+ * Gallery has no inputs, so only the first three mean anything there, and
+ * the picker offers it only those.
+ */
+export const LAYOUTS = [
+  "columns",
+  "split",
+  "wide",
+  "top",
+  "top-split",
+] as const;
+export type Layout = typeof LAYOUTS[number];
+
+/** The layouts that keep the metadata pane. */
+export const LAYOUTS_WITH_METADATA: readonly Layout[] = [
+  "columns",
+  "split",
+  "top-split",
+];
+
 export interface UiConfig {
   /** Icon rail (56px) vs. labelled rail (196px). */
   rail_expanded: boolean;
   tile_size: Record<UiScreen, TileSize>;
+  /** Where the inputs, the media and the metadata go (§11.3). */
+  layout: Record<UiScreen, Layout>;
+  /**
+   * Superseded by `layout`, which says whether there is a metadata pane at
+   * all. Still read and written so a config.yaml from before the layouts
+   * still loads — an older build of the app reads it, and refusing to start
+   * over a key we stopped needing would be a poor trade.
+   */
   sidebar_collapsed: Record<UiScreen, boolean>;
   filmstrip_collapsed: Record<UiScreen, boolean>;
   /**
@@ -130,6 +170,7 @@ export interface PartialConfig {
 export interface PartialUiConfig {
   rail_expanded?: boolean;
   tile_size?: Partial<Record<UiScreen, TileSize>>;
+  layout?: Partial<Record<UiScreen, Layout>>;
   sidebar_collapsed?: Partial<Record<UiScreen, boolean>>;
   filmstrip_collapsed?: Partial<Record<UiScreen, boolean>>;
   workflow_order?: string[];

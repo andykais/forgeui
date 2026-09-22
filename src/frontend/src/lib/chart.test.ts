@@ -30,7 +30,8 @@ describe("the y axis ceiling", () => {
     const GB = 1024 ** 3;
     for (const peak of [11.2 * GB, 640, 47, 1e6]) {
       const ceiling = niceCeiling(peak, "bytes");
-      const scaled = ceiling / 1024 ** Math.floor(Math.log(ceiling) / Math.log(1024));
+      const scaled = ceiling /
+        1024 ** Math.floor(Math.log(ceiling) / Math.log(1024));
       // Two decimals at most in the unit it is drawn in, so the quarter
       // ticks under it stay readable rather than trailing digits.
       expect(Math.round(scaled * 100) / 100).toBeCloseTo(scaled, 6);

@@ -109,6 +109,8 @@ export function defaultConfig(): Config {
     ui: {
       rail_expanded: false,
       tile_size: { generate: "small", gallery: "small", models: "small" },
+      // Three columns, which is what the app has always opened as.
+      layout: { generate: "columns", gallery: "columns", models: "columns" },
       sidebar_collapsed: { generate: false, gallery: false, models: false },
       filmstrip_collapsed: { generate: false, gallery: false, models: false },
       workflow_order: [],

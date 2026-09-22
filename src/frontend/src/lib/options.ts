@@ -42,7 +42,11 @@ export function optionKeys(node: HTMLElement, params: OptionKeysParams = {}) {
   }
 
   function onKeyDown(event: KeyboardEvent) {
-    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    const step = event.key === "ArrowDown"
+      ? 1
+      : event.key === "ArrowUp"
+      ? -1
+      : 0;
     if (step !== 0) {
       const list = options();
       if (list.length === 0) return;

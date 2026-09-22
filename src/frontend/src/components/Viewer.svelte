@@ -1,8 +1,8 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import PanelRight from "@lucide/svelte/icons/panel-right";
-  import type { Job, Output, OutputDetail, UiScreen } from "../types.ts";
+  import type { Job, Layout, Output, OutputDetail, UiScreen } from "../types.ts";
+  import { hasMetadata } from "../types.ts";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { clock, dimensions } from "../lib/format.ts";
@@ -17,6 +17,15 @@
    */
   interface Props {
     screen: UiScreen;
+    /** Where the media and the metadata go (§11.3). */
+    layout: Layout;
+    /**
+     * The parent is already the grid these panes belong to, so disappear
+     * into it: `display: contents`, and the media and the metadata become
+     * items of *its* grid. That is what lets Generate put the metadata
+     * beside the inputs, which is on the other side of this component.
+     */
+    dissolve?: boolean;
     /** The ordered set the grid was showing; ← / → walk it. */
     outputs: Output[];
     selected: Output;
@@ -38,6 +47,8 @@
 
   let {
     screen,
+    layout,
+    dissolve = false,
     outputs,
     selected,
     activeJobs = [],
@@ -68,7 +79,8 @@
   let mediaBox: HTMLDivElement | undefined;
   let renderedWidth = $state(0);
 
-  const sidebarCollapsed = $derived(app.sidebarCollapsed(screen));
+  /** Three of the five layouts have a metadata pane; two do not (§11.3). */
+  const showMetadata = $derived(hasMetadata(layout));
   const filmstripCollapsed = $derived(app.filmstripCollapsed(screen));
   const index = $derived(outputs.findIndex((output) => output.id === selected.id));
   const isNewest = $derived(index === 0);
@@ -173,11 +185,13 @@
   </div>
 {/if}
 
-<div class="viewer">
+<div class="viewer" class:dissolve data-layout={layout}>
   <div class="main">
     <header>
-      <button class="back" onclick={onclose}>
-        <ArrowLeft size={13} /> Back to grid <span class="key mono">esc</span>
+      <button class="back" onclick={onclose} title="Back to grid">
+        <ArrowLeft size={13} />
+        <span class="back-label">Back to grid</span>
+        <span class="key mono">esc</span>
       </button>
       <span class="spacer"></span>
       <div class="row nav">
@@ -198,14 +212,6 @@
         <button class:active={!fit} onclick={() => (fit = false)}>1:1</button>
       </div>
       <span class="id mono">{selected.id}</span>
-      <button
-        class="toggle"
-        title={sidebarCollapsed ? "Show metadata" : "Hide metadata"}
-        aria-label={sidebarCollapsed ? "Show metadata" : "Hide metadata"}
-        onclick={() => app.setSidebarCollapsed(screen, !sidebarCollapsed)}
-      >
-        <PanelRight size={14} />
-      </button>
     </header>
 
     <div class="media" class:one-to-one={!fit} bind:this={mediaBox}>
@@ -255,19 +261,26 @@
       {/if}
     </div>
 
-    <Filmstrip
-      {outputs}
-      selectedId={selected.id}
-      collapsed={filmstripCollapsed}
-      {activeJobs}
-      oncollapse={(collapsed) => app.setFilmstripCollapsed(screen, collapsed)}
-      onselect={(output) => onselect(output)}
-    />
+    {#if dissolve}{@render strip()}{/if}
   </div>
 
-  {#if !sidebarCollapsed}
+  {#snippet strip()}
+    <div class="strip-row">
+      <Filmstrip
+        {outputs}
+        selectedId={selected.id}
+        collapsed={filmstripCollapsed}
+        {activeJobs}
+        oncollapse={(collapsed) => app.setFilmstripCollapsed(screen, collapsed)}
+        onselect={(output) => onselect(output)}
+      />
+    </div>
+  {/snippet}
+
+  {#if showMetadata}
     {#if detail}
       <MetadataSidebar
+        topRight={layout === "columns"}
         output={detail}
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}
@@ -278,17 +291,13 @@
         onopen={onopenoutput}
       />
     {:else}
-      <aside class="sidebar-loading"><span class="dim">loading metadata…</span></aside>
+      <aside class="sidebar-loading" class:top-right={layout === "columns"}>
+        <span class="dim">loading metadata…</span>
+      </aside>
     {/if}
-  {:else}
-    <!-- Collapsed, the sidebar becomes a thin edge (§11.2). -->
-    <button
-      class="edge"
-      title="Show metadata"
-      aria-label="Show metadata"
-      onclick={() => app.setSidebarCollapsed(screen, false)}
-    ></button>
   {/if}
+
+  {#if !dissolve}{@render strip()}{/if}
 </div>
 
 <style>
@@ -326,27 +335,71 @@
     width: 100%;
   }
 
+  /*
+   * The grid of §11.3, for the screens where this component is the whole of
+   * it — Gallery, which has media and metadata and nothing else. Generate
+   * has an inputs panel on the other side of this component, so there the
+   * grid is its, and this dissolves into it.
+   */
   .viewer {
     flex: 1;
-    display: flex;
-    min-height: 0;
+    display: grid;
     /*
-     * Load-bearing. Without it this is a flex item at `min-width: auto`, so
-     * its min-content width wins over the flex basis — and its min-content is
-     * the filmstrip laid out in full, which grows with every result. The row
-     * then overflows, the filmstrip's `scrollIntoView` scrolls the whole
-     * screen sideways to follow the selection, and the sidebar walks off the
-     * right edge until it is gone.
+     * Load-bearing, and was before this was a grid. Without it this is a
+     * flex item at `min-width: auto`, so its min-content width wins — and
+     * its min-content is the filmstrip laid out in full, which grows with
+     * every result. The row then overflows, the filmstrip's
+     * `scrollIntoView` scrolls the whole screen sideways to follow the
+     * selection, and the sidebar walks off the right edge until it is gone.
      */
     min-width: 0;
-    background: var(--canvas);
+    min-height: 0;
+  }
+
+  /*
+   * The filmstrip is a row of this grid rather than the last thing in the
+   * media pane, because "under the media" and "at the bottom of the screen"
+   * are not the same place in every layout: with the metadata below the
+   * media, a strip inside the media pane landed halfway down the page with
+   * the metadata under it. Beside the media, the two are the same place, and
+   * there the sidebar keeps its full height.
+   */
+  .viewer[data-layout="columns"] {
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "media meta" "strip meta";
+  }
+
+  .viewer[data-layout="split"] {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas: "media" "meta" "strip";
+  }
+
+  .viewer[data-layout="wide"] {
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "media" "strip";
+  }
+
+  /* Generate's grid has no row for it, so there it stays with the media. */
+  .strip-row {
+    grid-area: strip;
+    min-width: 0;
+  }
+
+  /* Generate's grid owns these panes; this box is in the way of that. */
+  .viewer.dissolve {
+    display: contents;
   }
 
   .main {
-    flex: 1;
+    grid-area: media;
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    /* The plate the media sits on, which `.viewer` carried until it could
+       no longer be relied on to have a box at all. */
+    background: var(--canvas);
   }
 
   header {
@@ -354,6 +407,9 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
+    /* The screen's top-right corner belongs to the layout picker, which
+       floats above whichever pane happens to be under it (§11.3). */
+    padding-right: var(--corner-reserve);
     background: var(--app);
   }
 
@@ -363,6 +419,10 @@
     gap: 6px;
     font-size: 12px;
     background: var(--raised-2);
+    /* It used to wrap to three lines in a narrow window, taking the header
+       with it and pushing the metadata toggle off the right edge. */
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .key {
@@ -371,8 +431,7 @@
   }
 
   .nav button,
-  .zoom button,
-  .toggle {
+  .zoom button {
     padding: 4px 8px;
     font-size: 12px;
     display: flex;
@@ -382,10 +441,18 @@
     background: var(--control-selected);
   }
 
+  /*
+   * The one thing here that may be cut short: a ULID is 26 characters of
+   * mono, it is the widest item in the row, and nothing is decided by it.
+   */
   .id {
     font-size: 11px;
     color: var(--text-3);
     padding: 0 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .media {
@@ -459,22 +526,56 @@
   }
 
   .sidebar-loading {
-    width: 306px;
-    flex: 0 0 auto;
+    grid-area: meta;
+    min-width: 0;
+    min-height: 0;
     background: var(--panel);
     padding: 12px;
     font-size: 12px;
   }
 
-  .edge {
-    width: 10px;
-    flex: 0 0 auto;
-    border-radius: 0;
-    background: var(--panel);
+  .sidebar-loading.top-right {
+    padding-top: var(--corner-clear);
   }
 
-  .edge:hover {
-    background: var(--raised-2);
+  /*
+   * Too narrow for three columns — the app in one half of a split monitor,
+   * which is how it is actually used beside an editor (§11.3).
+   *
+   * Side by side, the two fixed columns (360px of params, 306px of metadata)
+   * plus the rail leave the media `width - 722`: 238px in a half-screen 1080p
+   * window, a sliver with a 1024px picture shown at 20%. 1100px is where that
+   * remainder falls below the width of the params panel itself, and there is
+   * no width left to take from — so the metadata takes height instead: media
+   * above, metadata below, half each. `Escape` and the toggle both still do
+   * what they did.
+   *
+   * Width *and* aspect, because aspect alone does not survive a real browser:
+   * a window occupying half of a 1920×1080 screen is 960×1080 on the outside
+   * but 960×990 or so inside, once the tab strip and the address bar have
+   * taken their share — 0.97, comfortably above 8/9, so the rule never fired
+   * for anyone who was not running a browser with no chrome at all. The
+   * aspect clause stays for the case width alone misses: a tall, narrow
+   * window on a large monitor, where a portrait display wants stacking too.
+   */
+  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
+    /*
+     * Beside the media there is no room for a 306px column, so the metadata
+     * takes height instead — which is what the `split` layout is, arrived at
+     * by the window rather than by the picker.
+     */
+    .viewer[data-layout="columns"] {
+      grid-template-columns: none;
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+      grid-template-areas: "media" "meta" "strip";
+    }
+
+    /* What the row can no longer afford. The id is in the sidebar. */
+    .id,
+    .back-label,
+    .key {
+      display: none;
+    }
   }
 
   .fullscreen {

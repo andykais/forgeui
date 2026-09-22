@@ -44,7 +44,9 @@ describe("inputMediaUrl", () => {
 
   it("recognises a file in the input store and points at it", () => {
     expect(inputMediaUrl(`${sha}.png`)).toBe(`/api/media/inputs/aa/${sha}.png`);
-    expect(inputMediaUrl(`${sha}.jpeg`)).toBe(`/api/media/inputs/aa/${sha}.jpeg`);
+    expect(inputMediaUrl(`${sha}.jpeg`)).toBe(
+      `/api/media/inputs/aa/${sha}.jpeg`,
+    );
   });
 
   it("leaves every other param value alone", () => {

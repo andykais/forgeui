@@ -19,6 +19,12 @@
    * has one — most do not, and an empty block is a row of nothing.
    */
   interface Props {
+    /**
+     * This pane is the one under the screen's top-right corner, which the
+     * layout picker floats in (§11.3). Only true in `columns`, where the
+     * metadata is the rightmost pane and starts at the top.
+     */
+    topRight?: boolean;
     output: OutputDetail;
     onedit: () => void;
     onrerun: () => void;
@@ -37,7 +43,15 @@
     onopen?: (id: string) => void;
   }
 
-  let { output, onedit, onrerun, ondelete, onupscale, onopen }: Props = $props();
+  let {
+    topRight = false,
+    output,
+    onedit,
+    onrerun,
+    ondelete,
+    onupscale,
+    onopen,
+  }: Props = $props();
 
   let copied = $state<string | null>(null);
   let promoteOpen = $state(false);
@@ -257,7 +271,7 @@
   }
 </script>
 
-<aside class="sidebar scroll">
+<aside class="sidebar scroll" class:top-right={topRight}>
   <div class="actions">
     <button class="primary" onclick={onedit}>Reuse parameters →</button>
     <button onclick={onrerun}>Generate again ⟳</button>
@@ -599,9 +613,20 @@
     text-decoration: underline;
   }
 
+  /*
+   * A pane of the §11.3 grid, wherever that grid happens to be: beside the
+   * media, under it, or beside the inputs with the media over both. How wide
+   * and how tall is the track's business — this used to be a fixed 306px,
+   * which then had to be undone in every arrangement that was not a column.
+   */
+  .sidebar.top-right {
+    padding-top: var(--corner-clear);
+  }
+
   .sidebar {
-    width: 306px;
-    flex: 0 0 auto;
+    grid-area: meta;
+    min-width: 0;
+    min-height: 0;
     background: var(--panel);
     padding: 10px;
     display: flex;

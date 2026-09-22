@@ -28,9 +28,7 @@ export function matcher(
   return (...fields) =>
     fields.some((field) =>
       typeof field === "string" && field.length > 0
-        ? pattern
-          ? pattern.test(field)
-          : field.toLowerCase().includes(lower)
-        : false,
+        ? pattern ? pattern.test(field) : field.toLowerCase().includes(lower)
+        : false
     );
 }

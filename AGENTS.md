@@ -55,6 +55,7 @@ deno task ui:dev                     # Vite dev server, proxying /api /ws /comfy
 deno task ui:check / ui:fmt          # svelte-check / prettier
 deno task test:ui                    # param-panel component tests (vitest)
 deno task test:e2e                   # Playwright smoke test against the built app
+FORGEUI_E2E_BROWSER=/path/to/chromium deno task test:e2e   # …where there is no Chrome
 UPDATE_GOLDEN=1 deno task test       # accept new golden files, never silently
 
 deno task comfy:setup                # once: a pinned ComfyUI, CPU torch, SD 1.5

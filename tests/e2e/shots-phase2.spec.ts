@@ -105,11 +105,11 @@ test("the model page, its samples strip and the outputs beneath", async ({ page 
 
   // Promote one of the generations, so the strip has something in it.
   await page.locator(".tile .surface").first().click();
-  await page.getByRole("button", { name: "Promote to sample" }).click();
+  await page.getByRole("button", { name: "Save as sample" }).click();
   await page.screenshot({ path: `${shots}/viewer-promote-to-sample.png` });
   await page.getByRole("button", { name: /Stable Diffusion 1\.5/ }).click();
-  await page.getByRole("button", { name: "Promote", exact: true }).click();
-  await expect(page.getByText(/Promoted to 1 sample/)).toBeVisible();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Saved as 1 sample/)).toBeVisible();
   await page.keyboard.press("Escape");
 
   await page.reload();
@@ -147,7 +147,7 @@ test("the gallery's models filter, and the viewer's model links", async ({ page 
   await expect(page).toHaveURL(/models=[0-9a-f]{64}/);
   await page.keyboard.press("Escape");
   await page.locator(".tile .surface").first().click();
-  await expect(page.getByRole("button", { name: "Edit in Generate →" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reuse parameters →" })).toBeVisible();
   await page.screenshot({ path: `${shots}/gallery-viewer-model-links.png` });
 });
 
