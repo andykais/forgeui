@@ -261,15 +261,21 @@
       {/if}
     </div>
 
-    <Filmstrip
-      {outputs}
-      selectedId={selected.id}
-      collapsed={filmstripCollapsed}
-      {activeJobs}
-      oncollapse={(collapsed) => app.setFilmstripCollapsed(screen, collapsed)}
-      onselect={(output) => onselect(output)}
-    />
+    {#if dissolve}{@render strip()}{/if}
   </div>
+
+  {#snippet strip()}
+    <div class="strip-row">
+      <Filmstrip
+        {outputs}
+        selectedId={selected.id}
+        collapsed={filmstripCollapsed}
+        {activeJobs}
+        oncollapse={(collapsed) => app.setFilmstripCollapsed(screen, collapsed)}
+        onselect={(output) => onselect(output)}
+      />
+    </div>
+  {/snippet}
 
   {#if showMetadata}
     {#if detail}
@@ -290,6 +296,8 @@
       </aside>
     {/if}
   {/if}
+
+  {#if !dissolve}{@render strip()}{/if}
 </div>
 
 <style>
@@ -348,18 +356,34 @@
     min-height: 0;
   }
 
+  /*
+   * The filmstrip is a row of this grid rather than the last thing in the
+   * media pane, because "under the media" and "at the bottom of the screen"
+   * are not the same place in every layout: with the metadata below the
+   * media, a strip inside the media pane landed halfway down the page with
+   * the metadata under it. Beside the media, the two are the same place, and
+   * there the sidebar keeps its full height.
+   */
   .viewer[data-layout="columns"] {
     grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
-    grid-template-areas: "media meta";
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "media meta" "strip meta";
   }
 
   .viewer[data-layout="split"] {
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: "media" "meta";
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas: "media" "meta" "strip";
   }
 
   .viewer[data-layout="wide"] {
-    grid-template-areas: "media";
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "media" "strip";
+  }
+
+  /* Generate's grid has no row for it, so there it stays with the media. */
+  .strip-row {
+    grid-area: strip;
+    min-width: 0;
   }
 
   /* Generate's grid owns these panes; this box is in the way of that. */
@@ -542,8 +566,8 @@
      */
     .viewer[data-layout="columns"] {
       grid-template-columns: none;
-      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-      grid-template-areas: "media" "meta";
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+      grid-template-areas: "media" "meta" "strip";
     }
 
     /* What the row can no longer afford. The id is in the sidebar. */

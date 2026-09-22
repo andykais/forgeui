@@ -36,6 +36,26 @@
   let selectedId = $state<string | null>(null);
   let importing = $state(false);
   let rereading = $state(false);
+  let viewer = $state<ReturnType<typeof Viewer> | null>(null);
+  /**
+   * The outputs grid, for the one thing the keys need from it: how many
+   * tiles a row holds, since ↑ / ↓ move by a row and the grid is
+   * `auto-fill`, so that number is whatever the width allows.
+   */
+  let grid = $state<HTMLDivElement | undefined>(undefined);
+  let columns = $state(4);
+  $effect(() => {
+    const el = grid;
+    if (!el) return;
+    const measure = () => {
+      const tracks = getComputedStyle(el).gridTemplateColumns.split(" ").length;
+      if (tracks > 0) columns = tracks;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
 
   /**
    * The debugging action of §8.1: when a model is filed as something it
@@ -261,11 +281,71 @@
     outputs = outputs.filter((entry) => entry.id !== output.id);
     selectedId = null;
   }
+
+  /**
+   * The bindings of §11.4, which every screen that shows the viewer owes it:
+   * this page had none, so the Back button said `esc` while the key did
+   * nothing, and ← / → and `f` were dead too. They apply only while a take
+   * is open — the grid behind it has no selection to walk — and never while
+   * a field is being edited, which is what reverts an edit-in-place header.
+   */
+  function onKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    if (!selected) return;
+    const action = app.keyAction(event);
+    if (!action) return;
+    const index = outputs.findIndex((output) => output.id === selectedId);
+    const move = (delta: number) => {
+      const next = outputs[index + delta];
+      if (next) selectedId = next.id;
+    };
+    switch (action) {
+      // Newest first, reading left to right, as in the gallery (§11.2).
+      case "select_prev":
+        event.preventDefault();
+        move(-1);
+        break;
+      case "select_next":
+        event.preventDefault();
+        move(1);
+        break;
+      case "select_up":
+        event.preventDefault();
+        move(-columns);
+        break;
+      case "select_down":
+        event.preventDefault();
+        move(columns);
+        break;
+      case "fullscreen":
+        event.preventDefault();
+        viewer?.toggleFullscreen();
+        break;
+      case "close":
+        event.preventDefault();
+        // Fullscreen first: one `esc` leaves the black field, the next
+        // leaves the viewer.
+        if (!viewer?.exitFullscreen()) selectedId = null;
+        break;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 {#if selected}
   <Viewer
-screen="models"
+    bind:this={viewer}
+    screen="models"
     layout={app.layout("models")}
     {outputs}
     {selected}
@@ -554,7 +634,7 @@ screen="models"
         {#if outputs.length === 0}
           <p class="dim empty-line">Nothing has been generated with this model yet.</p>
         {:else}
-          <div class="grid">
+          <div class="grid" bind:this={grid}>
             {#each outputs as output (output.id)}
               <!-- Open it; the viewer is where the actions live (§11.2). -->
               <Tile {output} onopen={openOutput} />

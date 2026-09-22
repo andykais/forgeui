@@ -104,7 +104,9 @@ test.afterEach(async ({ page }) => {
     fetch("/api/config", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ui: { layout: { generate: "columns" } } }),
+      body: JSON.stringify({
+        ui: { layout: { generate: "columns", gallery: "columns", models: "columns" } },
+      }),
     })
   );
 });
@@ -276,6 +278,45 @@ test("Gallery is offered only the layouts it can use", async ({ page }) => {
   );
   expect(panes).toEqual([2, 2, 1]);
   await page.keyboard.press("Escape");
+});
+
+test("the filmstrip is the bottom of the page, wherever the metadata goes", async ({
+  page,
+}) => {
+  await page.setViewportSize(WIDE);
+  await anOutput(page);
+  await page.getByRole("link", { name: "Gallery" }).click();
+  await page.locator(".tile .surface").first().click();
+  await expect(page.locator(".main")).toBeVisible();
+
+  for (const layout of ["columns", "split", "wide"] as const) {
+    await page.locator(".trigger").first().click();
+    await page.getByRole("button", { name: GALLERY_LABELS[layout], exact: true })
+      .click();
+    await expect(page.locator(".viewer")).toHaveAttribute("data-layout", layout);
+
+    const viewer = (await page.locator(".viewer").boundingBox())!;
+    const strip = (await page.locator(".filmstrip").boundingBox())!;
+    // Flush with the bottom of the screen. As the last thing in the media
+    // pane it was flush with the bottom of *that*, which in `split` is
+    // halfway down the page with the metadata underneath it.
+    expect(Math.round(strip.y + strip.height)).toBe(
+      Math.round(viewer.y + viewer.height),
+    );
+
+    const meta = await page.locator("aside.sidebar").count() > 0
+      ? (await page.locator("aside.sidebar").boundingBox())!
+      : null;
+    if (layout === "split") {
+      // Stacked, so the metadata ends where the strip begins.
+      expect(Math.round(meta!.y + meta!.height)).toBe(Math.round(strip.y));
+    } else if (layout === "columns") {
+      // Beside the media, so the strip takes nothing from the sidebar.
+      expect(Math.round(meta!.height)).toBe(Math.round(viewer.height));
+    } else {
+      expect(meta).toBeNull();
+    }
+  }
 });
 
 test("three columns is offered but greyed out in a narrow window", async ({ page }) => {

@@ -1363,6 +1363,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   five puts the metadata beside the *inputs*, and no arrangement of nested
   boxes gets it there.
 
+  The **filmstrip is a row of that grid**, not the last thing in the media
+  pane, because "under the media" and "along the bottom" stopped being the
+  same place once the metadata could sit below the media: in `split` a strip
+  inside the media pane landed halfway down the page with the metadata under
+  it. Where the metadata is beside the media the two places coincide, and
+  there the sidebar keeps its full height rather than being cut short by a
+  strip that has nothing to do with it. On Generate the grid is the screen's,
+  not the viewer's, and there the strip stays with the media.
+
 - **Narrow windows.** Down to half a 16:9 screen the layout does not move:
   the metadata sidebar collapses first, then the media centre shrinks, and
   the params panel is the last to give. The filmstrip stays unless the user
@@ -1435,6 +1444,14 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   A chord is never one of these: a binding is a bare key, and several are
   plain letters, so an event carrying ctrl, meta or alt matches nothing —
   otherwise `Ctrl+A` would move the selection on its way to selecting all.
+
+  **Every screen that shows the viewer owes it these keys.** The model page
+  showed the viewer and bound none of them, so its Back button said `esc`
+  while the key did nothing — a control that advertises a binding the screen
+  does not answer. `esc` unwinds one step at a time there as everywhere: out
+  of fullscreen first, then back to the grid. Inside a text field the
+  bindings are off, which is what leaves `esc` to revert an edit-in-place
+  header (§8.1).
 
   A first run writes the whole default tree into `config.yaml`, which makes
   the file self-documenting and also **freezes every value in it**: a default
