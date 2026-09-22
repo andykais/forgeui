@@ -1,4 +1,4 @@
-# Design — `forgecli models`: model metadata and samples from Civitai
+# Design — `forgecli models`: metadata, samples and weights from Civitai
 
 **Status:** proposal. Nothing here is implemented.
 **Touches:** DESIGN.md §3, §3.1, §6.2, §7, §8.1, §8.3, §11.2, §12, §13.
@@ -28,11 +28,12 @@ not, for three reasons:
    images and a 6 GB checkpoint wants a terminal you can watch, interrupt and
    re-run — not a request that either blocks a route for ten minutes or
    disappears into a background job whose only UI is a spinner.
-3. **Civitai already ships a CLI**, and it handles the parts that are
-   genuinely annoying: device login, token storage, hash lookup across five
-   hash flavours, resumable authenticated downloads, SHA256 verification.
-   Wrapping it is a day of work. Reimplementing it is a quarter of
-   maintenance.
+3. **Civitai already ships a CLI**, and it handles the part that is genuinely
+   annoying: device login, token storage, and resumable authenticated
+   downloads that verify against the file's SHA256. Wrapping that is a day of
+   work; reimplementing it is a quarter of maintenance. Its *lookups* turn out
+   to be a smaller win than they looked — see §4.0, which is the one place
+   this proposal moved away from "powered by the official CLI".
 
 So the fetching lives in a second binary, and the two halves meet on the
 filesystem.
@@ -41,17 +42,23 @@ filesystem.
 
 ## 1. What this does
 
-**`forgecli models`** is a standalone Deno CLI that resolves a model on
-Civitai — by URL, by filename or by sha256 — and writes what it finds into an
-**import folder** inside the data directory. It writes files and nothing else.
-It never opens `app.db`, never talks to the server, and does not care whether
-the app is running.
+**`forgecli models`** is a standalone Deno CLI that resolves a model — by URL,
+by filename or by sha256 — against **civitai.red first and civitaiarchive.com
+second** (§4.1), and writes what it finds into an **import folder** inside the
+data directory. Metadata, samples and, with `--download-model`, the weights
+themselves: everything it fetches goes into the same folder, and nothing it
+fetches goes anywhere else. It writes files and nothing else. It never opens
+`app.db`, never talks to the server, never touches a model folder, and does
+not care whether the app is running.
 
 **The app slurps that folder** on boot and at the end of every model rescan,
-applies each batch to the model it names, and deletes the batch. An imported
-sample lands in `samples/<model_hash>/` exactly as a dropped file does, with
-two additions: it remembers **where it came from**, as a link, and it carries
-whatever generation data could be parsed out of it.
+applies each batch to the model it names, and deletes the batch. A downloaded
+weights file is moved into `<appdata>/models/<kind>/` — app-owned storage that
+is scanned and hashed like any other model folder — so a model fetched by the
+CLI simply appears on the Models page. An imported sample lands in
+`samples/<model_hash>/` exactly as a dropped file does, with two additions: it
+remembers **where it came from**, as a link, and it carries whatever
+generation data could be parsed out of it.
 
 That "where it came from" is the second half of the proposal and the reason to
 do it now rather than bolt it on later: **provenance is a first-class field on
@@ -63,7 +70,9 @@ before they can exist at all.
 
 ### 1.1 What it is not
 
-- Not a model manager. It does not delete, move, organise or rename anything.
+- Not a model manager. It never deletes, moves, renames or reorganises a
+  model you already have; the only file it puts anywhere is one it just
+  fetched, and even that it hands to the app to file (§7.2).
 - Not a sync. There is no watcher, no polling, no "check for updates". You run
   it when you want something fetched.
 - Not a parameter importer. Generation data from a sample is stored and shown,
@@ -87,8 +96,8 @@ The everyday case, with the app running the whole time:
       $ forgecli models --filename cyberrealistic_v90.safetensors --download-samples=8
 
     The CLI finds the file in a configured model folder, hashes it, asks
-    Civitai what that hash is, downloads eight images off the model's page,
-    parses each one's generation data, and writes
+    civitai.red what that hash is, downloads eight images off the model's
+    page, parses each one's generation data, and writes
 
       ~/.forgeui/import/9f3c…b1/
 
@@ -123,10 +132,23 @@ Three properties of that sequence are load-bearing:
 The less everyday cases:
 
 - **The model is not on this machine yet.** `--download-model` fetches the
-  weights into the configured folder for its kind. This is the one thing in
-  the whole repository allowed to write inside a model folder, and it is
-  allowed because you typed a flag whose entire meaning is "write inside a
-  model folder". The app's rule is unchanged: *the app* never does.
+  weights **into the batch**, like everything else it fetches. On ingest the
+  app moves them into `<appdata>/models/<kind>/` and the ordinary scan picks
+  them up: hashed, probed, on the Models page, loadable by ComfyUI through the
+  generated `extra_model_paths.yaml` (§7.2, §8).
+
+  Nothing — not the CLI, not the app — ever writes inside a folder
+  `config.yaml` names. Those stay read-only, which is what AGENTS.md's rule
+  has always meant and now means without an exception carved out of it. The
+  data directory is app-owned storage and always has been; putting downloads
+  there is the same claim as putting outputs there.
+
+  The consequence worth naming: the app **does** now write a file it obtained
+  over the network, which "never download anything at runtime" could be read
+  as forbidding. It does not download it — `forgecli` did, deliberately,
+  because you typed a flag — and the app only moves a file that is already on
+  its own disk. A generation still cannot cause a transfer, which is the rule's
+  actual subject (§4.6).
 - **The model has not been hashed yet.** The batch names a sha256 the
   database has no row for. It stays in the folder, untouched, and is retried
   after the next hashing pass finishes. No error, no noise; it lands when the
@@ -142,8 +164,8 @@ The less everyday cases:
 The `--help` output, which is the specification of the interface:
 
 ```
-forgecli models — fetch model metadata and samples from Civitai into
-ForgeUI's import folder, for the app to ingest on its next rescan.
+forgecli models — fetch model metadata, samples and weights into ForgeUI's
+import folder, for the app to ingest on its next rescan.
 
 Usage:  forgecli models [options]
 
@@ -157,16 +179,22 @@ Options:
                               model folders and the import folder.
                               (Default: $FORGEUI_DATA_DIR, else ~/.forgeui)
 
-      --url          <url>    Civitai or civitaiarchive.com link to a model, a model
-                              version or an image. Accepts every form in §4.1.
+      --url          <url>    civitai.red, civitai.com or civitaiarchive.com link to
+                              a model, a model version or an image. The site in the
+                              link is tried first. Accepts every form in §4.1.
       --filename     <name>   Filename of the model as it sits in a configured model
                               folder; it is hashed there and looked up by hash.
       --sha256checksum <hex>  SHA256 of the model file — the identity ForgeUI uses.
 
+      --source       <name>   Where to look, when the input does not say:
+                              auto (default) tries civitai.red, then
+                              civitaiarchive.com. red | archive pin it to one.
+
       --download-samples <n>  Download up to <n> images from the model's page as
                               samples, newest first. (Default: 0)
-      --download-model        Download the model weights into the configured folder
-                              for its kind. Requires a Civitai login (see AUTH).
+      --download-model        Download the model weights into the batch. The app
+                              files them under <appdata>/models/<kind>/ on ingest.
+                              Requires a Civitai login (see AUTH).
       --overwrite             Rewrite files already on disk. Without it every file
                               that exists is left exactly as it is.
 
@@ -174,13 +202,14 @@ Options:
       --json                  Print the resulting model.json to stdout instead of a
                               human summary.
       --anon                  Never send credentials, even if a token is configured.
-      --no-archive            Fail rather than fall back to civitaiarchive.com.
+      --browsing-level <n>    Civitai's visibility bitmask, for what a lookup is
+                              allowed to return. (Default: config import.browsing_level)
       --timeout      <ms>     Per-request timeout. (Default: 30000)
 
 Examples:
 
   forgecli models --filename cyberrealistic_v90.safetensors --download-samples=8
-  forgecli models --url https://civitai.com/models/4384?modelVersionId=128713
+  forgecli models --url https://civitai.red/models/4384?modelVersionId=128713
   forgecli models --sha256checksum 6ce0161689b3853acaa037… --download-samples=4 --overwrite
   forgecli models --url https://civitaiarchive.com/sha256/6ce0161689b3… --download-model
 
@@ -198,7 +227,7 @@ AUTH
 EXIT CODES
 
   0  wrote a batch (or, with --dry-run, would have)
-  1  the model was not found on Civitai or in the archive
+  1  the model was not found on civitai.red or in the archive
   2  bad arguments, or none of --url/--filename/--sha256checksum
   3  a download failed, or --download-model without a login
   4  the import folder is not writable
@@ -231,24 +260,80 @@ deno install -A -n forgecli jsr:… / src/cli/main.ts   # or install it
 
 ## 4. Lookup
 
+### 4.0 civitai.red, civitai.com, and where the official CLI fits
+
+**On the websites, `.red` is the superset and you are right.** Civitai's own
+announcement of the split says it plainly: one account, one database, two
+front doors, and "Civitai.com is locked to PG content, so anything above that
+simply won't show up there. Civitai.red lets you choose what you see." SFW
+uploads appear on both; mature content appears only on `.red`. Nothing moved
+or forked — a visibility filter is applied per domain.
+
+**On the REST API it does not work that way, and this is worth knowing before
+building on it.** The same API is served from both hostnames, and what it
+returns is governed by the `browsingLevel` (integer bitmask) or legacy `nsfw`
+query parameter rather than by which host you asked. Checked against both:
+
+```
+GET https://civitai.red/api/v1/images?browsingLevel=31&limit=20&sort=Newest
+GET https://civitai.com/api/v1/images?browsingLevel=31&limit=20&sort=Newest
+    → identical results, nsfwLevel in {None, Soft, Mature, X} from both
+```
+
+So `civitai.com` is not a narrower *API* than `civitai.red`; an unparameterised
+request is narrower than a parameterised one, on either host. Which means the
+subset/superset question has a different answer than the domains suggest, and
+the thing that actually decides what you can see is a query parameter.
+
+**That is what demotes the official CLI.** Its documented interface has no
+base-URL option and no `browsingLevel` or `nsfw` flag, so it asks with the
+default filter and cannot be made to ask for anything else. A tool whose whole
+job is identifying the models you already have must be able to identify the
+mature ones, so lookups go to the API directly:
+
+| job | who does it |
+|---|---|
+| lookups, image lists, `by-hash` | `civitai.red/api/v1/*` directly, with `browsingLevel` |
+| deleted models | `civitaiarchive.com/api/*` |
+| `--download-model` | the official CLI: `civitai download <version-id>` |
+| credentials | the official CLI's (`civitai login`), or `CIVITAI_TOKEN` |
+
+The CLI keeps the half that is hard — device login, token storage, resumable
+verified transfers — and loses the half that is three `fetch` calls. If it
+grows a `--browsing-level` flag, the lookups can move back behind it; the
+normalising layer of §4.2 is what makes that a one-file change.
+
+One caveat to carry into implementation: the download endpoints are
+`civitai.com`'s, and there are reports of API tokens not authenticating
+against `civitai.red/api/`. `--download-model` therefore stays on `.com` via
+the CLI, which is where the token is known to work. Lookup and download
+talking to different hosts is fine — they are the same database.
+
 ### 4.1 Resolving the identifier
 
 One of three flags, each reduced to the same thing: a **model version**, which
 is what actually has files, images and a `baseModel`.
 
 **`--sha256checksum <hex>`** — the direct road, and the one the other two end
-up on.
+up on. When the input does not name a site, the order is civitai.red, then
+the archive; `--source` pins it to one.
 
-1. `civitai model-versions by-hash <hash> --json`
+1. `GET https://civitai.red/api/v1/model-versions/by-hash/<hash>` with
+   `browsingLevel` set, which answers with the version, its files and its
+   `baseModel` in one call. Civitai matches AutoV1, AutoV2, SHA256, CRC32 and
+   BLAKE3 here, case-insensitively, so the same road serves a hash copied out
+   of another tool.
 2. Fallback: `GET https://civitaiarchive.com/api/sha256/<hash>`, which answers
    with every file it has seen under that hash and their `model_id` /
    `model_version_id`, then
    `GET https://civitaiarchive.com/api/models/<id>?modelVersionId=<v>`.
 
-The archive is the fallback specifically because it answers for **models
+The archive is second rather than absent because it answers for **models
 Civitai has deleted** — `deletedAt` is a field it returns rather than a 404 it
 throws — which is a large fraction of the models people actually have on disk
-and cannot identify.
+and cannot identify. It also indexes HuggingFace, ModelScope and TensorArt
+under the same hash, so its answer can name a mirror when the original is
+gone.
 
 **`--filename <name>`** — the everyday flag, because the filename is what you
 know. It is resolved **locally**: the configured model folders are walked for
@@ -258,19 +343,23 @@ scan does), that file is hashed, and the run continues as
 answer is about *your* file rather than a file with the same name.
 
 If nothing matches on disk, fall back to a name search —
-`civitai models search --query <stem> --json`, then
+`GET https://civitai.red/api/v1/models?query=<stem>`, then
 `GET https://civitaiarchive.com/api/search?q=<stem>` — and accept a result
 only when one of its version files carries exactly that filename. Two or more
 matches is an error listing the candidates with their URLs, not a guess.
 
-**`--url <url>`** — parsed, never fetched as a page:
+**`--url <url>`** — parsed, never fetched as a page. The host decides which
+source is tried first; `.com` and `.red` are the same database, so a `.com`
+link is honoured and then looked up with a `browsingLevel` that a `.com`
+browser session would not have given you:
 
 | form | reduces to |
 |---|---|
-| `civitai.com/models/<id>?modelVersionId=<v>` | that version |
-| `civitai.com/models/<id>` | the model's latest version |
-| `civitai.com/images/<id>` | the version that image was posted under |
-| `civitaiarchive.com/models/<id>?modelVersionId=<v>` | that version, archive-first |
+| `civitai.red/models/<id>?modelVersionId=<v>` | that version |
+| `civitai.red/models/<id>` | the model's latest version |
+| `civitai.red/images/<id>` | the version that image was posted under |
+| `civitai.com/…` (any of the three above) | the same, `.red` API |
+| `civitaiarchive.com/models/<id>?modelVersionId=<v>` | that version, archive first |
 | `civitaiarchive.com/sha256/<hash>` | `--sha256checksum <hash>` |
 | `civitai.com/api/download/models/<v>` | that version |
 
@@ -293,10 +382,16 @@ answer is better than a wrong guess, and `unset` is better than either.
 Civitai's model `type` maps onto a ForgeUI **kind** (`Checkpoint` →
 `checkpoints`, `LORA`/`LoCon` → `loras`, `TextualInversion` → `embeddings`,
 `VAE` → `vae`, `Controlnet` → `controlnet`, `Upscaler` → `upscale_models`),
-which is what `--download-model` needs in order to know which configured
-folder to write into. Without a mapping, or with no folder configured for the
-mapped kind, `--download-model` is exit 3 naming the kind — it does not pick a
-folder on your behalf.
+which is what a downloaded file is filed under in `<appdata>/models/<kind>/`.
+The CLI only records the kind; the app does the filing (§7.2). An unmapped
+`type` files under `other`, which is scanned like every other kind and is
+visible on the Models page — a model in the wrong drawer is a nuisance, and a
+refused download is worse.
+
+Note that the kind is a *Civitai* claim about the file, and the app does not
+take its word for anything that matters: the family still comes from the
+header probe where the probe has an answer, and the hash still comes from
+hashing the bytes.
 
 ### 4.3 Samples
 
@@ -307,12 +402,18 @@ each one:
    and the Civitai CLI has no image-download command. The URL's
    `width=450,optimized=true` segment is rewritten to `original=true` so the
    sample is the full-size image rather than a card thumbnail.
-2. **The generation data** comes from `civitai images search
-   --model-version-id <v> --json`, whose `meta` is the A1111-style record
-   (`prompt`, `negativePrompt`, `steps`, `sampler`, `cfgScale`, `seed`,
-   `Size`, `Model`, `hashes`, `resources`, sometimes a `comfy` workflow).
-   Where the API has no meta, the file itself is parsed (§6).
+2. **The generation data** comes from
+   `GET https://civitai.red/api/v1/images?modelVersionId=<v>&withMeta=true`
+   with `browsingLevel`, whose `meta` is the A1111-style record (`prompt`,
+   `negativePrompt`, `steps`, `sampler`, `cfgScale`, `seed`, `Size`, `Model`,
+   `hashes`, `resources`, sometimes a `comfy` workflow). Where the API has no
+   meta, the file itself is parsed (§6). `withMeta=true` is what keeps the
+   list to images there is something to show for.
 3. Images above `import.nsfw_level` are skipped and counted in the summary.
+   This is ForgeUI's own ceiling and is separate from
+   `import.browsing_level`, which is what the *lookup* was allowed to see:
+   asking broadly and filing narrowly means the model is still found when its
+   only images are ones you did not want downloaded.
 
 The archive fallback carries image URLs, dimensions and a `has_metadata` flag
 but **not the metadata itself** — there is no image endpoint on it. A sample
@@ -338,16 +439,33 @@ batch — there is no way to fetch images without fetching what they are of.
       0001.jpeg
       0002.png
       …
+    model/                            only with --download-model
+      cyberrealisticV90.safetensors
   .staging/<ulid>/                    a batch being written; renamed into place
   .failed/<sha256>/                   a batch ingest refused, plus error.txt
+
+<appdata>/models/<kind>/              ← new; where ingest files downloaded weights
+  checkpoints/
+  loras/
+  …
 ```
+
+`<appdata>/models/` is an ordinary model folder as far as everything else is
+concerned: the scan walks it, the hasher hashes it, and
+`extra_model_paths.yaml` lists it under its kind so ComfyUI can load from it.
+The only thing special about it is who may write there, and the answer is the
+app — because it is inside the data directory, which the app has always
+owned. The folders `config.yaml` names stay read-only, with no exception.
 
 Chosen this way because:
 
 - **Named by sha256** — the model's identity in this app (§8.1). Ingest is a
   primary-key lookup, two batches for one model collide loudly rather than
   quietly doubling up, and nothing has to be parsed to know what a directory
-  is about.
+  is about. It also means a `--download-model` batch is **self-verifying**:
+  the folder's name is what the bytes inside it must hash to, so a truncated
+  or substituted download is caught by the pass that files it, not by a
+  loader failing at generate time.
 - **One JSON per model, images beside it.** You can read it. You can hand-write
   it — which is the supported way to import a model the CLI cannot find, and
   is how the integration tests build fixtures.
@@ -384,13 +502,28 @@ boot from now on. Nothing ever retries it; it is yours to look at or delete.
   "source": {
     "kind": "civitai",
     "label": "Civitai",
-    "url": "https://civitai.com/models/62437?modelVersionId=66991",
+    "url": "https://civitai.red/models/62437?modelVersionId=66991",
     "model_id": 62437,
     "model_version_id": 66991,
     "fetched_at": "2026-09-18T20:14:01Z",
-    "via": "civitai-cli/1.4.2"
+    "via": "civitai.red/api/v1"
   },
   "civitai": { "…": "the lookup response, verbatim and uninterpreted" },
+  "files": [
+    {
+      "file": "model/v15PrunedEmaonly.safetensors",
+      "kind": "checkpoints",
+      "sha256": "6ce0161689b3853acaa03779ec93eafe75a02f4ced659bee03f50797806fa2fa",
+      "size": 4265146304,
+      "source": {
+        "kind": "civitai",
+        "label": "Civitai",
+        "url": "https://civitai.com/api/download/models/66991",
+        "fetched_at": "2026-09-18T20:16:44Z",
+        "via": "civitai-cli/1.4.2"
+      }
+    }
+  ],
   "samples": [
     {
       "file": "samples/0001.jpeg",
@@ -400,7 +533,7 @@ boot from now on. Nothing ever retries it; it is yours to look at or delete.
       "source": {
         "kind": "civitai",
         "label": "Civitai",
-        "url": "https://civitai.com/images/26534668",
+        "url": "https://civitai.red/images/26534668",
         "fetched_at": "2026-09-18T20:14:02Z"
       },
       "raw": {
@@ -430,6 +563,11 @@ rejected with a sentence rather than misread. `overwrite` carries the CLI's
 there" at both ends of the pipe, and it would be strange for it to mean it
 only at one.
 
+`files` is absent without `--download-model` and is a list rather than a
+single entry because a version can ship more than one file worth having (a
+checkpoint and its VAE, a LoRA and its config). Each entry names its own
+kind, so a two-file batch can file into two folders.
+
 ### 5.3 `raw`, and what the app does with it
 
 §8.3 is explicit that imported generation data is **not mapped onto params in
@@ -458,7 +596,7 @@ New optional block in the §6.2 sidecar, on outputs and samples alike:
 "source": {
   "kind": "civitai",
   "label": "Civitai",
-  "url": "https://civitai.com/images/26534668",
+  "url": "https://civitai.red/images/26534668",
   "imported_at": "2026-09-18T20:14:09Z"
 }
 ```
@@ -508,26 +646,55 @@ restore the real thing, params and all.
 
 ### 7.1 Where ingest runs
 
-A new `src/models/import.ts` — `ImportInbox` — owned by `ModelLibrary`:
+A new `src/models/import.ts` — `ImportInbox` — owned by `ModelLibrary`, in
+**two phases around the scan** rather than one pass after it. Weights force
+that: a batch that carries a file the library has never seen cannot be applied
+until the file has been filed, scanned and hashed, and the hash is what the
+batch is keyed on.
 
-- **at the end of every `rescan()`**, which covers boot (`startBackground`)
-  and the Rescan button (`POST /api/maintenance/rescan-models`);
-- **when the background hasher drains its queue**, so a batch dropped for a
-  model that was still hashing lands as soon as its hash does, without a
-  second Rescan;
-- never on a timer, and never on an HTTP request of its own.
+- **Phase A — file, at the start of `rescan()`.** Every batch carrying a
+  `files` entry has it verified against the batch's own sha256 and moved into
+  `<appdata>/models/<kind>/`. Nothing else in the batch is touched; the batch
+  stays.
+- the scan and the hashing queue then run exactly as they do today, and the
+  file Phase A moved is just another new model to them.
+- **Phase B — apply, when the hasher drains.** §7.2, for every batch whose
+  hash now has a row.
 
-Progress is broadcast on the existing `rescan_progress` channel with two added
-counters (`imports_found`, `imports_applied`), so the Models page's existing
-progress line says what is happening without a new socket message type.
+`rescan()` therefore ends with the metadata not yet applied, and Phase B
+follows a beat later when hashing finishes. That is the same shape the rest of
+the library already has — a scan makes a model appear, hashing gives it an
+identity — so a downloaded model shows up on the Models page immediately and
+fills in its family, tags and samples when its hash lands, which is the
+behaviour §8.1 already describes for a model you copied in by hand.
+
+Neither phase runs on a timer or on an HTTP request of its own. Progress is
+broadcast on the existing `rescan_progress` channel with three added counters
+(`imports_found`, `imports_filed`, `imports_applied`), so the Models page's
+existing progress line says what is happening without a new socket message
+type.
 
 ### 7.2 What ingest applies
 
-For each `import/<sha256>/model.json`, in one transaction:
+**Phase A**, for each batch with a `files` entry, before anything is scanned:
+
+1. **Verify.** The file is hashed and must match the entry's `sha256`, which
+   must in turn be the batch's own directory name for the primary file. A
+   mismatch is a failed batch (`.failed/`), not a filed model — half a
+   checkpoint on the Models page is worse than an error.
+2. **File it.** Moved to `<appdata>/models/<kind>/<filename>`, created if
+   absent. A name already taken by different bytes gets ` (2)` before the
+   extension; a name already taken by *these* bytes means a previous run
+   already filed it, and the batch's copy is dropped.
+3. The entry is marked filed in `model.json`, rewritten in place, so a crash
+   between the move and the scan does not file it twice.
+
+**Phase B**, for each `import/<sha256>/model.json`, in one transaction:
 
 1. **Find the model.** No `models` row for that hash → leave the batch alone
    and move on. This is the normal case for a not-yet-hashed file, not an
-   error.
+   error, and it is the case a `--download-model` batch is in until the hasher
+   reaches the file Phase A just filed.
 2. **Metadata.** `civitai_json` is set from `source` + `civitai` — the column
    has existed since §7 and has never been written. `family`, `display_name`,
    `tags` and `notes` are filled **only where the model's own value is null or
@@ -542,7 +709,9 @@ For each `import/<sha256>/model.json`, in one transaction:
 4. **Thumbnail.** If the model has no `thumb_path` and no samples before this
    batch, the first imported sample becomes the thumbnail. A model that had
    one keeps it.
-5. **Delete the batch**, after the transaction commits.
+5. **Delete the batch**, after the transaction commits. By now it holds only
+   `model.json` and whatever sample files could not be moved; the weights left
+   in Phase A.
 
 Anything thrown moves the batch to `.failed/` with the message, and ingest
 continues with the next one.
@@ -595,12 +764,27 @@ import:
   # how the fetching machine and the serving machine can be different ones.
   dir: null
 
-  # How to invoke the official Civitai CLI. A bare name is looked up on PATH;
-  # null disables it entirely and every lookup goes to the archive.
-  civitai_cli: civitai
+  # Where ingest files weights fetched with --download-model.
+  # null → <appdata>/models. Point it at a disk with room on it; it is a
+  # model folder like any other and is scanned as one (§5.1).
+  model_dir: null
+
+  # Looked up first. civitai.com is the same API with a narrower default
+  # filter (§4.0), so this is the .red host and browsing_level does the
+  # filtering rather than the hostname.
+  civitai_url: https://civitai.red
+
+  # Civitai's visibility bitmask. 1 is PG only; 31 is everything. This is
+  # what a *lookup* may return — nsfw_level below is what may be downloaded.
+  browsing_level: 31
 
   # The fallback, and the only source for models Civitai has deleted.
   archive_url: https://civitaiarchive.com
+
+  # How to invoke the official Civitai CLI, which owns credentials and
+  # --download-model. A bare name is looked up on PATH; null disables
+  # downloads and leaves lookups working.
+  civitai_cli: civitai
 
   # What --download-samples means with no number after it.
   samples: 4
@@ -612,15 +796,29 @@ import:
   ingest_on_boot: true
 ```
 
+`browsing_level` and `nsfw_level` are two settings rather than one because
+they answer different questions — what a lookup may *see* versus what may be
+*kept*. Defaulting the first to 31 and the second to 1 means a mature model is
+still identified, named and filed correctly while none of its images land on
+your disk, which is the behaviour someone who has models they did not
+advertise actually wants. Setting both to 1 is the strict reading and is one
+edit away.
+
 - `src/config/types.ts`: `ImportConfig`, added to `Config` and `PartialConfig`.
 - `src/config/defaults.ts`: the block above.
 - `src/config/validate.ts`: `"import"` added to the top-level `rejectUnknown`
   list, plus a `validateImport` in the shape of `validateUi`.
-- `src/config/paths.ts`: `DataPaths.imports`, defaulting to
-  `<root>/import` and overridden by `import.dir`, created by
-  `ensureDataDirs`. Note that this is the first path in `DataPaths` that
-  depends on the config rather than on the root alone, so `dataPaths()` grows
-  an optional second argument and `ConfigStore` passes it.
+- `src/config/paths.ts`: `DataPaths.imports` (`<root>/import`) and
+  `DataPaths.downloads` (`<root>/models`), overridable by `import.dir` and
+  `import.model_dir`, both created by `ensureDataDirs`. These are the first
+  paths in `DataPaths` that depend on the config rather than on the root
+  alone, so `dataPaths()` grows an optional second argument and `ConfigStore`
+  passes it.
+- `src/config/extra_model_paths.ts`: `<appdata>/models/<kind>` is appended to
+  every kind's folder list in the generated file, so ComfyUI resolves a
+  downloaded model by name like any other. The same list is what
+  `ModelScanner` walks, so the Models page and ComfyUI keep agreeing about
+  what exists.
 - `GET`/`PATCH /api/config` carry it like every other block; Settings grows a
   read-only line for it rather than a form, because changing where the import
   folder is mid-run is not a thing worth making easy.
@@ -659,6 +857,18 @@ back, which is the right failure.
 `models.civitai_json` needs no migration: the column has been in `schema.sql`
 since version 1, waiting for this.
 
+**Not a database migration, but a spec change that belongs with them:**
+DESIGN.md §3's directory layout gains two entries — `import/` and `models/` —
+and §3's line "Model folders … are **never written to**" needs the word
+*configured* in it, since `<appdata>/models/` is now a model folder the app
+writes. Per AGENTS.md, DESIGN.md is edited first and this document does not
+get to contradict it, so that edit lands with step 3 of §11.
+
+There is no migration for what is already on disk, and none is needed: an
+existing install has no `import/` and no `<appdata>/models/`, both are created
+empty on the next boot, and an install that never runs `forgecli` sees no
+change at all.
+
 ---
 
 ## 10. Testing
@@ -679,6 +889,13 @@ Everything the test suite already promises — no network, no GPU, hermetic.
 - Ingest applies a hand-written batch to a hashed model and deletes it.
 - Ingest leaves a batch for an unhashed model alone, then applies it once the
   hash lands.
+- A batch carrying a weights file is filed into `<appdata>/models/<kind>/`,
+  scanned, hashed, and then applied — the whole Phase A → scan → Phase B
+  sequence, driven by a small fake `.safetensors` and `app.models.rescan()`.
+- A weights file whose bytes do not hash to the batch's name is refused and
+  nothing is filed.
+- `<appdata>/models/<kind>` appears in the generated `extra_model_paths.yaml`
+  under that kind.
 - Re-ingesting the same batch imports no second sample.
 - A malformed `model.json` lands in `.failed/` and the next batch still
   ingests.
@@ -688,12 +905,21 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   source; the sidecar round-trips through `reindex` unchanged.
 
 **The CLI end to end** runs against a fake Civitai: a local HTTP server
-serving canned `model-versions/by-hash`, `models/<id>` and image responses,
-plus a stub `civitai` executable on `PATH` that prints fixture JSON — the same
-shape as `tests/fake-comfy/` and for the same reason. The real Civitai is
-never called by the suite; a `tests/contract/` case behind an env var can be
-added when someone wants to check the fixtures are still true, exactly as
-`FORGEUI_COMFY_URL` gates the ComfyUI contract tests.
+serving canned `model-versions/by-hash`, `models/<id>`, `images` and archive
+responses — `import.civitai_url` and `import.archive_url` point at it, which
+is the other reason those are config rather than constants — plus a stub
+`civitai` executable on `PATH` that writes a fixture file where a download
+would land. The same shape as `tests/fake-comfy/`, for the same reason.
+
+Two cases the fake exists to cover: the archive fallback fires when the
+primary 404s, and a lookup sends the configured `browsingLevel` (asserted on
+the request, since it is the one parameter the whole §4.0 argument rests on).
+
+The real Civitai is never called by the suite; a `tests/contract/` case behind
+an env var can be added when someone wants to check the fixtures are still
+true, exactly as `FORGEUI_COMFY_URL` gates the ComfyUI contract tests. That
+case is worth writing eventually — §4.0's claim about the two hosts was true
+on the day it was measured and is not a promise anyone made us.
 
 ---
 
@@ -706,12 +932,16 @@ added when someone wants to check the fixtures are still true, exactly as
    get an origin line that is not a guess.
 3. `src/models/import.ts` + the config block + the ingest hooks, driven by
    hand-written batches. The whole app side, testable with no network at all.
-4. `src/cli/main.ts` — cliffy, lookup, the archive fallback, sample download,
-   batch writing.
-5. `--download-model`, which is the only part that needs auth and the only
-   part that writes into a model folder.
+4. `src/cli/main.ts` — cliffy, lookup against civitai.red, the archive
+   fallback, sample download, batch writing.
+5. `--download-model`: the CLI half (the one part that needs auth) and the
+   Phase A half (`<appdata>/models/`, the `extra_model_paths.yaml` entry, the
+   DESIGN.md §3 edit).
 
 Steps 1–3 are independently shippable and none of them can reach the network.
+Step 5 is last because it is the only step that can put six gigabytes
+somewhere, and it should land on top of a pipeline that is already known to
+work for the parts that cannot.
 
 ---
 
@@ -722,10 +952,13 @@ Steps 1–3 are independently shippable and none of them can reach the network.
    the trigger words plus a stripped-down description in and keeps the full
    HTML in `civitai_json`; the alternative is to leave `notes` alone entirely
    and render the description as its own read-only block on the model page.
-2. **`--download-model` into which folder**, when a kind has several
-   configured? The proposal takes the first, which is arbitrary. A
-   `--into <path>` override is the obvious out, and it is left out of v1
-   deliberately — one flag is easier to add later than to remove.
+2. **Does `<appdata>/models/` want a size ceiling or a sweep?** Weights are
+   the largest thing the data directory will ever hold, and nothing in this
+   proposal ever deletes one — `GET /api/system/storage` would start
+   reporting a number that only goes up. The obvious answer is a line in the
+   storage report and a delete action on the model page for models filed
+   there, which is a small feature and not this one. Raised because "the app
+   now accumulates gigabytes" is worth deciding on purpose.
 3. **Should ingest be able to create a `models` row** for a model whose file
    is not on disk, so metadata can be fetched ahead of a download? It would
    make `--download-model` and metadata one step, but a `models` row with no
