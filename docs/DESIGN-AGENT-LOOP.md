@@ -111,7 +111,7 @@ described one drifts. This has one.
    │                    ├─ GET /running until empty ▶│                 │
    │                 (GPU free)                 │                      │
    │                    ├─ POST /api/jobs/batch ─────────────────────▶ │
-   │◀── notifications/progress ×N ──────────────┤   (WS: job events)   │
+   │  (model unloaded — sees nothing until the call returns)           │
    │                    │◀─ WS: one `batch` event ───────────────────── │
    │                    ├─ POST /api/system/free_vram ───────────────▶ │
    │                 (GPU free)                 │                      │
@@ -186,31 +186,49 @@ In order, the bridge:
 3. Opens ForgeUI's WebSocket **before** submitting. After is a race that loses
    the completion of a fast job.
 4. `POST /api/jobs/batch` once — all-or-nothing (§6.1), one `batch_id` back.
-5. Waits for the single `batch` event, relaying per-job progress as MCP
-   `notifications/progress` (§5.3).
+5. Waits for the single `batch` event. Nothing to relay and nobody to relay
+   it to — the model is unloaded until this call returns (§5.3).
 6. `POST /api/system/free_vram`.
 7. Returns ids, statuses and errors — **not images**. The model asks for the
    pictures it wants with `get_output_image` once it is resident again, which
    keeps the context small and lets it choose.
 
-### 5.3 Long calls: progress, timeouts, cancellation
+### 5.3 Long calls: two different timeouts, and who is watching
 
-A four-minute tool call is fine for the *model* (§2) and awkward for the
-*client*, which may have a request timeout. Three mechanisms, in order of
-preference:
+A four-minute tool call is fine for the *model* — §2, it is idle throughout —
+and awkward for the machinery around it. Two distinct things can cut the call
+off, they have different fixes, and conflating them produces mechanisms that
+do not help:
 
-- **Progress notifications.** When the call carries a `progressToken`, the
-  bridge sends `notifications/progress` as each job lands — `3/6`, with the
-  workflow name as the message. Many clients extend their timeout on progress;
-  the spec defines the notification but does not require that behaviour, so it
-  is a strong mitigation rather than a guarantee.
-- **`wait: false`.** Returns `{batch_id}` immediately; `generate_status(id)`
-  polls. The escape hatch for a harness with a short, fixed timeout. It costs a
-  round of model time per poll, so it is not the default.
-- **Cancellation.** On Streamable HTTP a client abandons a request by closing
-  the response stream. When that happens the bridge calls
-  `POST /api/jobs/batch/:id/cancel` — otherwise a model that gave up leaves a
-  batch running with the GPU it no longer wants.
+**The transport idle timeout.** A reverse proxy, or the OS, closes a
+connection that has carried no bytes for N seconds. Fixed at the transport
+layer: the bridge writes an SSE comment every 15s on the response stream.
+Standard practice, invisible to the JSON-RPC layer, costs nothing. Always on.
+
+**The client's own request timeout.** The MCP client has a deadline for
+`tools/call`. Nothing the server sends can *make* it wait longer — so the fix
+is configuration: **the harness's MCP timeout must exceed the longest batch you
+intend to run.** This is a documented requirement of running the bridge, not
+something to engineer around. Where it cannot be configured, `wait: false`
+returns `{batch_id}` immediately and `generate_status(id)` polls; it costs a
+round of model time per poll, which is why it is not the default.
+
+**Progress notifications are not a timeout mechanism, and the model never sees
+them.** They go to the MCP *client*, and the model is unloaded for the whole
+call. The spec defines `notifications/progress` against a `progressToken` but
+does not require a client to extend any deadline on receiving one, so relying
+on that would be relying on a behaviour nobody promised. They are therefore
+**off by default and exist for one audience: a human watching a harness that
+renders them.** `--progress` turns them on, the bridge relays ForgeUI's per-job
+events as `3/6`, and if your harness prints nothing, leave them off — the
+bridge does not need per-job events for anything else. It waits on the single
+`batch` event.
+
+**Cancellation is real and is not optional.** On Streamable HTTP a client
+abandons a request by closing the response stream; when that happens the bridge
+calls `POST /api/jobs/batch/:id/cancel`. Without it, a client that timed out
+leaves the GPU working on results nobody will read — which matters far more
+here than anywhere else, because that GPU is also the one the model needs back.
 
 ### 5.4 Where it lives
 
@@ -283,8 +301,9 @@ Three things that matter more than they look:
   is a judgement, and the bridge is better placed to make it than we are.
 
 Per-job `job` events keep firing as they do today — the batch event is in
-addition, not instead. The UI still wants to watch a queue drain, and so does
-the bridge, to relay progress.
+addition, not instead. The UI still wants to watch a queue drain. The bridge
+does not: it waits on the one event and ignores the rest, unless `--progress`
+is on for a human's benefit (§5.3).
 
 ### 6.2 Where a job came from, and what it was for
 
@@ -477,8 +496,9 @@ mechanics. A skill is optional, and it is about taste.
 | WS drops mid-batch | bridge reconnects, reconciles with `GET /api/jobs/batch/:id` | one call instead of N; terminal state is in the DB, so a dropped socket loses nothing |
 | A job fails | counted in the batch, returned with its error text | the model can retry smaller, or change workflow |
 | **Every** job fails | the `batch` event still fires | terminal means terminal, not successful (§6.1) |
+| Proxy closes an idle connection | SSE keepalive every 15s | §5.3, transport layer, always on |
 | MCP client times out mid-`generate` | it closes the stream; the bridge cancels the batch | §5.3 — otherwise the GPU keeps working for nobody |
-| Client has a short fixed timeout | `wait: false` plus `generate_status` | §5.3 |
+| Client's timeout is shorter than a batch | configure it longer — a requirement of running the bridge | §5.3; `wait: false` where it cannot be configured |
 | Something else pings llama-swap mid-batch | it loads the model → OOM | **the main operational hazard.** One client only; a lock the bridge holds is the cheap mitigation |
 | **You generate from the web UI while the model is resident** | ComfyUI OOMs | the bridge cannot help — it never sees that request. `ttl` (§8) is the backstop; a `gpu_status` glance before a big job is the habit |
 | ComfyUI OOMs anyway | job fails with Comfy's error | surfaced to the model; retry at a smaller size |
