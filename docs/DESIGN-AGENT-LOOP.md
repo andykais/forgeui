@@ -4,7 +4,7 @@
 **Touches:** DESIGN.md §4.6 (manifest), §6.2 (sidecar), §7 (schema), §11.2
 (gallery filters), §12 (API).
 **Lands in ForgeUI the server:** the batch API, job origin, two routes, one
-manifest field, API client tokens. No MCP, no knowledge of any LLM.
+manifest field. No MCP, no auth, no knowledge of any LLM.
 **Lands beside it:** `forgeui-mcp`, a separate process — the bridge. It holds
 everything about the model and the GPU handoff.
 
@@ -135,7 +135,7 @@ or by systemd, pointed at ForgeUI and llama-swap:
 
 ```
 forgeui-mcp --http 127.0.0.1:7801 \
-            --forgeui http://127.0.0.1:7860 --forgeui-token … \
+            --forgeui http://127.0.0.1:7860 \
             --llama-swap http://127.0.0.1:8080 --llm-model qwen-vlm
 ```
 
@@ -178,6 +178,9 @@ generate({
 → { batch_id, counts: {done, failed, cancelled}, jobs: [{job_id, status, output_ids, error?}] }
 ```
 
+**No `source` parameter, on purpose.** The bridge adds it on the way out
+(§6.2); there is no argument here through which the model could set it.
+
 In order, the bridge:
 
 1. `POST /api/models/unload` to llama-swap.
@@ -185,7 +188,8 @@ In order, the bridge:
    still holds 18GB is how you get an OOM that looks like a ComfyUI bug.
 3. Opens ForgeUI's WebSocket **before** submitting. After is a race that loses
    the completion of a fast job.
-4. `POST /api/jobs/batch` once — all-or-nothing (§6.1), one `batch_id` back.
+4. `POST /api/jobs/batch` once, adding its own `source` — all-or-nothing
+   (§6.1), one `batch_id` back.
 5. Waits for the single `batch` event. Nothing to relay and nobody to relay
    it to — the model is unloaded until this call returns (§5.3).
 6. `POST /api/system/free_vram`.
@@ -255,7 +259,11 @@ gets a second door:
 ```
 POST /api/jobs/batch
 {
-  "origin": { "project": "kitchen-lighting", "note": "round 3 — LoRA ceiling" },
+  "origin": {
+    "source": "llm:qwen3.5-9b",
+    "project": "kitchen-lighting",
+    "note": "round 3 — LoRA ceiling"
+  },
   "jobs": [
     { "workflow_id": "illustrious", "params": {…}, "note": "0.7" },
     { "workflow_id": "illustrious", "params": {…}, "note": "0.9" }
@@ -327,28 +335,30 @@ they are filtered on; the sidecar holds all of it.
 Pleasant consequence: since each sidecar carries `batch_id`, batch membership
 is rebuildable from disk too.
 
-#### `source` is stamped, not claimed
+#### `source` is an ordinary field, sent by whoever calls
 
-The body cannot set it. The server derives it from the credential the request
-arrived with:
+Every client names itself. The web UI sends `"webui"`; the bridge sends
+`"llm:qwen3.5-9b"`, hardcoded in the bridge. **Absent means `"unknown"`** — not
+`"webui"`, because a script that forgets to identify itself must not be
+recorded as you. Same reasoning as the pre-existing outputs in §11: the record
+says what it knows and no more.
 
-```yaml
-api:
-  clients:
-    - token: "…"
-      source: "llm:qwen3.5-9b"
-```
+ForgeUI trims it, caps its length and stores it. There is no allow-list, no
+token, and no authentication — **ForgeUI has none at all**, and adding some for
+this one field would have been theatre: anyone who can POST a job can already
+delete the gallery. Protecting the label while leaving the door open protects
+nothing.
 
-No token — the UI, same origin — is `webui`. A request bearing a client's token
-is that client's `source`. A body that tries to set `source` gets a 400.
+**What keeps the model from setting it is the bridge's tool schema, not the
+server.** `generate` (§5.2) exposes `project`, `note` and `jobs`. It does not
+expose `source`, so there is no argument through which the model could set it;
+the bridge fills it in as code, on the way out. A model cannot pass a parameter
+that does not exist.
 
-*"If it's from the webui, that's me"* is only true if the bridge cannot say it
-is the webui. A claimed field would make `source` a comment. Stamped, it is a
-fact, and a year from now "did I write this prompt or did the model?" has an
-answer worth trusting.
-
-Note that this is now `api.clients`, not `mcp.clients`: ForgeUI has no MCP, and
-the token is about identifying an API client generally.
+So `source` is a claim, and on a single-user LAN box that is the right trade:
+the job is **labelling**, not attribution under attack. If ForgeUI ever grows
+real auth, deriving `source` from the credential is the upgrade — but it should
+arrive with the auth, not before it.
 
 #### `project` gets a column, `note` does not
 
@@ -370,8 +380,9 @@ to remember to increment is one it will eventually get wrong, and then the
 record is worse than no record.
 
 Batch `origin` applies to every job in it; a job's own `note` is appended
-rather than replacing the batch's. `source` and `batch_id` are never settable
-at either level — the server owns both.
+rather than replacing the batch's. `batch_id` is the server's and is never
+settable; `source` is set once for the batch, not per job — one call comes from
+one client.
 
 ### 6.3 Two routes
 
@@ -406,8 +417,7 @@ Through the interface, not the internals:
 - `origin` round-trips: submit with a project and a note, rebuild the database
   from the sidecars with `reindex`, and the filters still find it. This is the
   test that proves the sidecar rule was honoured rather than described;
-- a request with a client token stamps that client's `source`; a body that sets
-  `source` is rejected;
+- a job submitted without a `source` records `unknown`, not `webui`;
 - `free_vram` calls the fake ComfyUI's `/free` (a new scenario in
   `tests/fake-comfy/`);
 - `?max_edge=` returns an image within the bound, uncropped.
