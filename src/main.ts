@@ -254,7 +254,7 @@ async function bootstrap(args: CliArgs, env?: EnvSource) {
   return { store, db, telemetryDb, paths: store.paths, created, workflows };
 }
 
-async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[]): Promise<number> {
   let args: CliArgs;
   try {
     args = parseCliArgs(argv);

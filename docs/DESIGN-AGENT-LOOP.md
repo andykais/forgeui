@@ -1,6 +1,11 @@
 # Design — an LLM drives ForgeUI, and they take turns with the GPU
 
-**Status:** proposal. Nothing here is implemented.
+**Status:** part built. §5 — the bridge, `forge mcp` — is implemented and
+tested; the runbook is `MCP-BRIDGE.md`. §6 (the batch API, job `origin`, the
+two routes, the manifest field) and §7 (the gallery) are still proposals, and
+the bridge is written against today's API until they land: it submits one job
+per call and watches `job` events rather than a `batch` event, and sends
+`origin` in the body, which ForgeUI currently ignores.
 **Touches:** DESIGN.md §4.6 (manifest), §6.2 (sidecar), §7 (schema), §11.2
 (gallery filters), §12 (API).
 **Lands in ForgeUI the server:** the batch API, job origin, two routes, one
@@ -164,6 +169,13 @@ now"* makes better choices than one that submits and finds out.
 
 ### 5.2 `generate`
 
+*Built.* Two things learned from making it run that the design had wrong:
+media is fetched via the output row's own `media_url` (§12 serves everything
+from `/api/media/<path>`, so a constructed URL 404s), and a rollback has to
+*wait* for its cancellations — `POST /cancel` returns before ComfyUI has torn
+the job down, so returning on the ask hands back a GPU that is still busy.
+
+
 ```jsonc
 generate({
   project: "kitchen-lighting",          // groups the round (§6.2)
@@ -234,7 +246,21 @@ calls `POST /api/jobs/batch/:id/cancel`. Without it, a client that timed out
 leaves the GPU working on results nobody will read — which matters far more
 here than anywhere else, because that GPU is also the one the model needs back.
 
-### 5.4 Where it lives
+### 5.4 Where it lives, and what it depends on
+
+*Built as described.* `src/mcp/`, run as `forge mcp`, sharing the repo and
+nothing else — `deno task test` does not need llama-swap, and the fake in the
+tests stands in for it.
+
+Two dependencies came with it, both deviations from "Deno std only": **Cliffy**
+for the command line, and **`@modelcontextprotocol/server`** for the protocol.
+The second was going to be hand-rolled — the surface used here is small — until
+the spec's 2026-07-28 revision turned out to have dropped the `initialize`
+handshake for per-request `_meta` and a mandatory `server/discover`, with a
+dual-era compatibility matrix behind it. That is a protocol implementation, not
+a hundred lines of JSON-RPC, and it is exactly what an SDK is for.
+
+
 
 Same repository, separate entrypoint (`deno task mcp`), separate process. The
 alternative — its own repo — buys independence that one person on one box does
