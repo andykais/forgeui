@@ -1,7 +1,10 @@
-# Design — `forgecli models`: metadata, samples and weights from Civitai
+# Design — `forge models`: metadata, samples and weights from Civitai
 
 **Status:** proposal. Nothing here is implemented.
 **Touches:** DESIGN.md §3, §3.1, §6.2, §7, §8.1, §8.3, §11.2, §12, §13.
+**Supersedes:** §12's `POST /api/models/:hash/fetch-info`, which is struck
+(§9): the CLI is the fetcher, and a route that reached Civitai is the thing
+§4.6 forbids.
 **Premise being extended:** §8.3 ("Import paths … paste a Civitai image/model
 URL") and §11.2's gallery, which today can only show media this app made.
 
@@ -35,15 +38,17 @@ not, for three reasons:
    to be a smaller win than they looked — see §4.0, which is the one place
    this proposal moved away from "powered by the official CLI".
 
-So the fetching lives in a second binary, and the two halves meet on the
-filesystem.
+So the fetching lives in a subcommand of its own that the server never calls,
+and the two halves meet on the filesystem rather than in a function call
+(§3.1).
 
 ---
 
 ## 1. What this does
 
-**`forgecli models`** is a standalone Deno CLI that resolves a model — by URL,
-by filename or by sha256 — against **civitai.red first and civitaiarchive.com
+**`forge`** is the command line, with `gui` serving the app and `models`
+fetching metadata (§3.1). **`forge models`** resolves a model — by URL, by
+filename or by sha256 — against **civitai.red first and civitaiarchive.com
 second** (§4.1), and writes what it finds into an **import folder** inside the
 data directory. Metadata, samples and, with `--download-model`, the weights
 themselves: everything it fetches goes into the same folder, and nothing it
@@ -93,7 +98,7 @@ The everyday case, with the app running the whole time:
 
 3.  In a terminal:
 
-      $ forgecli models --filename cyberrealistic_v90.safetensors --download-samples=8
+      $ forge models --filename cyberrealistic_v90.safetensors --download-samples=8
 
     The CLI finds the file in a configured model folder, hashes it, asks
     civitai.red what that hash is, downloads eight images off the model's
@@ -107,10 +112,11 @@ The everyday case, with the app running the whole time:
 4.  You hit **Rescan** on the Models page. (Or restart the app. Or wait for
     the next boot — the batch keeps.)
 
-5.  The model page now has its family, its tags, its trigger words in the
-    notes, a Civitai link in the header, and eight samples in the strip. Each
-    sample carries a `CIVITAI ↗` badge linking back to the image it came from,
-    and shows its prompt, seed, sampler and steps read-only beside it.
+5.  The model page now has its family, its tags, its trigger words on a line
+    you can copy, a **From Civitai** panel with the author's description in
+    it, and eight samples in the strip (§5.5, §7.5). Each sample carries a
+    `CIVITAI ↗` badge linking back to the image it came from, and shows its
+    prompt, seed, sampler and steps read-only beside it.
 
 6.  `~/.forgeui/import/9f3c…b1/` is gone.
 ```
@@ -145,7 +151,7 @@ The less everyday cases:
 
   The consequence worth naming: the app **does** now write a file it obtained
   over the network, which "never download anything at runtime" could be read
-  as forbidding. It does not download it — `forgecli` did, deliberately,
+  as forbidding. It does not download it — `forge` did, deliberately,
   because you typed a flag — and the app only moves a file that is already on
   its own disk. A generation still cannot cause a transfer, which is the rule's
   actual subject (§4.6).
@@ -161,13 +167,39 @@ The less everyday cases:
 
 ## 3. Usage
 
-The `--help` output, which is the specification of the interface:
+`forge` is one binary with subcommands (§3.1). Its top-level help:
 
 ```
-forgecli models — fetch model metadata, samples and weights into ForgeUI's
+forge — ForgeUI: a workflow-first frontend for ComfyUI.
+
+Usage:  forge <command> [options]
+
+Commands:
+
+  gui        Serve the UI and the API, and manage ComfyUI. (default)
+  models     Fetch model metadata, samples and weights from Civitai.
+  reindex    Rebuild app.db from the sidecars on disk.
+
+Options:
+
+  -h, --help     Show this help.
+  -V, --version  Print the version.
+
+`forge` with no command is `forge gui`. Every option after a command belongs
+to that command; `forge gui --help` lists the server's flags.
+```
+
+`gui` and `reindex` take the flags `src/config/cli.ts` already defines and
+pass them through untouched, so there is one definition of what the server
+accepts and this document does not restate it.
+
+The `models` help, which is the specification of that interface:
+
+```
+forge models — fetch model metadata, samples and weights into ForgeUI's
 import folder, for the app to ingest on its next rescan.
 
-Usage:  forgecli models [options]
+Usage:  forge models [options]
 
 Exactly one of --url, --filename or --sha256checksum says which model.
 
@@ -208,10 +240,10 @@ Options:
 
 Examples:
 
-  forgecli models --filename cyberrealistic_v90.safetensors --download-samples=8
-  forgecli models --url https://civitai.red/models/4384?modelVersionId=128713
-  forgecli models --sha256checksum 6ce0161689b3853acaa037… --download-samples=4 --overwrite
-  forgecli models --url https://civitaiarchive.com/sha256/6ce0161689b3… --download-model
+  forge models --filename cyberrealistic_v90.safetensors --download-samples=8
+  forge models --url https://civitai.red/models/4384?modelVersionId=128713
+  forge models --sha256checksum 6ce0161689b3853acaa037… --download-samples=4 --overwrite
+  forge models --url https://civitaiarchive.com/sha256/6ce0161689b3… --download-model
 
 AUTH
 
@@ -238,22 +270,67 @@ Built with [cliffy](https://github.com/c4spar/cliffy)
 `--help` rendering, the `<n>` type checking and the "exactly one of" conflict
 rule come from rather than being hand-rolled as `src/config/cli.ts` does for
 the server. `models` is a subcommand because the next ones —
-`forgecli import swarmui <dir>`, `forgecli import comfyui <dir>` — are
+`forge import swarmui <dir>`, `forge import comfyui <dir>` — are
 siblings of it, not variations on it.
 
-### 3.1 Why a second binary and not `forgeui models`
+### 3.1 One binary, and the invariant that actually holds
 
-The server's entrypoint carries the whole app: SQLite through FFI, the ComfyUI
-manager, the HTTP stack. `forgecli` needs none of it and must not have it — a
-tool that can be pointed at a data directory belonging to a *running* app has
-no business being able to open that app's database. Keeping them apart is what
-makes "the CLI cannot corrupt anything" a structural claim rather than a
-promise. They share code the ordinary way: `src/media/infotext.ts`,
-`src/jobs/sidecar.ts` and `src/config/` are imported by both.
+An earlier draft of this document made `forge` a *second* binary, on the
+argument that a tool which can be pointed at a running app's data directory
+has no business being able to open that app's database — and that keeping the
+two apart made "the CLI cannot corrupt anything" structural rather than a
+promise.
+
+**That argument does not survive contact with the permission list.** Since
+`node:sqlite` replaced the FFI driver, the server runs on `--allow-env
+--allow-net --allow-read --allow-run --allow-write`. `forge models` needs
+exactly those five: env for `FORGEUI_DATA_DIR` and `CIVITAI_TOKEN`, net for
+the lookups, read for `config.yaml` and the model folders, write for the
+import folder, run for the `civitai` binary. Two binaries were never granted
+different authority, so separating them enforced nothing. The isolation was
+always a property of which code paths the `models` command takes, and that
+property is identical whether or not the server is linked into the same
+executable.
+
+So: **one binary**, and the invariant is stated as something testable instead
+of something architectural —
+
+> `forge models` never opens `app.db`. A test runs it end to end against a
+> fresh data directory and asserts that no `app.db` is created, and against a
+> populated one that the file's mtime does not move.
+
+That is a stronger guarantee than the file layout ever gave, because it fails
+the build when someone breaks it.
+
+Mechanically it is small. `src/main.ts` already guards its entrypoint with
+`import.meta.main`, so importing it starts nothing — it exports `startApp` and
+that is all. The `gui` action takes its arguments raw (cliffy's
+`useRawArgs()`) and hands them to the server's own parser, so the flag surface
+is defined once. The import is dynamic, so `forge models` never loads the
+server's module graph at all; measured cost if it did: 57 ms warm.
+
+The one change inside `src/main.ts` is exporting the dozen lines its start
+branch already has — the signal listeners and the never-resolving promise — as
+`serve(argv)`, which `main()` then calls too.
+
+What this buys: one thing on `PATH`, one `--help` that lists everything
+ForgeUI does, and one artifact for Phase 5's `deno compile` instead of two.
+
+Two costs, both accepted:
+
+- `forge gui --help` forwards `--help` to the server's parser, so it prints
+  `src/config/cli.ts`'s usage text in a different visual style from cliffy's.
+  It is accurate, just inconsistent. Porting those flags into cliffy would fix
+  it and delete the hand-rolled parser, but that is a rewrite of working,
+  tested code for a cosmetic gain, and it is not in this proposal.
+- The name. `forge` rather than `forgeui` or `forgecli`: `forge gui` and
+  `forge models` both read as verbs on a tool, which neither of the others
+  managed.
 
 ```
-deno task cli models --filename …              # from the repo
-deno install -A -n forgecli jsr:… / src/cli/main.ts   # or install it
+deno task cli models --filename …                   # from the repo
+deno install -A -n forge jsr:… / src/cli/main.ts    # or install it
+deno task start                                      # unchanged; still src/main.ts
 ```
 
 ---
@@ -284,6 +361,20 @@ So `civitai.com` is not a narrower *API* than `civitai.red`; an unparameterised
 request is narrower than a parameterised one, on either host. Which means the
 subset/superset question has a different answer than the domains suggest, and
 the thing that actually decides what you can see is a query parameter.
+
+**Which parameter is not uniform across endpoints**, and this is the kind of
+detail that costs an afternoon if it is not written down:
+
+| endpoint | what widens it |
+|---|---|
+| `/api/v1/images` | `browsingLevel=31` **or** `nsfw=true` — both accepted |
+| `/api/v1/models` | `nsfw=true` only; `browsingLevel=31` is rejected with a `ZodError` ("expected number, received string"), and `browsingLevel[]=31` parses but changes nothing |
+| `/api/v1/model-versions/by-hash/…` | neither; a hash lookup answers for what it is given |
+
+So the client sends `nsfw` to `/models`, `browsingLevel` to `/images`, and
+nothing to `by-hash`. `import.browsing_level` is the one setting behind all
+three, translated per endpoint in `src/models/civitai.ts` — one place that
+knows this, rather than three call sites each getting it wrong differently.
 
 **That is what demotes the official CLI.** Its documented interface has no
 base-URL option and no `browsingLevel` or `nsfw` flag, so it asks with the
@@ -318,11 +409,14 @@ is what actually has files, images and a `baseModel`.
 up on. When the input does not name a site, the order is civitai.red, then
 the archive; `--source` pins it to one.
 
-1. `GET https://civitai.red/api/v1/model-versions/by-hash/<hash>` with
-   `browsingLevel` set, which answers with the version, its files and its
-   `baseModel` in one call. Civitai matches AutoV1, AutoV2, SHA256, CRC32 and
-   BLAKE3 here, case-insensitively, so the same road serves a hash copied out
-   of another tool.
+1. `GET https://civitai.red/api/v1/model-versions/by-hash/<hash>`, which
+   answers with the version, its files and its `baseModel` in one call and
+   needs no visibility parameter — a hash lookup answers for what it is
+   given. Civitai matches AutoV1, AutoV2, SHA256, CRC32 and BLAKE3 here,
+   case-insensitively, so the same road serves a hash copied out of another
+   tool. The version names its `modelId`, and
+   `GET /api/v1/models/<modelId>` is the second call, for the description,
+   tags and creator that §5.5 keeps.
 2. Fallback: `GET https://civitaiarchive.com/api/sha256/<hash>`, which answers
    with every file it has seen under that hash and their `model_id` /
    `model_version_id`, then
@@ -343,7 +437,7 @@ scan does), that file is hashed, and the run continues as
 answer is about *your* file rather than a file with the same name.
 
 If nothing matches on disk, fall back to a name search —
-`GET https://civitai.red/api/v1/models?query=<stem>`, then
+`GET https://civitai.red/api/v1/models?query=<stem>&nsfw=true`, then
 `GET https://civitaiarchive.com/api/search?q=<stem>` — and accept a result
 only when one of its version files carries exactly that filename. Two or more
 matches is an error listing the candidates with their URLs, not a guess.
@@ -485,7 +579,7 @@ boot from now on. Nothing ever retries it; it is yours to look at or delete.
 ```json
 {
   "format": 1,
-  "forgecli_version": "0.1.0",
+  "forge_version": "0.1.0",
   "created_at": "2026-09-18T20:14:03Z",
   "overwrite": false,
   "model": {
@@ -612,6 +706,128 @@ than only in a column is not optional: AGENTS.md's rule is that anything the
 database knows about an output must be rebuildable from the sidecar, and a
 `reindex` that dropped "this came from SwarmUI" would be a `reindex` that
 loses data.
+
+### 5.5 The source record: what Civitai knows about a model
+
+Everything Civitai holds about a model that is worth keeping — the
+description, the trigger words, the creator, the upstream tags — lands in one
+**source record**, and the shape of it is set by two requirements that pull in
+opposite directions: a future MCP wants it small, plain and structured, and
+the model page wants it rendered the way its author wrote it.
+
+**The description is real HTML, not fancy text.** This was worth checking
+rather than assuming, so: across the descriptions of two popular models, the
+tags present were
+
+```
+p 107  strong 53  br 43  a 32  li 27  span 8  h2 6  code 6
+u 5  ul 5  h3 3  em 3  h1 1  s 1  img 1  pre 1
+```
+
+— the output of a rich-text editor (the `id="heading-133"` anchors and
+`rel="ugc"` links give away ProseMirror), including headings, lists, code
+blocks, emoji, inline images and a great many links to Patreon and Ko-fi. It
+is 6–8 KB for a well-documented model. You cannot flatten it to plain text
+without losing the structure that makes it readable, and you cannot render it
+raw. So both renditions are kept:
+
+- **`description_html`** — verbatim, exactly as served. The archival copy, and
+  what the model page renders *after sanitising* (§7.5).
+- **`description_text`** — derived at ingest: headings become `#` lines, lists
+  become `-` lines, links become `[text](url)`, images are dropped, everything
+  else is unwrapped. Markdown, in other words. This is what the API returns by
+  default and what an MCP would put in front of a model, because 8 KB of
+  `<strong>`-wrapped Patreon pitch is not a useful tool response.
+
+Deriving one from the other at ingest rather than at read time means the
+expensive, fiddly part happens once, in the CLI, where a bad parse is visible
+in a diff rather than in a route.
+
+**Trigger words are promoted out of the blob.** They are the one part of this
+the *app* acts on rather than displays: they go into a prompt. So they become
+a first-class field on the model — `trigger_words`, a list of strings — with
+the rest of the record staying read-only reference material. The upstream data
+needs cleaning first: `trainedWords` lives on the *version*, not the model,
+and is inconsistent in a way that will bite anyone who trusts it —
+
+```json
+["shuimobysim", "wuchangshuo", "bonian"]          // a clean list
+["abstractionism, brush stroke, traditional media, "]  // one string, comma-separated, trailing comma
+[]                                                 // very common
+```
+
+so ingest splits every entry on commas, trims, drops empties and
+de-duplicates case-insensitively.
+
+**Collections are not available.** Civitai's public API has
+`/api/v1/collections`, which lists public collections globally, but there is
+no reverse lookup from a model to the collections containing it
+(`/api/v1/models/<id>/collections` is a 404, and the model response carries no
+collection field). Getting it would mean enumerating collections and their
+items until you found the ones that mention this model, which is a crawl
+rather than a lookup and is not something this tool should do. The field is
+**left out rather than stubbed**, and the record's `format` version is how it
+gets added later if Civitai ever exposes it.
+
+The record as stored:
+
+```json
+{
+  "format": 1,
+  "source": {
+    "kind": "civitai",
+    "label": "Civitai",
+    "url": "https://civitai.red/models/4384?modelVersionId=128713",
+    "model_id": 4384,
+    "model_version_id": 128713,
+    "fetched_at": "2026-09-23T09:12:44Z"
+  },
+  "creator": { "username": "Lykon", "url": "https://civitai.red/user/Lykon" },
+  "model": {
+    "name": "DreamShaper",
+    "type": "Checkpoint",
+    "tags": ["photorealistic", "base model", "anime"],
+    "description_html": "<h1 id=\"heading-133\">DreamShaper - V∞!</h1>…",
+    "description_text": "# DreamShaper - V∞!\n\n…"
+  },
+  "version": {
+    "name": "8",
+    "base_model": "SD 1.5",
+    "published_at": "2023-10-30T…",
+    "description_html": "<ul><li><p>Better at handling Character LoRA</p></li>…",
+    "description_text": "- Better at handling Character LoRA\n…"
+  },
+  "trigger_words": ["shuimobysim", "wuchangshuo"],
+  "license": {
+    "allow_commercial_use": ["Image"],
+    "allow_derivatives": true,
+    "allow_no_credit": true
+  },
+  "stats": { "downloads": 1207233, "thumbs_up": 24408 }
+}
+```
+
+**Where it lives.** §8.1 already says a model's Civitai metadata lives "in
+`models-meta/<hash>/` and the DB", and `models.civitai_json` has been in
+`schema.sql` since version 1 without ever being written. So: the raw upstream
+response is written to `models-meta/<hash>/civitai.json`, the normalised
+record above goes in `models.civitai_json`, and `trigger_words` gets a column
+of its own. The on-disk copy is what a rebuild reads, which keeps the
+database derived exactly as §7 promises — and unlike samples (§7.4), this half
+*is* rebuildable from disk from the start.
+
+**It never merges into the fields you edit.** `notes`, `display_name` and
+`tags` are yours — §8.1 makes them edit-in-place. The source record is a
+cached copy of somebody else's document with its own lifecycle: replaced
+wholesale on a re-fetch, never diffed, never merged. Dumping 8 KB of an
+author's promotional HTML into `notes` would destroy the field it landed in
+and then clobber whatever you typed the next time `--overwrite` ran. Two
+different lifecycles, two different homes. The upstream `tags` are the one
+borderline case, and they stay in the record rather than joining ForgeUI's
+`tags`, which are your taxonomy and drive the `?tags=` filter: importing forty
+models should not silently add two hundred tags to your filter list. Promoting
+a tag from the record to a real tag is a click on the model page, not
+something ingest decides.
 
 ---
 
@@ -751,6 +967,49 @@ be fixed by a separate change that walks `samples/` the way §7 says it should.
 Flagging it here rather than fixing it here: it is a pre-existing gap and
 bundling it would double this diff.
 
+### 7.5 The source panel, and the API an MCP will read
+
+`GET /api/models/:hash` grows one block, which is the record of §5.5 with its
+HTML halves left out by default:
+
+```
+GET /api/models/:hash                → …, trigger_words[], source { … }
+GET /api/models/:hash?html=1         → the same, plus description_html
+```
+
+Plain by default is the important half of that. An MCP asking "what is this
+LoRA and how do I trigger it" wants `trigger_words` and `description_text`;
+serving it 8 KB of markup by default would make every caller strip tags, and
+some of them would do it wrong. The browser is the one caller that wants the
+HTML and the one that can ask for it.
+
+Nothing about this is MCP-specific — it is an HTTP route returning normalised
+JSON, which is what an MCP server would wrap. Keeping the wrapping out of
+scope costs nothing as long as the shape is right now, and the shape being
+right now is the entire reason §5.5 normalises at ingest instead of at read.
+
+On the model page, a **From Civitai** panel below the header: creator, upstream
+tags, published date, license summary, the rendered description, and the link
+out. Collapsed by default past a few lines, because a description can be eight
+kilobytes and the samples strip is what people came for.
+
+Two rules for rendering it, both non-negotiable:
+
+- **Sanitise.** The HTML is written by a stranger. Allow the tag set §5.5
+  measured (`h1`–`h3`, `p`, `br`, `strong`, `em`, `u`, `s`, `a`, `ul`, `ol`,
+  `li`, `code`, `pre`, `blockquote`) and strip everything else, attributes
+  included, with `href` kept only for `http(s):` and every link forced to
+  `target="_blank" rel="noopener noreferrer nofollow"`.
+- **Drop `<img>` entirely**, replacing each with a plain link. Those point at
+  `image.civitai.com`, and rendering them would make opening a model page
+  issue requests to a third party every time — in an app whose whole premise
+  is that it does not talk to anyone you did not ask it to. The description
+  images are decoration; the samples strip is the images that matter, and
+  those are on disk.
+
+The trigger words get their own line above the panel, monospaced, each one a
+click to copy — the one piece of this that is an input rather than a document.
+
 ---
 
 ## 8. Config changes
@@ -759,7 +1018,7 @@ One new top-level block in `config.yaml`, validated like every other:
 
 ```yaml
 import:
-  # Where forgecli drops batches and the app picks them up.
+  # Where forge drops batches and the app picks them up.
   # null → <appdata>/import. An absolute path may live on a share, which is
   # how the fetching machine and the serving machine can be different ones.
   dir: null
@@ -776,6 +1035,8 @@ import:
 
   # Civitai's visibility bitmask. 1 is PG only; 31 is everything. This is
   # what a *lookup* may return — nsfw_level below is what may be downloaded.
+  # Which query parameter carries it differs per endpoint (§4.0); one place
+  # translates it, and this is the only knob.
   browsing_level: 31
 
   # The fallback, and the only source for models Civitai has deleted.
@@ -839,10 +1100,21 @@ gets it at version 1 and the migration is a no-op there):
 ALTER TABLE outputs ADD COLUMN source_json TEXT;   -- §5.4; NULL = made here
 ALTER TABLE samples ADD COLUMN source_json TEXT;
 
+-- What the model wants in a prompt (§5.5). A list of strings, or NULL for
+-- "nobody has told us", which is every row today.
+ALTER TABLE models ADD COLUMN trigger_words_json TEXT;
+
 -- Re-importing the same image is a no-op rather than a duplicate (§7.2).
 CREATE UNIQUE INDEX IF NOT EXISTS samples_source
   ON samples(model_hash, source_url) WHERE source_url IS NOT NULL;
 ```
+
+`trigger_words_json` is the only part of §5.5's record to get a column. The
+rest goes in `models.civitai_json`, which `schema.sql` has carried since
+version 1 and nothing has ever written — so the source record needs no
+migration at all, only a first writer. The column's name predates
+civitaiarchive being a source too; the record's own `source.kind` says which
+one answered, and renaming a column for tidiness is not worth a migration.
 
 Existing rows get `NULL`, which reads as "this app made it" and is true of
 every row that exists. Nothing is backfilled and nothing needs to be.
@@ -854,19 +1126,27 @@ nothing has ever set it. The migration creates the index unconditionally and,
 should that ever stop being true, fails loudly in a transaction that rolls
 back, which is the right failure.
 
-`models.civitai_json` needs no migration: the column has been in `schema.sql`
-since version 1, waiting for this.
+**Not a database migration, but spec changes that belong with them.** Per
+AGENTS.md, DESIGN.md is edited first and this document does not get to
+contradict it, so these land with the steps of §11 that need them:
 
-**Not a database migration, but a spec change that belongs with them:**
-DESIGN.md §3's directory layout gains two entries — `import/` and `models/` —
-and §3's line "Model folders … are **never written to**" needs the word
-*configured* in it, since `<appdata>/models/` is now a model folder the app
-writes. Per AGENTS.md, DESIGN.md is edited first and this document does not
-get to contradict it, so that edit lands with step 3 of §11.
+- §3's directory layout gains two entries, `import/` and `models/`, and §3's
+  line "Model folders … are **never written to**" needs the word *configured*
+  in it, since `<appdata>/models/` is now a model folder the app writes.
+- §8.1's "optional Civitai metadata (fetched by hash **only when the user
+  clicks Fetch info**; never automatic)" describes a button that was never
+  built. It becomes: fetched by `forge models`, applied on ingest, never by
+  the app on its own — which keeps the "never automatic" promise it was making
+  and names the thing that actually does the fetching.
+- §12's route table gains `?html=1` on `GET /api/models/:hash`, and
+  `POST /api/models/:hash/fetch-info` — listed there since Phase 3 and never
+  implemented — is struck. There is no such route in this design; the CLI is
+  the fetcher, and a route that reached Civitai would be the thing §4.6
+  forbids.
 
 There is no migration for what is already on disk, and none is needed: an
 existing install has no `import/` and no `<appdata>/models/`, both are created
-empty on the next boot, and an install that never runs `forgecli` sees no
+empty on the next boot, and an install that never runs `forge` sees no
 change at all.
 
 ---
@@ -881,9 +1161,19 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   a file with nothing, a file that is not an image.
 - `civitai.ts`: every URL form in §4.1 and a handful that are not;
   `baseModel` → family for each mapping and for an unknown one; model `type`
-  → kind.
+  → kind; `import.browsing_level` translated to the right parameter per
+  endpoint (§4.0's table).
+- `trainedWords` normalisation (§5.5): a clean list, the one-string
+  comma-separated form with its trailing comma, `[]`, `null`, and duplicates
+  differing only in case.
+- HTML → text (§5.5): headings, nested lists, links, `<br>`, code blocks,
+  entities, and a description that is not valid HTML at all.
+- The sanitiser (§7.5): `<script>` and `<iframe>` removed, `<img>` replaced by
+  a link, `javascript:` hrefs dropped, `rel`/`target` forced on what survives.
+  This one is security-relevant, so it gets the ugly inputs.
 - The CLI's argument parsing: the "exactly one of" rule, `--download-samples`
-  with and without a value, unknown flags.
+  with and without a value, unknown flags, and `forge gui --help` reaching the
+  server's parser rather than cliffy's.
 
 **Integration**
 - Ingest applies a hand-written batch to a hashed model and deletes it.
@@ -903,6 +1193,11 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   `overwrite: true` does.
 - An imported sample's row, sidecar and `GET /api/models/:hash` all carry the
   source; the sidecar round-trips through `reindex` unchanged.
+- `GET /api/models/:hash` returns `trigger_words` and `description_text` and
+  **no** `description_html`; `?html=1` returns it (§7.5).
+- `forge models` run against a fresh data directory creates no `app.db`, and
+  against a populated one does not touch its mtime — §3.1's invariant, which
+  is the one test that keeps the two halves honest now they share a binary.
 
 **The CLI end to end** runs against a fake Civitai: a local HTTP server
 serving canned `model-versions/by-hash`, `models/<id>`, `images` and archive
@@ -930,16 +1225,21 @@ on the day it was measured and is not a promise anyone made us.
 2. Migration 8, the sidecar `source` block, `source` on both views, the badge
    and the `?source=` filter. Useful on its own: promoted and dropped samples
    get an origin line that is not a guess.
-3. `src/models/import.ts` + the config block + the ingest hooks, driven by
+3. The source record (§5.5): the HTML→text conversion, the sanitiser,
+   `trigger_words` and its column, the `From Civitai` panel and the
+   `GET /api/models/:hash` block. Pure functions plus a read path, driven by
+   canned fixtures — no network, no CLI, and it is what the future MCP reads.
+4. `src/models/import.ts` + the config block + the ingest hooks, driven by
    hand-written batches. The whole app side, testable with no network at all.
-4. `src/cli/main.ts` — cliffy, lookup against civitai.red, the archive
-   fallback, sample download, batch writing.
-5. `--download-model`: the CLI half (the one part that needs auth) and the
+5. `src/cli/main.ts` — cliffy, the `gui`/`reindex` passthrough and the
+   `serve(argv)` export, then `models`: lookup against civitai.red, the
+   archive fallback, sample download, batch writing.
+6. `--download-model`: the CLI half (the one part that needs auth) and the
    Phase A half (`<appdata>/models/`, the `extra_model_paths.yaml` entry, the
    DESIGN.md §3 edit).
 
-Steps 1–3 are independently shippable and none of them can reach the network.
-Step 5 is last because it is the only step that can put six gigabytes
+Steps 1–4 are independently shippable and none of them can reach the network.
+Step 6 is last because it is the only step that can put six gigabytes
 somewhere, and it should land on top of a pipeline that is already known to
 work for the parts that cannot.
 
@@ -947,11 +1247,15 @@ work for the parts that cannot.
 
 ## 12. Open questions
 
-1. **Should `notes` take the Civitai description?** It is HTML, often long,
-   and `notes` is a plain-text field a person types into. The proposal puts
-   the trigger words plus a stripped-down description in and keeps the full
-   HTML in `civitai_json`; the alternative is to leave `notes` alone entirely
-   and render the description as its own read-only block on the model page.
+1. **Should `description_text` be searchable?** DESIGN.md §12 has carried the
+   question ("should notes / Civitai description be searchable anywhere")
+   since before there was a description to search. There is one now, and it is
+   the best prose anyone will ever write about a model — but `?q=` today means
+   "name, filename and tags", and quietly widening it to eight kilobytes of
+   Patreon pitch per model would make every search noisier. A separate
+   `?describes=`, or an FTS table over `description_text` alone, are both
+   defensible. The proposal stores the text and searches none of it, which is
+   the reversible choice.
 2. **Does `<appdata>/models/` want a size ceiling or a sweep?** Weights are
    the largest thing the data directory will ever hold, and nothing in this
    proposal ever deletes one — `GET /api/system/storage` would start
