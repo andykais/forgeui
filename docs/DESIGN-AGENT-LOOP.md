@@ -2,12 +2,11 @@
 
 **Status:** proposal. Nothing here is implemented.
 **Touches:** DESIGN.md §4.6 (manifest), §6.2 (sidecar), §7 (schema), §11.2
-(gallery filters), §12 (API), and a new §13 for the MCP surface.
-**Lands in this repo:** the MCP server, the batch API, job origin, two more
-routes, one manifest field, config.
-**Does not land in this repo:** llama-swap, the runner, the harness. They are
-described here so the whole loop is legible from one document, and so the
-contract ForgeUI has to keep is written down next to the thing that keeps it.
+(gallery filters), §12 (API).
+**Lands in ForgeUI the server:** the batch API, job origin, two routes, one
+manifest field, API client tokens. No MCP, no knowledge of any LLM.
+**Lands beside it:** `forgeui-mcp`, a separate process — the bridge. It holds
+everything about the model and the GPU handoff.
 
 ---
 
@@ -23,34 +22,29 @@ The naive fix is to make ForgeUI the arbiter: it already owns the ComfyUI child
 process, already samples VRAM (§7.1), already has a config file. It would be a
 natural home and it is the wrong one. ForgeUI would grow a scheduler, a policy
 for a process it does not own, and a hard dependency on a particular LLM
-runtime. This design keeps ForgeUI a media generation service that can *let go
-of the GPU when asked*, and puts the sequencing outside.
+runtime.
+
+So the arbitration goes in a **third process that is nobody's dependency**, and
+which happens to be the MCP server the model already talks to.
 
 ---
 
 ## 1. The shape
 
-Four processes, three of them already exist:
+| Component | Where | Owns |
+| --- | --- | --- |
+| **ForgeUI** | 5090 box | ComfyUI, the gallery, a REST + WS API. Knows nothing about LLMs |
+| **llama-swap** | 5090 box | loading and evicting the VLM |
+| **the bridge** (`forgeui-mcp`) | 5090 box | the MCP server, and the GPU handoff |
+| **the harness** | anywhere | the conversation, the tool loop |
 
-| Component | Where | Owns | In this repo |
-| --- | --- | --- | --- |
-| **ForgeUI** | 5090 box | ComfyUI, the gallery, the MCP surface | yes |
-| **llama-swap** | 5090 box | loading and evicting the VLM | no |
-| **The harness** | anywhere | the conversation, the tool loop | no |
-| **The runner** | with the harness | one tool: the GPU-exclusive batch | no |
+The bridge is the only component that can see both tenants, so it is the only
+one that sequences them. It talks plain REST and WebSocket to ForgeUI, plain
+HTTP to llama-swap, and MCP to the harness. Neither of the two things it
+arbitrates knows it exists.
 
-And the division that makes it work:
-
-- **The MCP server is the catalogue and the media.** Every call is fast and
-  happens while the model is resident: what workflows exist, what params they
-  take, how to prompt this family, what is in the gallery, show me this output.
-- **The runner is the long operation.** One tool, one job: evict the model,
-  submit the batch, watch it finish, hand the GPU back. It is the only
-  component that can see both tenants, so it is the only one that sequences
-  them.
-
-Nothing arbitrates. Each side can be *told to let go*, and the runner does the
-telling.
+**Every verb the model has is an MCP tool, including `generate`.** There is no
+second mechanism, no local script, nothing to describe by hand. See §5.
 
 ---
 
@@ -61,91 +55,183 @@ The thing that makes this tractable, and the reason it needs so little code:
 **When the model emits a tool call, its turn is over.** The harness is holding
 a tool result it has not produced yet; the model is not generating, is not
 being sampled, and is doing nothing but occupying VRAM. That is exactly the
-moment it is safe to evict.
+moment it is safe to evict — and it is true whether the tool takes 50ms or four
+minutes.
 
 And llama-swap already handles the way back. It loads a model on demand when a
 request arrives for one that is not running. So:
 
-- **Unloading** is one POST from the runner.
+- **Unloading** is one POST from the bridge.
 - **Waking the model back up** is *not implemented by anything*. The harness
   posts the next chat completion with the tool result attached, llama-swap sees
-  a request for a model that is not loaded, and loads it. The runner never
+  a request for a model that is not loaded, and loads it. The bridge never
   "wakes" anything — it just returns.
 
-The whole handoff is therefore one explicit call and one thing that happens by
-itself.
+The whole handoff is one explicit call and one thing that happens by itself.
 
 ---
 
-## 3. The round trip
+## 3. Why the bridge, and not the two obvious alternatives
+
+An earlier revision of this document had `generate` *not* be an MCP tool, on
+the grounds that a tool call which blocks for four minutes holds the GPU
+hostage. **That was wrong**, and §2 is the reason: the model is idle for the
+whole of any tool call, so the duration of the call costs nothing. What was
+actually true was narrower — *ForgeUI's in-process MCP server* could not evict
+the model, because that would make ForgeUI depend on llama-swap.
+
+Moving the MCP server out of ForgeUI dissolves the problem rather than working
+around it:
+
+| | MCP inside ForgeUI | A local runner script | **The bridge** |
+| --- | --- | --- | --- |
+| Can evict the LLM | no — would couple ForgeUI to llama-swap | yes | **yes** |
+| `generate` is a normal tool | no | no — a second, hand-described mechanism | **yes** |
+| Things to install | 1 | 2 | **1** |
+| ForgeUI knows about LLMs | yes | no | **no** |
+
+The runner-script version also had a subtler cost: two ways for the model to
+act on the world, one discovered through MCP and one described in a prompt. The
+described one drifts. This has one.
+
+---
+
+## 4. The round trip
 
 ```
- model          runner                 llama-swap            ForgeUI / Comfy
-   │               │                       │                       │
-   │ (resident, ~18GB)                     │                       │
-   ├─ MCP: describe_workflow ──────────────┼──────────────────────▶│  fast
-   │◀─ params + prompting guide ───────────┼───────────────────────┤  reads
-   │                                       │                       │
-   ├─ tool: render([p1..pN]) ─────────────▶│                       │
-   │  ── turn over, model idle ──          │                       │
-   │               ├─ POST /api/models/unload ─▶│                  │
-   │               ├─ GET /running until empty ▶│                  │
-   │            (GPU free)                 │                       │
-   │               ├─ POST /api/jobs/batch ┼──────────────────────▶│
-   │               │   {jobs[], origin}    │      → batch_id       │
-   │               ├─ WS /ws: one `batch` ─┼──────────────────────▶│  minutes
-   │               │   event, at the end   │                       │
-   │               ├─ POST /api/system/free_vram ─────────────────▶│
-   │               │                    (GPU free)                 │
-   │◀─ tool result: ids, status, timings ──┤                       │
-   │  ── harness posts next completion ──  │                       │
-   │               │      llama-swap loads on demand ──▶(resident) │
-   ├─ MCP: get_output_image(id, 768) ──────┼──────────────────────▶│
-   │◀─ image content block ────────────────┼───────────────────────┤
-   │  …critique, next batch                │                       │
+ model            bridge (forgeui-mcp)      llama-swap          ForgeUI / Comfy
+   │                    │                       │                      │
+   │ (resident, ~18GB)  │                       │                      │
+   ├─ describe_workflow ▶│─ GET /api/workflows/:id ─────────────────────▶│
+   │◀─ params + guide ──┤                       │                      │
+   │                    │                       │                      │
+   ├─ generate([…]) ───▶│                       │                      │
+   │  ── turn over, model idle ──               │                      │
+   │                    ├─ POST /api/models/unload ─▶│                 │
+   │                    ├─ GET /running until empty ▶│                 │
+   │                 (GPU free)                 │                      │
+   │                    ├─ POST /api/jobs/batch ─────────────────────▶ │
+   │◀── notifications/progress ×N ──────────────┤   (WS: job events)   │
+   │                    │◀─ WS: one `batch` event ───────────────────── │
+   │                    ├─ POST /api/system/free_vram ───────────────▶ │
+   │                 (GPU free)                 │                      │
+   │◀─ tool result: batch_id, counts, ids ──────┤                      │
+   │  ── harness posts next completion ──       │                      │
+   │                    │   llama-swap loads on demand ─▶ (resident)    │
+   ├─ get_output_image ▶│─ GET …/media?max_edge=768 ──────────────────▶│
+   │◀─ image block ─────┤                       │                      │
+   │  …critique, next generate()                │                      │
 ```
 
-Two evictions per round, not per image — which is why the runner takes a
+Two evictions per round, not per image — which is why `generate` takes a
 **batch**. Six variants cost the same two handoffs as one.
 
 ---
 
-## 4. What ForgeUI gains
+## 5. The bridge — `forgeui-mcp`
 
-Small, and all of it in ForgeUI's existing idiom.
+A CLI that starts an MCP server and nothing else. One process, started by hand
+or by systemd, pointed at ForgeUI and llama-swap:
 
-### 4.1 The MCP server — `src/mcp/`
+```
+forgeui-mcp --http 127.0.0.1:7801 \
+            --forgeui http://127.0.0.1:7860 --forgeui-token … \
+            --llama-swap http://127.0.0.1:8080 --llm-model qwen-vlm
+```
 
-Served by the same Deno process on the same port, at `/mcp`, over Streamable
-HTTP. Not stdio: ForgeUI is a long-running server, not something a harness
-spawns as a child, and the harness may be on another machine.
+`--stdio` instead of `--http` when the harness runs on the same box and would
+rather launch it as a subprocess. The same server implementation serves both
+bindings; the protocol is identical either way.
 
-| Tool | Returns | Why |
+### 5.1 Tools
+
+| Tool | What it does | Cost |
 | --- | --- | --- |
-| `list_workflows` | id, name, family, kind | what can be made |
-| `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** | the model cannot guess that Illustrious wants tags and Krea wants prose |
-| `list_models` | checkpoints and LoRAs, by display name (§8.1) | so a prompt can name a LoRA |
-| `search_gallery` | outputs under the §11.2 filters, **including `project` and `source`** | find this project's earlier rounds |
-| `get_output` | the sidecar: params, seed, model, timings, **origin** | read back exactly what produced a take, and why |
-| `get_output_image` | an **image content block**, downscaled | this is what "look at it" means |
+| `list_workflows` | proxies `GET /api/workflows` | fast |
+| `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
+| `list_models` | checkpoints and LoRAs by display name (§8.1) | fast |
+| `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
+| `get_output` | the sidecar: params, seed, models, timings, origin | fast |
+| `get_output_image` | an **image content block**, downscaled | fast |
+| `gpu_status` | what is resident, and how much VRAM is free | fast |
+| **`generate`** | the round: evict, submit the batch, wait, free, report | **minutes** |
 
-`get_output_image` takes `max_edge` (default 768) and serves a resized JPEG.
-This is not a nicety: vision tokens land in the same VRAM budget as the model,
-and a 1024² image is several times the tokens of a 768px one for no critique
-value. ForgeUI already makes thumbnails, so the machinery exists.
+Only the last one is special, and only in how long it takes.
 
-**`generate` is deliberately not an MCP tool.** Submitting is easy; *waiting*
-is the problem, and a tool call that blocks for four minutes while holding the
-GPU hostage is the thing this design exists to avoid. Generation belongs to the
-runner, over the batch API of §4.2, because the runner can evict first. See §7.
+`gpu_status` exists because the bridge is the only thing that can answer it,
+and because a model that can ask *"is there room for a video workflow right
+now"* makes better choices than one that submits and finds out.
 
-Note what the model *can* read: its own last round, by project, with the notes
-it wrote at the time. That is the loop's memory, and it survives the model
-being evicted, the harness restarting, and the database being rebuilt.
+### 5.2 `generate`
 
-### 4.2 The batch API
+```jsonc
+generate({
+  project: "kitchen-lighting",          // groups the round (§6.2)
+  note: "round 3 — LoRA ceiling",
+  jobs: [
+    { workflow_id: "illustrious", params: {…}, note: "0.7" },
+    { workflow_id: "illustrious", params: {…}, note: "0.9" }
+  ],
+  wait: true,                            // default
+  timeout_s: 900
+})
+→ { batch_id, counts: {done, failed, cancelled}, jobs: [{job_id, status, output_ids, error?}] }
+```
 
-`POST /api/jobs` stays one job per call — the UI wants it that way. The runner
+In order, the bridge:
+
+1. `POST /api/models/unload` to llama-swap.
+2. Polls `GET /running` until empty, or fails loudly. Submitting while the VLM
+   still holds 18GB is how you get an OOM that looks like a ComfyUI bug.
+3. Opens ForgeUI's WebSocket **before** submitting. After is a race that loses
+   the completion of a fast job.
+4. `POST /api/jobs/batch` once — all-or-nothing (§6.1), one `batch_id` back.
+5. Waits for the single `batch` event, relaying per-job progress as MCP
+   `notifications/progress` (§5.3).
+6. `POST /api/system/free_vram`.
+7. Returns ids, statuses and errors — **not images**. The model asks for the
+   pictures it wants with `get_output_image` once it is resident again, which
+   keeps the context small and lets it choose.
+
+### 5.3 Long calls: progress, timeouts, cancellation
+
+A four-minute tool call is fine for the *model* (§2) and awkward for the
+*client*, which may have a request timeout. Three mechanisms, in order of
+preference:
+
+- **Progress notifications.** When the call carries a `progressToken`, the
+  bridge sends `notifications/progress` as each job lands — `3/6`, with the
+  workflow name as the message. Many clients extend their timeout on progress;
+  the spec defines the notification but does not require that behaviour, so it
+  is a strong mitigation rather than a guarantee.
+- **`wait: false`.** Returns `{batch_id}` immediately; `generate_status(id)`
+  polls. The escape hatch for a harness with a short, fixed timeout. It costs a
+  round of model time per poll, so it is not the default.
+- **Cancellation.** On Streamable HTTP a client abandons a request by closing
+  the response stream. When that happens the bridge calls
+  `POST /api/jobs/batch/:id/cancel` — otherwise a model that gave up leaves a
+  batch running with the GPU it no longer wants.
+
+### 5.4 Where it lives
+
+Same repository, separate entrypoint (`deno task mcp`), separate process. The
+alternative — its own repo — buys independence that one person on one box does
+not need yet, and costs a second clone and a second update path.
+
+The line that keeps this honest is the test suite: **`deno task test` must
+never need llama-swap.** The bridge's arbitration goes behind an interface with
+a fake in tests, exactly as `tests/fake-comfy/` stands in for ComfyUI. If that
+ever becomes hard to hold, the bridge has earned its own repo and should move.
+
+---
+
+## 6. What ForgeUI gains
+
+Smaller than the previous revision, because the MCP server left.
+
+### 6.1 The batch API
+
+`POST /api/jobs` stays one job per call — the UI wants it that way. The bridge
 gets a second door:
 
 ```
@@ -162,10 +248,9 @@ POST /api/jobs/batch
 
 **All or nothing.** Every job's params are coerced and validated before any of
 them is enqueued; one bad value fails the whole call, naming the index and the
-param. That is the reason for the endpoint to exist at all — six separate
-`POST /api/jobs` calls can leave three jobs running and three rejected, and the
-runner then has to decide what a half-submitted round means. It should never
-have to.
+param. That is the reason for the endpoint to exist — six separate `POST
+/api/jobs` calls can leave three jobs running and three rejected, and then the
+bridge has to decide what half a round means. It should never have to.
 
 | Route | |
 | --- | --- |
@@ -189,20 +274,19 @@ returns — the §12 rule that websocket payloads share the API's shapes.
 Three things that matter more than they look:
 
 - **It fires when every job is terminal, not when every job succeeds.** A batch
-  where all six fail still fires. Anything else is a runner that hangs holding
-  the GPU, which is the failure this whole design is organised against.
+  where all six fail still fires. Anything else is a bridge that hangs holding
+  the GPU, which is the failure this design is organised against.
 - **It fires exactly once.** The check runs on every job transition, so the
-  batch row carries the fact that it has been announced and the second
+  batch row carries the fact that it has been announced, and the second
   transition to arrive finds it already set.
 - **`counts` rather than a verdict.** "4 done, 2 failed" is a fact; "partial"
-  is a judgement, and the runner is better placed to make it than we are.
+  is a judgement, and the bridge is better placed to make it than we are.
 
 Per-job `job` events keep firing as they do today — the batch event is in
-addition, not instead. The UI still wants to watch a queue drain.
+addition, not instead. The UI still wants to watch a queue drain, and so does
+the bridge, to relay progress.
 
-### 4.3 Where a job came from, and what it was for
-
-Two different things, and worth separating.
+### 6.2 Where a job came from, and what it was for
 
 ```json
 "origin": {
@@ -214,16 +298,15 @@ Two different things, and worth separating.
 }
 ```
 
-This is a **sidecar** field (DESIGN.md §6.2), not only a column. The repo's
-rule is that anything stored only in the database about an output must also go
-in the sidecar, and provenance is the clearest case there will ever be for it:
-a note saying why a take exists is worthless if `deno task reindex` throws it
-away. The outputs table gets `source` and `project` as derived, indexed columns
-because they are filtered on; the sidecar holds all of it.
+A **sidecar** field (DESIGN.md §6.2), not only a column. The repo's rule is
+that anything stored only in the database about an output must also go in the
+sidecar, and provenance is the clearest case there will ever be: a note saying
+why a take exists is worthless if `deno task reindex` throws it away. The
+outputs table gets `source` and `project` as derived, indexed columns because
+they are filtered on; the sidecar holds all of it.
 
 Pleasant consequence: since each sidecar carries `batch_id`, batch membership
-is rebuildable from disk too. The batches table is a derived index like
-everything else.
+is rebuildable from disk too.
 
 #### `source` is stamped, not claimed
 
@@ -231,8 +314,7 @@ The body cannot set it. The server derives it from the credential the request
 arrived with:
 
 ```yaml
-mcp:
-  enabled: true
+api:
   clients:
     - token: "…"
       source: "llm:qwen3.5-9b"
@@ -241,11 +323,13 @@ mcp:
 No token — the UI, same origin — is `webui`. A request bearing a client's token
 is that client's `source`. A body that tries to set `source` gets a 400.
 
-This costs almost nothing, because §4.5 needs the token anyway, and it buys the
-distinction being asked for here: *"if it's from the webui, that's me"* is only
-true if the runner cannot say it is the webui. A claimed field would make
-`source` a comment. Stamped, it is a fact, and a year from now "did I write
-this prompt or did the model?" has an answer you can trust.
+*"If it's from the webui, that's me"* is only true if the bridge cannot say it
+is the webui. A claimed field would make `source` a comment. Stamped, it is a
+fact, and a year from now "did I write this prompt or did the model?" has an
+answer worth trusting.
+
+Note that this is now `api.clients`, not `mcp.clients`: ForgeUI has no MCP, and
+the token is about identifying an API client generally.
 
 #### `project` gets a column, `note` does not
 
@@ -253,30 +337,72 @@ this prompt or did the model?" has an answer you can trust.
 grouping key is what you filter and navigate by; the prose is what you read.
 
 - **`project`** — indexed, a gallery filter chip (§11.2), normalised on write
-  (trimmed, length-capped) because a grouping key has to be stable to group.
+  (trimmed, length-capped), because a grouping key has to be stable to group.
 - **`note`** — free text, capped at 2KB, shown in the metadata sidebar and
   covered by the gallery's existing `q` search. Being able to find *"where was
   I testing the LoRA limits"* is most of the value.
-- **`meta`** — an opaque object for whatever the runner wants to keep, capped
-  at 8KB total, never indexed, never parsed. An escape hatch, so the schema
-  does not have to guess right the first time.
+- **`meta`** — an opaque object for whatever the bridge wants to keep, capped
+  at 8KB, never indexed, never parsed. An escape hatch, so the schema does not
+  have to guess right the first time.
 
-**No `iteration` field, deliberately.** It is tempting — the example sentence
-has one in it — but a batch already orders its own jobs and `project` plus
-`created_at` already orders the rounds. An integer the model has to remember to
-increment is an integer the model will eventually get wrong, and then the
+**No `iteration` field, deliberately.** A batch already orders its own jobs and
+`project` plus `created_at` already orders the rounds. An integer the model has
+to remember to increment is one it will eventually get wrong, and then the
 record is worse than no record.
-
-#### Inheritance
 
 Batch `origin` applies to every job in it; a job's own `note` is appended
 rather than replacing the batch's. `source` and `batch_id` are never settable
 at either level — the server owns both.
 
-### 4.4 What this is for: the gallery
+### 6.3 Two routes
+
+- **`POST /api/system/free_vram`** — asks ComfyUI to drop its models (`POST
+  /free` with `unload_models` and `free_memory`). ForgeUI owns that child
+  process, so ForgeUI owns the verb. It is a verb, not a policy: the bridge
+  decides when.
+- **`?max_edge=` on the media route** — serves a resized frame. Not a nicety:
+  vision tokens land in the same VRAM budget as the model, and a 1024² image
+  costs several times a 768px one for no critique value. The existing
+  `thumb_url` is not a substitute — tile thumbnails are square-cropped, and
+  cropping out the composition is exactly wrong for a model being asked about
+  composition. ffmpeg is already a dependency.
+
+### 6.4 `prompting` on the manifest — DESIGN.md §4.6 first
+
+The per-family guidance is the genuinely valuable half of this work, and it
+belongs next to the workflow it describes, in `workflows/bundled/<id>/`, not in
+a prompt file that drifts from the manifest. `describe_workflow` serves it, so
+the model gets it at the moment it needs it without a separate install.
+
+Per the repo's own rule: the field goes in DESIGN.md before it goes in code.
+
+### 6.5 Tests
+
+Through the interface, not the internals:
+
+- a batch with one invalid param enqueues **nothing**, and says which job and
+  which param;
+- the `batch` event fires once when the last job lands — with a scenario where
+  every job fails, because that is the case a naive implementation drops;
+- `origin` round-trips: submit with a project and a note, rebuild the database
+  from the sidecars with `reindex`, and the filters still find it. This is the
+  test that proves the sidecar rule was honoured rather than described;
+- a request with a client token stamps that client's `source`; a body that sets
+  `source` is rejected;
+- `free_vram` calls the fake ComfyUI's `/free` (a new scenario in
+  `tests/fake-comfy/`);
+- `?max_edge=` returns an image within the bound, uncropped.
+
+And for the bridge, against a fake llama-swap and the existing fake ComfyUI:
+`generate` unloads before submitting, cancels the batch when the MCP request is
+abandoned, and returns counts when every job fails.
+
+---
+
+## 7. What the gallery gains
 
 Metadata nobody can see is metadata nobody writes correctly. The payoff is in
-§11.2, and it is small:
+§11.2 and it is small:
 
 - **filter chips for `source` and `project`** beside the existing ones — *show
   me only what the model made*, *show me this project*;
@@ -285,64 +411,11 @@ Metadata nobody can see is metadata nobody writes correctly. The payoff is in
   batch's siblings reachable from it — lineage (§11.2) records parents and
   children, and a batch is the sibling relationship it has no way to express.
 
-Without those, `origin` is a write-only field and will rot. They are cheap, and
-they are the reason to do this at all.
-
-### 4.5 `POST /api/system/free_vram`
-
-Asks ComfyUI to drop its models (`POST /free` with `unload_models` and
-`free_memory`). ForgeUI owns that child process, so ForgeUI owns the verb — but
-it is a verb, not a policy. The runner decides *when*; ForgeUI only knows how.
-
-A later convenience could be `comfy.free_vram_when_idle` in `config.yaml`,
-firing when the queue drains. It is not needed for this design and should not
-be added before someone wants it.
-
-### 4.6 `prompting` on the manifest — DESIGN.md §4.6 first
-
-The per-family guidance is the genuinely valuable half of this work and it
-belongs next to the workflow it describes, in `workflows/bundled/<id>/`, not in
-a skill file that drifts from the manifest. `describe_workflow` serves it, so
-any client gets it without a separate install.
-
-Per the repo's own rule: the field goes in DESIGN.md before it goes in code.
-
-### 4.7 Config
-
-```yaml
-mcp:
-  enabled: false          # off by default; it is a control surface
-  clients: []             # required when enabled
-  # - token: "…"
-  #   source: "llm:qwen3.5-9b"   # stamped onto every job this client submits
-```
-
-`/mcp` is an unauthenticated control surface on a listening port if we are not
-careful. A bearer token checked in the router is the minimum; binding to
-localhost or the LAN interface is the operator's job, as with `server.host`.
-
-### 4.8 Tests
-
-Per the repo's convention — through the interface, not the internals:
-
-- an integration test that speaks MCP over `/mcp` and lists workflows;
-- `get_output_image` returns an image block within `max_edge`;
-- `free_vram` calls the fake ComfyUI's `/free` (a new scenario in
-  `tests/fake-comfy/`);
-- `/mcp` 401s without a token, and a token stamps its configured `source`;
-- a batch with one invalid param enqueues **nothing**, and says which job and
-  which param;
-- the `batch` event fires once when the last job lands — with a scenario where
-  every job fails, because that is the case a naive implementation drops;
-- `origin` round-trips: submit with a project and a note, `reindex` the
-  database from the sidecars, and the filters still find it. This is the test
-  that proves the sidecar rule was honoured rather than described.
+Without those, `origin` is a write-only field and will rot.
 
 ---
 
-## 5. What llama-swap does — as it works today
-
-A proxy in front of `llama-server` with the model defined in its config:
+## 8. llama-swap — as it works today
 
 ```yaml
 models:
@@ -352,113 +425,78 @@ models:
       --model /models/Qwen3.5-9B-Q4_K_M.gguf
       --mmproj /models/mmproj-F16.gguf
       -c 16384 -ctk q8_0 -ctv q8_0
-    ttl: 0            # never unload on idle; the runner decides
-    unloadTimeout: 30 # seconds to stop gracefully
+    ttl: 1800          # a backstop, not the mechanism
+    unloadTimeout: 30
 ```
-
-The endpoints the runner uses:
 
 | Call | Effect |
 | --- | --- |
 | `POST /api/models/unload` | unload everything running |
 | `POST /api/models/unload/:model_id` | unload one |
-| `GET /running` | what is resident — the runner polls this to confirm |
+| `GET /running` | what is resident — the bridge polls this to confirm |
 | any `/v1/chat/completions` | **loads the model if it is not running** |
 
-`ttl: 0` is deliberate. An idle timeout would race the runner: the model could
-evict itself mid-conversation and reload during a batch. Explicit control from
-one place is easier to reason about than two timers.
+`ttl` is a **backstop**, deliberately generous. The bridge evicts explicitly,
+so the timer is never the mechanism — but a loop you walked away from leaves
+the model resident, and then your own first generation from the web UI OOMs.
+Half an hour is long enough never to race a round of thinking and short enough
+to have let go by the time you sit back down. `ttl: 0` would be purer and would
+leave that footgun armed.
 
 ---
 
-## 6. What the runner does — the one thing not in this repo
+## 9. How the model learns to use any of this
 
-A script, ~150 lines, next to the harness. It exposes one tool to the model:
+Three layers, and only the third is a "skill":
 
-```
-render(
-  jobs: [{workflow_id, params, note?}],
-  project?: string,
-  note?: string,
-  timeout_s: number,
-) -> { batch_id, counts, jobs: [{job_id, status, output_ids, error?}] }
-```
+1. **The tools are discovered, not described.** The harness calls `tools/list`
+   at connect and gets names, descriptions and JSON schemas. Nothing is
+   explained by hand, nothing is re-pasted per session, and a tool that changes
+   shape cannot drift out of sync with its description because the description
+   *is* the server's.
+2. **The per-workflow knowledge arrives at call time**, from
+   `describe_workflow` (§6.4) — that Illustrious wants tags and weights, that
+   Krea wants prose, that ACE-Step wants structured lyrics. It travels with the
+   workflow, so it is right for the workflow the model actually picked.
+3. **A skill, if you want one, carries strategy** — and only strategy. *Ask for
+   a batch of variants rather than one image at a time. Look before iterating.
+   Give the round a project name and say what you were testing. Stop when two
+   rounds stop improving.* That is a page of prose that has nothing to do with
+   ForgeUI's API, applies to any media backend, and is the only part worth
+   writing by hand.
 
-and does, in order:
-
-1. `POST /api/models/unload` to llama-swap.
-2. Poll `GET /running` until empty, or give up and fail loudly — submitting
-   while the VLM still holds 18GB is how you get an OOM that looks like a
-   ComfyUI bug.
-3. Open the ForgeUI WebSocket **before** submitting. Opening it after is a race
-   that loses the completion of a fast job.
-4. `POST /api/jobs/batch` once, with the jobs and the `origin` the model gave
-   it. One call, all-or-nothing, one `batch_id` back.
-5. Wait for the one `batch` event carrying that id. No per-job bookkeeping, no
-   counting — the server already knows when the round is over.
-6. `POST /api/system/free_vram`.
-7. Return a compact result. **Not images** — ids, statuses, timings, errors.
-   The model asks for the pictures it wants via `get_output_image` once it is
-   resident again, which keeps the context small and lets it choose.
-
-The model writes no scripts. `render` is a fixed tool with a schema, because a
-model that writes a fresh WebSocket client each round will eventually write one
-that hangs, and it will hang holding the GPU.
-
-The model does not pass `source` either — the runner holds the token, and the
-server stamps it (§4.3). The model can lie about its note; it cannot lie about
-being the model.
+So: not a script you describe each time, and not a skill that wraps the
+mechanics. A skill is optional, and it is about taste.
 
 ---
 
-## 7. Why `render` is not MCP
-
-Worth stating plainly, because putting everything behind one protocol is
-tempting.
-
-The runner must evict the model that is calling it. An MCP server inside
-ForgeUI cannot do that without ForgeUI taking a dependency on llama-swap —
-which is exactly the coupling this design refuses. The runner sits on the
-harness side because that is the only vantage point from which both tenants are
-visible.
-
-The consequence is two consumers speaking two protocols: the **model** speaks
-MCP (catalogue and media), the **runner** speaks plain REST and WebSocket
-(submit and watch). That is not duplication — they want different things, at
-different times, with different lifetimes.
-
----
-
-## 8. Failure modes
+## 10. Failure modes
 
 | What happens | Result | What handles it |
 | --- | --- | --- |
-| WS drops mid-batch | runner reconnects, then reconciles with `GET /api/jobs/batch/:id` | one call instead of N; the batch's terminal state is in the DB, so a dropped socket loses nothing |
+| WS drops mid-batch | bridge reconnects, reconciles with `GET /api/jobs/batch/:id` | one call instead of N; terminal state is in the DB, so a dropped socket loses nothing |
 | A job fails | counted in the batch, returned with its error text | the model can retry smaller, or change workflow |
-| **Every** job in a batch fails | the `batch` event still fires | terminal means terminal, not successful (§4.2) |
-| Batch exceeds `timeout_s` | runner cancels via `POST /api/jobs/:id/cancel`, returns partial | never hang holding the GPU |
-| Something pings llama-server mid-batch | llama-swap loads the model → OOM | **the main operational hazard.** One client only; a lock file the runner holds is the cheap mitigation |
+| **Every** job fails | the `batch` event still fires | terminal means terminal, not successful (§6.1) |
+| MCP client times out mid-`generate` | it closes the stream; the bridge cancels the batch | §5.3 — otherwise the GPU keeps working for nobody |
+| Client has a short fixed timeout | `wait: false` plus `generate_status` | §5.3 |
+| Something else pings llama-swap mid-batch | it loads the model → OOM | **the main operational hazard.** One client only; a lock the bridge holds is the cheap mitigation |
+| **You generate from the web UI while the model is resident** | ComfyUI OOMs | the bridge cannot help — it never sees that request. `ttl` (§8) is the backstop; a `gpu_status` glance before a big job is the habit |
 | ComfyUI OOMs anyway | job fails with Comfy's error | surfaced to the model; retry at a smaller size |
-| Runner crashes while the model is unloaded | harmless | next completion reloads it |
+| Bridge crashes while the model is unloaded | harmless | the next completion reloads it |
 | Model reload cost | seconds, not minutes | llama.cpp mmaps; with RAM to spare the weights stay in page cache |
-
-The one that will actually bite is row four. It is worth a line in the runner's
-README: **while a batch is running, nothing else may talk to llama-swap.**
 
 ---
 
-## 9. What this does not solve
+## 11. What this does not solve
 
 - **Latency.** Two evictions and two loads per round. Batching amortises it;
   nothing removes it. If the loop needs to feel interactive, the answer is a
   second GPU, not a better scheduler.
 - **Taste.** A 9B VLM will spot a sixth finger and miss that the composition is
-  boring. The prompting guides (§4.3) carry more of the quality than the model
+  boring. The prompting guides (§6.4) carry more of the quality than the model
   size does.
-- **Concurrent use.** While a loop is running, the human cannot generate from
-  the UI without joining the queue — which is correct, but means the loop is a
-  thing you start and leave, not something running in the background while you
-  work.
+- **Concurrent use.** While a loop is running you are sharing the queue, and
+  the row above says what happens if you forget the model is resident.
 - **The record starts today.** Every output already on disk has no `origin`,
   and nothing can invent one. `source` will read as unknown for everything
   generated before this lands; the gallery should say "unknown", not "webui",
@@ -466,27 +504,25 @@ README: **while a batch is running, nothing else may talk to llama-swap.**
 
 ---
 
-## 10. Order of work
+## 12. Order of work
 
-1. **§4.3 — `origin`, sidecar first.** DESIGN.md §6.2 and §7, then the write
-   path, then the reindex test. Everything else here hangs off it, and it is
-   the one change that is expensive to retrofit: sidecars already on disk will
-   never have an `origin` block, so the sooner it exists the smaller the
-   silent gap in the record.
-2. **§4.4 — the gallery filters.** Immediately after, not later. A field with
-   no reader is a field that rots, and `source` alone — *what did I make, what
-   did the model make* — is worth the afternoon on its own.
-3. **§4.6 — `prompting` on the manifest**, DESIGN.md first. Independent of all
-   of this, useful with any model.
-4. **§4.2 — the batch API.** Wanted by the runner, but the UI can use it too:
-   a batch is what "generate four variants" should always have been.
-5. **§4.1 — the MCP server**, read-only tools plus `get_output_image`. Testable
-   against any MCP client with vision, with no VRAM dance at all.
-6. **§4.5 — `free_vram`**, with a fake-comfy scenario.
-7. The runner and the llama-swap config, outside this repo.
+1. **§6.2 — `origin`, sidecar first.** DESIGN.md §6.2 and §7, then the write
+   path, then the reindex test. Everything hangs off it, and it is the one
+   change that is expensive to retrofit: sidecars already on disk will never
+   get an `origin` block, so the sooner it exists the smaller the silent gap.
+2. **§7 — the gallery filters.** Immediately after, not later. A field with no
+   reader rots, and `source` alone — *what did I make, what did the model
+   make* — is worth the afternoon on its own.
+3. **§6.1 — the batch API.** Wanted by the bridge, but the UI can use it too: a
+   batch is what "generate four variants" should always have been.
+4. **§6.3, §6.4** — `free_vram`, `max_edge`, `prompting`. Small, independent.
+5. **§5 — the bridge**, read-only tools first. At that point any MCP client
+   with vision can drive ForgeUI, with no VRAM dance at all — which is the
+   milestone worth reaching, because it is testable by hand.
+6. **§5.2 — `generate`**, and the llama-swap config with it.
 
-Steps 1–6 are worth having whether or not the local VLM ever works out: they
-are what lets *any* model drive ForgeUI, and steps 1, 2 and 4 improve the app
-for a human working alone. Step 7 is the part that is specific to sharing one
-card, and it is the part that can be thrown away and replaced with a hosted
-model, a second GPU, or a second machine without touching the rest.
+Steps 1–4 improve the app for a human working alone and are worth having
+whether or not any of the rest happens. Step 5 is what lets *any* model drive
+ForgeUI — hosted, local, or on another machine. Only step 6 is specific to
+sharing one card, and it is the part that can be deleted if you ever put a
+second GPU in the box.
