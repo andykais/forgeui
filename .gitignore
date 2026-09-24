@@ -3,6 +3,8 @@
 # Frontend build output (embedded into the binary).
 /src/frontend/dist/
 /dist/
+# `deno task compile` writes the binary here.
+/forge
 # Frontend and end-to-end tooling.
 /src/frontend/node_modules/
 /src/frontend/dist/
