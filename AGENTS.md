@@ -51,7 +51,7 @@ workflows/bundled/<id>/   the eight workflows of §4.6 (+ README)
 
 ```sh
 deno task start --data-dir ./data   # serve the API and the built UI on one port
-deno task mcp -- --http 127.0.0.1:7801   # the MCP bridge (docs/MCP-BRIDGE.md)
+deno task mcp --http 127.0.0.1:7801      # the MCP bridge (docs/MCP-BRIDGE.md)
 deno task compile                   # build the `forge` binary
 deno task test                      # unit + golden + server integration (no GPU)
 deno task check / lint / fmt         # Deno side only

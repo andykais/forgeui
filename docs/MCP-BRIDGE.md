@@ -79,7 +79,7 @@ over — but it is worth looking at that output once, because it is where the
 ## 3. The bridge
 
 ```sh
-deno task mcp -- \
+deno task mcp \
   --http 127.0.0.1:7801 \
   --forgeui http://127.0.0.1:7860 \
   --llama-swap http://127.0.0.1:8080 \
