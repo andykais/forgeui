@@ -154,7 +154,8 @@ bindings; the protocol is identical either way.
 | --- | --- | --- |
 | `list_workflows` | proxies `GET /api/workflows` | fast |
 | `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
-| `list_models` | checkpoints and LoRAs by display name (§8.1) | fast |
+| `list_checkpoints` | the diffusion class across every folder holding one, filterable by family | fast |
+| `list_loras` | LoRAs, filterable by family, each with its strength range (§8.1) | fast |
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
 | `get_output` | the sidecar: params, seed, models, timings, origin | fast |
 | `get_output_image` | an **image content block**, downscaled | fast |
@@ -162,6 +163,18 @@ bindings; the protocol is identical either way.
 | **`generate`** | the round: evict, submit the batch, wait, free, report | **minutes** |
 
 Only the last one is special, and only in how long it takes.
+
+The two library listings are split by class rather than taking a `kind`
+argument, because a family mismatch is the usual cause of a result that
+ignores the prompt: a LoRA trained on SDXL does nothing to a Flux checkpoint,
+and the model has no way to see that from a name. Each returns a projection
+rather than the API's rows — `name` (what a param binds to; a display name
+passed to `generate` reaches ComfyUI and fails there), the display name, the
+family, the kind, tags, notes and the LoRA's strength range — because the
+Models screen needs two dozen fields per model, this needs six, and the
+difference is the whole context window when a library holds three hundred
+LoRAs. Both also name the families the library knows, so a filter that
+matched nothing is a mistake the model can fix without another tool.
 
 `gpu_status` exists because the bridge is the only thing that can answer it,
 and because a model that can ask *"is there room for a video workflow right

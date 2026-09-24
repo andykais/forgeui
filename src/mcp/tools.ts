@@ -13,7 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
-import type { ForgeUi } from "./forgeui.ts";
+import type { FamilyListing, ForgeUi, ModelListing } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
 import { runRound } from "./round.ts";
 import { APP_VERSION } from "../version.ts";
@@ -81,20 +81,26 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
-  server.registerTool("list_models", {
+  registerLibraryTool(server, forge, {
+    name: "list_checkpoints",
+    modelClass: "diffusion",
     description:
-      "Checkpoints and LoRAs in the library, by display name. Use these names " +
-      "when a workflow takes a model or a LoRA parameter.",
-    inputSchema: z.object({
-      kind: z.enum(["checkpoints", "loras"]).optional(),
-    }),
-  }, async ({ kind }) => {
-    try {
-      const query = kind ? `?kind=${encodeURIComponent(kind)}` : "";
-      return text(await forge.get(`/api/models${query}`));
-    } catch (cause) {
-      return failure(cause);
-    }
+      "Checkpoints — the base models a workflow generates with, across every " +
+      "folder that holds one. Filter by family to see only the ones a " +
+      "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
+      "else. Pass the `name` back, not the display name.",
+  });
+
+  registerLibraryTool(server, forge, {
+    name: "list_loras",
+    modelClass: "lora",
+    description:
+      "LoRAs in the library. Filter by family — a LoRA trained for one base " +
+      "model does nothing for another, and mixing families is the usual " +
+      "cause of a result that ignores the prompt. Each one carries the " +
+      "strength range its owner set, which is the range worth exploring. " +
+      "Pass the `name` back in a workflow's lora list, not the display name.",
+    strengths: true,
   });
 
   server.registerTool("search_gallery", {
@@ -256,4 +262,75 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   });
 
   return server;
+}
+
+interface LibraryTool {
+  name: string;
+  modelClass: "diffusion" | "lora";
+  description: string;
+  /** LoRAs carry the strength range their owner set; checkpoints do not. */
+  strengths?: boolean;
+}
+
+/**
+ * One of the two library listings.
+ *
+ * What comes back is a projection, not the API's rows: the Models screen
+ * needs two dozen fields per model and this needs five, and the difference is
+ * the whole context window when a library holds three hundred LoRAs. `name`
+ * is first among them because `name` is what a workflow param binds to — a
+ * display name passed to `generate` reaches ComfyUI and fails there.
+ */
+function registerLibraryTool(
+  server: McpServer,
+  forge: ForgeUi,
+  tool: LibraryTool,
+): void {
+  server.registerTool(tool.name, {
+    description: tool.description,
+    inputSchema: z.object({
+      family: z.string().optional().describe(
+        "exact family, e.g. krea2 or sdxl; list_workflows names the " +
+          "family each workflow wants",
+      ),
+      q: z.string().optional().describe("substring of the name or a tag"),
+      tags: z.string().optional().describe("comma-separated; all must match"),
+      limit: z.number().int().min(1).max(500).optional(),
+    }),
+  }, async ({ family, q, tags, limit }) => {
+    try {
+      const query = new URLSearchParams({ class: tool.modelClass });
+      if (family) query.set("family", family);
+      if (q) query.set("q", q);
+      if (tags) query.set("tags", tags);
+      const [listing, families] = await Promise.all([
+        forge.get<ModelListing>(`/api/models?${query}`),
+        // The vocabulary, so a family that matched nothing is a mistake the
+        // model can fix on its own rather than a silent empty list.
+        forge.get<FamilyListing>("/api/families").catch(() => null),
+      ]);
+      // A row whose file has gone keeps its page so its outputs stay linked
+      // (§8.1), but it cannot be generated with, so it is not offered here.
+      const all = listing.models.filter((model) => model.present !== false);
+      const shown = all.slice(0, limit ?? 60);
+      return text({
+        family: family ?? null,
+        total: all.length,
+        families: families?.families.map((entry) => entry.family) ?? undefined,
+        models: shown.map((model) => ({
+          name: model.name,
+          display_name: model.display_name,
+          family: model.family,
+          kind: model.kind,
+          tags: model.tags.length > 0 ? model.tags : undefined,
+          notes: model.notes ?? undefined,
+          strength_min: tool.strengths ? model.strength_min : undefined,
+          strength_max: tool.strengths ? model.strength_max : undefined,
+          outputs: model.output_count,
+        })),
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
 }

@@ -21,6 +21,29 @@ export interface JobRow {
   error?: { type?: string; message?: string; node_id?: string | null } | null;
 }
 
+/** A model as `GET /api/models` lists it, narrowed to what a picker reads. */
+export interface ModelRow {
+  name: string;
+  display_name: string;
+  family: string;
+  kind: string;
+  tags: string[];
+  notes: string | null;
+  strength_min: number;
+  strength_max: number;
+  output_count: number;
+  /** False once the file is gone; the row survives for its outputs (§8.1). */
+  present: boolean;
+}
+
+export interface ModelListing {
+  models: ModelRow[];
+}
+
+export interface FamilyListing {
+  families: { family: string; models: number; workflows: number }[];
+}
+
 export interface Origin {
   source: string;
   project?: string;
@@ -90,8 +113,8 @@ export class ForgeUi {
     return text.trim().length === 0 ? null : JSON.parse(text);
   }
 
-  get(path: string): Promise<unknown> {
-    return this.request(path);
+  get<T = unknown>(path: string): Promise<T> {
+    return this.request(path) as Promise<T>;
   }
 
   post(path: string, body?: unknown): Promise<unknown> {
