@@ -412,10 +412,14 @@ one client.
 
 ### 6.3 Two routes
 
-- **`POST /api/system/free_vram`** — asks ComfyUI to drop its models (`POST
-  /free` with `unload_models` and `free_memory`). ForgeUI owns that child
-  process, so ForgeUI owns the verb. It is a verb, not a policy: the bridge
-  decides when.
+- **`POST /api/system/free_vram`** — *built.* Asks ComfyUI to drop its models
+  (`POST /free` with `unload_models` and `free_memory`). ForgeUI owns that
+  child process, so ForgeUI owns the verb. It is a verb, not a policy: the
+  bridge decides when. Shipping the bridge before this route existed was a
+  mistake that cost an afternoon of debugging: the bridge called it, got a
+  404, swallowed it, ComfyUI kept the weights, and the only symptom was
+  llama-swap failing to start the model afterwards. The call is no longer
+  silent about failing.
 - **`?max_edge=` on the media route** — serves a resized frame. Not a nicety:
   vision tokens land in the same VRAM budget as the model, and a 1024² image
   costs several times a 768px one for no critique value. The existing

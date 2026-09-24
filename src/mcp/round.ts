@@ -145,8 +145,19 @@ export async function runRound(
     await pump.return?.(undefined).catch(() => {});
     // 6. Hand it back whatever happened — a thrown round must not leave
     // ComfyUI holding the weights the model is about to want.
+    //
+    // Never silently: swallowing this is how the GPU stays full and the only
+    // symptom is llama-swap failing to start the model minutes later, with
+    // nothing in any log to connect the two.
     if (deps.freeVram) {
-      await forge.post("/api/system/free_vram").catch(() => {});
+      try {
+        await forge.post("/api/system/free_vram");
+      } catch (cause) {
+        console.error(
+          `forge mcp: could not free ComfyUI's VRAM — the LLM may not fit when ` +
+            `it reloads: ${cause instanceof Error ? cause.message : cause}`,
+        );
+      }
     }
   }
 

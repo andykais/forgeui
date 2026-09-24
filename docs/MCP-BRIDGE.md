@@ -397,6 +397,7 @@ the unload, then nothing until the round ends.
 | --- | --- |
 | `refusing to submit into an OOM` | llama-swap said it unloaded but `/running` still lists the model after `unloadTimeout`. Raise `unloadTimeout`, or look at whether the model is wedged |
 | ComfyUI OOMs anyway | something reloaded the VLM mid-round. **While a batch is running, nothing else may talk to llama-swap** — one client only |
+| `upstream command exited prematurely` when llama-swap starts the model | the GPU is still full. Check `nvidia-smi`: if ComfyUI is holding the weights, the bridge could not free them — look for `could not free ComfyUI's VRAM` on its stderr, and confirm `POST /api/system/free_vram` answers `{"freed": true}`. As a one-off, `curl -XPOST <comfy>/free -d '{"unload_models":true,"free_memory":true}'` |
 | `source` reads `llm:unknown` | the bridge could not reach llama-swap and had no `--llm-model`. Harmless, but pass `--llm-model` |
 | The model "sees" nothing | `--mmproj` missing from the llama-swap `cmd`, **or** `input: ["text","image"]` missing from `models.json` — both are needed (§5.2, §5.4) |
 | Eviction seems to do nothing | llama-swap is not the thing that started `llama-server` (§5.2) |

@@ -1518,6 +1518,7 @@ GET  /api/outputs/:id/lineage           {parents[], children[]}; each node: id, 
 POST /api/outputs/:id/promote           {model_hashes[]} → one sample per model
 DELETE /api/outputs/:id                 soft delete (sets deleted_at); file removal deferred past the undo window
 POST /api/outputs/:id/restore           undo within the window (clears deleted_at)
+POST /api/system/free_vram              ask ComfyUI to unload its models (`/free`); a verb, the caller decides when
 GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml

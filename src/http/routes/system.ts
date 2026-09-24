@@ -87,6 +87,21 @@ export function systemRoutes(ctx: AppContext): Route[] {
       },
     },
     {
+      method: "POST",
+      path: "/api/system/free_vram",
+      handler: async () => {
+        // A verb, not a policy: ForgeUI owns the ComfyUI process so it owns
+        // the ability to make it let go, but the caller decides when
+        // (DESIGN-AGENT-LOOP §6.3).
+        if (ctx.comfy.state !== "running") {
+          return json({ freed: false, reason: "comfyui is not running" });
+        }
+        await ctx.comfy.client.free();
+        await ctx.comfy.refreshStats(0);
+        return json({ freed: true, comfy: ctx.comfy.status() });
+      },
+    },
+    {
       method: "GET",
       path: "/api/system/comfy/log",
       handler: (_req, { url }) => {

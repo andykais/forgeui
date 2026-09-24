@@ -208,6 +208,22 @@ export class ComfyClient {
     await this.#request("/interrupt", { method: "POST" });
   }
 
+  /**
+   * Drop the loaded models and free what the allocator is holding.
+   *
+   * ComfyUI keeps weights resident between runs, which is right when it is the
+   * only tenant of the card and wrong when something else wants the GPU next
+   * (DESIGN-AGENT-LOOP §6.3). This is the verb; deciding *when* belongs to
+   * whoever is arbitrating.
+   */
+  async free(): Promise<void> {
+    await this.#request("/free", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unload_models: true, free_memory: true }),
+    });
+  }
+
   /** How a job that finished while the app was not listening is recovered. */
   async history(promptId: string): Promise<HistoryEntry | null> {
     const response = await this.#request(

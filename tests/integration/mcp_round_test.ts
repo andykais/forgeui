@@ -144,3 +144,27 @@ Deno.test("an output's media is fetched by the url the row carries", async () =>
     assertEquals([...bytes.slice(1, 4)], [0x50, 0x4e, 0x47], "PNG magic");
   }, { comfy: true });
 });
+
+Deno.test("a round hands the GPU back when it is done", async () => {
+  // The bug this pins: the route did not exist, the bridge swallowed the 404,
+  // ComfyUI kept the weights, and llama-server could not start afterwards —
+  // with nothing in any log connecting the two.
+  await withTestApp(async (app) => {
+    assertEquals(app.fake!.freed, 0);
+    await runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 30_000,
+    }, { forge: new ForgeUi({ url: app.url }), llama: null, freeVram: true });
+    assertEquals(app.fake!.freed, 1, "ComfyUI was asked to unload");
+  }, { comfy: true });
+});
+
+Deno.test("freeing VRAM goes through the route, not the client", async () => {
+  await withTestApp(async (app) => {
+    const body = await app.json<{ freed: boolean }>("/api/system/free_vram", {
+      method: "POST",
+    });
+    assertEquals(body.freed, true);
+    assertEquals(app.fake!.freed, 1);
+  }, { comfy: true });
+});
