@@ -159,6 +159,7 @@ bindings; the protocol is identical either way.
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
 | `get_output` | the sidecar: params, seed, models, timings, origin | fast |
 | `get_output_image` | an **image content block**, downscaled | fast |
+| `attach_input` | an output, or a file on the bridge's disk, into the input store (§9) | fast |
 | `gpu_status` | what is resident, and how much VRAM is free | fast |
 | **`generate`** | the round: evict, submit the batch, wait, free, report | **minutes** |
 
@@ -175,6 +176,37 @@ Models screen needs two dozen fields per model, this needs six, and the
 difference is the whole context window when a library holds three hundred
 LoRAs. Both also name the families the library knows, so a filter that
 matched nothing is a mistake the model can fix without another tool.
+
+### 5.1.1 Chaining a round into the next
+
+*Built.* DESIGN-AUDIO §3's chain — a picture, a take, then video lip-synced
+to both — needs an output of one round to be an input of the next, and the
+model has no hands: it cannot drag a result onto a field.
+
+Dragging was never the mechanism anyway. A media param binds to a *stored
+input filename*, and the panel's drag is one `POST /api/inputs` with an
+`output_id`. So `attach_input` is that call, plus a second source — a path on
+the bridge's own disk — for reference media that was not made here. It hands
+back a `value` to put in the param, with the clip's length and the picture's
+size beside it.
+
+Two things this deliberately is not. It is not a resize: the adopted file is
+hardlinked, so what the next graph loads is bit-for-bit what came out of the
+last one — `get_output_image`'s downscaled copy is for *looking*, never for
+chaining. And it is not implicit: `generate` does not adopt ids it finds in
+params, because a param that silently means two different things depending on
+what the string looks like is a worse trade than one extra call the model
+makes while it is resident anyway.
+
+For this to be usable, a round has to say what it *made*. `generate` returns
+each job's outputs named — id, kind, path, url, size — rather than a list of
+ids, because the file is the thing the next round points at.
+
+`describe_workflow` carries the other half: a media param's `supply` line says
+to attach first, and a length that `follows` a clip says to round the clip's
+duration *up* to the param's step. That second one is the number the panel
+fills in for a human and therefore the one a model silently gets wrong — the
+9s default trims a 6s take, or pads it.
 
 `gpu_status` exists because the bridge is the only thing that can answer it,
 and because a model that can ask *"is there room for a video workflow right

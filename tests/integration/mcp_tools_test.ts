@@ -1,8 +1,9 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { type TestApp, withTestApp } from "../fixtures/app.ts";
 import { writeFakeSafetensors } from "../fixtures/models.ts";
+import { tinyPng } from "../fixtures/png.ts";
 import { ForgeUi } from "../../src/mcp/forgeui.ts";
 import { createBridgeServer } from "../../src/mcp/tools.ts";
 
@@ -35,6 +36,7 @@ async function callTool<T>(
   app: TestApp,
   name: string,
   args: Record<string, unknown> = {},
+  options: { expectError?: boolean } = {},
 ): Promise<T> {
   const forge = new ForgeUi({ url: app.url });
   const handler = createMcpHandler(() =>
@@ -73,11 +75,13 @@ async function callTool<T>(
     };
     assert(!message.error, `${name} failed: ${message.error?.message}`);
     const result = message.result!;
-    assert(
-      !result.isError,
-      `${name} answered an error: ${result.content[0]?.text}`,
-    );
-    return JSON.parse(result.content[0]!.text) as T;
+    const answer = result.content[0]!.text;
+    if (options.expectError) {
+      assert(result.isError, `${name} should have failed, got: ${answer}`);
+      return answer as T;
+    }
+    assert(!result.isError, `${name} answered an error: ${answer}`);
+    return JSON.parse(answer) as T;
   } finally {
     await handler.close();
   }
@@ -228,5 +232,145 @@ Deno.test("a listing narrows by text and stops at the limit", async () => {
     assertEquals(capped.models.length, 1);
     // The total is the honest one, so a truncated list says so.
     assertEquals(capped.total, 2);
+  });
+});
+
+// ------------------------------------------------------- chaining rounds
+
+interface RoundResult {
+  counts: { done: number; failed: number };
+  jobs: {
+    status: string;
+    error?: string;
+    outputs: {
+      id: string;
+      kind: string;
+      path?: string;
+      media_url?: string;
+      width?: number | null;
+    }[];
+  }[];
+}
+
+interface Attached {
+  value: string;
+  kind: string;
+  width?: number;
+  duration_s?: number;
+  bytes: number;
+}
+
+/**
+ * DESIGN-AUDIO §3's chain, as the model has to walk it: make something, then
+ * feed it to the next workflow. There is no dragging over MCP — an output
+ * becomes an input through `attach_input`, and the value it hands back is
+ * what a media param binds to.
+ */
+Deno.test("a round names its files, and one of them feeds the next round", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a granite bowl" } }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+
+    // Named, not counted: an id to chain from and the file it actually is.
+    const [output] = round.jobs[0]!.outputs;
+    assert(output, "the round reports what it made");
+    assertEquals(output.kind, "image");
+    assert(output.path?.endsWith(".png"), `no file path: ${output.path}`);
+    assert(output.media_url?.startsWith("/api/media/"), output.media_url);
+
+    // The whole output, not the downscaled copy `get_output_image` returns.
+    const attached = await callTool<Attached>(app, "attach_input", {
+      output_id: output.id,
+    });
+    assertEquals(attached.kind, "image");
+    assert(attached.bytes > 0);
+
+    const next = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "krea2-upscale",
+        params: { image: attached.value, creativity: 0.4 },
+      }],
+    });
+    assertEquals(next.counts.done, 1, next.jobs[0]?.error);
+
+    // §9 step 3: the file reached ComfyUI under the name the graph binds.
+    assert(
+      app.fake!.uploads.map((file) => file.name).includes(attached.value),
+      `${attached.value} was never uploaded`,
+    );
+  }, { comfy: true });
+});
+
+Deno.test("attach_input also takes a file off the bridge's own disk", async () => {
+  // Not everything the model works from was made here: a reference photo, a
+  // voice clip to mimic. The bridge reads its own disk and uploads the bytes,
+  // because ForgeUI may not be on the same machine.
+  await withTestApp(async (app) => {
+    const path = await Deno.makeTempFile({ suffix: ".png" });
+    try {
+      await Deno.writeFile(path, tinyPng({ width: 64, height: 48 }));
+      const attached = await callTool<Attached>(app, "attach_input", {
+        file: path,
+      });
+      assertEquals(attached.kind, "image");
+      assertEquals(attached.width, 64);
+      assert(attached.value.endsWith(".png"), attached.value);
+    } finally {
+      await Deno.remove(path);
+    }
+  });
+});
+
+Deno.test("attach_input refuses to guess which source you meant", async () => {
+  await withTestApp(async (app) => {
+    const both = await callTool<string>(app, "attach_input", {
+      output_id: "x",
+      file: "/tmp/y.png",
+    }, { expectError: true });
+    assertStringIncludes(both, "exactly one");
+
+    const neither = await callTool<string>(
+      app,
+      "attach_input",
+      {},
+      { expectError: true },
+    );
+    assertStringIncludes(neither, "exactly one");
+  });
+});
+
+Deno.test("describe_workflow says how to supply media, and leaves the graph out", async () => {
+  await withTestApp(async (app) => {
+    const detail = await callTool<
+      {
+        id: string;
+        params: {
+          key: string;
+          type: string;
+          bind?: unknown;
+          supply?: string;
+        }[];
+        api_json?: unknown;
+      }
+    >(app, "describe_workflow", { workflow_id: "ltx2-ia2v" });
+
+    // The whole ComfyUI graph, twice, is not something the model can act on.
+    assertEquals(detail.api_json, undefined);
+    const byKey = new Map(detail.params.map((param) => [param.key, param]));
+
+    for (const key of ["image", "audio"]) {
+      const param = byKey.get(key)!;
+      assertStringIncludes(param.supply ?? "", "attach_input");
+      // `bind` is the graph's business, not the model's.
+      assertEquals(param.bind, undefined);
+    }
+
+    // The one number the panel fills in for a human, and therefore the one a
+    // model silently gets wrong: the default would trim the take.
+    const duration = byKey.get("duration")!;
+    assertStringIncludes(duration.supply ?? "", "`audio`");
+    assertStringIncludes(duration.supply ?? "", "0.5");
   });
 });

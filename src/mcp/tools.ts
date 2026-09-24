@@ -13,7 +13,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
-import type { FamilyListing, ForgeUi, ModelListing } from "./forgeui.ts";
+import { basename } from "@std/path";
+import type {
+  FamilyListing,
+  ForgeUi,
+  ModelListing,
+  StoredInputView,
+} from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
 import { runRound } from "./round.ts";
 import { APP_VERSION } from "../version.ts";
@@ -65,17 +71,92 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
 
   server.registerTool("describe_workflow", {
     description:
-      "One workflow in full: every parameter with its type, range and default, " +
-      "and the prompting guidance for this model family. Read this before " +
-      "writing a prompt — what Illustrious wants is not what Krea wants.",
+      "One workflow in full: every parameter with its type, range, default " +
+      "and when it applies, and how to supply any media it takes. Read this " +
+      "before writing a prompt — what Illustrious wants is not what Krea " +
+      "wants.",
     inputSchema: z.object({
       workflow_id: z.string().describe("id from list_workflows"),
     }),
   }, async ({ workflow_id }) => {
     try {
-      return text(
-        await forge.get(`/api/workflows/${encodeURIComponent(workflow_id)}`),
+      const detail = await forge.get<WorkflowDetail>(
+        `/api/workflows/${encodeURIComponent(workflow_id)}`,
       );
+      // Not the whole route body: it carries `api_json` and `ui_json`, the
+      // entire ComfyUI graph twice over. The model binds params, not nodes.
+      return text({
+        id: detail.id,
+        name: detail.name,
+        family: detail.family,
+        kind: detail.kind,
+        category: detail.category,
+        description: detail.description,
+        runnable: detail.runnable,
+        error: detail.error ?? undefined,
+        params: (detail.manifest?.params ?? []).map((param) => {
+          const { bind: _bind, ...rest } = param;
+          const supply = supplyHint(param);
+          return supply ? { ...rest, supply } : rest;
+        }),
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("attach_input", {
+    description:
+      "Put a file into ForgeUI's input store and get back the value to pass " +
+      "for an image, audio, mask or video parameter. This is how one round " +
+      "feeds the next: make a picture, make a take, then attach both and " +
+      "run ltx2-ia2v on them. Takes either `output_id` — anything `generate` " +
+      "returned, attached whole, at full quality, never the downscaled copy " +
+      "`get_output_image` shows you — or `file`, a path on the machine " +
+      "running this bridge, for media you did not make here.",
+    inputSchema: z.object({
+      output_id: z.string().optional().describe(
+        "an output id from generate or search_gallery",
+      ),
+      file: z.string().optional().describe(
+        "absolute path to an image or audio file on the bridge's own disk",
+      ),
+    }),
+  }, async ({ output_id, file }) => {
+    if ((output_id === undefined) === (file === undefined)) {
+      return failure("pass exactly one of `output_id` or `file`");
+    }
+    try {
+      let stored: StoredInputView;
+      if (output_id !== undefined) {
+        stored = await forge.attachOutput(output_id);
+      } else {
+        // The bridge reads its own disk; ForgeUI may be on another machine,
+        // so the bytes go up rather than the path across.
+        let bytes: Uint8Array;
+        try {
+          bytes = await Deno.readFile(file!);
+        } catch (cause) {
+          return failure(
+            `cannot read ${file}: ${
+              cause instanceof Error ? cause.message : cause
+            }`,
+          );
+        }
+        stored = await forge.attachFile(basename(file!), bytes);
+      }
+      return text({
+        // Named `value` because that is all it is for: the thing to put in
+        // the param. Its shape (a content hash) is not worth reasoning about.
+        value: stored.filename,
+        kind: stored.kind,
+        width: stored.width ?? undefined,
+        height: stored.height ?? undefined,
+        duration_s: stored.duration_ms === null
+          ? undefined
+          : Number((stored.duration_ms / 1000).toFixed(3)),
+        bytes: stored.bytes,
+      });
     } catch (cause) {
       return failure(cause);
     }
@@ -218,7 +299,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "call whether it carries one job or six. Blocks until every job " +
       "finishes; you are unloaded while it runs and will see the results " +
       "when it returns. Name the project and say what you are testing: that " +
-      "note is what search_gallery finds later.",
+      "note is what search_gallery finds later. A param that takes media — " +
+      "an image, a clip — wants a value from attach_input, not a filename " +
+      "or an id. Every finished job comes back with its outputs named, so " +
+      "the next round can attach one.",
     inputSchema: z.object({
       jobs: z.array(z.object({
         workflow_id: z.string(),
@@ -333,4 +417,51 @@ function registerLibraryTool(
       return failure(cause);
     }
   });
+}
+
+/** `GET /api/workflows/:id`, narrowed to the half a model can act on. */
+interface WorkflowDetail {
+  id: string;
+  name: string;
+  family: string | null;
+  kind: string;
+  category: string | null;
+  description: string | null;
+  runnable: boolean;
+  error?: string | null;
+  manifest: { params?: ManifestParam[] } | null;
+}
+
+interface ManifestParam {
+  key: string;
+  type: string;
+  bind?: unknown;
+  step?: number;
+  /** An `audio` param whose length this one takes (\u00a711.3). */
+  follows?: string;
+  [field: string]: unknown;
+}
+
+/**
+ * How to fill a param the schema alone cannot explain.
+ *
+ * A media param's value is a store filename, which nothing about `type:
+ * "image"` says; and a length that `follows` a clip is the one number the
+ * panel fills in for a human, so over the API it is the one number a model
+ * silently gets wrong — the default trims the take instead.
+ */
+function supplyHint(param: ManifestParam): string | undefined {
+  if (["image", "mask", "video", "audio"].includes(param.type)) {
+    return `attach_input first (by output_id, or by file), then pass the ` +
+      `\`value\` it returns`;
+  }
+  if (typeof param.follows === "string") {
+    const step = typeof param.step === "number" && param.step > 0
+      ? param.step
+      : 1;
+    return `the length of the \`${param.follows}\` clip: take duration_s ` +
+      `from attach_input and round it UP to the next ${step}. Short cuts ` +
+      `the take off mid-word; long leaves padding the model fills.`;
+  }
+  return undefined;
 }

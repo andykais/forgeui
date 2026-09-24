@@ -44,6 +44,32 @@ export interface FamilyListing {
   families: { family: string; models: number; workflows: number }[];
 }
 
+/** One finished file, as `generate` reports it and `attach_input` takes it. */
+export interface OutputRef {
+  id: string;
+  kind: string;
+  /** Where it sits under the data dir — what the file is actually called. */
+  path?: string;
+  media_url?: string;
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
+}
+
+/** What `POST /api/inputs` gives back: media in the store, ready to bind. */
+export interface StoredInputView {
+  sha256: string;
+  ext: string;
+  filename: string;
+  kind: string;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  bytes: number;
+  url: string;
+  derived_from_output: string | null;
+}
+
 export interface Origin {
   source: string;
   project?: string;
@@ -87,7 +113,9 @@ export class ForgeUi {
     const response = await this.#fetch(`${this.#url}${path}`, {
       ...init,
       headers: {
-        ...(init?.body ? { "content-type": "application/json" } : {}),
+        ...(typeof init?.body === "string"
+          ? { "content-type": "application/json" }
+          : {}),
         ...init?.headers,
       },
     });
@@ -146,6 +174,48 @@ export class ForgeUi {
 
   async cancel(id: string): Promise<void> {
     await this.post(`/api/jobs/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** One output row, narrowed to what a chained job needs to name it. */
+  async output(id: string): Promise<OutputRef> {
+    const row = await this.get<
+      OutputRef & { kind?: string }
+    >(`/api/outputs/${encodeURIComponent(id)}`);
+    return {
+      id,
+      kind: row.kind ?? "image",
+      path: row.path,
+      media_url: row.media_url,
+      width: row.width ?? null,
+      height: row.height ?? null,
+      duration_ms: row.duration_ms ?? null,
+    };
+  }
+
+  /**
+   * Adopt an output into the input store (§9).
+   *
+   * The file itself, not a copy of it: `adoptOutput` hardlinks where it can,
+   * so chaining a 200MB video costs nothing and the bytes the next graph
+   * loads are bit-for-bit the ones that came out of the last one.
+   */
+  attachOutput(outputId: string): Promise<StoredInputView> {
+    return this.post("/api/inputs", {
+      output_id: outputId,
+    }) as Promise<StoredInputView>;
+  }
+
+  /** Upload bytes the bridge read off its own disk. */
+  async attachFile(
+    filename: string,
+    bytes: Uint8Array,
+  ): Promise<StoredInputView> {
+    const form = new FormData();
+    form.set("file", new File([bytes as BlobPart], filename));
+    return await this.request("/api/inputs", {
+      method: "POST",
+      body: form,
+    }) as StoredInputView;
   }
 
   /**

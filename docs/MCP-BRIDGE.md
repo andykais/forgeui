@@ -389,6 +389,44 @@ curl -sX POST localhost:7801/mcp \
 Watch llama-swap's log while that runs: you should see `/running` read, then
 the unload, then nothing until the round ends.
 
+### 6.1 Chaining: picture, take, video
+
+The round comes back with its outputs named, so the next call can point at
+one. `attach_input` puts it in the input store and gives back the value a
+media param binds to:
+
+```sh
+call() {  # call <tool> <json arguments>
+  curl -sX POST localhost:7801/mcp \
+    -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2026-07-28' \
+    -H 'Mcp-Method: tools/call' -H "Mcp-Name: $1" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",
+         \"params\":{$META,\"name\":\"$1\",\"arguments\":$2}}"
+}
+
+# 1. a first frame                        -> jobs[0].outputs[0].id
+call generate '{"jobs":[{"workflow_id":"krea2","params":{"prompt":"a cactus creature"}}]}'
+# 2. a take                               -> jobs[0].outputs[0].id
+call generate '{"jobs":[{"workflow_id":"breeze-tts-design","params":{
+  "voice":"a low, unhurried voice","text":"Nothing grows out here but me."}}]}'
+# 3. both into the store                  -> .value, and .duration_s for the clip
+call attach_input '{"output_id":"<frame id>"}'
+call attach_input '{"output_id":"<take id>"}'
+# 4. the video. duration is the clip rounded UP to the param's step (0.5)
+call generate '{"jobs":[{"workflow_id":"ltx2-ia2v","params":{
+  "image":"<frame value>","audio":"<take value>",
+  "prompt":"the creature talks to the camera","duration":6.5}}]}'
+```
+
+`attach_input` also takes `{"file":"/path/on/the/bridge/photo.png"}`, for
+reference media that was not made here. The path is read by the **bridge**,
+not by ForgeUI, so it is a path on whichever machine runs `forge mcp`.
+
+The file that gets attached is the real one, hardlinked — not the downscaled
+picture `get_output_image` returns. That one is for looking at.
+
 ---
 
 ## 7. When it goes wrong

@@ -8,7 +8,13 @@
  * is why every path out of here goes through the `finally`.
  */
 
-import type { ForgeUi, JobRow, Origin, SubmitJob } from "./forgeui.ts";
+import type {
+  ForgeUi,
+  JobRow,
+  Origin,
+  OutputRef,
+  SubmitJob,
+} from "./forgeui.ts";
 import { isTerminal } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
 import { sourceFor } from "./llama.ts";
@@ -24,7 +30,12 @@ export interface RoundJob {
   job_id: string;
   workflow_id: string;
   status: string;
-  output_ids: string[];
+  /**
+   * What this job made, named rather than counted: an id to chain from, the
+   * kind, and the path the file actually has. A round whose results are a
+   * list of ids leaves the model nothing to point at.
+   */
+  outputs: OutputRef[];
   note?: string;
   error?: string;
 }
@@ -83,6 +94,8 @@ export async function runRound(
   const pump = events[Symbol.asyncIterator]();
 
   const submitted = new Map<string, RoundJob>();
+  /** Ids as the job rows report them, resolved to files once the round ends. */
+  const produced = new Map<string, string[]>();
   try {
     // 4. Submit. A rejection here is the model's to fix — a bad param names
     // itself — so the ids already queued are cancelled rather than orphaned.
@@ -93,7 +106,7 @@ export async function runRound(
           job_id: row.id,
           workflow_id: job.workflow_id,
           status: row.status,
-          output_ids: [],
+          outputs: [],
           note: job.note,
         });
       } catch (cause) {
@@ -111,7 +124,7 @@ export async function runRound(
     for (const id of [...pending]) {
       const row = await forge.job(id).catch(() => null);
       if (row && isTerminal(row.status)) {
-        settle(submitted, pending, row, deps, request.jobs.length);
+        settle(submitted, produced, pending, row, deps, request.jobs.length);
       }
     }
 
@@ -138,7 +151,7 @@ export async function runRound(
       const row = event.data as JobRow;
       if (!pending.has(row.id)) continue;
       if (!isTerminal(row.status)) continue;
-      settle(submitted, pending, row, deps, request.jobs.length);
+      settle(submitted, produced, pending, row, deps, request.jobs.length);
     }
   } finally {
     abort.abort();
@@ -160,6 +173,19 @@ export async function runRound(
       }
     }
   }
+
+  // The files, last: a chained job takes an output by id, and the model
+  // cannot chain what the round never named. Failing to read one is not
+  // worth failing the round over — the id still works.
+  await Promise.all(
+    [...submitted.entries()].map(async ([jobId, entry]) => {
+      entry.outputs = await Promise.all(
+        (produced.get(jobId) ?? []).map((id) =>
+          forge.output(id).catch(() => ({ id, kind: "unknown" }))
+        ),
+      );
+    }),
+  );
 
   const jobs = [...submitted.values()];
   return {
@@ -203,6 +229,7 @@ async function stopAll(
 
 function settle(
   submitted: Map<string, RoundJob>,
+  produced: Map<string, string[]>,
   pending: Set<string>,
   row: JobRow,
   deps: RoundDeps,
@@ -211,7 +238,7 @@ function settle(
   const entry = submitted.get(row.id);
   if (!entry) return;
   entry.status = row.status;
-  entry.output_ids = row.outputs ?? [];
+  produced.set(row.id, row.outputs ?? []);
   entry.error = errorText(row);
   pending.delete(row.id);
   deps.onProgress?.(

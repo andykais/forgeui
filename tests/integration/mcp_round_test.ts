@@ -63,7 +63,7 @@ Deno.test("a round evicts the model, generates, and labels the work", async () =
     assertEquals(result.jobs.length, 2);
     for (const job of result.jobs) {
       assertEquals(job.status, "done");
-      assert(job.output_ids.length > 0, "a finished job carries its outputs");
+      assert(job.outputs.length > 0, "a finished job carries its outputs");
     }
     // The per-job note survives alongside the round's.
     assertEquals(result.jobs.map((job) => job.note), ["0.7", "0.9"]);
@@ -138,7 +138,7 @@ Deno.test("an output's media is fetched by the url the row carries", async () =>
       timeoutMs: 30_000,
     }, { forge, llama: null });
 
-    const outputId = result.jobs[0]!.output_ids[0]!;
+    const outputId = result.jobs[0]!.outputs[0]!.id;
     const { bytes, mimeType } = await forge.media(outputId);
     assertEquals(mimeType, "image/png");
     assertEquals([...bytes.slice(1, 4)], [0x50, 0x4e, 0x47], "PNG magic");
