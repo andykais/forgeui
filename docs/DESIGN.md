@@ -405,6 +405,7 @@ or replacing any workflow must never affect the ability to rerun an old output.
     "image": { "sha256": "…", "ext": "png", "original_name": "ref.png", "derived_from": "01J…" }
   },
   "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
+  "origin": { "source": "ui", "project": "herons", "note": "iteration 3, pushing the LoRA past 0.9" },
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
   "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024 } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
@@ -412,6 +413,22 @@ or replacing any workflow must never affect the ability to rerun an old output.
 }
 ```
 `raw` holds unmapped source data for imported samples (§8.3).
+
+`origin` says who asked for this and why. `source` is `ui`, which the web app
+sends for itself, or `llm:<model-id>` from the MCP bridge, which reads the
+resident model's name from llama-swap and fills it in itself (DESIGN-AGENT-LOOP
+§6.2) rather than taking it from a param the model controls. A submit that
+names no source stays unnamed: the server never guesses `ui` for it, because
+that is the one label the gallery filter exists to tell apart, and a job
+posted by a script is not a person at the screen. `project` groups a run with
+its siblings and `note` says what it was testing. All three are free text and
+optional, capped at 120, 120 and 1000 characters; the block is absent
+altogether from sidecars written before it existed, which reads the same as a
+submit that said nothing — unknown.
+
+The three fields are denormalised onto `jobs` and `outputs` (§7) so the
+gallery can filter by them; the sidecar stays the source of truth and
+`reindex` rebuilds them from it.
 
 ### 6.3 Why `rename()` and not copy
 ComfyUI writes to `staging/` on the same filesystem; moving is a metadata
@@ -447,6 +464,8 @@ CREATE TABLE jobs (
   api_graph_json TEXT NOT NULL,   -- the rewritten graph that was queued (enables retry of failed jobs)
   progress_json TEXT,             -- {pct, eta_ms, node_id, node_label, node_index, node_total, step, max}
   error_json TEXT,
+  origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
+  origin_project TEXT, origin_note TEXT,
   created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
 );
 
@@ -1499,14 +1518,16 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
 DELETE /api/workflows/:id               user copies only; 409 for bundled
-POST /api/jobs                          {workflow_id, params}   one job per call
-POST /api/jobs/rerun                    {output_id} | {job_id}   resubmit a frozen graph (rerun exact / retry failed)
+POST /api/jobs                          {workflow_id, params, origin?}   one job per call
+POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed)
 POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
 GET  /api/jobs/:id                      one job row with the ids of its outputs
-GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2; sort newest|oldest
+GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2, plus `project` and
+                                        `source` from the origin block (§6.2), which the screens do
+                                        not offer yet; sort newest|oldest
                                         rows carry the row of §7 plus media_url, the models chips
                                         and generation_ms (the job's wall clock, for DURATION)
 GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);

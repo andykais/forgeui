@@ -383,9 +383,8 @@ function registerLibraryTool(
       ),
       q: z.string().optional().describe("substring of the name or a tag"),
       tags: z.string().optional().describe("comma-separated; all must match"),
-      limit: z.number().int().min(1).max(500).optional(),
     }),
-  }, async ({ family, q, tags, limit }) => {
+  }, async ({ family, q, tags }) => {
     try {
       // The family is filtered here rather than by the server, so that an
       // answer of "none" can carry the families this class *does* have. A
@@ -412,9 +411,11 @@ function registerLibraryTool(
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .map(([name, count]) => ({ family: name, count })),
         note: emptyNote(tool, listing, all.length, matched.length, family),
-        models: matched.slice(0, limit ?? 60).map((model) =>
-          entry(model, tool.strengths ?? false)
-        ),
+        // Every one of them. A library is a closed set the owner curated, and
+        // a page of it is worse than useless here: the model cannot tell a
+        // truncated list from the whole shelf, so it picks from the first
+        // sixty and never learns the rest exist.
+        models: matched.map((model) => entry(model, tool.strengths ?? false)),
       });
     } catch (cause) {
       return failure(cause);

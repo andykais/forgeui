@@ -30,6 +30,7 @@ Deno.test("a built sidecar carries the app version and the §6.2 field order", (
     "workflow",
     "params",
     "models",
+    "origin",
     "api_graph",
     "outputs",
     "timing",

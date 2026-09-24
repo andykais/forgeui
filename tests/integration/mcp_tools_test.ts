@@ -250,20 +250,20 @@ Deno.test("an empty class says which folders exist, not just nothing", async () 
   }
 });
 
-Deno.test("a listing narrows by text and stops at the limit", async () => {
+Deno.test("a listing narrows by text, and otherwise holds nothing back", async () => {
   await withModels(async (app) => {
     const found = await callTool<Listing>(app, "list_loras", { q: "grain" });
     assertEquals(found.models.map((lora) => lora.name), [
       "film-grain-35mm.safetensors",
     ]);
 
-    const capped = await callTool<Listing>(app, "list_loras", { limit: 1 });
-    assertEquals(capped.models.length, 1);
-    // The total is the honest one, so a truncated list says so.
-    assertEquals(capped.total, 2);
+    // No page, no cap: a library is a closed set its owner curated, and a
+    // model cannot tell a truncated list from the whole shelf.
+    const all = await callTool<Listing>(app, "list_loras");
+    assertEquals(all.total, 2);
+    assertEquals(all.models.length, all.total);
   });
 });
-
 // ------------------------------------------------------- chaining rounds
 
 interface RoundResult {

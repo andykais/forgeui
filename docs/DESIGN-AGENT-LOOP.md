@@ -1,11 +1,12 @@
 # Design — an LLM drives ForgeUI, and they take turns with the GPU
 
 **Status:** part built. §5 — the bridge, `forge mcp` — is implemented and
-tested; the runbook is `MCP-BRIDGE.md`. §6 (the batch API, job `origin`, the
-two routes, the manifest field) and §7 (the gallery) are still proposals, and
-the bridge is written against today's API until they land: it submits one job
-per call and watches `job` events rather than a `batch` event, and sends
-`origin` in the body, which ForgeUI currently ignores.
+tested; the runbook is `MCP-BRIDGE.md`. §6.2 (`origin`) and §6.3's
+`free_vram` are built, and the gallery *filters* of §7 exist on the API
+though no screen offers them yet. Still proposals: §6.1 (the batch API),
+§6.3's `max_edge`, §6.4 (the manifest field) and the rest of §7. Until the
+batch API lands the bridge submits one job per call and watches `job` events
+rather than a `batch` event.
 **Touches:** DESIGN.md §4.6 (manifest), §6.2 (sidecar), §7 (schema), §11.2
 (gallery filters), §12 (API).
 **Lands in ForgeUI the server:** the batch API, job origin, two routes, one
@@ -386,13 +387,16 @@ is on for a human's benefit (§5.3).
 
 ### 6.2 Where a job came from, and what it was for
 
+*Built,* in the shape below minus `batch_id` and `meta`: `batch_id` waits on
+§6.1, and `meta` waited for something that wanted it. What shipped is
+DESIGN.md §6.2's `origin` block, the six columns of §7, and `?project=` /
+`?source=` on `GET /api/outputs`.
+
 ```json
 "origin": {
   "source": "llm:qwen3.5-9b",
-  "batch_id": "01J…",
   "project": "kitchen-lighting",
-  "note": "round 3 — pushing the LoRA past 0.9 to find where it breaks",
-  "meta": { }
+  "note": "round 3 — pushing the LoRA past 0.9 to find where it breaks"
 }
 ```
 
@@ -492,7 +496,9 @@ Through the interface, not the internals:
 - `origin` round-trips: submit with a project and a note, rebuild the database
   from the sidecars with `reindex`, and the filters still find it. This is the
   test that proves the sidecar rule was honoured rather than described;
-- a job submitted without a `source` records `unknown`, not `webui`;
+- a job submitted without a `source` records unknown, not `ui` — the web app
+  names itself, and the server guessing for a caller that said nothing would
+  file a script's work under the one label the filter exists to tell apart;
 - `free_vram` calls the fake ComfyUI's `/free` (a new scenario in
   `tests/fake-comfy/`);
 - `?max_edge=` returns an image within the bound, uncropped.
@@ -504,6 +510,11 @@ abandoned, and returns counts when every job fails.
 ---
 
 ## 7. What the gallery gains
+
+*The API half is built:* `?project=` and `?source=` filter `GET /api/outputs`
+and are what the bridge's `search_gallery` passes through. The screens below
+are not — whether a filter chip earns its place there is a question best
+answered after living with the data for a while.
 
 Metadata nobody can see is metadata nobody writes correctly. The payoff is in
 §11.2 and it is small:
@@ -611,13 +622,12 @@ mechanics. A skill is optional, and it is about taste.
 
 ## 12. Order of work
 
-1. **§6.2 — `origin`, sidecar first.** DESIGN.md §6.2 and §7, then the write
-   path, then the reindex test. Everything hangs off it, and it is the one
-   change that is expensive to retrofit: sidecars already on disk will never
-   get an `origin` block, so the sooner it exists the smaller the silent gap.
-2. **§7 — the gallery filters.** Immediately after, not later. A field with no
-   reader rots, and `source` alone — *what did I make, what did the model
-   make* — is worth the afternoon on its own.
+1. ~~**§6.2 — `origin`, sidecar first.**~~ *Done.* DESIGN.md §6.2 and §7, the
+   write path, the migration, and the reindex test that proves the sidecar
+   rule was honoured rather than described.
+2. **§7 — the gallery.** *Filters done* — `?project=`, `?source=`, and
+   `search_gallery` no longer silently ignoring both. The chips, the tile mark
+   and the sidebar rows are still open.
 3. **§6.1 — the batch API.** Wanted by the bridge, but the UI can use it too: a
    batch is what "generate four variants" should always have been.
 4. **§6.3, §6.4** — `free_vram`, `max_edge`, `prompting`. Small, independent.

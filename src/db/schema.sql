@@ -11,6 +11,8 @@ CREATE TABLE jobs (
   api_graph_json TEXT NOT NULL,   -- the rewritten graph that was queued (enables retry of failed jobs)
   progress_json TEXT,             -- {pct, eta_ms, node_id, node_label, node_index, node_total, step, max}
   error_json TEXT,
+  origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
+  origin_project TEXT, origin_note TEXT,
   created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
 );
 
@@ -25,12 +27,14 @@ CREATE TABLE outputs (
   workflow_id TEXT, workflow_hash TEXT, family TEXT,
   prompt TEXT,                    -- denormalised for search
   tone TEXT,                      -- audio: what it was asked to sound like (DESIGN-AUDIO §11.5)
+  origin_source TEXT, origin_project TEXT, origin_note TEXT,  -- denormalised from the sidecar's `origin` (§6.2)
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
+CREATE INDEX outputs_project ON outputs(origin_project, created_at DESC);
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (

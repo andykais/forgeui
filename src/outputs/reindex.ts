@@ -14,9 +14,31 @@ import {
   type SidecarModelRef,
 } from "../db/queries.ts";
 import { promptText, toneText } from "../jobs/completion.ts";
+import type { Origin } from "../db/queries.ts";
 import { readPngSize } from "../jobs/png.ts";
 import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
 import { sha256Hex } from "../workflows/hash.ts";
+
+/**
+ * The sidecar's `origin` block (§6.2), as the row holds it.
+ *
+ * A sidecar written before the block existed has none, and that stays
+ * unknown: the run was not made by anything we can now name, and filling it
+ * in as `ui` would be inventing a fact a rebuild is supposed to recover.
+ */
+function originOf(sidecar: Sidecar): Origin | null {
+  const origin = sidecar.origin;
+  if (!origin || typeof origin !== "object") return null;
+  const text = (value: unknown) => typeof value === "string" ? value : null;
+  const row = {
+    source: text(origin.source),
+    project: text(origin.project),
+    note: text(origin.note),
+  };
+  return row.source === null && row.project === null && row.note === null
+    ? null
+    : row;
+}
 import type { ApiGraph, Manifest } from "../workflows/types.ts";
 
 /**
@@ -173,6 +195,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
         family: sidecar.workflow?.family ?? null,
         prompt: promptText(manifest, sidecar.params),
         tone: toneText(manifest, sidecar.params),
+        origin: originOf(sidecar),
         params: sidecar.params,
         deleted_at: null,
         created_at: createdAt,
@@ -190,6 +213,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
     if (!jobExists(db, sidecar.job_id) && seen.size > 0) {
       insertRebuiltJob(db, {
         id: sidecar.job_id,
+        origin: originOf(sidecar),
         workflow_id: sidecar.workflow?.id ?? null,
         workflow_hash: sidecar.workflow?.hash ?? null,
         params: sidecar.params,

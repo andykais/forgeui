@@ -25,6 +25,13 @@ function filtersFrom(url: URL): OutputFilters {
   if (models.length > 0) filters.models = models;
   const q = url.searchParams.get("q");
   if (q && q.trim().length > 0) filters.q = q;
+  // The origin block (§6.2). Exact matches: a project is a name the caller
+  // already knows, not something to search for. No screen offers these yet —
+  // they are here for the API and the MCP bridge's `search_gallery`.
+  const project = url.searchParams.get("project");
+  if (project && project.trim().length > 0) filters.project = project.trim();
+  const source = url.searchParams.get("source");
+  if (source && source.trim().length > 0) filters.source = source.trim();
   return filters;
 }
 

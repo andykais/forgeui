@@ -13,6 +13,12 @@ export interface Sidecar {
   workflow: SidecarWorkflow | null;
   params: Record<string, unknown>;
   models: SidecarModel[];
+  /**
+   * Who asked for this run and why (§6.2). Absent on sidecars written before
+   * the block existed, which is why a missing one reads as unknown rather
+   * than as `ui`.
+   */
+  origin?: SidecarOrigin | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
   timing: SidecarTiming;
@@ -27,6 +33,14 @@ export interface SidecarWorkflow {
   hash: string;
   family: string | null;
   kind: string;
+  [unknownField: string]: unknown;
+}
+
+export interface SidecarOrigin {
+  /** `ui` for anything submitted without one, or `llm:<model-id>`. */
+  source: string | null;
+  project: string | null;
+  note: string | null;
   [unknownField: string]: unknown;
 }
 
@@ -62,6 +76,7 @@ export interface SidecarInit {
   workflow: SidecarWorkflow | null;
   params: Record<string, unknown>;
   models?: SidecarModel[];
+  origin?: SidecarOrigin | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
   timing?: SidecarTiming;
@@ -87,6 +102,7 @@ export function buildSidecar(init: SidecarInit): Sidecar {
     workflow: init.workflow,
     params: init.params,
     models: init.models ?? [],
+    origin: init.origin ?? null,
     api_graph: init.api_graph,
     outputs: init.outputs,
     timing: init.timing ?? { total_ms: 0, nodes: {} },

@@ -138,6 +138,38 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 8,
+    name: "job and output origin",
+    // Who asked for a run and why (§6.2): `ui` for the app itself, or
+    // `llm:<model>` from the MCP bridge. Also in schema.sql, so a fresh
+    // database gets these at version 1 and this does nothing there. NULL is
+    // "unknown", which every existing row is and stays — an output made
+    // before the block existed was not made by anything we can now name, and
+    // backfilling it as `ui` would be inventing a fact. `reindex` fills in
+    // what the sidecars of newer runs record.
+    apply: (db) => {
+      const columnsOf = (table: string) =>
+        new Set(
+          db.prepare(`PRAGMA table_info(${table})`)
+            .values<[number, string]>()
+            .map(([, name]) => name),
+        );
+      for (const table of ["jobs", "outputs"]) {
+        const present = columnsOf(table);
+        for (
+          const column of ["origin_source", "origin_project", "origin_note"]
+        ) {
+          if (present.has(column)) continue;
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+        }
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS outputs_project
+           ON outputs(origin_project, created_at DESC)`,
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =
