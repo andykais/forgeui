@@ -15,9 +15,9 @@ import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
 import { basename } from "@std/path";
 import type {
-  FamilyListing,
   ForgeUi,
   ModelListing,
+  ModelRow,
   StoredInputView,
 } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
@@ -165,6 +165,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   registerLibraryTool(server, forge, {
     name: "list_checkpoints",
     modelClass: "diffusion",
+    noun: "checkpoint",
     description:
       "Checkpoints — the base models a workflow generates with, across every " +
       "folder that holds one. Filter by family to see only the ones a " +
@@ -175,6 +176,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   registerLibraryTool(server, forge, {
     name: "list_loras",
     modelClass: "lora",
+    noun: "LoRA",
     description:
       "LoRAs in the library. Filter by family — a LoRA trained for one base " +
       "model does nothing for another, and mixing families is the usual " +
@@ -351,6 +353,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
 interface LibraryTool {
   name: string;
   modelClass: "diffusion" | "lora";
+  /** What one of these is called, in a message about there being none. */
+  noun: string;
   description: string;
   /** LoRAs carry the strength range their owner set; checkpoints do not. */
   strengths?: boolean;
@@ -383,35 +387,34 @@ function registerLibraryTool(
     }),
   }, async ({ family, q, tags, limit }) => {
     try {
+      // The family is filtered here rather than by the server, so that an
+      // answer of "none" can carry the families this class *does* have. A
+      // filter that matched nothing and says nothing is what sends a model
+      // off to poke ForgeUI's REST API on its own.
       const query = new URLSearchParams({ class: tool.modelClass });
-      if (family) query.set("family", family);
       if (q) query.set("q", q);
       if (tags) query.set("tags", tags);
-      const [listing, families] = await Promise.all([
-        forge.get<ModelListing>(`/api/models?${query}`),
-        // The vocabulary, so a family that matched nothing is a mistake the
-        // model can fix on its own rather than a silent empty list.
-        forge.get<FamilyListing>("/api/families").catch(() => null),
-      ]);
+      const listing = await forge.get<ModelListing>(`/api/models?${query}`);
       // A row whose file has gone keeps its page so its outputs stay linked
       // (§8.1), but it cannot be generated with, so it is not offered here.
       const all = listing.models.filter((model) => model.present !== false);
-      const shown = all.slice(0, limit ?? 60);
+      const counts = new Map<string, number>();
+      for (const model of all) {
+        counts.set(model.family, (counts.get(model.family) ?? 0) + 1);
+      }
+      const matched = family === undefined
+        ? all
+        : all.filter((model) => model.family === family);
       return text({
         family: family ?? null,
-        total: all.length,
-        families: families?.families.map((entry) => entry.family) ?? undefined,
-        models: shown.map((model) => ({
-          name: model.name,
-          display_name: model.display_name,
-          family: model.family,
-          kind: model.kind,
-          tags: model.tags.length > 0 ? model.tags : undefined,
-          notes: model.notes ?? undefined,
-          strength_min: tool.strengths ? model.strength_min : undefined,
-          strength_max: tool.strengths ? model.strength_max : undefined,
-          outputs: model.output_count,
-        })),
+        total: matched.length,
+        families: [...counts]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([name, count]) => ({ family: name, count })),
+        note: emptyNote(tool, listing, all.length, matched.length, family),
+        models: matched.slice(0, limit ?? 60).map((model) =>
+          entry(model, tool.strengths ?? false)
+        ),
       });
     } catch (cause) {
       return failure(cause);
@@ -464,4 +467,52 @@ function supplyHint(param: ManifestParam): string | undefined {
       `the take off mid-word; long leaves padding the model fills.`;
   }
   return undefined;
+}
+
+/** What a picker shows: enough to choose with, and nothing the screen needs. */
+function entry(model: ModelRow, strengths: boolean) {
+  return {
+    name: model.name,
+    display_name: model.display_name,
+    family: model.family,
+    kind: model.kind,
+    tags: model.tags.length > 0 ? model.tags : undefined,
+    notes: model.notes ?? undefined,
+    strength_min: strengths ? model.strength_min : undefined,
+    strength_max: strengths ? model.strength_max : undefined,
+    outputs: model.output_count,
+  };
+}
+
+/**
+ * Why the list is empty, when it is.
+ *
+ * Two different nothings, and an empty array tells them apart from neither.
+ * Either the family excluded everything — in which case the counts beside
+ * this say what to ask for instead — or the class itself is empty, which,
+ * with folders configured, usually means a folder is filed under the wrong
+ * one: these tools ask by class, and a folder name the default table does
+ * not know lands in `other`. Both cases end with a model that concludes the
+ * bridge is broken and goes looking for ForgeUI's REST API.
+ */
+function emptyNote(
+  tool: LibraryTool,
+  listing: ModelListing,
+  inClass: number,
+  matched: number,
+  family?: string,
+): string | undefined {
+  if (matched > 0) return undefined;
+  if (inClass > 0) {
+    return `no ${tool.noun} has family "${family}" — \`families\` lists the ` +
+      `ones that do, and leaving family out lists all ${inClass}.`;
+  }
+  const folders = Object.entries(listing.classes ?? {})
+    .map(([kind, modelClass]) => `${kind} (${modelClass})`)
+    .join(", ");
+  if (!folders) return `no model folders are configured at all.`;
+  return `nothing in this library is classed \`${tool.modelClass}\`. The ` +
+    `configured folders are: ${folders}. A folder that holds ${tool.noun}s ` +
+    `but is filed under another class has to be named by \`model_classes\` ` +
+    `in config.yaml before anything will list it.`;
 }

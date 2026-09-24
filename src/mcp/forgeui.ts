@@ -38,10 +38,8 @@ export interface ModelRow {
 
 export interface ModelListing {
   models: ModelRow[];
-}
-
-export interface FamilyListing {
-  families: { family: string; models: number; workflows: number }[];
+  /** Every configured folder kind and the class it is filed under (§8.2). */
+  classes?: Record<string, string>;
 }
 
 /** One finished file, as `generate` reports it and `attach_input` takes it. */

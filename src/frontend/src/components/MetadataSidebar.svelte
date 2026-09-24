@@ -1,5 +1,6 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
+  import Copy from "@lucide/svelte/icons/copy";
   import ImageUpscale from "@lucide/svelte/icons/image-upscale";
   import Plus from "@lucide/svelte/icons/plus";
   import type { Lineage, LineageNode, OutputDetail } from "../types.ts";
@@ -339,6 +340,22 @@
         </Popover>
       </div>
     {/if}
+    <!--
+      The id, because something outside this window may need to name this
+      output: the MCP bridge takes one in `attach_input` and `get_output`,
+      and an id you cannot get out of the page is an id you retype.
+    -->
+    <button
+      title={`Copy output id — ${output.id}`}
+      aria-label="Copy output id"
+      onclick={() => copy(output.id)}
+    >
+      {#if copied === output.id}
+        <Check size={12} /> Copied
+      {:else}
+        <Copy size={12} /> Copy id
+      {/if}
+    </button>
     <button class="danger" onclick={ondelete}>Delete</button>
   </div>
 

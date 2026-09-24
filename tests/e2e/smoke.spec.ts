@@ -58,6 +58,14 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
   // The sidecar's own numbers, not the row's.
   await expect(page.getByText("duration")).toBeVisible();
 
+  // The id goes to the clipboard, because everything outside this window
+  // names an output by it — the MCP bridge's `attach_input` among them. The
+  // button says so afterwards; reading the clipboard back needs a permission
+  // prompt headless Chromium will not answer.
+  await page.getByLabel("Copy output id").click();
+  await expect(page.getByRole("button", { name: "Copy output id" }))
+    .toContainText("Copied");
+
   // Escape returns to the grid (§11.4).
   await page.keyboard.press("Escape");
   await expect(page.getByPlaceholder("Search prompts…")).toBeVisible();

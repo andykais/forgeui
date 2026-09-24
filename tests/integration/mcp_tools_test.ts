@@ -27,7 +27,8 @@ interface Entry {
 interface Listing {
   family: string | null;
   total: number;
-  families?: string[];
+  families: { family: string; count: number }[];
+  note?: string;
   models: Entry[];
 }
 
@@ -193,7 +194,7 @@ Deno.test("list_loras lists only LoRAs, with the range its owner set", async () 
   });
 });
 
-Deno.test("either listing filters by family, and says which families there are", async () => {
+Deno.test("either listing filters by family, and counts the ones there are", async () => {
   await withModels(async (app) => {
     const loras = await callTool<Listing>(app, "list_loras", {
       family: "sdxl",
@@ -210,15 +211,43 @@ Deno.test("either listing filters by family, and says which families there are",
       "flux1-dev.safetensors",
     ]);
 
-    // A family that matches nothing is a mistake the model can fix itself,
-    // because the vocabulary comes back with the empty list.
+    // A family that matches nothing has to say so, with what this class
+    // *does* hold: an empty array and a vocabulary of every family ForgeUI
+    // knows is what sends a model off to the REST API on its own.
     const none = await callTool<Listing>(app, "list_loras", {
       family: "krea2",
     });
     assertEquals(none.total, 0);
-    assert(none.families?.includes("sdxl"), "the families are named");
-    assert(none.families?.includes("flux"));
+    assertEquals(none.models, []);
+    assertStringIncludes(none.note ?? "", "krea2");
+    // Counted over this class, not over the whole library.
+    assertEquals(none.families, [
+      { family: "flux", count: 1 },
+      { family: "sdxl", count: 1 },
+    ]);
   });
+});
+
+Deno.test("an empty class says which folders exist, not just nothing", async () => {
+  // The other empty: a folder holding LoRAs under a name the default table
+  // does not know is filed as `other`, and `class=lora` then misses it with
+  // no hint at all. One line of config fixes it — if you can tell.
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-odd-folder-" });
+  try {
+    await writeFakeSafetensors(join(dir, "lora", "some-style.safetensors"), {
+      name: "style",
+    });
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const listing = await callTool<Listing>(app, "list_loras");
+      assertEquals(listing.total, 0);
+      assertStringIncludes(listing.note ?? "", "lora (other)");
+      assertStringIncludes(listing.note ?? "", "model_classes");
+    }, { argv: ["--models-dir", `lora=${join(dir, "lora")}`] });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("a listing narrows by text and stops at the limit", async () => {

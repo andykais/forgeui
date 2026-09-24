@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import type { ModelEntry, OutputDetail, Sidecar } from "../types.ts";
 
 /**
@@ -280,6 +280,18 @@ describe("the metadata sidebar", () => {
     );
     expect(row?.querySelector("img")).toBeNull();
     expect(row?.textContent).toContain("krea2_turbo_fp8_scaled.safetensors");
+  });
+
+  test("the output id can be copied out of the actions row", async () => {
+    // Anything outside this window that names an output does it by id — the
+    // MCP bridge's `attach_input` and `get_output` both take one. An id you
+    // can only read is an id you retype.
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mount();
+    await fireEvent.click(screen.getByLabelText("Copy output id"));
+    expect(writeText).toHaveBeenCalledWith("01JOUT");
+    vi.unstubAllGlobals();
   });
 
   test("says nothing when no workflow is open at all", () => {
