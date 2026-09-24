@@ -1333,7 +1333,7 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - **Layout (§11.2).** Generate has three panes — the inputs, the media, the
   metadata — and the arrangement is the user's to pick, from a control whose
   options are drawn rather than named: at a glance you are choosing a shape,
-  and five words would each have to be read. The five are
+  and seven words would each have to be read. The seven are
 
   | `ui.layout` | Where things go |
   | --- | --- |
@@ -1342,9 +1342,24 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   | `wide` | inputs \| media, and no metadata |
   | `top` | media across the top, inputs underneath |
   | `top-split` | media across the top, inputs and metadata underneath |
+  | `media-split` | media \| metadata, and **no inputs panel** |
+  | `media` | media alone |
 
-  **Only `columns` has fixed panes** — 360px of params, 306px of metadata,
-  the media between them — because it is the only one with three of them.
+  **The last two have no inputs panel at all**, for the times the prompt is
+  not the thing being worked on: watching a run land, looking back through
+  what came out, or letting the MCP bridge drive (DESIGN-AGENT-LOOP). They
+  are the only arrangements that hide a pane the screen owns rather than one
+  the selection implies, so the way back has to be visible from inside them —
+  it is the picker itself, which is in the corner whatever the layout.
+  There is no Generate button while one of them is in force; that is the
+  point of them, and switching back is one click.
+  The panel is hidden, not unmounted, so returning lands on the form as it
+  was left rather than on a freshly built one.
+
+  **Only `columns` has three fixed panes** — 360px of params, 306px of
+  metadata, the media between them — because it is the only one with three
+  of them. `media-split` keeps the metadata's 306px too, but with two panes
+  rather than three it fits at any width worth using and needs no fallback.
   Every other split is down the middle, at every width. It was 360px against
   the rest, which is a quarter of a 1600px window and half of a 960px one:
   one arrangement that looked like two, and a diagram that could only be
@@ -1363,8 +1378,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   the room — a header reserves the width, the metadata pane the height.
   An arrangement this window cannot honour is offered greyed out rather than
   silently swapped: below the breakpoint, that is `columns`.
-  Gallery and a model's page have no inputs panel, so they are offered only
-  the first three — and the diagrams there draw two panes rather than three,
+  Gallery and a model's page have no inputs panel at all, so they are
+  offered only the first three — `media` and `media-split` would be
+  `wide` and `columns` there, the same two shapes under different names — and the diagrams there draw two panes rather than three,
   because a picture of a screen that does not exist is worse than no picture.
   Each pane has its own colour in those diagrams, so an arrangement is read
   by which pane is where and not only by shape; `sidebar_collapsed` is what this replaces, and stays a

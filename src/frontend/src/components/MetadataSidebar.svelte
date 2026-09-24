@@ -22,8 +22,10 @@
   interface Props {
     /**
      * This pane is the one under the screen's top-right corner, which the
-     * layout picker floats in (§11.3). Only true in `columns`, where the
-     * metadata is the rightmost pane and starts at the top.
+     * layout picker floats in (§11.3). True in the two arrangements where
+     * the metadata is the rightmost pane and starts at the top — `columns`
+     * and `media-split`. Without it the picker sits on top of the first
+     * row of actions.
      */
     topRight?: boolean;
     output: OutputDetail;

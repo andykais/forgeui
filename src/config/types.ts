@@ -95,6 +95,8 @@ export type ModelThumbnail = typeof MODEL_THUMBNAILS[number];
  * - `wide`        inputs | media, and no metadata
  * - `top`         media across the top, inputs underneath
  * - `top-split`   media across the top, inputs and metadata underneath
+ * - `media-split` media | metadata, and no inputs panel
+ * - `media`       media alone
  *
  * Gallery has no inputs, so only the first three mean anything there, and
  * the picker offers it only those.
@@ -105,6 +107,8 @@ export const LAYOUTS = [
   "wide",
   "top",
   "top-split",
+  "media-split",
+  "media",
 ] as const;
 export type Layout = typeof LAYOUTS[number];
 
@@ -113,6 +117,7 @@ export const LAYOUTS_WITH_METADATA: readonly Layout[] = [
   "columns",
   "split",
   "top-split",
+  "media-split",
 ];
 
 export interface UiConfig {

@@ -630,6 +630,34 @@
       "inputs meta";
   }
 
+  /*
+   * The two without an inputs panel (§11.3): for watching rather than
+   * typing. `media-split` keeps the metadata's fixed 306px, which fits
+   * beside the media at any width worth using — there are two panes here,
+   * not the three that make `columns` need a fallback.
+   */
+  .generate[data-layout="media-split"] {
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-areas: "media meta";
+  }
+
+  .generate[data-layout="media"] {
+    grid-template-areas: "media";
+  }
+
+  /*
+   * Hidden, not unmounted: the panel keeps its scroll position and its
+   * fields, so coming back from a media layout lands where you left rather
+   * than at the top of a freshly built form. `display: none` also takes it
+   * out of the grid entirely — a grid item whose named area does not exist
+   * is placed in an implicit track, which would put the params back on
+   * screen underneath everything.
+   */
+  .generate[data-layout="media"] .panel,
+  .generate[data-layout="media-split"] .panel {
+    display: none;
+  }
+
   .panel {
     grid-area: inputs;
     min-width: 0;

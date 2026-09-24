@@ -232,6 +232,13 @@ export type UiScreen = "generate" | "gallery" | "models";
  * - `wide`        inputs | media, no metadata
  * - `top`         media across the top, inputs underneath
  * - `top-split`   media across the top, inputs and metadata underneath
+ * - `media-split` media | metadata, and no inputs panel
+ * - `media`       media alone
+ *
+ * The last two are for watching rather than typing — while the bridge is
+ * driving, or while looking through what came out — and they are the only
+ * ones with no inputs panel at all. The way back is the picker itself,
+ * which is in the screen's corner whatever the layout.
  */
 export const LAYOUTS = [
   "columns",
@@ -239,6 +246,8 @@ export const LAYOUTS = [
   "wide",
   "top",
   "top-split",
+  "media-split",
+  "media",
 ] as const;
 export type Layout = (typeof LAYOUTS)[number];
 
@@ -247,7 +256,16 @@ export const LAYOUTS_WITH_METADATA: readonly Layout[] = [
   "columns",
   "split",
   "top-split",
+  "media-split",
 ];
+
+/**
+ * The layouts that still show the inputs panel — everything but the two
+ * media ones. Generate is the only screen with a panel to hide.
+ */
+export function hasInputs(layout: Layout): boolean {
+  return layout !== "media" && layout !== "media-split";
+}
 
 /** Gallery has no inputs panel, so only these three differ there. */
 export const GALLERY_LAYOUTS: readonly Layout[] = ["columns", "split", "wide"];
@@ -264,7 +282,11 @@ export function hasMetadata(layout: Layout): boolean {
  * would hold 306px of empty panel open beside the tiles.
  */
 export function withoutMetadata(layout: Layout): Layout {
-  return layout === "top" || layout === "top-split" ? "top" : "wide";
+  if (layout === "top" || layout === "top-split") return "top";
+  // A media layout drops to media, not to `wide`: `wide` would put the
+  // inputs panel back, which is the one thing these two are for not doing.
+  if (layout === "media" || layout === "media-split") return "media";
+  return "wide";
 }
 
 export interface Config {

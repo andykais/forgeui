@@ -280,7 +280,7 @@
   {#if showMetadata}
     {#if detail}
       <MetadataSidebar
-        topRight={layout === "columns"}
+        topRight={layout === "columns" || layout === "media-split"}
         output={detail}
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}

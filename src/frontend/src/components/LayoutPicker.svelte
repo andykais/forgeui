@@ -81,6 +81,14 @@
       { ...LEFT, ...BOTTOM, role: "inputs" },
       { ...RIGHT, ...BOTTOM, role: "meta" },
     ],
+    // The two with no inputs pane: drawn with none, which is the whole
+    // point of them and the only thing that tells them from `columns` and
+    // `wide` at a glance.
+    "media-split": [
+      { x: 0, y: 0, w: 19, h: 15, role: "media" },
+      { x: 20, y: 0, w: 6, h: 15, role: "meta" },
+    ],
+    media: [{ ...FULL_W, ...FULL_H, role: "media" }],
   };
 
   /**
@@ -121,6 +129,8 @@
     wide: "2 vertical columns: input, media — no metadata",
     top: "2 horizontal rows: media, then input — no metadata",
     "top-split": "Media across the top; input and metadata in 2 columns below",
+    "media-split": "Media and metadata, in 2 columns — no input panel",
+    media: "Just media — no input panel, no metadata",
   };
 
   /** The same, for a screen with no input panel (§11.3). */
