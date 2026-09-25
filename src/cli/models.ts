@@ -119,7 +119,13 @@ export async function runModels(
       kind: found.kind,
       display_name: found.display_name,
       family: found.family,
-      tags: found.tags,
+      // Deliberately empty. Civitai's tags stay in the source record, where
+      // the model page shows them under "their tags": ForgeUI's `tags` are
+      // your taxonomy and drive the `?tags=` filter, and importing forty
+      // models should not silently add two hundred entries to it (§5.5).
+      // Promoting one is a click on the model page, not something ingest
+      // decides.
+      tags: [],
       notes: notesFrom(found),
       trigger_words: found.trigger_words,
     },

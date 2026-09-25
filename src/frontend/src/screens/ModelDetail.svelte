@@ -14,6 +14,7 @@
   import type { ModelDetail, Output, Sample } from "../types.ts";
   import FamilyPicker from "../components/FamilyPicker.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
+  import SourcePanel from "../components/SourcePanel.svelte";
   import TagPicker from "../components/TagPicker.svelte";
   import Tile from "../components/Tile.svelte";
   import Viewer from "../components/Viewer.svelte";
@@ -610,6 +611,14 @@
             }
           }}
         ></textarea>
+
+        <!--
+          What Civitai said about it, and the words it wants in a prompt
+          (DESIGN-MODEL-IMPORT §7.5). Below the fields you edit, because this
+          is a cached copy of somebody else's document rather than anything
+          of yours.
+        -->
+        <SourcePanel source={model.source} triggerWords={model.trigger_words} />
       </div>
     </header>
 

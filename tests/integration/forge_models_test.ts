@@ -230,6 +230,13 @@ Deno.test("--filename hashes the local file and writes a batch", async () => {
     assertEquals(batch.model.family, "sd15");
     assertEquals(batch.model.kind, "checkpoints");
     assertEquals(batch.model.display_name, "CyberRealistic");
+    // Civitai's tags are kept in the record, not pressed into ForgeUI's own
+    // tag taxonomy (§5.5).
+    assertEquals(batch.model.tags, []);
+    assertEquals(
+      (batch.civitai as { model: { tags: string[] } }).model.tags,
+      ["photorealistic", "base model"],
+    );
     // The comma-separated single string is split, trimmed and de-duplicated.
     assertEquals(batch.model.trigger_words, ["cyberrealistic", "photo"]);
     // Notes get the trigger words and not eight kilobytes of HTML.

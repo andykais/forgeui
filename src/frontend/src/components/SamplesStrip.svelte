@@ -12,8 +12,9 @@
    * The hover menu is Set as thumbnail and Delete, plus Reuse parameters on
    * the ones that came from an output and therefore have params to reuse.
    *
-   * The Civitai URL field and Fetch info button belong to Phase 3 and are
-   * not drawn — the space is left, not stubbed (MOCK-REVISIONS §9).
+   * A sample fetched by `forge models` carries where it came from, and says
+   * so as a link (DESIGN-MODEL-IMPORT §7.3). There is no Civitai URL field
+   * here and there will not be: the app does not fetch, the CLI does.
    */
   let {
     samples,
@@ -83,7 +84,24 @@
         {#if sample.path === thumbPath}
           <figcaption class="mono">thumbnail</figcaption>
         {/if}
-        <span class="origin mono">{sample.reusable ? "promoted" : "dropped file"}</span>
+        <!--
+          Where it came from, as a link when there is one to follow
+          (DESIGN-MODEL-IMPORT §7.3). A sample this app made says how; one
+          that came from somewhere else says where.
+        -->
+        {#if sample.source}
+          <a
+            class="origin mono external"
+            href={sample.source.url ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            title={`Imported from ${sample.source.label}`}
+          >
+            {sample.source.label} ↗
+          </a>
+        {:else}
+          <span class="origin mono">{sample.reusable ? "promoted" : "dropped file"}</span>
+        {/if}
       </figure>
     {/each}
 
@@ -221,6 +239,24 @@
 
   .sample:hover .origin {
     opacity: 0;
+  }
+
+  /*
+    The one origin that is a link rather than a label, so it takes clicks —
+    and stays visible on hover, since following it is the point.
+  */
+  .origin.external {
+    pointer-events: auto;
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .sample:hover .origin.external {
+    opacity: 1;
+  }
+
+  .origin.external:hover {
+    text-decoration: underline;
   }
 
   .drop {

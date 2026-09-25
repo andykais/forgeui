@@ -270,6 +270,11 @@ export function htmlToText(html: string): string {
   const listStack: { ordered: boolean; index: number }[] = [];
   let link: string | null = null;
   let inPre = false;
+  // Real editor output nests a paragraph inside every list item
+  // (`<ul><li><p>text</p></li></ul>`). Breaking on that `<p>` would leave the
+  // bullet alone on its own line, which is what it did before this existed.
+  let justMarked = false;
+  let listDepth = 0;
 
   const push = (text: string) => out.push(text);
   const breakLine = () => {
@@ -283,7 +288,11 @@ export function htmlToText(html: string): string {
   for (const token of tokenize(html)) {
     if (token.kind === "text") {
       const decoded = decodeEntities(token.text!);
+      // Whitespace between `<li>` and its `<p>` is not content, and must not
+      // clear the marker flag.
+      if (justMarked && decoded.trim().length === 0) continue;
       push(inPre ? decoded : decoded.replace(/\s+/g, " "));
+      if (decoded.trim().length > 0) justMarked = false;
       continue;
     }
     const name = token.name!;
@@ -291,6 +300,8 @@ export function htmlToText(html: string): string {
       // Same reasoning as the sanitiser, plus: an image has no text.
       continue;
     }
+    const wasMarked = justMarked;
+    justMarked = false;
     switch (name) {
       case "br":
         if (!token.closing) breakLine();
@@ -305,12 +316,21 @@ export function htmlToText(html: string): string {
       }
       case "p":
       case "blockquote":
-        breakBlock();
+        if (wasMarked && !token.closing) break;
+        // Inside a list, a paragraph is the item's text, not a block of its
+        // own: breaking twice would space every bullet apart.
+        if (listDepth > 0) breakLine();
+        else breakBlock();
         break;
       case "ul":
       case "ol":
-        if (token.closing) listStack.pop();
-        else listStack.push({ ordered: name === "ol", index: 0 });
+        if (token.closing) {
+          listStack.pop();
+          listDepth--;
+        } else {
+          listStack.push({ ordered: name === "ol", index: 0 });
+          listDepth++;
+        }
         breakBlock();
         break;
       case "li": {
@@ -320,7 +340,8 @@ export function htmlToText(html: string): string {
         const indent = "  ".repeat(Math.max(0, listStack.length - 1));
         if (list?.ordered) push(`${indent}${++list.index}. `);
         else push(`${indent}- `);
-        break;
+        justMarked = true;
+        continue; // the flag must survive to the next token
       }
       case "pre":
         if (token.closing) {
