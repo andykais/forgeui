@@ -66,6 +66,17 @@ test("submit, watch progress, see the card, refresh, still there", async ({ page
   await expect(page.getByRole("button", { name: "Copy output id" }))
     .toContainText("Copied");
 
+  // The note (§6.2): typed here, saved on blur, and really on the server —
+  // which is checked through the API rather than by reading the box back,
+  // because the box would say the right thing either way.
+  const note = `the wing is bent, take ${Date.now()}`;
+  await page.getByLabel("Notes").fill(note);
+  await page.getByLabel("Notes").blur();
+  await expect(async () => {
+    const body = await (await page.request.get("/api/outputs?q=bent")).json();
+    expect(body.outputs[0]?.notes).toBe(note);
+  }).toPass({ timeout: 5000 });
+
   // Escape returns to the grid (§11.4).
   await page.keyboard.press("Escape");
   await expect(page.getByPlaceholder("Search prompts…")).toBeVisible();

@@ -196,6 +196,11 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
         prompt: promptText(manifest, sidecar.params),
         tone: toneText(manifest, sidecar.params),
         origin: originOf(sidecar),
+        // The note a person wrote about this frame, which is in the sidecar
+        // precisely so that this pass brings it back (§6.2).
+        notes: typeof output.notes === "string" && output.notes.length > 0
+          ? output.notes
+          : null,
         params: sidecar.params,
         deleted_at: null,
         created_at: createdAt,

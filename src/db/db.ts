@@ -170,6 +170,41 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 9,
+    name: "output notes",
+    // What a person said about one output after looking at it (§6.2), and
+    // the search index that has to know about it. Also in schema.sql, so a
+    // fresh database gets both at version 1 and this does nothing there.
+    //
+    // The FTS table is external-content, so its columns have to match what
+    // it is told to read: adding one means recreating it and rebuilding,
+    // which is one statement and costs a pass over the prompts.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(outputs)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("notes")) {
+        db.exec("ALTER TABLE outputs ADD COLUMN notes TEXT");
+      }
+      const indexed = new Set(
+        db.prepare("PRAGMA table_info(outputs_fts)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!indexed.has("notes")) {
+        db.exec(`
+          DROP TABLE IF EXISTS outputs_fts;
+          CREATE VIRTUAL TABLE outputs_fts USING fts5(
+            prompt, notes, content='outputs', content_rowid='rowid'
+          );
+          INSERT INTO outputs_fts (outputs_fts) VALUES ('rebuild');
+        `);
+      }
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

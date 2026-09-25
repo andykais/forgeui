@@ -97,6 +97,8 @@ export interface OutputRow {
   tone: string | null;
   /** Denormalised from the sidecar's `origin` (§6.2), for the filters. */
   origin: Origin | null;
+  /** What a person said about this one afterwards (§6.2); searched. */
+  notes: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -309,8 +311,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
     `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, width, height,
                           duration_ms, sha256, workflow_id, workflow_hash,
                           family, prompt, tone, origin_source, origin_project,
-                          origin_note, params_json, deleted_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          origin_note, notes, params_json, deleted_at,
+                          created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -329,15 +332,13 @@ export function insertOutput(db: Database, output: OutputRow): void {
     output.origin?.source ?? null,
     output.origin?.project ?? null,
     output.origin?.note ?? null,
+    output.notes,
     JSON.stringify(output.params),
     output.deleted_at,
     output.created_at,
   );
   // `outputs_fts` is an external-content table, so it is filled explicitly.
-  db.prepare(
-    `INSERT INTO outputs_fts (rowid, prompt)
-      SELECT rowid, prompt FROM outputs WHERE id = ?`,
-  ).run(output.id);
+  indexOutput(db, output.id);
 }
 
 /**
@@ -375,7 +376,7 @@ export function normalizeModelHash(hash: string): string {
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
   duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
-  origin_source, origin_project, origin_note,
+  origin_source, origin_project, origin_note, notes,
   params_json, deleted_at, created_at`;
 
 type OutputRecord = [
@@ -387,6 +388,7 @@ type OutputRecord = [
   number | null,
   number | null,
   number | null,
+  string | null,
   string | null,
   string | null,
   string | null,
@@ -418,9 +420,10 @@ function toOutput(record: OutputRecord): OutputRow {
     prompt: record[12],
     tone: record[13],
     origin: toOrigin(record[14], record[15], record[16]),
-    params: parse<Record<string, unknown>>(record[17], {}),
-    deleted_at: record[18],
-    created_at: record[19],
+    notes: record[17],
+    params: parse<Record<string, unknown>>(record[18], {}),
+    deleted_at: record[19],
+    created_at: record[20],
   };
 }
 
@@ -702,12 +705,47 @@ export function allOutputIds(db: Database): string[] {
   );
 }
 
-/** Drop a row outright; only `reindex` does this, for files that are gone. */
-export function deleteOutputRow(db: Database, id: string): void {
-  db.prepare(`DELETE FROM output_models WHERE output_id = ?`).run(id);
+/**
+ * Index one output's searchable text, reading it back out of the row.
+ *
+ * External content means the FTS table holds no copy of its own: it reads
+ * the columns from `outputs` when told to, which is why this runs *after*
+ * the row is written and why `setOutputNotes` unindexes *before* it changes
+ * one — a delete reads the old values through the same door.
+ */
+function indexOutput(db: Database, id: string): void {
+  db.prepare(
+    `INSERT INTO outputs_fts (rowid, prompt, notes)
+      SELECT rowid, prompt, notes FROM outputs WHERE id = ?`,
+  ).run(id);
+}
+
+function unindexOutput(db: Database, id: string): void {
   db.prepare(
     `DELETE FROM outputs_fts WHERE rowid = (SELECT rowid FROM outputs WHERE id = ?)`,
   ).run(id);
+}
+
+/**
+ * What a person made of this output (§6.2). Empty is stored as NULL, so
+ * "cleared" and "never written" are one state rather than two.
+ */
+export function setOutputNotes(
+  db: Database,
+  id: string,
+  notes: string | null,
+): void {
+  // Out of the index while the row still holds the old text, back in once it
+  // holds the new: the other order leaves the old words findable for ever.
+  unindexOutput(db, id);
+  db.prepare(`UPDATE outputs SET notes = ? WHERE id = ?`).run(notes, id);
+  indexOutput(db, id);
+}
+
+/** Drop a row outright; only `reindex` does this, for files that are gone. */
+export function deleteOutputRow(db: Database, id: string): void {
+  db.prepare(`DELETE FROM output_models WHERE output_id = ?`).run(id);
+  unindexOutput(db, id);
   db.prepare(`DELETE FROM outputs WHERE id = ?`).run(id);
 }
 

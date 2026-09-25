@@ -79,7 +79,7 @@
   let mediaBox: HTMLDivElement | undefined;
   let renderedWidth = $state(0);
 
-  /** Three of the five layouts have a metadata pane; two do not (§11.3). */
+  /** Four of the seven layouts have a metadata pane; three do not (§11.3). */
   const showMetadata = $derived(hasMetadata(layout));
   const filmstripCollapsed = $derived(app.filmstripCollapsed(screen));
   const index = $derived(outputs.findIndex((output) => output.id === selected.id));
@@ -282,6 +282,13 @@
       <MetadataSidebar
         topRight={layout === "columns" || layout === "media-split"}
         output={detail}
+        onnotes={(updated) => {
+          // Keep the pane's own copy current without refetching the sidecar:
+          // the row that comes back is the row the sidebar is rendering.
+          if (detail && detail.id === updated.id) {
+            detail = { ...detail, ...updated };
+          }
+        }}
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}
         ondelete={() => ondelete(selected)}

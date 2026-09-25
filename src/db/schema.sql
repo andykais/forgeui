@@ -28,6 +28,7 @@ CREATE TABLE outputs (
   prompt TEXT,                    -- denormalised for search
   tone TEXT,                      -- audio: what it was asked to sound like (DESIGN-AUDIO §11.5)
   origin_source TEXT, origin_project TEXT, origin_note TEXT,  -- denormalised from the sidecar's `origin` (§6.2)
+  notes TEXT,                     -- what a person said about this one afterwards (§6.2); searched with the prompt
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL
@@ -35,7 +36,7 @@ CREATE TABLE outputs (
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
 CREATE INDEX outputs_project ON outputs(origin_project, created_at DESC);
-CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
+CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
   hash TEXT PRIMARY KEY,          -- sha256 of file

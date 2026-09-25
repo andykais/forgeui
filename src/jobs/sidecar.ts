@@ -57,6 +57,11 @@ export interface SidecarOutput {
   width?: number;
   height?: number;
   duration_ms?: number;
+  /**
+   * What a person made of this one, written afterwards (§6.2). The only
+   * field in a sidecar that changes after the job that wrote it.
+   */
+  notes?: string | null;
   [unknownField: string]: unknown;
 }
 

@@ -3,7 +3,8 @@
   import Copy from "@lucide/svelte/icons/copy";
   import ImageUpscale from "@lucide/svelte/icons/image-upscale";
   import Plus from "@lucide/svelte/icons/plus";
-  import type { Lineage, LineageNode, OutputDetail } from "../types.ts";
+  import { untrack } from "svelte";
+  import type { Lineage, LineageNode, Output, OutputDetail } from "../types.ts";
   import { absoluteTime, duration, relativeTime, shortId } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
@@ -44,6 +45,8 @@
      * is.
      */
     onopen?: (id: string) => void;
+    /** The row as it is after a note was written, so the page can keep up. */
+    onnotes?: (output: Output) => void;
   }
 
   let {
@@ -54,7 +57,47 @@
     ondelete,
     onupscale,
     onopen,
+    onnotes,
   }: Props = $props();
+
+  /**
+   * The note (§6.2), and the state of getting it saved.
+   *
+   * A draft rather than a bound value, because the field is saved on blur
+   * and Escape has to be able to put back what was there. It resyncs when
+   * the *output* changes and not when the row does: stepping through the
+   * filmstrip must reload it, and the reply to a save must not overwrite
+   * what has been typed since.
+   */
+  let notesDraft = $state("");
+  let notesError = $state<string | null>(null);
+  let savingNotes = $state(false);
+  $effect(() => {
+    const id = output.id;
+    untrack(() => {
+      notesDraft = output.notes ?? "";
+      notesError = null;
+    });
+    return () => void id;
+  });
+
+  async function commitNotes() {
+    const text = notesDraft.trim();
+    if (text === (output.notes ?? "")) return;
+    savingNotes = true;
+    try {
+      // Saved first, told second. `onnotes?.(await api.patchOutput(…))` reads
+      // the same but is not: an optional call does not evaluate its
+      // arguments, so a screen that passes no handler would save nothing.
+      const updated = await api.patchOutput(output.id, { notes: text });
+      onnotes?.(updated);
+      notesError = null;
+    } catch (cause) {
+      notesError = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      savingNotes = false;
+    }
+  }
 
   let copied = $state<string | null>(null);
   let promoteOpen = $state(false);
@@ -362,6 +405,36 @@
   </div>
 
   <!--
+    The note, directly under the actions (§11.2): it is about the picture
+    that is on screen, and anything below the params would be written after
+    scrolling past them — which is to say, not written.
+  -->
+  <section class="notes-block">
+    <div class="label">
+      Notes
+      {#if savingNotes}<span class="dim">saving…</span>{/if}
+    </div>
+    <textarea
+      class="notes"
+      aria-label="Notes"
+      placeholder="What to remember about this one"
+      value={notesDraft}
+      oninput={(event) =>
+        (notesDraft = (event.currentTarget as HTMLTextAreaElement).value)}
+      onblur={commitNotes}
+      onkeydown={(event) => {
+        if (event.key === "Escape") {
+          notesDraft = output.notes ?? "";
+          (event.currentTarget as HTMLTextAreaElement).blur();
+        }
+      }}
+    ></textarea>
+    {#if notesError}
+      <p class="warn mono">{notesError}</p>
+    {/if}
+  </section>
+
+  <!--
     Rows, not a description list. Two reasons, and they point the same way.
     The label sat in a 74px column that took a fifth of a 306px sidebar away
     from the value, which is the part worth reading; it goes above instead,
@@ -651,6 +724,26 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+
+  .notes-block .label {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+
+  /*
+   * Three lines to start with, growing to a paragraph: a note is what went
+   * wrong and what to try, and a one-line box says "a few words" when the
+   * useful ones are a sentence.
+   */
+  .notes-block textarea {
+    width: 100%;
+    min-height: 54px;
+    max-height: 180px;
+    margin-top: 4px;
+    resize: vertical;
+    font: inherit;
   }
 
   .actions {

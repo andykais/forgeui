@@ -315,6 +315,8 @@ export async function completeJob(
       // Denormalised off the job so the gallery can filter by it (§6.2);
       // the sidecar above is what `reindex` rebuilds this from.
       origin: job.origin,
+      // Nothing has been said about it yet; it was made a moment ago.
+      notes: null,
       params: job.params,
       deleted_at: null,
       created_at: createdAt.getTime(),

@@ -190,10 +190,14 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     description:
       "Past outputs, newest first. Filter by project to find this project's " +
       "earlier rounds, or by source to see what was made by a model rather " +
-      "than by hand. This is the loop's memory — it survives you being " +
-      "unloaded and the harness restarting.",
+      "than by hand. `q` searches the prompts **and the notes** — what a " +
+      "person wrote about a picture after looking at it, which is the " +
+      "feedback worth reading before making another one. This is the loop's " +
+      "memory: it survives you being unloaded and the harness restarting.",
     inputSchema: z.object({
-      q: z.string().optional().describe("free text over prompts and notes"),
+      q: z.string().optional().describe(
+        "free text over the prompts and the notes written about an output",
+      ),
       project: z.string().optional(),
       source: z.string().optional(),
       workflow: z.string().optional(),
@@ -215,7 +219,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   server.registerTool("get_output", {
     description:
       "Everything recorded about one output: the exact params, seed, models " +
-      "and timings that produced it, and the note saying why it exists.",
+      "and timings that produced it, the origin saying who asked for it and " +
+      "why, and `notes` — what a person said about it afterwards. Read the " +
+      "notes on what you made last time before deciding what to make next.",
     inputSchema: z.object({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {

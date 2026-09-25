@@ -162,6 +162,13 @@ export interface Output {
   workflow_hash: string | null;
   family: string | null;
   prompt: string | null;
+  /**
+   * What a person made of this one, written afterwards in the metadata
+   * sidebar (§6.2). In the sidecar as well as the row, so it survives a
+   * rebuild — and searched with the prompt, so `?q=` finds an output by
+   * what was said about it.
+   */
+  notes: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -181,6 +188,16 @@ export interface Output {
   models: { model_hash: string; role: string }[];
 }
 
+export interface SidecarOutputEntry {
+  file: string;
+  kind: string;
+  width?: number;
+  height?: number;
+  duration_ms?: number;
+  /** §6.2: the one sidecar field written after the job that made it. */
+  notes?: string | null;
+}
+
 export interface Sidecar {
   app_version: string;
   job_id: string;
@@ -195,7 +212,7 @@ export interface Sidecar {
   params: Record<string, unknown>;
   models: { role: string; name: string; hash: string | null }[];
   api_graph: Record<string, ApiNode> | null;
-  outputs: { file: string; kind: string; width?: number; height?: number }[];
+  outputs: SidecarOutputEntry[];
   timing: { total_ms: number; nodes: Record<string, number> };
   raw: unknown;
 }

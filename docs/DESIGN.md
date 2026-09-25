@@ -407,12 +407,26 @@ or replacing any workflow must never affect the ability to rerun an old output.
   "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
   "origin": { "source": "ui", "project": "herons", "note": "iteration 3, pushing the LoRA past 0.9" },
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
-  "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024 } ],
+  "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024, "notes": "hands are wrong, the light is right" } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
   "raw": null
 }
 ```
 `raw` holds unmapped source data for imported samples (§8.3).
+
+`notes` on an output is the one field here written *after* the fact: what a
+person thought of this picture, typed into the metadata sidebar (§11.2) once
+they have looked at it. Per output rather than per job, because two frames of
+the same batch are not the same picture. It is in the sidecar and not only in
+a column for the usual reason — a rebuild must not lose it — and it is the
+only thing in a sidecar that changes after the job that made it, so the copy
+embedded in a PNG's `tEXt` chunk is a snapshot of generation time and the
+sidecar file stays canonical.
+
+Notes are indexed for search alongside the prompt, so `?q=` finds an output
+by what was said about it and not only by what was asked for. That is the
+point of writing them down: the MCP bridge's `search_gallery` (DESIGN-AGENT-LOOP
+§5.1) is how an LLM reads back the feedback on what it made last time.
 
 `origin` says who asked for this and why. `source` is `ui`, which the web app
 sends for itself, or `llm:<model-id>` from the MCP bridge, which reads the
@@ -485,7 +499,7 @@ CREATE TABLE outputs (
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
-CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
+CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
   hash TEXT PRIMARY KEY,          -- sha256 of file
@@ -1551,6 +1565,7 @@ GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (
                                         so the counts match the dividers the client drew
 GET  /api/outputs/count?filters         total under the active filters (lazy)
 GET  /api/outputs/:id                   with sidecar contents
+PATCH /api/outputs/:id                  {notes} — the sidebar's note; rewrites the sidecar too (§6.2)
 GET  /api/outputs/:id/lineage           {parents[], children[]}; each node: id, family, deleted (→ "?" marker)
 POST /api/outputs/:id/promote           {model_hashes[]} → one sample per model
 DELETE /api/outputs/:id                 soft delete (sets deleted_at); file removal deferred past the undo window

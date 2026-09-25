@@ -233,6 +233,12 @@ export const api = {
     request<ModelDetail>(`/api/models/${encodeURIComponent(id)}/rescan`, {
       method: "POST",
     }),
+  /** §6.2's note: what a person made of one output, written afterwards. */
+  patchOutput: (id: string, patch: { notes?: string | null }) =>
+    request<Output>(`/api/outputs/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   patchModel: (
     id: string,
     patch: {

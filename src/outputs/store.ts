@@ -21,10 +21,15 @@ import {
   outputsDeletedBefore,
   refreshModelUsage,
   restoreOutput,
+  setOutputNotes,
   softDeleteOutput,
 } from "../db/queries.ts";
 import type { WsHub } from "../http/ws.ts";
-import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
+import {
+  parseSidecar,
+  serializeSidecar,
+  type Sidecar,
+} from "../jobs/sidecar.ts";
 import { encodeCursor } from "./cursor.ts";
 
 /**
@@ -235,6 +240,61 @@ export class OutputStore {
       created_at: row.created_at,
       deleted: false,
     };
+  }
+
+  /**
+   * What a person made of this output, written after looking at it (§6.2).
+   *
+   * Into the sidecar as well as the row, which is the rule for anything
+   * recorded about an output — and here it is the whole point: the note is
+   * feedback meant to outlive the index, and `reindex` reads it back.
+   *
+   * The sidecar first. A row whose note is not on disk is a note that a
+   * rebuild silently drops; a sidecar whose note is not in the row is one
+   * the next rebuild puts back. Of the two ways to fail, only one loses
+   * what was written.
+   */
+  async setNotes(id: string, notes: string | null): Promise<OutputRow> {
+    const row = this.require(id);
+    const text = notes === null || notes.trim().length === 0
+      ? null
+      : notes.trim();
+    await this.#writeNotesToSidecar(row, text);
+    setOutputNotes(this.#db, id, text);
+    const updated = this.require(id);
+    // Every client sees it: the same output may be open in another tab, and
+    // the gallery's tiles read from the same view.
+    this.#hub.broadcast({ type: "output", data: this.view(updated) });
+    return updated;
+  }
+
+  /**
+   * The note into the sidecar's own entry for this file.
+   *
+   * Per output, not per job: one sidecar covers every frame a batch made,
+   * and two frames of the same batch are not the same picture. The copy
+   * embedded in a PNG is left alone — it is a snapshot of what was true when
+   * the file was written, and the sidecar is what §6.1 calls canonical.
+   */
+  async #writeNotesToSidecar(
+    row: OutputRow,
+    notes: string | null,
+  ): Promise<void> {
+    const path = join(this.#paths.root, row.sidecar_path);
+    const sidecar = parseSidecar(
+      await Deno.readTextFile(path),
+      row.sidecar_path,
+    );
+    const file = row.path.split("/").pop();
+    const entry = sidecar.outputs.find((output) => output.file === file);
+    if (!entry) {
+      throw new OutputNotFoundError(
+        `${row.sidecar_path} has no entry for ${file}`,
+      );
+    }
+    if (notes === null) delete entry.notes;
+    else entry.notes = notes;
+    await Deno.writeTextFile(path, serializeSidecar(sidecar));
   }
 
   /**

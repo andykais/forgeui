@@ -27,6 +27,7 @@ function output(extra: Partial<Output> = {}): Output {
     prompt: "Welcome aboard. Your journey begins now.",
     tone: "a warm, thoughtful young woman",
     tone_color: "#d0a06a",
+    notes: null,
     params: {},
     deleted_at: null,
     created_at: 1_789_000_000_000,
