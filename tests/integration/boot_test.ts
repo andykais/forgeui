@@ -22,9 +22,19 @@ Deno.test("the server boots against a temp data dir on the first run", async () 
     ) {
       assert((await Deno.stat(path)).isFile, `${path} is missing`);
     }
+    // No model folders are configured on a first run, but the download
+    // folder is listed under every kind regardless: a model fetched by
+    // `forge models --download-model` has to resolve by name even on an
+    // install that has pointed ComfyUI at nothing (DESIGN-MODEL-IMPORT §7.2).
+    const extraModelPaths = await Deno.readTextFile(app.paths.extraModelPaths);
+    assertStringIncludes(extraModelPaths, "forgeui:");
     assertStringIncludes(
-      await Deno.readTextFile(app.paths.extraModelPaths),
-      "forgeui: {}",
+      extraModelPaths,
+      `${app.paths.downloads}/checkpoints`,
+    );
+    assert(
+      !extraModelPaths.includes("/nowhere"),
+      "nothing but the download folder should be listed",
     );
 
     const response = await app.fetch("/");

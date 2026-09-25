@@ -1,4 +1,5 @@
 import {
+  type ImportConfig,
   KEY_ACTIONS,
   type KeyAction,
   LAYOUTS,
@@ -47,6 +48,13 @@ function port(value: unknown, where: string): number {
     value > 65535
   ) {
     fail(where, "an integer between 0 and 65535");
+  }
+  return value;
+}
+
+function count(value: unknown, where: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    fail(where, "a whole number, zero or more");
   }
   return value;
 }
@@ -185,6 +193,32 @@ function stringList(value: unknown, where: string): string[] {
   return out;
 }
 
+function validateImport(value: unknown, where: string): Partial<ImportConfig> {
+  const raw = record(value, where);
+  rejectUnknown(raw, where, [
+    "dir",
+    "model_dir",
+    "civitai_url",
+    "browsing_level",
+    "archive_url",
+    "civitai_cli",
+    "samples",
+    "nsfw_level",
+    "ingest_on_boot",
+  ]);
+  const out: Partial<ImportConfig> = {};
+  pick(raw, "dir", out, nullableStr, where);
+  pick(raw, "model_dir", out, nullableStr, where);
+  pick(raw, "civitai_url", out, str, where);
+  pick(raw, "browsing_level", out, count, where);
+  pick(raw, "archive_url", out, str, where);
+  pick(raw, "civitai_cli", out, nullableStr, where);
+  pick(raw, "samples", out, count, where);
+  pick(raw, "nsfw_level", out, count, where);
+  pick(raw, "ingest_on_boot", out, bool, where);
+  return out;
+}
+
 /**
  * Validate one config layer: a parsed `config.yaml`, a CLI override layer or a
  * `PATCH /api/config` body. Unknown keys and wrong types are errors so a typo
@@ -202,6 +236,7 @@ export function validatePartialConfig(
     "model_classes",
     "keys",
     "ui",
+    "import",
   ]);
   const out: PartialConfig = {};
 
@@ -283,6 +318,9 @@ export function validatePartialConfig(
   }
 
   if ("ui" in raw) out.ui = validateUi(raw.ui, `${where}.ui`);
+  if ("import" in raw) {
+    out.import = validateImport(raw.import, `${where}.import`);
+  }
 
   return out;
 }

@@ -226,6 +226,57 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
     ConfigError,
     "one of columns, split, wide, top, top-split, media-split, media",
   );
+  assertThrows(
+    () => validatePartialConfig({ import: { civitai: "yes" } }),
+    ConfigError,
+    'unknown key "civitai"',
+  );
+  assertThrows(
+    () => validatePartialConfig({ import: { browsing_level: "31" } }),
+    ConfigError,
+    "config.import.browsing_level: expected a whole number",
+  );
+  assertThrows(
+    () => validatePartialConfig({ import: { samples: -1 } }),
+    ConfigError,
+    "config.import.samples: expected a whole number",
+  );
+});
+
+/**
+ * DESIGN-MODEL-IMPORT §8. Two levels rather than one because they answer two
+ * questions: what a lookup may *see*, and what may be *kept*.
+ */
+Deno.test("the import block defaults, and what a layer may override", () => {
+  const base = defaultConfig().import;
+  assertEquals(base.civitai_url, "https://civitai.red");
+  assertEquals(base.archive_url, "https://civitaiarchive.com");
+  assertEquals(base.browsing_level, 31);
+  assertEquals(base.nsfw_level, 1);
+  assertEquals(base.dir, null);
+  assertEquals(base.model_dir, null);
+
+  const layered = effectiveConfig({ import: { nsfw_level: 31, samples: 8 } });
+  assertEquals(layered.import.nsfw_level, 31);
+  assertEquals(layered.import.samples, 8);
+  // Everything the layer did not mention keeps its default.
+  assertEquals(layered.import.civitai_url, "https://civitai.red");
+  assertEquals(layered.import.ingest_on_boot, true);
+});
+
+Deno.test("import.dir and import.model_dir move the folders", () => {
+  const under = dataPaths("/data");
+  assertEquals(under.imports, "/data/import");
+  assertEquals(under.downloads, "/data/models");
+
+  const moved = dataPaths("/data", { dir: "/mnt/share/in", model_dir: null });
+  assertEquals(moved.imports, "/mnt/share/in");
+  assertEquals(moved.downloads, "/data/models");
+
+  // A relative path is relative to the data directory, not the cwd.
+  const relative = dataPaths("/data", { dir: "inbox", model_dir: "weights" });
+  assertEquals(relative.imports, "/data/inbox");
+  assertEquals(relative.downloads, "/data/weights");
 });
 
 /**

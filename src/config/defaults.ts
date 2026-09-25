@@ -79,6 +79,15 @@ export function classOf(
 
 export const DEFAULT_COMFY_URL = "http://127.0.0.1:8188";
 
+/**
+ * `.red` rather than `.com`: the same API is served from both, and what it
+ * returns is decided by the visibility parameter rather than the hostname —
+ * but `.red` is the host whose *pages* show everything, so a link built from
+ * a lookup lands somewhere that can display what was found (§4.0).
+ */
+export const DEFAULT_CIVITAI_URL = "https://civitai.red";
+export const DEFAULT_ARCHIVE_URL = "https://civitaiarchive.com";
+
 export function defaultConfig(): Config {
   return {
     server: { host: "127.0.0.1", port: 7777 },
@@ -117,6 +126,20 @@ export function defaultConfig(): Config {
       // What was already happening before this was a setting.
       model_thumbnail: "latest_generated",
       hidden_families: [],
+    },
+    import: {
+      dir: null,
+      model_dir: null,
+      civitai_url: DEFAULT_CIVITAI_URL,
+      // Ask broadly and file narrowly: a mature model is still identified,
+      // named and filed correctly while `nsfw_level` keeps its images off
+      // the disk (DESIGN-MODEL-IMPORT §8).
+      browsing_level: 31,
+      archive_url: DEFAULT_ARCHIVE_URL,
+      civitai_cli: "civitai",
+      samples: 4,
+      nsfw_level: 1,
+      ingest_on_boot: true,
     },
   };
 }

@@ -243,7 +243,11 @@ export class ModelLibrary {
     this.#now = options.now ?? Date.now;
     this.#probes = listModelProbes(options.db);
     this.scanner = options.scanner ??
-      new ModelScanner(() => options.config.config);
+      new ModelScanner(
+        () => options.config.config,
+        undefined,
+        options.paths.downloads,
+      );
     this.hasher = new ModelHasher({
       db: options.db,
       now: options.now,
