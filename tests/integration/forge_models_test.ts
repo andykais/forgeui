@@ -84,6 +84,7 @@ function civitaiModel(hash: string, base: string) {
 interface Harness {
   fake: ReturnType<typeof startFakeCivitai>;
   bytes: Uint8Array;
+  modelsDir: string;
   config: ReturnType<typeof effectiveConfig>;
   paths: ReturnType<typeof dataPaths>;
   client: CivitaiClient;
@@ -200,7 +201,7 @@ async function withCli(
   });
 
   try {
-    await body({ fake, bytes, config, paths, client, hash });
+    await body({ fake, bytes, modelsDir, config, paths, client, hash });
   } finally {
     await fake.close();
     await Deno.remove(dataDir, { recursive: true }).catch(() => {});
@@ -221,11 +222,11 @@ async function readBatch(dir: string): Promise<ImportBatch> {
   return JSON.parse(await Deno.readTextFile(join(dir, "model.json")));
 }
 
-Deno.test("--filename hashes the local file and writes a batch", async () => {
+Deno.test("--local-file hashes what is on disk and writes a batch", async () => {
   await withCli(async (h) => {
     const result = await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       config: h.config,
       paths: h.paths,
       client: h.client,
@@ -257,7 +258,8 @@ Deno.test("--filename hashes the local file and writes a batch", async () => {
     assertStringIncludes(record.model.description_text, "# CyberRealistic");
     assertStringIncludes(record.model.description_html, "<h1>");
 
-    // It was found by hash, which means the local file decided it.
+    // It was found by hash, which means the local file decided it — not a
+    // name search that happened to land on something similar.
     assert(h.fake.matching("/model-versions/by-hash/").length > 0);
   });
 });
@@ -266,7 +268,7 @@ Deno.test("the lookup sends the visibility parameter §4.0's table names", async
   await withCli(async (h) => {
     await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       downloadSamples: 2,
       config: h.config,
       paths: h.paths,
@@ -297,7 +299,7 @@ Deno.test("samples are fetched at full size, with their generation data", async 
   await withCli(async (h) => {
     const result = await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       downloadSamples: 4,
       config: h.config,
       paths: h.paths,
@@ -336,7 +338,7 @@ Deno.test("the batch is renamed into place, never written in halves", async () =
   await withCli(async (h) => {
     const result = await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       downloadSamples: 1,
       config: h.config,
       paths: h.paths,
@@ -359,7 +361,7 @@ Deno.test("--dry-run touches nothing", async () => {
     const lines: string[] = [];
     const result = await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       dryRun: true,
       downloadSamples: 3,
       config: h.config,
@@ -408,7 +410,7 @@ Deno.test("exactly one identifier, and the message says which", async () => {
       () =>
         runModels({
           ...base,
-          filename: FILENAME,
+          localFile: FILENAME,
           sha256checksum: "a".repeat(64),
           config: h.config,
           paths: h.paths,
@@ -425,7 +427,7 @@ Deno.test("the archive answers when civitai does not", async () => {
   await withCli(async (h) => {
     const result = await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       config: h.config,
       paths: h.paths,
       client: h.client,
@@ -449,7 +451,7 @@ Deno.test("§3.1's invariant: `forge models` never opens app.db", async () => {
     await assertRejects(() => Deno.stat(h.paths.db), Deno.errors.NotFound);
     await runModels({
       ...base,
-      filename: FILENAME,
+      localFile: FILENAME,
       downloadSamples: 2,
       config: h.config,
       paths: h.paths,
@@ -492,7 +494,7 @@ Deno.test("--filename with nothing local lists what nearly matched", async () =>
   }, { noLocalFile: true });
 });
 
-Deno.test("--filename still takes an exact match when there is one", async () => {
+Deno.test("--filename takes an exact remote match when there is one", async () => {
   await withCli(async (h) => {
     const result = await runModels({
       ...base,
@@ -595,5 +597,148 @@ Deno.test("a gated model says what to do rather than writing half a batch", asyn
       staged.push(entry.name);
     }
     assertEquals(staged, []);
+  }, { noLocalFile: true });
+});
+
+/**
+ * `--filename` and `--local-file` are two different questions (§4.1): "find
+ * me this by name, wherever it is" and "identify the file I already have".
+ */
+
+Deno.test("--filename reads nothing on this machine, even when the file is here", async () => {
+  await withCli(async (h) => {
+    // The fixture *is* in a configured folder. A remote lookup must not
+    // notice, or the two flags would quietly be the same flag.
+    await runModels({
+      ...base,
+      filename: FILENAME,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    // The name search ran; the hash road did not.
+    assert(h.fake.matching("/api/v1/models").length > 0);
+    assertEquals(h.fake.matching("/by-hash/").length, 0);
+  });
+});
+
+Deno.test("--local-file takes a path as well as a configured-folder name", async () => {
+  await withCli(async (h) => {
+    const byPath = await runModels({
+      ...base,
+      localFile: join(h.modelsDir, "checkpoints", FILENAME),
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(byPath.batch?.model.sha256, h.hash);
+  });
+});
+
+Deno.test("--local-file that is nowhere points at the flags that do not need it", async () => {
+  await withCli(async (h) => {
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          localFile: "not-here.safetensors",
+          config: h.config,
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      UsageError,
+    );
+    assertStringIncludes(error.message, "--filename");
+    assertStringIncludes(error.message, "--search");
+  }, { noLocalFile: true });
+});
+
+Deno.test("the archive answers a filename Civitai cannot", async () => {
+  await withCli(async (h) => {
+    h.fake.configure({
+      // Civitai knows nothing; the archive indexes the file by hash, which is
+      // the case it exists for — a model Civitai has deleted.
+      models: {},
+      archiveSearch: {
+        [FILENAME]: [{
+          kind: "file",
+          name: FILENAME,
+          url: `/sha256/${h.hash}`,
+          platform: "civitai",
+          base_model: "SD 1.5",
+        }],
+      },
+      archiveByHash: {
+        [h.hash]: {
+          files: [{
+            filename: FILENAME,
+            source: "civitai",
+            model_id: "15003",
+            model_version_id: "501240",
+          }],
+        },
+      },
+      archiveModels: {
+        15003: {
+          id: 15003,
+          name: "CyberRealistic (archived)",
+          type: "Checkpoint",
+          version: {
+            id: 501240,
+            baseModel: "SD 1.5",
+            files: [{ name: FILENAME, sha256: h.hash, is_primary: true }],
+            images: [],
+          },
+        },
+      },
+    });
+
+    const result = await runModels({
+      ...base,
+      filename: FILENAME,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(result.batch?.model.display_name, "CyberRealistic (archived)");
+    assert(h.fake.matching("/api/search").length > 0);
+  }, { noLocalFile: true });
+});
+
+Deno.test("a hash the archive only mirrors says there is nothing to import", async () => {
+  await withCli(async (h) => {
+    h.fake.configure({
+      models: {},
+      archiveByHash: {
+        // A HuggingFace copy: the bytes exist, but no model page stands
+        // behind them, so there is no metadata to bring over.
+        [h.hash]: {
+          files: [{
+            filename: FILENAME,
+            source: "huggingface",
+            model_id: null,
+            model_version_id: null,
+          }],
+        },
+      },
+    });
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          config: h.config,
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      LookupError,
+    );
+    assertStringIncludes(error.message, "huggingface");
+    assertStringIncludes(error.message, "no model page");
   }, { noLocalFile: true });
 });

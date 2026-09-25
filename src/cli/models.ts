@@ -10,7 +10,7 @@
  * file or anything it imports opens the database.**
  */
 
-import { basename, extname, join } from "@std/path";
+import { basename, extname, join, resolve as resolvePath } from "@std/path";
 import { ulid } from "@std/ulid";
 import type { Config } from "../config/types.ts";
 import type { DataPaths } from "../config/paths.ts";
@@ -29,7 +29,6 @@ import { IMPORT_FORMAT } from "../models/import.ts";
 import { parseCivitaiMeta, readInfotext } from "../media/infotext.ts";
 import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
-import { sha256Hex } from "../workflows/hash.ts";
 import { downloadFile } from "./download.ts";
 import {
   CivitaiClient,
@@ -42,7 +41,10 @@ export { LookupError };
 
 export interface ModelsCommandOptions {
   url?: string;
+  /** A remote lookup by name: nothing on this machine is consulted. */
   filename?: string;
+  /** A file on this machine: hashed, then looked up by that hash. */
+  localFile?: string;
   sha256checksum?: string;
   /** Discovery: list what Civitai has under this name and write nothing. */
   search?: string;
@@ -77,14 +79,16 @@ export function requireOneIdentifier(options: ModelsCommandOptions): void {
   const given = [
     options.url !== undefined ? "--url" : null,
     options.filename !== undefined ? "--filename" : null,
+    options.localFile !== undefined ? "--local-file" : null,
     options.sha256checksum !== undefined ? "--sha256checksum" : null,
     options.search !== undefined ? "--search" : null,
   ].filter((flag): flag is string => flag !== null);
   if (given.length === 1) return;
   throw new UsageError(
     given.length === 0
-      ? "say which model: one of --url, --filename or --sha256checksum, " +
-        "or --search to look one up by name"
+      ? "say which model: --local-file for one on this machine, or --url, " +
+        "--filename or --sha256checksum for one that is not; --search to " +
+        "look by name without importing anything"
       : `${given.join(" and ")} both name a model; pass exactly one`,
   );
 }
@@ -235,17 +239,19 @@ async function resolve(
     return await client.byHash(options.sha256checksum, options.source);
   }
 
+  if (options.localFile !== undefined) {
+    // The exact road: a hash beats every name-based search, and the answer is
+    // about *your* file rather than one that happens to share its name.
+    const path = await resolveLocalFile(options.config, options.localFile);
+    say(`hashing ${path}`);
+    const hash = await hashFile(path);
+    return await client.byHash(hash, options.source);
+  }
+
   if (options.filename !== undefined) {
-    // Resolved locally first: an exact hash beats every name-based search,
-    // and the answer is about *your* file rather than one with the same name.
-    const path = await findModelFile(options.config, options.filename);
-    if (path !== null) {
-      say(`hashing ${path}`);
-      const hash = await sha256Hex(await Deno.readFile(path));
-      return await client.byHash(hash, options.source);
-    }
-    say(`no file named "${options.filename}" in the configured folders`);
-    return await client.byFilename(options.filename);
+    // Purely remote (§4.1): this flag is for a model that is *not* here yet,
+    // so nothing on this machine is read. `--local-file` is the other one.
+    return await client.byFilename(options.filename, options.source);
   }
 
   const ref = parseModelUrl(options.url!);
@@ -269,7 +275,34 @@ async function resolve(
   throw new LookupError(`nothing in "${options.url}" names a model`);
 }
 
-/** The configured model folders, walked for a basename match (§4.1). */
+/**
+ * What `--local-file` points at: a path, or failing that a filename in one of
+ * the configured model folders. A path is the honest reading of the flag; the
+ * folder search is what makes `--local-file dreamshaper_8.safetensors` work
+ * from any directory, which is how anyone will actually type it.
+ */
+export async function resolveLocalFile(
+  config: Config,
+  given: string,
+): Promise<string> {
+  const direct = resolvePath(given);
+  try {
+    if ((await Deno.stat(direct)).isFile) return direct;
+  } catch {
+    // Not a path here; try the configured folders below.
+  }
+  const found = await findModelFile(config, given);
+  if (found !== null) return found;
+  throw new UsageError(
+    `--local-file: no file at "${given}", and nothing named "${
+      basename(given)
+    }" in the configured model folders.\n` +
+      `If the model is not on this machine, use --filename to look it up by ` +
+      `name, or --search to see what is out there.`,
+  );
+}
+
+/** The configured model folders, walked for a basename match. */
 export async function findModelFile(
   config: Config,
   filename: string,

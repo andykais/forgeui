@@ -24,6 +24,8 @@ export interface FakeCivitaiOptions {
   archiveByHash?: Record<string, unknown>;
   /** Model id → the archive's `/api/models/<id>` body. */
   archiveModels?: Record<number, unknown>;
+  /** Query → the archive's `/api/search?q=` rows. */
+  archiveSearch?: Record<string, unknown[]>;
   /** Bytes served for any image URL under `/img/`. */
   imageBytes?: Uint8Array;
   /**
@@ -143,6 +145,10 @@ export function startFakeCivitai(
     if (parts[0] === "api" && parts[1] === "models" && parts[2] !== undefined) {
       const found = options.archiveModels?.[Number(parts[2])];
       return found === undefined ? notFound() : ok(found);
+    }
+    if (parts[0] === "api" && parts[1] === "search") {
+      const query = url.searchParams.get("q") ?? "";
+      return ok({ results: options.archiveSearch?.[query] ?? [] });
     }
 
     return notFound();

@@ -93,8 +93,13 @@ const models = new Command()
   )
   .option(
     "--filename <name:string>",
-    "Filename of the model. Hashed in place when it is in a configured " +
-      "folder; searched for by name when it is not.",
+    "Look up a model by filename on civitai.red and civitaiarchive.com. A " +
+      "remote lookup: nothing on this machine is read.",
+  )
+  .option(
+    "--local-file <path:string>",
+    "A model file on this machine: hash it and look that hash up. Takes a " +
+      "path, or a filename in one of the configured model folders.",
   )
   .option(
     "--sha256checksum <hex:string>",
@@ -218,6 +223,7 @@ async function runModelsCommand(options: {
   dataDir?: string;
   url?: string;
   filename?: string;
+  localFile?: string;
   sha256checksum?: string;
   search?: string;
   source: string;
@@ -250,6 +256,7 @@ async function runModelsCommand(options: {
     const command: ModelsCommandOptions = {
       url: options.url,
       filename: options.filename,
+      localFile: options.localFile,
       sha256checksum: options.sha256checksum,
       search: options.search,
       source: options.source as LookupSource,

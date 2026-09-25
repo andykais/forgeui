@@ -25,6 +25,15 @@ export class LookupError extends Error {
   override readonly name = "LookupError";
 }
 
+/** A file the archive indexes, which is identified by its hash. */
+export interface ArchiveFile {
+  name: string;
+  sha256: string;
+  platform: string;
+  baseModel: string | null;
+  deleted: boolean;
+}
+
 /** One row of a name search: enough to choose by, and the link to choose it. */
 export interface Candidate {
   result: LookupResult;
@@ -231,35 +240,67 @@ export class CivitaiClient {
    * (§4.1). A result is accepted only when one of its version files carries
    * exactly that filename — two matches is an error listing them, not a guess.
    */
-  async byFilename(filename: string): Promise<LookupResult> {
+  async byFilename(
+    filename: string,
+    source: LookupSource = "auto",
+  ): Promise<LookupResult> {
     const stem = filename.replace(/\.[^.]+$/, "");
-    const found = await this.search(stem);
+    const near: Candidate[] = [];
 
-    // An exact filename match is still the best answer there is: it means
-    // this is the file, not something with a similar name.
-    const exact = found.filter((candidate) =>
-      candidate.files.some((file) => file.name === filename)
-    );
-    if (exact.length === 1) return exact[0]!.result;
-    if (exact.length > 1) {
-      throw new LookupError(ambiguous(filename, exact));
+    if (source !== "archive") {
+      const found = await this.search(stem);
+      // An exact filename match is the best answer there is: it means this is
+      // the file, not something with a similar name.
+      const exact = found.filter((candidate) =>
+        candidate.files.some((file) => file.name === filename)
+      );
+      if (exact.length === 1) return exact[0]!.result;
+      if (exact.length > 1) throw new LookupError(ambiguous(filename, exact));
+      near.push(...found);
     }
 
-    // Nothing carries that exact name. Civitai stores its own mangled
-    // filenames — `krea2_turbo_bf16.safetensors` on your disk is
-    // `krea2TurboFP8_krea2TURBO.safetensors` there — so a near miss is the
-    // normal case rather than a failure, and the useful answer is the list.
-    if (found.length > 0) {
+    if (source !== "red") {
+      // The archive indexes by filename directly, and answers for files
+      // Civitai has deleted.
+      const files = await this.filesOnArchive(filename);
+      const wanted = filename.toLowerCase();
+      const hashes = [
+        ...new Set(
+          files
+            .filter((file) => file.name.toLowerCase() === wanted)
+            .map((file) => file.sha256),
+        ),
+      ];
+      if (hashes.length === 1) return await this.byHash(hashes[0]!, source);
+      if (hashes.length > 1) {
+        const rows = hashes.map((hash) => {
+          const file = files.find((entry) => entry.sha256 === hash)!;
+          return `  ${file.name} [${
+            file.baseModel ?? "unknown"
+          }, ${file.platform}]` +
+            `${file.deleted ? " (deleted)" : ""}\n    --sha256checksum ${hash}`;
+        });
+        throw new LookupError(
+          `the archive has ${hashes.length} different files named "${filename}". ` +
+            `They are not the same model; pick one:\n${rows.join("\n")}`,
+        );
+      }
+    }
+
+    // Civitai stores its own mangled filenames — `krea2_turbo_bf16.safetensors`
+    // on your disk is `krea2TurboFP8_krea2TURBO.safetensors` there — so a near
+    // miss is the normal case rather than a failure, and the useful answer is
+    // the list.
+    if (near.length > 0) {
       throw new LookupError(
-        `no model on Civitai has a file named exactly "${filename}", but ` +
-          `${found.length} look close. Pick one and pass its --url:\n${
-            found.map(describeCandidate).join("\n")
-          }`,
+        `no model on Civitai has a file named exactly "${filename}", and the ` +
+          `archive has none either, but ${near.length} look close. Pick one ` +
+          `and pass its --url:\n${near.map(describeCandidate).join("\n")}`,
       );
     }
     throw new LookupError(
-      `nothing on Civitai matches "${stem}". Try --url with a link, or ` +
-        `--sha256checksum if you know the hash.`,
+      `nothing on Civitai or the archive matches "${filename}". Try --url ` +
+        `with a link, or --sha256checksum if you know the hash.`,
     );
   }
 
@@ -305,21 +346,81 @@ export class CivitaiClient {
     return candidates;
   }
 
+  /**
+   * The archive's own filename search (§4.1). Its `kind: "file"` rows carry
+   * `url: "/sha256/<hash>"`, which is the identifier everything else here
+   * runs on — and it indexes files Civitai has deleted, which is the whole
+   * reason the fallback exists.
+   */
+  async filesOnArchive(filename: string): Promise<ArchiveFile[]> {
+    const body = await this.#json(
+      `${this.#archive}/api/search?q=${encodeURIComponent(filename)}`,
+    );
+    const results = Array.isArray((body as { results?: unknown[] })?.results)
+      ? (body as { results: Record<string, unknown>[] }).results
+      : [];
+    const out: ArchiveFile[] = [];
+    for (const row of results) {
+      if (row.kind !== "file") continue;
+      const name = typeof row.name === "string" ? row.name : null;
+      const url = typeof row.url === "string" ? row.url : "";
+      const hash = normalizeHash(url.replace(/^.*\/sha256\//, ""));
+      if (name === null || hash === null) continue;
+      out.push({
+        name,
+        sha256: hash,
+        platform: typeof row.platform === "string" ? row.platform : "unknown",
+        baseModel: typeof row.base_model === "string" ? row.base_model : null,
+        deleted: row.is_deleted === true || row.deleted_at != null,
+      });
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------- archive
 
   async #archiveByHash(hash: string): Promise<LookupResult | null> {
     const found = await this.#json(
       `${this.#archive}/api/sha256/${hash}`,
     ) as { files?: Record<string, unknown>[] } | null;
+    const files = found?.files ?? [];
+    if (files.length === 0) return null;
+
     const file =
-      found?.files?.find((entry) =>
+      files.find((entry) =>
         entry.source === "civitai" && entry.model_id != null
-      ) ?? found?.files?.[0];
-    if (!file) return null;
-    const modelId = Number(file.model_id);
-    const versionId = Number(file.model_version_id);
+      ) ?? files[0]!;
+    // `Number(null)` is 0, not NaN, so a missing id has to be checked for
+    // rather than inferred from the conversion.
+    const modelId = file.model_id == null ? NaN : Number(file.model_id);
+    const versionId = file.model_version_id == null
+      ? NaN
+      : Number(file.model_version_id);
+    if (!Number.isFinite(modelId)) {
+      // The archive indexes mirrors as well as models: HuggingFace and
+      // ModelScope copies are recorded by hash with no model record behind
+      // them. Knowing the bytes exist somewhere is not the same as having
+      // anything to import, and saying "nothing knows this hash" when the
+      // archive plainly does would send someone hunting for a bug.
+      const where = [
+        ...new Set(
+          files
+            .map((entry) =>
+              typeof entry.source === "string" ? entry.source : null
+            )
+            .filter((entry): entry is string => entry !== null),
+        ),
+      ];
+      throw new LookupError(
+        `the archive has a file with that hash${
+          where.length > 0 ? ` on ${where.join(", ")}` : ""
+        }, but no model page for it — so there is no description, no tags and ` +
+          `no samples to import. Mirrors are indexed by hash; only models ` +
+          `carry metadata.`,
+      );
+    }
     return await this.#archiveByModelId(
-      Number.isFinite(modelId) ? modelId : null,
+      modelId,
       Number.isFinite(versionId) ? versionId : null,
     );
   }

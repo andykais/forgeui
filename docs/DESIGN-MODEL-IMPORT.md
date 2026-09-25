@@ -216,9 +216,12 @@ Options:
       --url          <url>    civitai.red, civitai.com or civitaiarchive.com link to
                               a model, a model version or an image. The site in the
                               link is tried first. Accepts every form in §4.1.
-      --filename     <name>   Filename of the model. Hashed in place when it is in a
-                              configured folder; searched for by name when it is not,
-                              and near misses are listed rather than refused.
+      --filename     <name>   Look up a model by filename on civitai.red and
+                              civitaiarchive.com. A remote lookup: nothing on this
+                              machine is read. Near misses are listed, not refused.
+      --local-file   <path>   A model file on this machine: hash it and look that
+                              hash up. Takes a path, or a filename in one of the
+                              configured model folders.
       --sha256checksum <hex>  SHA256 of the model file — the identity ForgeUI uses.
       --search       <text>   List what Civitai has under this name and write nothing.
                               How you find the --url for something not on this
@@ -453,40 +456,53 @@ and cannot identify. It also indexes HuggingFace, ModelScope and TensorArt
 under the same hash, so its answer can name a mirror when the original is
 gone.
 
-**`--filename <name>`** — the everyday flag, because the filename is what you
-know. It is resolved **locally first**: the configured model folders are walked
-for a file with that name (basename match, one folder deep past the root, as
-§3's scan does), that file is hashed, and the run continues as
-`--sha256checksum`. An exact hash beats every name-based search, and the
-answer is about *your* file rather than a file with the same name.
+**`--local-file <path>`** — "identify the file I already have". The path is
+hashed and the run continues as `--sha256checksum`. An exact hash beats every
+name-based search, and the answer is about *your* file rather than one that
+happens to share its name. A bare filename is accepted too and resolved
+against the configured model folders (basename match, one folder deep past the
+root, as §3's scan does), because that is how anyone will actually type it.
 
-**When the file is not on this machine, the flag still works**, because
-fetching a model's metadata, samples and weights *before* it is on disk is
-half the point of the command. It falls back to a name search — and the
-search's exact-filename rule is a filter on the result, never a reason to
-report nothing:
+**`--filename <name>`** — "find me this by name, wherever it is". A **purely
+remote** lookup: nothing on this machine is read, because the case this exists
+for is a model that is not here yet. Civitai first, then the archive:
+
+1. `GET /api/v1/models?query=<stem>` — a result is taken when one of its
+   version files carries exactly that filename.
+2. `GET https://civitaiarchive.com/api/search?q=<filename>`, whose
+   `kind: "file"` rows carry `url: "/sha256/<hash>"`. One distinct hash under
+   that exact name is an answer; several are listed as `--sha256checksum`
+   options, because files sharing a name are not the same model.
+3. Otherwise the near misses from step 1 are listed with their URLs and their
+   real filenames.
+
+The two flags were one flag in an earlier draft, and that was wrong in both
+directions: it read the disk when asked about something remote, and it had no
+way to say "this exact file" when a name was ambiguous.
+
+Step 3 matters more than it looks. Civitai mangles the filenames it stores —
+what you downloaded as `krea2_turbo_bf16.safetensors` is
+`krea2TurboFP8_krea2TURBO.safetensors` there — so a near miss is the ordinary
+case rather than a failure:
 
 ```
 $ forge models --filename krea2_turbo_bf16.safetensors
 no model on Civitai has a file named exactly "krea2_turbo_bf16.safetensors",
-but 20 look close. Pick one and pass its --url:
+and the archive has none either, but 20 look close. Pick one and pass its --url:
   Krea2 Turbo_FP8 [Krea 2]
     https://civitai.red/models/2723583?modelVersionId=3060999
     krea2TurboFP8_krea2TURBO.safetensors
   …
 ```
 
-Civitai mangles the filenames it stores — what you downloaded as
-`krea2_turbo_bf16.safetensors` is `krea2TurboFP8_krea2TURBO.safetensors`
-there — so a near miss is the ordinary case, and the useful answer is the
-list. An earlier draft of this failed with "nothing named X was found" while
-holding twenty candidates, which was false and left nowhere to go.
+An earlier draft failed with "nothing named X was found" while holding twenty
+candidates, which was false and left nowhere to go.
 
-If nothing matches on disk, fall back to a name search —
-`GET https://civitai.red/api/v1/models?query=<stem>&nsfw=true`, then
-`GET https://civitaiarchive.com/api/search?q=<stem>` — and accept a result
-only when one of its version files carries exactly that filename. Two or more
-matches is an error listing the candidates with their URLs, not a guess.
+**A hash the archive only mirrors is not a model.** CivArchive indexes
+HuggingFace and ModelScope copies by hash with no model record behind them, so
+a lookup can find the bytes and still have no description, tags or samples to
+import. That is said plainly rather than reported as "nothing knows this
+hash", which would send someone hunting for a bug that is not there.
 
 **`--url <url>`** — parsed, never fetched as a page. The host decides which
 source is tried first; `.com` and `.red` are the same database, so a `.com`
