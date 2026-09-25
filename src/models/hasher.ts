@@ -55,6 +55,12 @@ export interface ModelHasherOptions {
   onProgress?: (progress: HashingProgress) => void;
   /** Called for every model that finished, fresh or cached. */
   onHashed?: (hashed: HashedModel) => void | Promise<void>;
+  /**
+   * Called once the queue has emptied. What the import folder waits for: a
+   * batch dropped for a model that was still hashing can be applied as soon
+   * as its hash lands (DESIGN-MODEL-IMPORT §7.1).
+   */
+  onDrained?: () => void;
   now?: () => number;
   /** Injectable so tests can fail a read without a fixture that cannot be read. */
   hashFile?: (path: string, onBytes: (read: number) => void) => Promise<string>;
@@ -101,6 +107,7 @@ export class ModelHasher {
   #db: Database;
   #onProgress?: (progress: HashingProgress) => void;
   #onHashed?: (hashed: HashedModel) => void | Promise<void>;
+  #onDrained?: () => void;
   #now: () => number;
   #hashFile: (path: string, onBytes: (read: number) => void) => Promise<string>;
 
@@ -123,6 +130,7 @@ export class ModelHasher {
     this.#db = options.db;
     this.#onProgress = options.onProgress;
     this.#onHashed = options.onHashed;
+    this.#onDrained = options.onDrained;
     this.#now = options.now ?? Date.now;
     this.#hashFile = options.hashFile ?? hashFileStreaming;
     this.#files = listModelFiles(options.db);
@@ -252,6 +260,7 @@ export class ModelHasher {
     this.#running = false;
     this.#current = null;
     this.#publish();
+    this.#onDrained?.();
   }
 
   #write(model: ScannedModel, hash: string): void {

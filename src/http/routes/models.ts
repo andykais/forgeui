@@ -1,6 +1,10 @@
 import { MODEL_CLASSES, type ModelClass } from "../../config/types.ts";
 import { FAMILIES } from "../../workflows/types.ts";
-import type { ModelPatch, ModelSort } from "../../models/library.ts";
+import {
+  type ModelPatch,
+  type ModelSort,
+  withoutHtml,
+} from "../../models/library.ts";
 import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 
@@ -186,7 +190,15 @@ export function modelRoutes(ctx: AppContext): Route[] {
     {
       method: "GET",
       path: "/api/models/:hash",
-      handler: (_req, { params }) => json(ctx.models.require(params.hash!)),
+      // The source record's HTML is served only when asked for
+      // (DESIGN-MODEL-IMPORT §7.5): plain by default, because the callers
+      // that are not a browser want `description_text`, and a default of
+      // markup would have every one of them stripping tags.
+      handler: (req, { params }) => {
+        const view = ctx.models.require(params.hash!);
+        const wantsHtml = new URL(req.url).searchParams.get("html") === "1";
+        return json(wantsHtml ? view : withoutHtml(view));
+      },
     },
     {
       // Re-read one model's file, header and hash both, ignoring the caches
