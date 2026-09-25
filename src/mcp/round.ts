@@ -19,6 +19,24 @@ import { isTerminal } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
 import { sourceFor } from "./llama.ts";
 
+/**
+ * How often a round re-reads the jobs it is waiting on.
+ *
+ * The websocket is the fast path and this is the floor under it. A minute of
+ * GPU time is worth a GET a second; a round that hangs because one frame went
+ * missing is not.
+ */
+const RECONCILE_MS = 1000;
+
+/** A timer that does not outlive the wait it was made for. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // Nothing here should hold the process open on its own.
+    Deno.unrefTimer(timer as unknown as number);
+  });
+}
+
 export interface RoundRequest {
   jobs: SubmitJob[];
   project?: string;
@@ -88,9 +106,11 @@ export async function runRound(
   };
 
   const abort = new AbortController();
-  const events = forge.watch(abort.signal);
-  // Force the socket open now — `watch` connects on first pull, and the point
-  // of this line is that the connection exists before a job can finish.
+  // Connected before the first submit, and awaited: an iterator that *would*
+  // open a socket is not a socket. A job that finishes in the gap emits an
+  // event nobody is listening for, and the round then waits out its whole
+  // timeout for something that already happened.
+  const events = await forge.watch(abort.signal);
   const pump = events[Symbol.asyncIterator]();
 
   const submitted = new Map<string, RoundJob>();
@@ -119,14 +139,24 @@ export async function runRound(
     // job fails still finishes, or the GPU is held by a call nobody ends.
     const deadline = Date.now() + request.timeoutMs;
     const pending = new Set(submitted.keys());
+    /** The pull in flight, held across ticks; see the race below. */
+    let pulling:
+      | Promise<IteratorResult<{ type: string; data: unknown }>>
+      | null = null;
+    let streamDone = false;
+
+    /** What the rows say, for the jobs no event has settled. */
+    const reconcile = async () => {
+      for (const id of [...pending]) {
+        const row = await forge.job(id).catch(() => null);
+        if (row && isTerminal(row.status)) {
+          settle(submitted, produced, pending, row, deps, request.jobs.length);
+        }
+      }
+    };
 
     // A job can already be terminal before the first event arrives.
-    for (const id of [...pending]) {
-      const row = await forge.job(id).catch(() => null);
-      if (row && isTerminal(row.status)) {
-        settle(submitted, produced, pending, row, deps, request.jobs.length);
-      }
-    }
+    await reconcile();
 
     while (pending.size > 0) {
       const remaining = deadline - Date.now();
@@ -139,13 +169,37 @@ export async function runRound(
         }
         break;
       }
-      const next = await Promise.race([
-        pump.next(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), remaining)
-        ),
+      // The socket, or a tick. Every tick re-reads the rows that are still
+      // pending: the events are the fast path, and this is the floor under
+      // it — a dropped socket or a missed frame must not cost the whole
+      // timeout on a call that is holding the GPU.
+      //
+      // The pull is kept across ticks rather than started afresh each time.
+      // `Promise.race` does not cancel the loser, so a `next()` abandoned to
+      // a tick stays queued on the generator and swallows the next event
+      // into a promise nobody awaits.
+      const wait = Math.min(remaining, RECONCILE_MS);
+      if (streamDone) {
+        await sleep(wait);
+        await reconcile();
+        continue;
+      }
+      pulling ??= pump.next();
+      const tick = await Promise.race([
+        pulling.then(() => false as const),
+        sleep(wait).then(() => true as const),
       ]);
-      if (next.done) continue;
+      if (tick) {
+        await reconcile();
+        continue;
+      }
+      const next = await pulling;
+      pulling = null;
+      if (next.done) {
+        // The socket went. The tick above is what finishes the round now.
+        streamDone = true;
+        continue;
+      }
       const event = next.value;
       if (event.type !== "job") continue;
       const row = event.data as JobRow;

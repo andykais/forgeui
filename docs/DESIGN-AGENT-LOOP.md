@@ -215,11 +215,21 @@ now"* makes better choices than one that submits and finds out.
 
 ### 5.2 `generate`
 
-*Built.* Two things learned from making it run that the design had wrong:
-media is fetched via the output row's own `media_url` (§12 serves everything
-from `/api/media/<path>`, so a constructed URL 404s), and a rollback has to
+*Built.* Three things learned from making it run that the design had wrong.
+Media is fetched via the output row's own `media_url` (§12 serves everything
+from `/api/media/<path>`, so a constructed URL 404s). A rollback has to
 *wait* for its cancellations — `POST /cancel` returns before ComfyUI has torn
 the job down, so returning on the ask hands back a GPU that is still busy.
+
+And **the round does not trust the websocket to be the only way a job can
+finish.** Opening the socket "before submitting" was written as an async
+generator, which runs none of its body until the first `next()` — so the
+socket opened *after* the submits, and a job that finished in that gap was
+waited on for the whole timeout. The socket is now connected and awaited
+before the first submit, and beneath it the round re-reads the rows of
+whatever is still pending once a second. The events are the fast path; the
+poll is the floor. A minute of GPU time is worth a GET a second, and a round
+that hangs because one frame went missing is not.
 
 
 ```jsonc

@@ -30,6 +30,46 @@ function fakeSwap(calls: string[]) {
   return { fetcher, isResident: () => resident };
 }
 
+/**
+ * A bridge whose websocket says nothing, ever.
+ *
+ * The worst case of a real race, made deterministic. `watch` used to be an
+ * async generator, so the socket it opened opened on the first `next()` —
+ * after the jobs had been submitted — and a job that finished in that gap
+ * emitted an event nobody was listening for. It passed here every time and
+ * failed on CI, where the timing is someone else's.
+ */
+class DeafForgeUi extends ForgeUi {
+  override watch(): Promise<AsyncIterable<{ type: string; data: unknown }>> {
+    return Promise.resolve({
+      // deno-lint-ignore require-yield
+      async *[Symbol.asyncIterator]() {
+        return;
+      },
+    });
+  }
+}
+
+Deno.test("a round finishes even if no event ever arrives", async () => {
+  await withTestApp(async (app) => {
+    const started = Date.now();
+    const result = await runRound({
+      jobs: [
+        { workflow_id: "krea2", params: { prompt: "one" } },
+        { workflow_id: "krea2", params: { prompt: "two" } },
+      ],
+      timeoutMs: 20_000,
+    }, { forge: new DeafForgeUi({ url: app.url }), llama: null });
+
+    // Settled by re-reading the rows, not by waiting out the timeout.
+    assertEquals(result.counts.done, 2);
+    assert(
+      Date.now() - started < 10_000,
+      `took ${Date.now() - started}ms; the reconcile is not running`,
+    );
+  }, { comfy: true });
+});
+
 Deno.test("a round evicts the model, generates, and labels the work", async () => {
   await withTestApp(async (app) => {
     const calls: string[] = [];

@@ -245,23 +245,39 @@ export class ForgeUi {
   }
 
   /** The app's `/ws` as an async iterator of decoded JSON events (§12). */
-  watch(signal?: AbortSignal): AsyncIterable<{ type: string; data: unknown }> {
+  /**
+   * The app's `/ws`, already connected.
+   *
+   * A promise, and not an iterable that connects when it is first pulled:
+   * the caller opens this *before* submitting, and "before" has to mean the
+   * socket is open by then, not that an object exists which would open one.
+   */
+  watch(
+    signal?: AbortSignal,
+  ): Promise<AsyncIterable<{ type: string; data: unknown }>> {
     const url = `${this.#url.replace(/^http/, "ws")}/ws`;
     return watchSocket(url, signal);
   }
 }
 
 /**
- * The websocket as an iterator.
+ * The websocket as an iterator, connected before this resolves.
+ *
+ * Not an `async function*`: a generator runs none of its body until the
+ * first `next()`, so a version of this that opened the socket inside one
+ * opened it *after* the jobs were submitted, however early the caller asked
+ * for the iterator. Events that landed in between were simply missed, and
+ * the round then waited for something that had already happened — which CI
+ * found and a fast machine never did.
  *
  * Buffered rather than dropped: a caller that is between `next()` calls when
  * three jobs land in the same tick must still see all three, or a batch never
  * finishes. Binary frames — ComfyUI's previews, relayed by §12 — are skipped.
  */
-async function* watchSocket(
+async function watchSocket(
   url: string,
   signal?: AbortSignal,
-): AsyncIterable<{ type: string; data: unknown }> {
+): Promise<AsyncIterable<{ type: string; data: unknown }>> {
   const socket = new WebSocket(url);
   const queue: { type: string; data: unknown }[] = [];
   let wake: (() => void) | null = null;
@@ -301,23 +317,27 @@ async function* watchSocket(
     signal?.addEventListener("abort", fail, { once: true });
   });
 
-  try {
-    while (true) {
-      while (queue.length > 0) yield queue.shift()!;
-      if (closed) {
-        if (failure) throw failure;
-        return;
+  return {
+    async *[Symbol.asyncIterator]() {
+      try {
+        while (true) {
+          while (queue.length > 0) yield queue.shift()!;
+          if (closed) {
+            if (failure) throw failure;
+            return;
+          }
+          await new Promise<void>((resolve) => {
+            wake = () => {
+              wake = null;
+              resolve();
+            };
+          });
+        }
+      } finally {
+        try {
+          socket.close();
+        } catch { /* already gone */ }
       }
-      await new Promise<void>((resolve) => {
-        wake = () => {
-          wake = null;
-          resolve();
-        };
-      });
-    }
-  } finally {
-    try {
-      socket.close();
-    } catch { /* already gone */ }
-  }
+    },
+  };
 }
