@@ -93,12 +93,17 @@ const models = new Command()
   )
   .option(
     "--filename <name:string>",
-    "Filename of the model as it sits in a configured model folder; it is " +
-      "hashed there and looked up by hash, which is exact.",
+    "Filename of the model. Hashed in place when it is in a configured " +
+      "folder; searched for by name when it is not.",
   )
   .option(
     "--sha256checksum <hex:string>",
     "SHA256 of the model file — the identity ForgeUI uses.",
+  )
+  .option(
+    "--search <text:string>",
+    "List what Civitai has under this name and write nothing. How you find " +
+      "the --url for a model that is not on this machine yet.",
   )
   .option(
     "--source <name:string>",
@@ -114,7 +119,8 @@ const models = new Command()
   .option(
     "--download-model",
     "Download the model weights into the batch. The app files them under " +
-      "<appdata>/models/<kind>/ on ingest. Needs a Civitai login.",
+      "<appdata>/models/<kind>/ on ingest. Public models need no login; a " +
+      "gated one needs CIVITAI_TOKEN.",
   )
   .option(
     "--overwrite",
@@ -213,6 +219,7 @@ async function runModelsCommand(options: {
   url?: string;
   filename?: string;
   sha256checksum?: string;
+  search?: string;
   source: string;
   downloadSamples?: number | boolean;
   downloadModel?: boolean;
@@ -244,6 +251,7 @@ async function runModelsCommand(options: {
       url: options.url,
       filename: options.filename,
       sha256checksum: options.sha256checksum,
+      search: options.search,
       source: options.source as LookupSource,
       downloadSamples: samples,
       downloadModel: options.downloadModel === true,
@@ -257,7 +265,9 @@ async function runModelsCommand(options: {
       config: store.config,
       paths: store.paths,
     });
-    if (options.json) console.log(JSON.stringify(result.batch, null, 2));
+    if (options.json && result.batch !== null) {
+      console.log(JSON.stringify(result.batch, null, 2));
+    }
     return 0;
   } catch (cause) {
     if (cause instanceof UsageError || cause instanceof CivitaiUrlError) {

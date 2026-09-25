@@ -25,6 +25,32 @@ export class LookupError extends Error {
   override readonly name = "LookupError";
 }
 
+/** One row of a name search: enough to choose by, and the link to choose it. */
+export interface Candidate {
+  result: LookupResult;
+  name: string;
+  url: string;
+  kind: string;
+  baseModel: string | null;
+  files: { name: string }[];
+}
+
+/** One candidate as a terminal line, with the filenames that disambiguate. */
+export function describeCandidate(candidate: Candidate): string {
+  const files = candidate.files.map((file) => file.name).slice(0, 3);
+  return [
+    `  ${candidate.name}`,
+    candidate.baseModel === null ? null : ` [${candidate.baseModel}]`,
+    `\n    ${candidate.url}`,
+    files.length === 0 ? null : `\n    ${files.join(", ")}`,
+  ].filter((part) => part !== null).join("");
+}
+
+function ambiguous(filename: string, matches: Candidate[]): string {
+  return `"${filename}" matches ${matches.length} model versions; pass --url ` +
+    `or --sha256checksum:\n${matches.map(describeCandidate).join("\n")}`;
+}
+
 export interface CivitaiClientOptions {
   civitaiUrl: string;
   archiveUrl: string;
@@ -207,49 +233,76 @@ export class CivitaiClient {
    */
   async byFilename(filename: string): Promise<LookupResult> {
     const stem = filename.replace(/\.[^.]+$/, "");
-    const matches: LookupResult[] = [];
+    const found = await this.search(stem);
 
-    const search = await this.#json(
+    // An exact filename match is still the best answer there is: it means
+    // this is the file, not something with a similar name.
+    const exact = found.filter((candidate) =>
+      candidate.files.some((file) => file.name === filename)
+    );
+    if (exact.length === 1) return exact[0]!.result;
+    if (exact.length > 1) {
+      throw new LookupError(ambiguous(filename, exact));
+    }
+
+    // Nothing carries that exact name. Civitai stores its own mangled
+    // filenames — `krea2_turbo_bf16.safetensors` on your disk is
+    // `krea2TurboFP8_krea2TURBO.safetensors` there — so a near miss is the
+    // normal case rather than a failure, and the useful answer is the list.
+    if (found.length > 0) {
+      throw new LookupError(
+        `no model on Civitai has a file named exactly "${filename}", but ` +
+          `${found.length} look close. Pick one and pass its --url:\n${
+            found.map(describeCandidate).join("\n")
+          }`,
+      );
+    }
+    throw new LookupError(
+      `nothing on Civitai matches "${stem}". Try --url with a link, or ` +
+        `--sha256checksum if you know the hash.`,
+    );
+  }
+
+  /**
+   * A name search, as its own operation (§4.1, amended): `forge models
+   * --search` lists what is out there, and `--filename` uses it to say what
+   * it nearly matched instead of dead-ending.
+   */
+  async search(query: string): Promise<Candidate[]> {
+    const body = await this.#json(
       this.#url(this.#civitai, "/api/v1/models", "models", {
-        query: stem,
+        query,
         limit: "20",
       }),
     );
-    const items = Array.isArray((search as { items?: unknown[] })?.items)
-      ? (search as { items: Record<string, unknown>[] }).items
+    const items = Array.isArray((body as { items?: unknown[] })?.items)
+      ? (body as { items: Record<string, unknown>[] }).items
       : [];
+
+    const candidates: Candidate[] = [];
     for (const model of items) {
       const versions = Array.isArray(model.modelVersions)
         ? model.modelVersions as Record<string, unknown>[]
         : [];
-      for (const version of versions) {
-        const files = Array.isArray(version.files)
-          ? version.files as Record<string, unknown>[]
-          : [];
-        if (!files.some((file) => file.name === filename)) continue;
-        matches.push(
-          sourceRecordFromCivitai({
-            model,
-            version,
-            baseUrl: this.#civitai,
-            fetchedAt: this.#now(),
-          }),
-        );
-      }
+      // The newest version only: a model with forty of them would otherwise
+      // bury every other result.
+      const version = versions[0] ?? null;
+      const result = sourceRecordFromCivitai({
+        model,
+        version,
+        baseUrl: this.#civitai,
+        fetchedAt: this.#now(),
+      });
+      candidates.push({
+        result,
+        name: result.display_name ?? "(unnamed)",
+        url: result.record.source.url,
+        kind: result.kind,
+        baseModel: result.record.version.base_model,
+        files: result.files.map((file) => ({ name: file.name })),
+      });
     }
-
-    if (matches.length === 1) return matches[0]!;
-    if (matches.length > 1) {
-      throw new LookupError(
-        `"${filename}" matches ${matches.length} model versions; pass --url or --sha256checksum:\n  ${
-          matches.map((match) => match.record.source.url).join("\n  ")
-        }`,
-      );
-    }
-    throw new LookupError(
-      `nothing named "${filename}" was found; if the file is on this machine, ` +
-        `it is hashed and looked up by hash instead, which is exact`,
-    );
+    return candidates;
   }
 
   // ------------------------------------------------------------- archive

@@ -83,6 +83,7 @@ function civitaiModel(hash: string, base: string) {
 
 interface Harness {
   fake: ReturnType<typeof startFakeCivitai>;
+  bytes: Uint8Array;
   config: ReturnType<typeof effectiveConfig>;
   paths: ReturnType<typeof dataPaths>;
   client: CivitaiClient;
@@ -91,13 +92,20 @@ interface Harness {
 
 async function withCli(
   body: (h: Harness) => Promise<void>,
-  options: { archiveOnly?: boolean; nsfwLevel?: number } = {},
+  options: {
+    archiveOnly?: boolean;
+    nsfwLevel?: number;
+    /** Leave the configured model folder empty, as a fresh machine is. */
+    noLocalFile?: boolean;
+  } = {},
 ): Promise<void> {
   const { bytes, hash } = await fixture();
   const dataDir = await Deno.makeTempDir({ prefix: "forgeui-cli-" });
   const modelsDir = await Deno.makeTempDir({ prefix: "forgeui-cli-models-" });
   await Deno.mkdir(join(modelsDir, "checkpoints"), { recursive: true });
-  await Deno.writeFile(join(modelsDir, "checkpoints", FILENAME), bytes);
+  if (!options.noLocalFile) {
+    await Deno.writeFile(join(modelsDir, "checkpoints", FILENAME), bytes);
+  }
 
   // One fake plays both sites, which is enough: what the test is about is
   // which one is asked, and in what order.
@@ -162,6 +170,7 @@ async function withCli(
   };
   fake.configure({
     imageBytes: tinyPng({ width: 8, height: 8, color: [1, 2, 3] }),
+    download: { bytes, filename: FILENAME },
     // `archiveOnly` leaves Civitai empty, so every lookup 404s there and the
     // fallback is what answers — which is the case the archive exists for.
     models: options.archiveOnly ? {} : { 15003: model },
@@ -191,7 +200,7 @@ async function withCli(
   });
 
   try {
-    await body({ fake, config, paths, client, hash });
+    await body({ fake, bytes, config, paths, client, hash });
   } finally {
     await fake.close();
     await Deno.remove(dataDir, { recursive: true }).catch(() => {});
@@ -449,4 +458,142 @@ Deno.test("§3.1's invariant: `forge models` never opens app.db", async () => {
     });
     await assertRejects(() => Deno.stat(h.paths.db), Deno.errors.NotFound);
   });
+});
+
+/**
+ * Nothing on disk (DESIGN-MODEL-IMPORT §4.1, amended). Pulling metadata,
+ * samples and weights *before* a model is on this machine is the point of
+ * the command, so none of these fixtures put the file in a model folder.
+ */
+
+Deno.test("--filename with nothing local lists what nearly matched", async () => {
+  await withCli(async (h) => {
+    // Civitai stores its own mangled filenames, so a near miss is the normal
+    // case. The old behaviour said "nothing was found" while holding twenty
+    // candidates, which was simply false.
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          filename: "krea2_turbo_bf16.safetensors",
+          config: h.config,
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      LookupError,
+    );
+    assertStringIncludes(error.message, "look close");
+    assertStringIncludes(error.message, "Pick one and pass its --url");
+    // The candidate's real filename is there, which is what tells you it is
+    // the thing you meant.
+    assertStringIncludes(error.message, FILENAME);
+    assertStringIncludes(error.message, "modelVersionId=501240");
+  }, { noLocalFile: true });
+});
+
+Deno.test("--filename still takes an exact match when there is one", async () => {
+  await withCli(async (h) => {
+    const result = await runModels({
+      ...base,
+      filename: FILENAME,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(result.batch?.model.sha256, h.hash);
+  }, { noLocalFile: true });
+});
+
+Deno.test("--search lists candidates and writes nothing", async () => {
+  await withCli(async (h) => {
+    const lines: string[] = [];
+    const result = await runModels({
+      ...base,
+      search: "cyberrealistic",
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: (line) => lines.push(line),
+    });
+    assertEquals(result.batch, null);
+    assertStringIncludes(lines.join("\n"), "CyberRealistic");
+    assertStringIncludes(lines.join("\n"), "modelVersionId=501240");
+    // Discovery is read-only: it is how you find a URL, not a way to import.
+    const staged: string[] = [];
+    for await (const entry of Deno.readDir(h.paths.imports)) {
+      staged.push(entry.name);
+    }
+    assertEquals(staged.filter((name) => !name.startsWith(".")), []);
+  }, { noLocalFile: true });
+});
+
+Deno.test("--download-model works with no local file and no civitai CLI", async () => {
+  await withCli(async (h) => {
+    const result = await runModels({
+      ...base,
+      // By hash rather than by URL: `parseModelUrl` only accepts the real
+      // hosts, which is right in production and means the fake is reached
+      // through the lookups that read `import.civitai_url`.
+      sha256checksum: h.hash,
+      downloadModel: true,
+      // `civitai` is not installed here, which is true of most machines and
+      // is exactly the case that used to fail.
+      config: {
+        ...h.config,
+        import: { ...h.config.import, civitai_cli: null },
+      },
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+
+    assertEquals(result.files, 1);
+    const batch = await readBatch(result.dir);
+    const [file] = batch.files!;
+    assertEquals(file!.file, `model/${FILENAME}`);
+    assertEquals(file!.kind, "checkpoints");
+    // Hashed from what actually landed, and equal to the batch's own name,
+    // which is what makes ingest able to verify it.
+    assertEquals(file!.sha256, h.hash);
+    assertEquals(file!.size, h.bytes.byteLength);
+    const onDisk = await Deno.readFile(join(result.dir, file!.file));
+    assertEquals(onDisk, h.bytes);
+  }, { noLocalFile: true });
+});
+
+Deno.test("a gated model says what to do rather than writing half a batch", async () => {
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    h.fake.configure({
+      models: { 15003: model },
+      versionsByHash: { [h.hash]: model.modelVersions[0]! },
+      downloadStatus: 401,
+    });
+    await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      Error,
+      "CIVITAI_TOKEN",
+    );
+    // The staging directory is cleaned up, so a failed run leaves nothing for
+    // the app to trip over.
+    const staged: string[] = [];
+    for await (const entry of Deno.readDir(join(h.paths.imports, ".staging"))) {
+      staged.push(entry.name);
+    }
+    assertEquals(staged, []);
+  }, { noLocalFile: true });
 });

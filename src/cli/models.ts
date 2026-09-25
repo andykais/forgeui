@@ -27,9 +27,13 @@ import type {
 } from "../models/import.ts";
 import { IMPORT_FORMAT } from "../models/import.ts";
 import { parseCivitaiMeta, readInfotext } from "../media/infotext.ts";
+import { crypto as stdCrypto } from "@std/crypto";
+import { encodeHex } from "@std/encoding/hex";
 import { sha256Hex } from "../workflows/hash.ts";
+import { downloadFile } from "./download.ts";
 import {
   CivitaiClient,
+  describeCandidate,
   LookupError,
   type LookupSource,
 } from "./civitai_client.ts";
@@ -40,6 +44,8 @@ export interface ModelsCommandOptions {
   url?: string;
   filename?: string;
   sha256checksum?: string;
+  /** Discovery: list what Civitai has under this name and write nothing. */
+  search?: string;
   source: LookupSource;
   downloadSamples: number;
   downloadModel: boolean;
@@ -52,7 +58,8 @@ export interface ModelsCommandOptions {
 export interface ModelsCommandResult {
   /** Where the batch landed, or would have with `--dry-run`. */
   dir: string;
-  batch: ImportBatch;
+  /** Null for `--search`, which looks things up and writes nothing. */
+  batch: ImportBatch | null;
   samples: number;
   skipped: number;
   files: number;
@@ -71,11 +78,13 @@ export function requireOneIdentifier(options: ModelsCommandOptions): void {
     options.url !== undefined ? "--url" : null,
     options.filename !== undefined ? "--filename" : null,
     options.sha256checksum !== undefined ? "--sha256checksum" : null,
+    options.search !== undefined ? "--search" : null,
   ].filter((flag): flag is string => flag !== null);
   if (given.length === 1) return;
   throw new UsageError(
     given.length === 0
-      ? "say which model: one of --url, --filename or --sha256checksum"
+      ? "say which model: one of --url, --filename or --sha256checksum, " +
+        "or --search to look one up by name"
       : `${given.join(" and ")} both name a model; pass exactly one`,
   );
 }
@@ -99,6 +108,18 @@ export async function runModels(
     browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
   });
+
+  // Discovery writes nothing: it is how you find the URL the other flags
+  // want, without anything being on disk first.
+  if (options.search !== undefined) {
+    const found = await client.search(options.search);
+    if (found.length === 0) {
+      throw new LookupError(`nothing on Civitai matches "${options.search}"`);
+    }
+    say(`${found.length} match${found.length === 1 ? "" : "es"}:`);
+    for (const candidate of found) say(describeCandidate(candidate));
+    return { dir: "", batch: null, samples: 0, skipped: 0, files: 0 };
+  }
 
   const found = await resolve(options, client, say);
   if (found.sha256 === null) {
@@ -177,7 +198,7 @@ export async function runModels(
         found,
         staging,
         cli: settings.civitai_cli,
-        overwrite: options.overwrite,
+        timeoutMs: options.timeoutMs,
         say,
       });
       batch.files = files;
@@ -418,26 +439,80 @@ async function fetchWeights(input: {
   found: LookupResult;
   staging: string;
   cli: string | null;
-  overwrite: boolean;
+  timeoutMs: number;
   say: (line: string) => void;
 }): Promise<ImportFile[]> {
   const { found, staging, cli, say } = input;
-  if (cli === null) {
-    throw new UsageError(
-      "--download-model needs the Civitai CLI, and import.civitai_cli is null",
-    );
-  }
-  const versionId = found.record.source.model_version_id;
-  if (versionId === null) {
-    throw new LookupError(
-      "--download-model needs a model version id, and this lookup found none",
-    );
-  }
-
   const into = join(staging, "model");
   await Deno.mkdir(into, { recursive: true });
-  say(`downloading the weights with ${cli}…`);
 
+  // The official CLI when it is actually installed — it handles the gated and
+  // paid models a plain GET cannot — and a direct download otherwise, which
+  // is the common case and must not need a separate install.
+  const versionId = found.record.source.model_version_id;
+  if (cli !== null && await onPath(cli)) {
+    if (versionId === null) {
+      throw new LookupError(
+        `${cli} downloads by model version id, and this lookup found none`,
+      );
+    }
+    say(`downloading the weights with ${cli}…`);
+    await runCivitaiCli(cli, versionId, into);
+  } else {
+    const wanted = found.files.filter((file) => file.download_url !== null);
+    if (wanted.length === 0) {
+      throw new LookupError(
+        versionId === null
+          ? "this lookup found no downloadable file"
+          : `no download URL for model version ${versionId}`,
+      );
+    }
+    // The primary file only, unless the version ships nothing marked as one:
+    // a version can carry pruned, fp16 and config variants, and pulling all
+    // of them is rarely what "download the model" means.
+    const primary = wanted.find((file) => file.primary) ?? wanted[0]!;
+    say(`downloading ${primary.name}…`);
+    await downloadFile({
+      url: primary.download_url!,
+      into,
+      fallbackName: primary.name,
+      token: Deno.env.get("CIVITAI_TOKEN") ?? null,
+      timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
+      say,
+    });
+  }
+
+  const files: ImportFile[] = [];
+  for await (const entry of Deno.readDir(into)) {
+    if (!entry.isFile) continue;
+    const path = join(into, entry.name);
+    const { size } = await Deno.stat(path);
+    files.push({
+      file: `model/${entry.name}`,
+      kind: found.kind,
+      // Hashed from disk rather than from memory: this is a file measured in
+      // gigabytes, and ingest checks the same number again before filing it.
+      sha256: await hashFile(path),
+      size,
+      source: {
+        kind: found.record.source.kind,
+        label: found.record.source.label,
+        url: found.files.find((file) => file.name === entry.name)
+          ?.download_url ?? null,
+      },
+    });
+  }
+  if (files.length === 0) {
+    throw new LookupError(`nothing was downloaded into ${into}`);
+  }
+  return files;
+}
+
+async function runCivitaiCli(
+  cli: string,
+  versionId: number,
+  into: string,
+): Promise<void> {
   const command = new Deno.Command(cli, {
     args: ["download", String(versionId), "--output", into],
     stdout: "inherit",
@@ -450,7 +525,7 @@ async function fetchWeights(input: {
     throw new UsageError(
       `could not run "${cli}": ${
         cause instanceof Error ? cause.message : cause
-      }\nInstall it, or set import.civitai_cli to where it lives.`,
+      }`,
     );
   }
   if (!status.success) {
@@ -459,28 +534,36 @@ async function fetchWeights(input: {
         `run \`${cli} login\`, or set CIVITAI_TOKEN.`,
     );
   }
+}
 
-  const files: ImportFile[] = [];
-  for await (const entry of Deno.readDir(into)) {
-    if (!entry.isFile) continue;
-    const bytes = await Deno.readFile(join(into, entry.name));
-    files.push({
-      file: `model/${entry.name}`,
-      kind: found.kind,
-      sha256: await sha256Hex(bytes),
-      size: bytes.byteLength,
-      source: {
-        kind: found.record.source.kind,
-        label: found.record.source.label,
-        url: found.files.find((file) => file.name === entry.name)
-          ?.download_url ?? null,
-      },
+/** Whether a configured helper is really there, before we depend on it. */
+async function onPath(command: string): Promise<boolean> {
+  try {
+    const probe = new Deno.Command(command, {
+      args: ["--version"],
+      stdout: "null",
+      stderr: "null",
     });
+    return (await probe.output()).success;
+  } catch {
+    return false;
   }
-  if (files.length === 0) {
-    throw new LookupError(`${cli} downloaded nothing into ${into}`);
+}
+
+/** sha256 of a file, streamed: a checkpoint never fits in memory. */
+async function hashFile(path: string): Promise<string> {
+  const file = await Deno.open(path, { read: true });
+  try {
+    const digest = await stdCrypto.subtle.digest("SHA-256", file.readable);
+    return encodeHex(new Uint8Array(digest));
+  } finally {
+    // `readable` closes the handle when it drains; closing twice throws.
+    try {
+      file.close();
+    } catch {
+      // already closed by the stream
+    }
   }
-  return files;
 }
 
 // ------------------------------------------------------------------- notes

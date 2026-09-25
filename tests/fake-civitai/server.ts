@@ -26,6 +26,14 @@ export interface FakeCivitaiOptions {
   archiveModels?: Record<number, unknown>;
   /** Bytes served for any image URL under `/img/`. */
   imageBytes?: Uint8Array;
+  /**
+   * Bytes served for `/api/download/models/<id>`, with the filename Civitai
+   * would put in `content-disposition` — the only place a usable name lives,
+   * since the URL path holds an opaque storage key.
+   */
+  download?: { bytes: Uint8Array; filename: string };
+  /** Answer downloads with this status instead, for the gated-model path. */
+  downloadStatus?: number;
 }
 
 export interface RecordedRequest {
@@ -75,6 +83,23 @@ export function startFakeCivitai(
       const bytes = options.imageBytes ?? new Uint8Array([0, 1, 2, 3]);
       return new Response(bytes.buffer as ArrayBuffer, {
         headers: { "content-type": "image/jpeg" },
+      });
+    }
+
+    // The weights. Real Civitai 307s to a signed URL; what matters to the
+    // client is that it follows redirects and reads the header, and `fetch`
+    // has already followed by the time this answers.
+    if (parts[0] === "api" && parts[1] === "download") {
+      if (options.downloadStatus !== undefined) {
+        return new Response("no", { status: options.downloadStatus });
+      }
+      const file = options.download;
+      if (file === undefined) return notFound();
+      return new Response(file.bytes.buffer as ArrayBuffer, {
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-disposition": `attachment; filename="${file.filename}"`,
+        },
       });
     }
 

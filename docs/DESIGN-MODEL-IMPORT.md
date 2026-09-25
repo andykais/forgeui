@@ -33,12 +33,12 @@ not, for three reasons:
    images and a 6 GB checkpoint wants a terminal you can watch, interrupt and
    re-run — not a request that either blocks a route for ten minutes or
    disappears into a background job whose only UI is a spinner.
-3. **Civitai already ships a CLI**, and it handles the part that is genuinely
-   annoying: device login, token storage, and resumable authenticated
-   downloads that verify against the file's SHA256. Wrapping that is a day of
-   work; reimplementing it is a quarter of maintenance. Its *lookups* turn out
-   to be a smaller win than they looked — see §4.0, which is the one place
-   this proposal moved away from "powered by the official CLI".
+3. **Civitai already ships a CLI**, and it looked like it handled the parts
+   that are genuinely annoying. In the end it handles one of them — the login
+   a gated model needs — and §4.0 records how little of the rest survived
+   contact with the API. `forge models` uses it when it is installed and works
+   without it, which is what "powered by the official CLI" had to become once
+   it turned out most machines do not have it.
 
 So the fetching lives in a subcommand of its own that the server never calls,
 and the two halves meet on the filesystem rather than in a function call
@@ -216,9 +216,13 @@ Options:
       --url          <url>    civitai.red, civitai.com or civitaiarchive.com link to
                               a model, a model version or an image. The site in the
                               link is tried first. Accepts every form in §4.1.
-      --filename     <name>   Filename of the model as it sits in a configured model
-                              folder; it is hashed there and looked up by hash.
+      --filename     <name>   Filename of the model. Hashed in place when it is in a
+                              configured folder; searched for by name when it is not,
+                              and near misses are listed rather than refused.
       --sha256checksum <hex>  SHA256 of the model file — the identity ForgeUI uses.
+      --search       <text>   List what Civitai has under this name and write nothing.
+                              How you find the --url for something not on this
+                              machine yet.
 
       --source       <name>   Where to look, when the input does not say:
                               auto (default) tries civitai.red, then
@@ -228,7 +232,7 @@ Options:
                               samples, newest first. (Default: 0)
       --download-model        Download the model weights into the batch. The app
                               files them under <appdata>/models/<kind>/ on ingest.
-                              Requires a Civitai login (see AUTH).
+                              Public models need no login; see AUTH for the rest.
       --overwrite             Rewrite files already on disk. Without it every file
                               that exists is left exactly as it is.
 
@@ -249,14 +253,15 @@ Examples:
 
 AUTH
 
-  Lookups and sample images work anonymously. --download-model needs a Civitai
-  account:
+  Lookups, sample images and public model downloads all work anonymously.
+  A gated or paid model needs an account:
 
-      civitai login                 browser device login (recommended)
-      civitai login --token <key>   a personal key from civitai.com/user/account
+      export CIVITAI_TOKEN=<key>    a personal key from civitai.com/user/account
+      civitai login                 or the official CLI's own device login,
+                                    used automatically when it is installed
 
-  or set CIVITAI_TOKEN in the environment. ForgeUI stores no credential of its
-  own and writes none into config.yaml, the import folder or any sidecar.
+  ForgeUI stores no credential of its own and writes none into config.yaml,
+  the import folder or any sidecar.
 
 EXIT CODES
 
@@ -388,13 +393,30 @@ mature ones, so lookups go to the API directly:
 |---|---|
 | lookups, image lists, `by-hash` | `civitai.red/api/v1/*` directly, with `browsingLevel` |
 | deleted models | `civitaiarchive.com/api/*` |
-| `--download-model` | the official CLI: `civitai download <version-id>` |
-| credentials | the official CLI's (`civitai login`), or `CIVITAI_TOKEN` |
+| `--download-model` | a direct streaming GET; the official CLI when installed |
+| credentials | `CIVITAI_TOKEN`, or the CLI's own login when it is there |
 
-The CLI keeps the half that is hard — device login, token storage, resumable
-verified transfers — and loses the half that is three `fetch` calls. If it
-grows a `--browsing-level` flag, the lookups can move back behind it; the
-normalising layer of §4.2 is what makes that a one-file change.
+If it grows a `--browsing-level` flag, the lookups can move back behind it;
+the normalising layer of §4.2 is what makes that a one-file change.
+
+**Downloads moved off the CLI too, and for a plainer reason.** This document
+argued that device login, token storage and resumable verified transfers were
+the hard part and not worth reimplementing. That was right about the hard part
+and wrong about the common case:
+
+```
+$ curl -sSI https://civitai.com/api/download/models/128713
+HTTP/2 307
+location: https://civitai-delivery-worker-prod…/dreamshaper8Pruned.safetensors?X-Amz-…
+```
+
+A public model answers an anonymous GET with a redirect to a signed URL. The
+official CLI is a separate install almost nobody has — requiring it made
+`--download-model` fail out of the box on any machine without it, which is the
+one thing that flag must not do. So the download is a streaming `fetch` that
+hashes as it writes, `CIVITAI_TOKEN` is sent when the environment has one, and
+the official CLI is used when it is installed and configured, because it does
+handle the gated and paid models a plain GET cannot.
 
 One caveat to carry into implementation: the download endpoints are
 `civitai.com`'s, and there are reports of API tokens not authenticating
@@ -432,11 +454,33 @@ under the same hash, so its answer can name a mirror when the original is
 gone.
 
 **`--filename <name>`** — the everyday flag, because the filename is what you
-know. It is resolved **locally**: the configured model folders are walked for
-a file with that name (basename match, one folder deep past the root, as §3's
-scan does), that file is hashed, and the run continues as
+know. It is resolved **locally first**: the configured model folders are walked
+for a file with that name (basename match, one folder deep past the root, as
+§3's scan does), that file is hashed, and the run continues as
 `--sha256checksum`. An exact hash beats every name-based search, and the
 answer is about *your* file rather than a file with the same name.
+
+**When the file is not on this machine, the flag still works**, because
+fetching a model's metadata, samples and weights *before* it is on disk is
+half the point of the command. It falls back to a name search — and the
+search's exact-filename rule is a filter on the result, never a reason to
+report nothing:
+
+```
+$ forge models --filename krea2_turbo_bf16.safetensors
+no model on Civitai has a file named exactly "krea2_turbo_bf16.safetensors",
+but 20 look close. Pick one and pass its --url:
+  Krea2 Turbo_FP8 [Krea 2]
+    https://civitai.red/models/2723583?modelVersionId=3060999
+    krea2TurboFP8_krea2TURBO.safetensors
+  …
+```
+
+Civitai mangles the filenames it stores — what you downloaded as
+`krea2_turbo_bf16.safetensors` is `krea2TurboFP8_krea2TURBO.safetensors`
+there — so a near miss is the ordinary case, and the useful answer is the
+list. An earlier draft of this failed with "nothing named X was found" while
+holding twenty candidates, which was false and left nowhere to go.
 
 If nothing matches on disk, fall back to a name search —
 `GET https://civitai.red/api/v1/models?query=<stem>&nsfw=true`, then
