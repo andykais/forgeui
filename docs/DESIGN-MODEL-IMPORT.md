@@ -1,6 +1,8 @@
 # Design — `forge models`: metadata, samples and weights from Civitai
 
-**Status:** proposal. Nothing here is implemented.
+**Status:** the backend is implemented; the model page's source panel (§7.5)
+and the gallery badge (§7.3) are not. `forge serve` is the subcommand §3 calls
+`gui` — the name the CLI shipped with, and the one that won.
 **Touches:** DESIGN.md §3, §3.1, §6.2, §7, §8.1, §8.3, §11.2, §12, §13.
 **Supersedes:** §12's `POST /api/models/:hash/fetch-info`, which is struck
 (§9): the CLI is the fetcher, and a route that reached Civitai is the thing
