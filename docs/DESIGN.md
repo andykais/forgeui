@@ -405,13 +405,44 @@ or replacing any workflow must never affect the ability to rerun an old output.
     "image": { "sha256": "…", "ext": "png", "original_name": "ref.png", "derived_from": "01J…" }
   },
   "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
+  "origin": { "source": "ui", "project": "herons", "note": "iteration 3, pushing the LoRA past 0.9" },
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
-  "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024 } ],
+  "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024, "notes": "hands are wrong, the light is right" } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
   "raw": null
 }
 ```
 `raw` holds unmapped source data for imported samples (§8.3).
+
+`notes` on an output is the one field here written *after* the fact: what a
+person thought of this picture, typed into the metadata sidebar (§11.2) once
+they have looked at it. Per output rather than per job, because two frames of
+the same batch are not the same picture. It is in the sidecar and not only in
+a column for the usual reason — a rebuild must not lose it — and it is the
+only thing in a sidecar that changes after the job that made it, so the copy
+embedded in a PNG's `tEXt` chunk is a snapshot of generation time and the
+sidecar file stays canonical.
+
+Notes are indexed for search alongside the prompt, so `?q=` finds an output
+by what was said about it and not only by what was asked for. That is the
+point of writing them down: the MCP bridge's `search_gallery` (DESIGN-AGENT-LOOP
+§5.1) is how an LLM reads back the feedback on what it made last time.
+
+`origin` says who asked for this and why. `source` is `ui`, which the web app
+sends for itself, or `llm:<model-id>` from the MCP bridge, which reads the
+resident model's name from llama-swap and fills it in itself (DESIGN-AGENT-LOOP
+§6.2) rather than taking it from a param the model controls. A submit that
+names no source stays unnamed: the server never guesses `ui` for it, because
+that is the one label the gallery filter exists to tell apart, and a job
+posted by a script is not a person at the screen. `project` groups a run with
+its siblings and `note` says what it was testing. All three are free text and
+optional, capped at 120, 120 and 1000 characters; the block is absent
+altogether from sidecars written before it existed, which reads the same as a
+submit that said nothing — unknown.
+
+The three fields are denormalised onto `jobs` and `outputs` (§7) so the
+gallery can filter by them; the sidecar stays the source of truth and
+`reindex` rebuilds them from it.
 
 ### 6.3 Why `rename()` and not copy
 ComfyUI writes to `staging/` on the same filesystem; moving is a metadata
@@ -447,6 +478,8 @@ CREATE TABLE jobs (
   api_graph_json TEXT NOT NULL,   -- the rewritten graph that was queued (enables retry of failed jobs)
   progress_json TEXT,             -- {pct, eta_ms, node_id, node_label, node_index, node_total, step, max}
   error_json TEXT,
+  origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
+  origin_project TEXT, origin_note TEXT,
   created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
 );
 
@@ -466,7 +499,7 @@ CREATE TABLE outputs (
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
-CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, content='outputs', content_rowid='rowid');
+CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
   hash TEXT PRIMARY KEY,          -- sha256 of file
@@ -1314,7 +1347,7 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 - **Layout (§11.2).** Generate has three panes — the inputs, the media, the
   metadata — and the arrangement is the user's to pick, from a control whose
   options are drawn rather than named: at a glance you are choosing a shape,
-  and five words would each have to be read. The five are
+  and seven words would each have to be read. The seven are
 
   | `ui.layout` | Where things go |
   | --- | --- |
@@ -1323,9 +1356,24 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   | `wide` | inputs \| media, and no metadata |
   | `top` | media across the top, inputs underneath |
   | `top-split` | media across the top, inputs and metadata underneath |
+  | `media-split` | media \| metadata, and **no inputs panel** |
+  | `media` | media alone |
 
-  **Only `columns` has fixed panes** — 360px of params, 306px of metadata,
-  the media between them — because it is the only one with three of them.
+  **The last two have no inputs panel at all**, for the times the prompt is
+  not the thing being worked on: watching a run land, looking back through
+  what came out, or letting the MCP bridge drive (DESIGN-AGENT-LOOP). They
+  are the only arrangements that hide a pane the screen owns rather than one
+  the selection implies, so the way back has to be visible from inside them —
+  it is the picker itself, which is in the corner whatever the layout.
+  There is no Generate button while one of them is in force; that is the
+  point of them, and switching back is one click.
+  The panel is hidden, not unmounted, so returning lands on the form as it
+  was left rather than on a freshly built one.
+
+  **Only `columns` has three fixed panes** — 360px of params, 306px of
+  metadata, the media between them — because it is the only one with three
+  of them. `media-split` keeps the metadata's 306px too, but with two panes
+  rather than three it fits at any width worth using and needs no fallback.
   Every other split is down the middle, at every width. It was 360px against
   the rest, which is a quarter of a 1600px window and half of a 960px one:
   one arrangement that looked like two, and a diagram that could only be
@@ -1344,8 +1392,9 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   the room — a header reserves the width, the metadata pane the height.
   An arrangement this window cannot honour is offered greyed out rather than
   silently swapped: below the breakpoint, that is `columns`.
-  Gallery and a model's page have no inputs panel, so they are offered only
-  the first three — and the diagrams there draw two panes rather than three,
+  Gallery and a model's page have no inputs panel at all, so they are
+  offered only the first three — `media` and `media-split` would be
+  `wide` and `columns` there, the same two shapes under different names — and the diagrams there draw two panes rather than three,
   because a picture of a screen that does not exist is worse than no picture.
   Each pane has its own colour in those diagrams, so an arrangement is read
   by which pane is where and not only by shape; `sidebar_collapsed` is what this replaces, and stays a
@@ -1499,14 +1548,16 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
 DELETE /api/workflows/:id               user copies only; 409 for bundled
-POST /api/jobs                          {workflow_id, params}   one job per call
-POST /api/jobs/rerun                    {output_id} | {job_id}   resubmit a frozen graph (rerun exact / retry failed)
+POST /api/jobs                          {workflow_id, params, origin?}   one job per call
+POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed)
 POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
 GET  /api/jobs/:id                      one job row with the ids of its outputs
-GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2; sort newest|oldest
+GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2, plus `project` and
+                                        `source` from the origin block (§6.2), which the screens do
+                                        not offer yet; sort newest|oldest
                                         rows carry the row of §7 plus media_url, the models chips
                                         and generation_ms (the job's wall clock, for DURATION)
 GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);
@@ -1514,10 +1565,12 @@ GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (
                                         so the counts match the dividers the client drew
 GET  /api/outputs/count?filters         total under the active filters (lazy)
 GET  /api/outputs/:id                   with sidecar contents
+PATCH /api/outputs/:id                  {notes} — the sidebar's note; rewrites the sidecar too (§6.2)
 GET  /api/outputs/:id/lineage           {parents[], children[]}; each node: id, family, deleted (→ "?" marker)
 POST /api/outputs/:id/promote           {model_hashes[]} → one sample per model
 DELETE /api/outputs/:id                 soft delete (sets deleted_at); file removal deferred past the undo window
 POST /api/outputs/:id/restore           undo within the window (clears deleted_at)
+POST /api/system/free_vram              ask ComfyUI to unload its models (`/free`); a verb, the caller decides when
 GET  /api/media/*                       serves outputs/inputs/samples
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml

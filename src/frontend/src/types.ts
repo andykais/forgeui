@@ -162,6 +162,13 @@ export interface Output {
   workflow_hash: string | null;
   family: string | null;
   prompt: string | null;
+  /**
+   * What a person made of this one, written afterwards in the metadata
+   * sidebar (§6.2). In the sidecar as well as the row, so it survives a
+   * rebuild — and searched with the prompt, so `?q=` finds an output by
+   * what was said about it.
+   */
+  notes: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -181,6 +188,16 @@ export interface Output {
   models: { model_hash: string; role: string }[];
 }
 
+export interface SidecarOutputEntry {
+  file: string;
+  kind: string;
+  width?: number;
+  height?: number;
+  duration_ms?: number;
+  /** §6.2: the one sidecar field written after the job that made it. */
+  notes?: string | null;
+}
+
 export interface Sidecar {
   app_version: string;
   job_id: string;
@@ -195,7 +212,7 @@ export interface Sidecar {
   params: Record<string, unknown>;
   models: { role: string; name: string; hash: string | null }[];
   api_graph: Record<string, ApiNode> | null;
-  outputs: { file: string; kind: string; width?: number; height?: number }[];
+  outputs: SidecarOutputEntry[];
   timing: { total_ms: number; nodes: Record<string, number> };
   raw: unknown;
 }
@@ -232,6 +249,13 @@ export type UiScreen = "generate" | "gallery" | "models";
  * - `wide`        inputs | media, no metadata
  * - `top`         media across the top, inputs underneath
  * - `top-split`   media across the top, inputs and metadata underneath
+ * - `media-split` media | metadata, and no inputs panel
+ * - `media`       media alone
+ *
+ * The last two are for watching rather than typing — while the bridge is
+ * driving, or while looking through what came out — and they are the only
+ * ones with no inputs panel at all. The way back is the picker itself,
+ * which is in the screen's corner whatever the layout.
  */
 export const LAYOUTS = [
   "columns",
@@ -239,6 +263,8 @@ export const LAYOUTS = [
   "wide",
   "top",
   "top-split",
+  "media-split",
+  "media",
 ] as const;
 export type Layout = (typeof LAYOUTS)[number];
 
@@ -247,7 +273,16 @@ export const LAYOUTS_WITH_METADATA: readonly Layout[] = [
   "columns",
   "split",
   "top-split",
+  "media-split",
 ];
+
+/**
+ * The layouts that still show the inputs panel — everything but the two
+ * media ones. Generate is the only screen with a panel to hide.
+ */
+export function hasInputs(layout: Layout): boolean {
+  return layout !== "media" && layout !== "media-split";
+}
 
 /** Gallery has no inputs panel, so only these three differ there. */
 export const GALLERY_LAYOUTS: readonly Layout[] = ["columns", "split", "wide"];
@@ -264,7 +299,11 @@ export function hasMetadata(layout: Layout): boolean {
  * would hold 306px of empty panel open beside the tiles.
  */
 export function withoutMetadata(layout: Layout): Layout {
-  return layout === "top" || layout === "top-split" ? "top" : "wide";
+  if (layout === "top" || layout === "top-split") return "top";
+  // A media layout drops to media, not to `wide`: `wide` would put the
+  // inputs panel back, which is the one thing these two are for not doing.
+  if (layout === "media" || layout === "media-split") return "media";
+  return "wide";
 }
 
 export interface Config {

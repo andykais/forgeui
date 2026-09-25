@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import type { ModelEntry, OutputDetail, Sidecar } from "../types.ts";
 
 /**
@@ -7,9 +7,14 @@ import type { ModelEntry, OutputDetail, Sidecar } from "../types.ts";
  * it marks copyable are wrapped.
  */
 
+const patchOutput = vi.fn((id: string, patch: { notes?: string | null }) =>
+  Promise.resolve({ id, notes: patch.notes ?? null })
+);
 vi.mock("../api.ts", () => ({
   api: {
     promote: vi.fn(),
+    patchOutput: (id: string, patch: { notes?: string | null }) =>
+      patchOutput(id, patch),
     // The sidebar asks for the provenance chain on every output it shows
     // (§11.2); these tests are about the rows above it, so it comes back
     // empty and the block is not rendered at all.
@@ -129,6 +134,7 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
     workflow_hash: "h",
     family: "krea2",
     prompt: null,
+    notes: null,
     params: {},
     deleted_at: null,
     created_at: 1_789_000_000_000,
@@ -280,6 +286,58 @@ describe("the metadata sidebar", () => {
     );
     expect(row?.querySelector("img")).toBeNull();
     expect(row?.textContent).toContain("krea2_turbo_fp8_scaled.safetensors");
+  });
+
+  test("a note is saved on blur, and Escape puts back what was there", async () => {
+    // §6.2: feedback typed after looking at the picture, which the MCP
+    // bridge reads back later. Saved on blur like the model page's notes.
+    //
+    // `mount()` passes no `onnotes`, which is the point: the save must not
+    // depend on someone listening for the result.
+    patchOutput.mockClear();
+    mount();
+    const field = screen.getByLabelText("Notes") as HTMLTextAreaElement;
+    await fireEvent.input(field, { target: { value: "hands are mangled" } });
+    await fireEvent.blur(field);
+    expect(patchOutput).toHaveBeenCalledWith("01JOUT", {
+      notes: "hands are mangled",
+    });
+
+    // Escape reverts to the row's own value and does not save.
+    patchOutput.mockClear();
+    await fireEvent.input(field, { target: { value: "no wait" } });
+    await fireEvent.keyDown(field, { key: "Escape" });
+    expect(field.value).toBe("");
+    await fireEvent.blur(field);
+    expect(patchOutput).not.toHaveBeenCalled();
+  });
+
+  test("a note that has not changed is not saved again", async () => {
+    // Stepping through the filmstrip blurs the field on every move; a PATCH
+    // per step would rewrite the sidecar for nothing.
+    patchOutput.mockClear();
+    render(MetadataSidebar, {
+      output: { ...output(), notes: "already said" },
+      onedit: vi.fn(),
+      onrerun: vi.fn(),
+      ondelete: vi.fn(),
+    });
+    const field = screen.getByLabelText("Notes") as HTMLTextAreaElement;
+    expect(field.value).toBe("already said");
+    await fireEvent.blur(field);
+    expect(patchOutput).not.toHaveBeenCalled();
+  });
+
+  test("the output id can be copied out of the actions row", async () => {
+    // Anything outside this window that names an output does it by id — the
+    // MCP bridge's `attach_input` and `get_output` both take one. An id you
+    // can only read is an id you retype.
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mount();
+    await fireEvent.click(screen.getByLabelText("Copy output id"));
+    expect(writeText).toHaveBeenCalledWith("01JOUT");
+    vi.unstubAllGlobals();
   });
 
   test("says nothing when no workflow is open at all", () => {

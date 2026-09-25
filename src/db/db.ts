@@ -138,6 +138,73 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 8,
+    name: "job and output origin",
+    // Who asked for a run and why (§6.2): `ui` for the app itself, or
+    // `llm:<model>` from the MCP bridge. Also in schema.sql, so a fresh
+    // database gets these at version 1 and this does nothing there. NULL is
+    // "unknown", which every existing row is and stays — an output made
+    // before the block existed was not made by anything we can now name, and
+    // backfilling it as `ui` would be inventing a fact. `reindex` fills in
+    // what the sidecars of newer runs record.
+    apply: (db) => {
+      const columnsOf = (table: string) =>
+        new Set(
+          db.prepare(`PRAGMA table_info(${table})`)
+            .values<[number, string]>()
+            .map(([, name]) => name),
+        );
+      for (const table of ["jobs", "outputs"]) {
+        const present = columnsOf(table);
+        for (
+          const column of ["origin_source", "origin_project", "origin_note"]
+        ) {
+          if (present.has(column)) continue;
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+        }
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS outputs_project
+           ON outputs(origin_project, created_at DESC)`,
+      );
+    },
+  },
+  {
+    version: 9,
+    name: "output notes",
+    // What a person said about one output after looking at it (§6.2), and
+    // the search index that has to know about it. Also in schema.sql, so a
+    // fresh database gets both at version 1 and this does nothing there.
+    //
+    // The FTS table is external-content, so its columns have to match what
+    // it is told to read: adding one means recreating it and rebuilding,
+    // which is one statement and costs a pass over the prompts.
+    apply: (db) => {
+      const present = new Set(
+        db.prepare("PRAGMA table_info(outputs)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!present.has("notes")) {
+        db.exec("ALTER TABLE outputs ADD COLUMN notes TEXT");
+      }
+      const indexed = new Set(
+        db.prepare("PRAGMA table_info(outputs_fts)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!indexed.has("notes")) {
+        db.exec(`
+          DROP TABLE IF EXISTS outputs_fts;
+          CREATE VIRTUAL TABLE outputs_fts USING fts5(
+            prompt, notes, content='outputs', content_rowid='rowid'
+          );
+          INSERT INTO outputs_fts (outputs_fts) VALUES ('rebuild');
+        `);
+      }
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

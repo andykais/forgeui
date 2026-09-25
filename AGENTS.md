@@ -13,21 +13,25 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 
 ## Read these first
 
-| Document                         | Why                                                                                                                                      |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/DESIGN.md`                 | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating. |
-| `docs/PHASE-1-HANDOFF.md`        | What Phase 1 delivered and the decisions worth knowing.                                                                                  |
-| `docs/PHASE-2-HANDOFF.md`        | What Phase 2 delivered, what it looks like, and where Phase 3 picks up.                                                                  |
-| `docs/IMPLEMENT-PHASE-1.md`      | The Phase 1 work plan and its conventions.                                                                                               |
-| `docs/IMPLEMENT-PHASE-2.md`      | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                       |
-| `docs/HARDWARE-CHECKLIST.md`     | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                   |
-| `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                     |
-| `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.             |
+| Document                         | Why                                                                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/DESIGN.md`                 | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating.  |
+| `docs/PHASE-1-HANDOFF.md`        | What Phase 1 delivered and the decisions worth knowing.                                                                                   |
+| `docs/PHASE-2-HANDOFF.md`        | What Phase 2 delivered, what it looks like, and where Phase 3 picks up.                                                                   |
+| `docs/IMPLEMENT-PHASE-1.md`      | The Phase 1 work plan and its conventions.                                                                                                |
+| `docs/IMPLEMENT-PHASE-2.md`      | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                        |
+| `docs/HARDWARE-CHECKLIST.md`     | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                    |
+| `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                      |
+| `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.              |
+| `docs/DESIGN-AGENT-LOOP.md`      | An LLM drives ForgeUI through `forge mcp`, and they take turns with the GPU. The bridge is built; the batch API and job `origin` are not. |
+| `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap and a harness together.                                                                           |
 
 ## Layout
 
 ```
-src/main.ts     CLI, boot order, the App handle tests use
+src/cli.ts      `forge` — the Cliffy command: serve, reindex, mcp
+src/main.ts     boot order, the App handle tests use
+src/mcp/        `forge mcp`: the MCP bridge, a separate process (DESIGN-AGENT-LOOP)
 src/config/     config.yaml layers, CLI overrides, extra_model_paths.yaml
 src/db/         schema.sql (verbatim DESIGN §7), migrations, all SQL
 src/comfy/      http client, ws client, child process, launch flags, proxy
@@ -47,6 +51,8 @@ workflows/bundled/<id>/   the eight workflows of §4.6 (+ README)
 
 ```sh
 deno task start --data-dir ./data   # serve the API and the built UI on one port
+deno task mcp --http 127.0.0.1:7801      # the MCP bridge (docs/MCP-BRIDGE.md)
+deno task compile                   # build the `forge` binary
 deno task test                      # unit + golden + server integration (no GPU)
 deno task check / lint / fmt         # Deno side only
 deno task ui:install                 # once: npm install in src/frontend
@@ -69,10 +75,15 @@ those use the npm toolchain. Run both sides before you call something green.
 
 ## Conventions
 
-- TypeScript strict, Deno std + `node:sqlite`, no ORM. Every SQL statement lives
-  in `src/db/queries.ts`, one function per query — with the same rule inside
-  `src/telemetry/queries.ts` for the telemetry database, which is its own file
-  and its own migration chain (§7.1).
+- TypeScript strict, Deno std + `node:sqlite`, no ORM. The two exceptions are
+  `forge`'s own dependencies — Cliffy for the command line, and the MCP server
+  package for `forge mcp`, which speaks a protocol that is not worth
+  hand-rolling. **`deno task test` must never need llama-swap**: the bridge's
+  arbitration goes behind an interface with a fake, as `tests/fake-comfy/`
+  stands in for ComfyUI. Every SQL statement lives in `src/db/queries.ts`, one
+  function per query — with the same rule inside `src/telemetry/queries.ts` for
+  the telemetry database, which is its own file and its own migration chain
+  (§7.1).
 - **Open SQLite only through `openDatabase()`** (`src/db/db.ts`), and reach the
   driver only through `src/db/sqlite.ts` — the small wrapper over Deno's
   built-in `node:sqlite` that gives back the positional rows the queries are

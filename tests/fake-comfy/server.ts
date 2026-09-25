@@ -185,6 +185,9 @@ export class FakeComfy {
   #history: Record<string, HistoryEntry> = {};
   #gates = new Map<string, Gate>();
   #queuedScenarios: Scenario[] = [];
+  /** How many times `POST /free` was asked for (§6.3). */
+  freed = 0;
+
   #defaultScenario: Scenario;
   #nextNumber = 1;
   #closed = false;
@@ -330,6 +333,10 @@ export class FakeComfy {
     if (req.method === "POST" && path === "/queue") return this.#postQueue(req);
     if (req.method === "POST" && path === "/interrupt") {
       return this.#interrupt();
+    }
+    if (req.method === "POST" && path === "/free") {
+      this.freed++;
+      return Response.json({});
     }
     if (req.method === "GET" && path.startsWith("/history")) {
       return this.#getHistory(path);

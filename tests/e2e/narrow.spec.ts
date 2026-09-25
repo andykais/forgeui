@@ -39,6 +39,8 @@ const LABELS = {
   top: "2 horizontal rows: media, then input — no metadata",
   "top-split":
     "Media across the top; input and metadata in 2 columns below",
+  "media-split": "Media and metadata, in 2 columns — no input panel",
+  media: "Just media — no input panel, no metadata",
 } as const;
 
 /** Gallery has no input panel, so it names two panes rather than three. */
@@ -113,7 +115,7 @@ test.afterEach(async ({ page }) => {
 
 test.describe.configure({ mode: "serial" });
 
-test("the five layouts put the three panes where they say", async ({ page }) => {
+test("the five with an inputs panel put the three panes where they say", async ({ page }) => {
   await page.setViewportSize(WIDE);
   await openOne(page);
 
@@ -162,6 +164,47 @@ test("the five layouts put the three panes where they say", async ({ page }) => 
 });
 
 /**
+ * The other two (§11.3): for watching rather than typing, which means the
+ * inputs panel is not there at all. The panel is hidden rather than
+ * unmounted, so "gone" has to be asserted as *not visible* — a grid item
+ * whose named area does not exist would otherwise be auto-placed into an
+ * implicit row and land back on screen under everything else.
+ */
+test("the two media layouts have no inputs panel at all", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await openOne(page);
+
+  await choose(page, "media-split");
+  await expect(page.locator(".panel")).not.toBeVisible();
+  let seen = await boxes(page);
+  expect(seen.meta).not.toBeNull();
+  // The metadata keeps its own column, and the media takes the rest —
+  // including the width the params used to have.
+  expect(seen.meta!.x).toBeGreaterThan(seen.media.x + seen.media.width - 1);
+  expect(seen.media.x).toBeLessThan(seen.screen.x + 40);
+  // The picker floats over this pane, so it has to leave the room: without
+  // that it sits on top of Reuse parameters.
+  const actions = (await page.locator(".sidebar .actions").boundingBox())!;
+  const picker = (await page.locator(".corner .trigger").boundingBox())!;
+  expect(actions.y).toBeGreaterThan(picker.y + picker.height - 1);
+
+  await choose(page, "media");
+  await expect(page.locator(".panel")).not.toBeVisible();
+  await expect(page.locator("aside.sidebar")).toHaveCount(0);
+  seen = await boxes(page);
+  expect(Math.round(seen.media.width)).toBe(Math.round(seen.screen.width));
+
+  // And back on the grid, where nothing is selected: still no panel, and
+  // the tiles get the whole screen rather than a column beside an empty one.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".results")).toBeVisible();
+  await expect(page.locator(".panel")).not.toBeVisible();
+  const results = (await page.locator(".results").boundingBox())!;
+  const screen = (await page.locator(".generate").boundingBox())!;
+  expect(Math.round(results.width)).toBe(Math.round(screen.width));
+});
+
+/**
  * Only `columns` has fixed panes. Everything else splits down the middle, at
  * every width — 360px of inputs is a quarter of a 1600px window and half of
  * a 960px one, which made one arrangement look like two.
@@ -176,7 +219,7 @@ test("the options are diagrams, and the words are in the title", async ({ page }
   await page.locator(".trigger").first().click();
 
   const options = page.locator(".option");
-  await expect(options).toHaveCount(5);
+  await expect(options).toHaveCount(Object.keys(LABELS).length);
   for (const [layout, label] of Object.entries(LABELS)) {
     const option = page.getByRole("button", { name: label, exact: true });
     await expect(option, layout).toHaveCount(1);

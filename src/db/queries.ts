@@ -29,6 +29,30 @@ export interface JobError {
   node_errors?: Record<string, unknown>;
 }
 
+/**
+ * Who asked for a run, and why (§6.2).
+ *
+ * `null` throughout means unknown, which every row written before this block
+ * existed is and stays: an output from last month was not made by anything we
+ * can now name, and calling it `ui` would be inventing a fact.
+ */
+export interface Origin {
+  /** `ui` for anything submitted without one, or `llm:<model-id>`. */
+  source: string | null;
+  project: string | null;
+  note: string | null;
+}
+
+/** The three columns as one field, or `null` when none of them is set. */
+export function toOrigin(
+  source: string | null,
+  project: string | null,
+  note: string | null,
+): Origin | null {
+  if (source === null && project === null && note === null) return null;
+  return { source, project, note };
+}
+
 export interface JobRow {
   id: string;
   prompt_id: string | null;
@@ -39,6 +63,7 @@ export interface JobRow {
   api_graph: ApiGraph;
   progress: Progress | null;
   error: JobError | null;
+  origin: Origin | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -50,6 +75,7 @@ export interface NewJob {
   workflow_hash: string | null;
   params: Record<string, unknown>;
   api_graph: ApiGraph;
+  origin?: Origin | null;
   created_at: number;
 }
 
@@ -69,6 +95,10 @@ export interface OutputRow {
   prompt: string | null;
   /** What the take was asked to sound like; audio only (DESIGN-AUDIO §11.5). */
   tone: string | null;
+  /** Denormalised from the sidecar's `origin` (§6.2), for the filters. */
+  origin: Origin | null;
+  /** What a person said about this one afterwards (§6.2); searched. */
+  notes: string | null;
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
@@ -91,6 +121,9 @@ type JobRecord = [
   string,
   string | null,
   string | null,
+  string | null,
+  string | null,
+  string | null,
   number,
   number | null,
   number | null,
@@ -98,6 +131,7 @@ type JobRecord = [
 
 const JOB_COLUMNS = `id, prompt_id, workflow_id, workflow_hash, status,
   params_json, api_graph_json, progress_json, error_json,
+  origin_source, origin_project, origin_note,
   created_at, started_at, finished_at`;
 
 function parse<T>(value: string | null, fallback: T): T {
@@ -120,9 +154,10 @@ function toJob(record: JobRecord): JobRow {
     api_graph: parse<ApiGraph>(record[6], {}),
     progress: parse<Progress | null>(record[7], null),
     error: parse<JobError | null>(record[8], null),
-    created_at: record[9],
-    started_at: record[10],
-    finished_at: record[11],
+    origin: toOrigin(record[9], record[10], record[11]),
+    created_at: record[12],
+    started_at: record[13],
+    finished_at: record[14],
   };
 }
 
@@ -130,14 +165,18 @@ function toJob(record: JobRecord): JobRow {
 export function insertJob(db: Database, job: NewJob): void {
   db.prepare(
     `INSERT INTO jobs (id, workflow_id, workflow_hash, status, params_json,
-                       api_graph_json, created_at)
-     VALUES (?, ?, ?, 'queued', ?, ?, ?)`,
+                       api_graph_json, origin_source, origin_project,
+                       origin_note, created_at)
+     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
   ).run(
     job.id,
     job.workflow_id,
     job.workflow_hash,
     JSON.stringify(job.params),
     JSON.stringify(job.api_graph),
+    job.origin?.source ?? null,
+    job.origin?.project ?? null,
+    job.origin?.note ?? null,
     job.created_at,
   );
 }
@@ -271,9 +310,10 @@ export function insertOutput(db: Database, output: OutputRow): void {
   db.prepare(
     `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, width, height,
                           duration_ms, sha256, workflow_id, workflow_hash,
-                          family, prompt, tone, params_json, deleted_at,
+                          family, prompt, tone, origin_source, origin_project,
+                          origin_note, notes, params_json, deleted_at,
                           created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -289,15 +329,16 @@ export function insertOutput(db: Database, output: OutputRow): void {
     output.family,
     output.prompt,
     output.tone,
+    output.origin?.source ?? null,
+    output.origin?.project ?? null,
+    output.origin?.note ?? null,
+    output.notes,
     JSON.stringify(output.params),
     output.deleted_at,
     output.created_at,
   );
   // `outputs_fts` is an external-content table, so it is filled explicitly.
-  db.prepare(
-    `INSERT INTO outputs_fts (rowid, prompt)
-      SELECT rowid, prompt FROM outputs WHERE id = ?`,
-  ).run(output.id);
+  indexOutput(db, output.id);
 }
 
 /**
@@ -335,6 +376,7 @@ export function normalizeModelHash(hash: string): string {
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
   duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
+  origin_source, origin_project, origin_note, notes,
   params_json, deleted_at, created_at`;
 
 type OutputRecord = [
@@ -346,6 +388,10 @@ type OutputRecord = [
   number | null,
   number | null,
   number | null,
+  string | null,
+  string | null,
+  string | null,
+  string | null,
   string | null,
   string | null,
   string | null,
@@ -373,9 +419,11 @@ function toOutput(record: OutputRecord): OutputRow {
     family: record[11],
     prompt: record[12],
     tone: record[13],
-    params: parse<Record<string, unknown>>(record[14], {}),
-    deleted_at: record[15],
-    created_at: record[16],
+    origin: toOrigin(record[14], record[15], record[16]),
+    notes: record[17],
+    params: parse<Record<string, unknown>>(record[18], {}),
+    deleted_at: record[19],
+    created_at: record[20],
   };
 }
 
@@ -396,6 +444,9 @@ export interface OutputFilters {
   models?: string[];
   /** Full-text over the denormalised prompt. */
   q?: string;
+  /** The origin block (§6.2): exact matches, not a search. */
+  project?: string;
+  source?: string;
   /** Soft-deleted rows are hidden unless a caller asks for them. */
   includeDeleted?: boolean;
 }
@@ -433,6 +484,14 @@ export function buildOutputsWhere(filters: OutputFilters = {}): WhereClause {
   if (filters.kind) {
     clauses.push("outputs.kind = ?");
     params.push(filters.kind);
+  }
+  if (filters.project) {
+    clauses.push("outputs.origin_project = ?");
+    params.push(filters.project);
+  }
+  if (filters.source) {
+    clauses.push("outputs.origin_source = ?");
+    params.push(filters.source);
   }
   for (const hash of filters.models ?? []) {
     // AND semantics: an output must have used every selected model (§11.2).
@@ -646,12 +705,47 @@ export function allOutputIds(db: Database): string[] {
   );
 }
 
-/** Drop a row outright; only `reindex` does this, for files that are gone. */
-export function deleteOutputRow(db: Database, id: string): void {
-  db.prepare(`DELETE FROM output_models WHERE output_id = ?`).run(id);
+/**
+ * Index one output's searchable text, reading it back out of the row.
+ *
+ * External content means the FTS table holds no copy of its own: it reads
+ * the columns from `outputs` when told to, which is why this runs *after*
+ * the row is written and why `setOutputNotes` unindexes *before* it changes
+ * one — a delete reads the old values through the same door.
+ */
+function indexOutput(db: Database, id: string): void {
+  db.prepare(
+    `INSERT INTO outputs_fts (rowid, prompt, notes)
+      SELECT rowid, prompt, notes FROM outputs WHERE id = ?`,
+  ).run(id);
+}
+
+function unindexOutput(db: Database, id: string): void {
   db.prepare(
     `DELETE FROM outputs_fts WHERE rowid = (SELECT rowid FROM outputs WHERE id = ?)`,
   ).run(id);
+}
+
+/**
+ * What a person made of this output (§6.2). Empty is stored as NULL, so
+ * "cleared" and "never written" are one state rather than two.
+ */
+export function setOutputNotes(
+  db: Database,
+  id: string,
+  notes: string | null,
+): void {
+  // Out of the index while the row still holds the old text, back in once it
+  // holds the new: the other order leaves the old words findable for ever.
+  unindexOutput(db, id);
+  db.prepare(`UPDATE outputs SET notes = ? WHERE id = ?`).run(notes, id);
+  indexOutput(db, id);
+}
+
+/** Drop a row outright; only `reindex` does this, for files that are gone. */
+export function deleteOutputRow(db: Database, id: string): void {
+  db.prepare(`DELETE FROM output_models WHERE output_id = ?`).run(id);
+  unindexOutput(db, id);
   db.prepare(`DELETE FROM outputs WHERE id = ?`).run(id);
 }
 
@@ -666,6 +760,7 @@ export function jobExists(db: Database, id: string): boolean {
 }
 
 export interface RebuiltJob {
+  origin?: Origin | null;
   id: string;
   workflow_id: string | null;
   workflow_hash: string | null;
@@ -684,14 +779,18 @@ export interface RebuiltJob {
 export function insertRebuiltJob(db: Database, job: RebuiltJob): void {
   db.prepare(
     `INSERT INTO jobs (id, workflow_id, workflow_hash, status, params_json,
-                       api_graph_json, created_at, started_at, finished_at)
-     VALUES (?, ?, ?, 'done', ?, ?, ?, ?, ?)`,
+                       api_graph_json, origin_source, origin_project,
+                       origin_note, created_at, started_at, finished_at)
+     VALUES (?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     job.id,
     job.workflow_id,
     job.workflow_hash,
     JSON.stringify(job.params),
     JSON.stringify(job.api_graph),
+    job.origin?.source ?? null,
+    job.origin?.project ?? null,
+    job.origin?.note ?? null,
     job.created_at,
     job.created_at,
     job.created_at + job.total_ms,

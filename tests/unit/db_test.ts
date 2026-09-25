@@ -57,6 +57,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         "model_files_hash",
         "output_models_model",
         "outputs_created",
+        "outputs_project",
         "outputs_workflow",
         "samples_model",
       ]);
@@ -84,6 +85,61 @@ Deno.test("migrations are idempotent across reopens", async () => {
       );
     } finally {
       second.close();
+    }
+  });
+});
+
+Deno.test("a database from before origin gains the columns, and says it does not know", async () => {
+  await withDbDir((path) => {
+    // A database as it stood at version 7: jobs and outputs, no origin.
+    const old = new Database(path);
+    old.exec(MIGRATIONS[0]!.sql!);
+    // The index first: SQLite will not drop a column one is built on.
+    old.exec("DROP INDEX outputs_project");
+    for (const table of ["jobs", "outputs"]) {
+      for (const column of ["origin_source", "origin_project", "origin_note"]) {
+        old.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+      }
+    }
+    old.exec("PRAGMA user_version = 7");
+    old.exec(
+      `INSERT INTO jobs (id, status, params_json, api_graph_json, created_at)
+       VALUES ('01JOLD', 'done', '{}', '{}', 1)`,
+    );
+    old.exec(
+      `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, params_json,
+                            created_at)
+       VALUES ('01JOLD-0', '01JOLD', 'outputs/a.png', 'outputs/a.json',
+               'image', '{}', 1)`,
+    );
+    old.close();
+
+    const migrated = openDatabase(path);
+    try {
+      assertEquals(schemaVersion(migrated), SCHEMA_VERSION);
+      // Nothing is backfilled: an output made before the block existed was
+      // not made by anything we can now name, and calling it `ui` would be
+      // inventing a fact (§6.2).
+      assertEquals(
+        migrated.prepare(
+          `SELECT origin_source, origin_project, origin_note FROM outputs`,
+        ).value<[string | null, string | null, string | null]>(),
+        [null, null, null],
+      );
+      assertEquals(
+        migrated.prepare("SELECT origin_source FROM jobs").value<
+          [string | null]
+        >(),
+        [null],
+      );
+      assert(names(migrated, "index").includes("outputs_project"));
+      // The rows themselves are untouched.
+      assertEquals(
+        migrated.prepare("SELECT count(*) FROM outputs").value<[number]>(),
+        [1],
+      );
+    } finally {
+      migrated.close();
     }
   });
 });

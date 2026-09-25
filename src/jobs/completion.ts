@@ -266,6 +266,7 @@ export async function completeJob(
     },
     params: job.params,
     models,
+    origin: job.origin === null ? null : { ...job.origin },
     api_graph: job.api_graph,
     outputs: sidecarOutputs,
     timing: input.timing,
@@ -311,6 +312,11 @@ export async function completeJob(
       family: manifest?.family ?? null,
       prompt: promptText(manifest, job.params),
       tone,
+      // Denormalised off the job so the gallery can filter by it (§6.2);
+      // the sidecar above is what `reindex` rebuilds this from.
+      origin: job.origin,
+      // Nothing has been said about it yet; it was made a moment ago.
+      notes: null,
       params: job.params,
       deleted_at: null,
       created_at: createdAt.getTime(),

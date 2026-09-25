@@ -106,6 +106,10 @@ COPY --from=frontend /app/src/frontend/dist/ ./src/frontend/dist/
 # at startup. SQLite itself is `node:sqlite`, which is built into Deno, so
 # there is no native library to download here.
 RUN deno cache src/main.ts
+# `forge mcp` is a second entry point with dependencies of its own (Cliffy,
+# the MCP server package), so it needs its own pass or the bridge reaches for
+# the network the first time it is run (docs/MCP-BRIDGE.md).
+RUN deno cache src/cli.ts
 
 # /workspace is the data dir (config.yaml, app.db, workflows/user, samples,
 # ...); outputs always lives at <data-dir>/outputs, i.e. /workspace/outputs,

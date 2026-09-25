@@ -16,6 +16,7 @@ import {
   jobsInFlight,
   listOutputsForJob,
   nodeTimingsFor,
+  type Origin,
   type OutputRow,
   type Progress,
   setJobPromptId,
@@ -106,11 +107,64 @@ interface LiveJob {
 export interface SubmitJobBody {
   workflow_id?: unknown;
   params?: unknown;
+  origin?: unknown;
 }
 
 export interface RerunJobBody {
   output_id?: unknown;
   job_id?: unknown;
+  origin?: unknown;
+}
+
+/** What one origin field may hold, before it is written down (§6.2). */
+const ORIGIN_LIMITS: Record<string, number> = {
+  source: 120,
+  project: 120,
+  note: 1000,
+};
+
+/**
+ * The `origin` block of a submit (§6.2).
+ *
+ * Absent means unknown, and stays unknown. The web app names itself `ui` and
+ * the bridge fills `source` in from llama-swap (DESIGN-AGENT-LOOP §5.1) — so
+ * a caller that says nothing is one we genuinely cannot name, and guessing
+ * `ui` for it would file someone else's job under the one label the gallery
+ * filter exists to tell apart. The model, meanwhile, has no parameter through
+ * which to set `source` at all.
+ *
+ * Capped because this is free text from a client and it lands in a row, a
+ * sidecar and a PNG chunk; a note that ran to a megabyte would be in all
+ * three for ever.
+ */
+export function readOrigin(raw: unknown): Origin {
+  if (raw === undefined || raw === null) {
+    return { source: null, project: null, note: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new JobRequestError("origin: expected {source, project, note}");
+  }
+  const body = raw as Record<string, unknown>;
+  const field = (key: string): string | null => {
+    const value = body[key];
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "string") {
+      throw new JobRequestError(`origin.${key}: expected a string`);
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    if (trimmed.length > ORIGIN_LIMITS[key]!) {
+      throw new JobRequestError(
+        `origin.${key}: at most ${ORIGIN_LIMITS[key]} characters`,
+      );
+    }
+    return trimmed;
+  };
+  return {
+    source: field("source"),
+    project: field("project"),
+    note: field("note"),
+  };
 }
 
 export interface JobRunnerOptions {
@@ -222,6 +276,9 @@ export class JobRunner {
     const params = typeof body.params === "object" && body.params !== null
       ? body.params as Record<string, unknown>
       : {};
+    // Before the work, with the other request-shape checks: a bad origin is a
+    // bad request, and finding out after the GPU has run is no use to anyone.
+    const origin = readOrigin(body.origin);
     // Params are checked before the connection: what is wrong with the panel
     // is wrong whether or not ComfyUI happens to be up, and saying so is more
     // use than "not connected".
@@ -253,6 +310,7 @@ export class JobRunner {
       workflowHash: workflow.hash,
       params: values,
       graph,
+      origin,
     });
   }
 
@@ -268,6 +326,10 @@ export class JobRunner {
       workflowHash: source.workflowHash,
       params: source.params,
       graph,
+      // A rerun is its own run: the origin is whoever asked for *this* one,
+      // not whoever asked for the original. Inheriting it would file a
+      // person's rerun under the model that made the first.
+      origin: readOrigin(body.origin),
     });
   }
 
@@ -369,6 +431,7 @@ export class JobRunner {
     workflowHash: string | null;
     params: Record<string, unknown>;
     graph: ApiGraph;
+    origin: Origin;
   }): Promise<JobRow> {
     // Truncated to the second because the sidecar is the source of truth and
     // §6.2 records `created_at` to the second: this keeps the row, the sidecar
@@ -387,6 +450,7 @@ export class JobRunner {
       workflow_hash: input.workflowHash,
       params: input.params,
       api_graph: input.graph,
+      origin: input.origin,
       created_at: createdAt,
     });
     // The prompt id is ours and is recorded first, so events that arrive

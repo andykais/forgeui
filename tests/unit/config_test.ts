@@ -224,7 +224,7 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
   assertThrows(
     () => validatePartialConfig({ ui: { layout: { generate: "sideways" } } }),
     ConfigError,
-    "one of columns, split, wide, top, top-split",
+    "one of columns, split, wide, top, top-split, media-split, media",
   );
 });
 
@@ -242,10 +242,12 @@ Deno.test("the layout is a per-screen preference, and the old key still loads", 
       models: "columns",
     });
 
-    await store.patch({ ui: { layout: { generate: "top-split" } } });
+    // One of the two that hide the inputs panel, so the round-trip covers a
+    // layout added after the file format was.
+    await store.patch({ ui: { layout: { generate: "media" } } });
     const reloaded = (await loadConfig({ dataDir: dir })).store;
     assertEquals(reloaded.config.ui.layout, {
-      generate: "top-split",
+      generate: "media",
       gallery: "columns",
       models: "columns",
     });

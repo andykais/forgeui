@@ -117,15 +117,23 @@ export const api = {
   deleteWorkflow: (id: string) =>
     request<null>(`/api/workflows/${id}`, { method: "DELETE" }),
 
+  // `origin.source` says this was a person at the screen (§6.2). The app
+  // says so itself rather than the server assuming it, so that a job posted
+  // by anything else stays honestly unattributed instead of being filed
+  // under the one thing the gallery filter is for telling apart.
   submit: (workflowId: string, params: Record<string, unknown>) =>
     request<Job>("/api/jobs", {
       method: "POST",
-      body: JSON.stringify({ workflow_id: workflowId, params }),
+      body: JSON.stringify({
+        workflow_id: workflowId,
+        params,
+        origin: { source: "ui" },
+      }),
     }),
   rerun: (body: { output_id?: string; job_id?: string }) =>
     request<Job>("/api/jobs/rerun", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, origin: { source: "ui" } }),
     }),
   jobs: (
     query: { status?: string; workflow_id?: string; limit?: number } = {},
@@ -224,6 +232,12 @@ export const api = {
   rescanModel: (id: string) =>
     request<ModelDetail>(`/api/models/${encodeURIComponent(id)}/rescan`, {
       method: "POST",
+    }),
+  /** §6.2's note: what a person made of one output, written afterwards. */
+  patchOutput: (id: string, patch: { notes?: string | null }) =>
+    request<Output>(`/api/outputs/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
     }),
   patchModel: (
     id: string,

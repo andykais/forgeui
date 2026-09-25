@@ -2,9 +2,16 @@ import type { DayRange, OutputFilters, OutputSort } from "../../db/queries.ts";
 import { OUTPUTS_MAX_LIMIT } from "../../db/queries.ts";
 import { CursorError, decodeCursor } from "../../outputs/cursor.ts";
 import { serveMedia } from "../media.ts";
-import { json } from "../json.ts";
+import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 import { WORKFLOW_KINDS } from "../../workflows/types.ts";
+
+/**
+ * A note is a sentence or two about a picture, not a document: long enough
+ * for what went wrong and what to try, bounded because it lands in a row, a
+ * sidecar and a search index.
+ */
+const NOTES_MAX = 2000;
 
 /** All gallery filters travel as URL params, so a view is a link (§11.2). */
 function filtersFrom(url: URL): OutputFilters {
@@ -25,6 +32,13 @@ function filtersFrom(url: URL): OutputFilters {
   if (models.length > 0) filters.models = models;
   const q = url.searchParams.get("q");
   if (q && q.trim().length > 0) filters.q = q;
+  // The origin block (§6.2). Exact matches: a project is a name the caller
+  // already knows, not something to search for. No screen offers these yet —
+  // they are here for the API and the MCP bridge's `search_gallery`.
+  const project = url.searchParams.get("project");
+  if (project && project.trim().length > 0) filters.project = project.trim();
+  const source = url.searchParams.get("source");
+  if (source && source.trim().length > 0) filters.source = source.trim();
   return filters;
 }
 
@@ -109,6 +123,27 @@ export function outputRoutes(ctx: AppContext): Route[] {
       method: "GET",
       path: "/api/outputs/:id",
       handler: async (_req, { params }) => json(await store.detail(params.id!)),
+    },
+    {
+      // §6.2's note, the one thing about an output a person writes after the
+      // fact. A PATCH rather than a POST because it edits the row it names,
+      // and `notes` is the only field of it anyone may edit.
+      method: "PATCH",
+      path: "/api/outputs/:id",
+      handler: async (req, { params }) => {
+        const body = await readJson(req) as Record<string, unknown>;
+        if (!("notes" in body)) {
+          throw new BodyError("nothing to change: expected notes");
+        }
+        const notes = body.notes;
+        if (notes !== null && typeof notes !== "string") {
+          throw new BodyError("notes: expected a string or null");
+        }
+        if (typeof notes === "string" && notes.length > NOTES_MAX) {
+          throw new BodyError(`notes: at most ${NOTES_MAX} characters`);
+        }
+        return json(await store.setNotes(params.id!, notes));
+      },
     },
     {
       method: "GET",
