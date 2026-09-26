@@ -15,6 +15,9 @@ const CONFIG_HEADER = `# ForgeUI configuration.
 # connection are read at launch: change them here and restart the app.
 # CLI flags (--comfy-path, --comfy-url, --models-dir kind=path, --port) override
 # these values for one run and are never written back.
+#
+# import.civitai_token is kept here in plaintext. CIVITAI_TOKEN in the
+# environment is the alternative, and wins when both are set.
 `;
 
 export interface EnvSource {
@@ -85,12 +88,14 @@ export function mergePartialConfig(
   const classes = mergeSection(a.model_classes, b.model_classes);
   const keys = mergeSection(a.keys, b.keys);
   const ui = mergeUi(a.ui, b.ui);
+  const importing = mergeSection(a.import, b.import);
   if (server) out.server = server;
   if (comfy) out.comfy = comfy;
   if (folders) out.model_folders = folders;
   if (classes) out.model_classes = classes;
   if (keys) out.keys = keys;
   if (ui) out.ui = ui;
+  if (importing) out.import = importing;
   return out;
 }
 
@@ -118,6 +123,7 @@ export function effectiveConfig(...layers: PartialConfig[]): Config {
         ...layer.ui?.filmstrip_collapsed,
       },
     },
+    import: { ...base.import, ...layer.import },
   };
 }
 
@@ -290,8 +296,10 @@ export function migrateStoredConfig(onDisk: PartialConfig): boolean {
 export async function loadConfig(
   options: LoadConfigOptions,
 ): Promise<LoadedConfig> {
-  const paths = dataPaths(options.dataDir);
-  await ensureDataDirs(paths);
+  // Where the import and download folders live is itself configured, so the
+  // file has to be read before the paths are final: read with the defaults,
+  // then rebuild them from what it said (DESIGN-MODEL-IMPORT §8).
+  let paths = dataPaths(options.dataDir);
 
   let onDisk: PartialConfig;
   let created = false;
@@ -310,6 +318,11 @@ export async function loadConfig(
     onDisk = parseConfigDocument(text, "config.yaml");
     migrated = migrateStoredConfig(onDisk);
   }
+
+  // Now that both layers are known, the folders they may have moved are too.
+  const settings = effectiveConfig(onDisk, options.overrides ?? {}).import;
+  paths = dataPaths(options.dataDir, settings);
+  await ensureDataDirs(paths);
 
   const store = new ConfigStore({
     paths,

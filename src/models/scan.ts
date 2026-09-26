@@ -120,9 +120,31 @@ export class ModelScanner {
     models: 0,
   };
 
-  constructor(config: () => Config, ttlMs = 30_000) {
+  #downloads: string | null;
+
+  constructor(
+    config: () => Config,
+    ttlMs = 30_000,
+    /**
+     * `<appdata>/models`, where ingest files what `forge models
+     * --download-model` fetched (DESIGN-MODEL-IMPORT §7.2). Walked as one
+     * more folder per kind, after the configured ones, so a downloaded model
+     * is a model like any other here — and so this agrees with
+     * `extra_model_paths.yaml`, which lists it the same way.
+     */
+    downloads: string | null = null,
+  ) {
     this.#config = config;
     this.#ttlMs = ttlMs;
+    this.#downloads = downloads;
+  }
+
+  /** The configured folders for a kind, plus the download folder for it. */
+  #foldersFor(kind: string): string[] {
+    const configured = this.#config().model_folders[kind] ?? [];
+    return this.#downloads === null
+      ? configured
+      : [...configured, join(this.#downloads, kind)];
   }
 
   /** Every model seen by the last scan of each kind, keyed by absolute path. */
@@ -155,7 +177,7 @@ export class ModelScanner {
     if (!options.refresh && cached && Date.now() - cached.at < this.#ttlMs) {
       return cached.models;
     }
-    const folders = this.#config().model_folders[kind] ?? [];
+    const folders = this.#foldersFor(kind);
     const models: ScannedModel[] = [];
     const seen = new Set<string>();
     for (const folder of folders) {
@@ -181,10 +203,7 @@ export class ModelScanner {
   ): Promise<RescanResult> {
     const startedAt = Date.now();
     const folders = this.kinds().flatMap((kind) =>
-      (this.#config().model_folders[kind] ?? []).map((folder) => ({
-        kind,
-        folder,
-      }))
+      this.#foldersFor(kind).map((folder) => ({ kind, folder }))
     );
     this.#progress = {
       running: true,

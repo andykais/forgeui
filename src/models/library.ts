@@ -30,7 +30,8 @@ import { FAMILIES } from "../workflows/types.ts";
 import { backfillOutputModels, SidecarModelIndex } from "./backfill.ts";
 import { type HashingProgress, ModelHasher } from "./hasher.ts";
 import { DETECTOR_VERSION, probeFamily } from "./probe.ts";
-import { log, seconds } from "../log.ts";
+import { log, logError, seconds } from "../log.ts";
+import { emptyCounts, ImportInbox, type IngestCounts } from "./import.ts";
 import {
   ModelScanner,
   type RescanProgress,
@@ -100,6 +101,18 @@ export interface ModelView {
    * to delete later should be out of the way, not gone.
    */
   hidden: boolean;
+  /**
+   * What this model wants in a prompt (DESIGN-MODEL-IMPORT §5.5). Empty
+   * until something fetches it; the model page shows it as a line you can
+   * copy, above the source panel.
+   */
+  trigger_words: string[];
+  /**
+   * What Civitai knows about it, normalised (§5.5), or null where nobody has
+   * fetched anything. The HTML halves are stripped unless the caller asked
+   * for them — see `withHtml`.
+   */
+  source: ModelSource | null;
   /** True until the hash lands; the UI shows the `hashing` badge (§8.1). */
   hashing: boolean;
   /**
@@ -111,6 +124,42 @@ export interface ModelView {
   hash_error: string | null;
   /** False when the row survives but the file is no longer on disk. */
   present: boolean;
+}
+
+/**
+ * The §5.5 source record as a caller sees it. The same shape the record has
+ * on disk, minus the two `description_html` fields unless `?html=1` asked
+ * for them: plain by default because an MCP asking "what is this LoRA and how
+ * do I trigger it" wants the text, and serving markup by default would make
+ * every caller strip tags — and some of them would do it wrong (§7.5).
+ */
+export type ModelSource = Record<string, unknown>;
+
+/**
+ * The record without its two `description_html` fields, which is what every
+ * caller but the browser gets (§7.5). Dropped rather than emptied, so a
+ * reader can tell "not asked for" from "there was none".
+ */
+export function withoutHtml<T extends { source: ModelSource | null }>(
+  view: T,
+): T {
+  if (view.source === null) return view;
+  const strip = (value: unknown) => {
+    if (typeof value !== "object" || value === null) return value;
+    const { description_html: _dropped, ...rest } = value as Record<
+      string,
+      unknown
+    >;
+    return rest;
+  };
+  return {
+    ...view,
+    source: {
+      ...view.source,
+      model: strip(view.source.model),
+      version: strip(view.source.version),
+    },
+  };
 }
 
 /** The model page: the header, plus its Samples strip (§8.1, §8.3). */
@@ -214,12 +263,16 @@ export interface ModelLibraryOptions {
   /** The model-size report, written once per scan pass (§7.1). */
   telemetry?: TelemetryStore;
   scanner?: ModelScanner;
+  /** The import folder (DESIGN-MODEL-IMPORT §7.1); tests inject their own. */
+  inbox?: ImportInbox;
   now?: () => number;
 }
 
 export class ModelLibrary {
   readonly scanner: ModelScanner;
   readonly hasher: ModelHasher;
+  /** What `forge models` left behind, and what became of it (§7.1). */
+  readonly inbox: ImportInbox;
   #db: Database;
   #paths: DataPaths;
   #config: ConfigStore;
@@ -228,6 +281,8 @@ export class ModelLibrary {
   #telemetry?: TelemetryStore;
   #index: SidecarModelIndex | null = null;
   #scanning: Promise<void> | null = null;
+  #ingesting: Promise<void> | null = null;
+  #imports: IngestCounts = emptyCounts();
   #probes = new Map<string, ModelProbeRow>();
   #now: () => number;
   /** Whether the last progress said the hasher was still going. */
@@ -243,7 +298,11 @@ export class ModelLibrary {
     this.#now = options.now ?? Date.now;
     this.#probes = listModelProbes(options.db);
     this.scanner = options.scanner ??
-      new ModelScanner(() => options.config.config);
+      new ModelScanner(
+        () => options.config.config,
+        undefined,
+        options.paths.downloads,
+      );
     this.hasher = new ModelHasher({
       db: options.db,
       now: options.now,
@@ -252,17 +311,47 @@ export class ModelLibrary {
         if (!fresh) return;
         await this.#backfill(model, hash);
       },
+      onDrained: () => {
+        // Phase B (§7.1): a batch dropped for a model that was still hashing
+        // lands as soon as its hash does, without a second Rescan.
+        this.#ingest().catch((error) => {
+          logError(
+            `import: the pass after hashing failed: ${
+              error instanceof Error ? error.message : error
+            }`,
+          );
+        });
+      },
+    });
+    this.inbox = options.inbox ?? new ImportInbox({
+      db: options.db,
+      paths: options.paths,
+      samples: options.samples,
+      now: options.now,
     });
   }
 
-  /** Startup and Rescan: walk the folders, then hash what is new. */
-  async rescan(): Promise<{ models: number; queued: number }> {
+  /**
+   * Startup and Rescan: file whatever `forge models` downloaded, walk the
+   * folders, then hash what is new — and apply the import batches once the
+   * hashing has given their models an identity
+   * (DESIGN-MODEL-IMPORT §7.1).
+   */
+  async rescan(
+    options: { ingest?: boolean } = {},
+  ): Promise<{ models: number; queued: number }> {
+    // `import.ingest_on_boot: false` turns the boot pass off; an explicit
+    // Rescan always ingests, because that is what the button is for.
+    const ingest = options.ingest ?? true;
     if (this.#scanning) await this.#scanning;
     let finish = () => {};
     this.#scanning = new Promise((resolve) => {
       finish = resolve;
     });
     try {
+      // Phase A, before the walk, so a downloaded model is one more file the
+      // scan finds rather than something that waits for the next pass.
+      if (ingest) this.#imports = await this.inbox.file();
       const result = await this.scanner.rescan((progress) =>
         this.#broadcastRescan(progress)
       );
@@ -282,6 +371,11 @@ export class ModelLibrary {
           seconds(result.elapsed_ms)
         }${queued > 0 ? ` — hashing ${queued}` : ""}`,
       );
+      // Phase B. With nothing queued the hashes are already in, so the batches
+      // can be applied now; otherwise the hasher calls back when it drains and
+      // a downloaded model gains its metadata a beat after it appears, which
+      // is the behaviour §8.1 already describes for a file copied in by hand.
+      if (ingest && queued === 0) await this.#ingest();
       return { models: result.models.length, queued };
     } finally {
       finish();
@@ -291,9 +385,10 @@ export class ModelLibrary {
 
   /** Kick the first scan off without making the boot wait for it (§11.3). */
   startBackground(): void {
-    this.rescan().catch((error) => {
-      console.error("the model scan failed:", error);
-    });
+    this.rescan({ ingest: this.#config.config.import.ingest_on_boot })
+      .catch((error) => {
+        console.error("the model scan failed:", error);
+      });
   }
 
   stop(): void {
@@ -304,10 +399,38 @@ export class ModelLibrary {
   async idle(): Promise<void> {
     if (this.#scanning) await this.#scanning;
     await this.hasher.idle();
+    if (this.#ingesting) await this.#ingesting;
   }
 
-  get progress(): { rescan: RescanProgress; hashing: HashingProgress } {
-    return { rescan: this.scanner.progress, hashing: this.hasher.progress };
+  /**
+   * Phase B, serialised: two passes over the same folder would race to delete
+   * the same batch, and the hasher can drain while a rescan is still running.
+   */
+  #ingest(): Promise<void> {
+    if (this.#ingesting) return this.#ingesting;
+    this.#ingesting = (async () => {
+      try {
+        const counts = await this.inbox.apply();
+        this.#imports = {
+          ...counts,
+          filed: this.#imports.filed + counts.filed,
+        };
+        this.#broadcastRescan(this.scanner.progress);
+      } finally {
+        this.#ingesting = null;
+      }
+    })();
+    return this.#ingesting;
+  }
+
+  get progress(): {
+    rescan: RescanProgress & { imports: IngestCounts };
+    hashing: HashingProgress;
+  } {
+    return {
+      rescan: { ...this.scanner.progress, imports: this.#imports },
+      hashing: this.hasher.progress,
+    };
   }
 
   // ------------------------------------------------------------------ views
@@ -554,6 +677,8 @@ export class ModelLibrary {
       tags: row?.tags ?? [],
       strength_min: row?.strength_min ?? DEFAULT_STRENGTH_MIN,
       strength_max: row?.strength_max ?? DEFAULT_STRENGTH_MAX,
+      trigger_words: row?.trigger_words ?? [],
+      source: row?.civitai ?? null,
       thumb_path: row?.thumb_path ?? null,
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
@@ -639,8 +764,16 @@ export class ModelLibrary {
     this.#telemetry.recordModelPass(models);
   }
 
+  /**
+   * The Models page's existing progress line carries the import counters too
+   * (DESIGN-MODEL-IMPORT §7.1) — added to the payload it already sends
+   * rather than given a socket message of their own.
+   */
   #broadcastRescan(progress: RescanProgress): void {
-    this.#hub.broadcast({ type: "rescan_progress", data: progress });
+    this.#hub.broadcast({
+      type: "rescan_progress",
+      data: { ...progress, imports: this.#imports },
+    });
   }
 
   #broadcastHashing(progress: HashingProgress): void {

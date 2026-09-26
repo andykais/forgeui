@@ -13,23 +13,25 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 
 ## Read these first
 
-| Document                         | Why                                                                                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/DESIGN.md`                 | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating.  |
-| `docs/PHASE-1-HANDOFF.md`        | What Phase 1 delivered and the decisions worth knowing.                                                                                   |
-| `docs/PHASE-2-HANDOFF.md`        | What Phase 2 delivered, what it looks like, and where Phase 3 picks up.                                                                   |
-| `docs/IMPLEMENT-PHASE-1.md`      | The Phase 1 work plan and its conventions.                                                                                                |
-| `docs/IMPLEMENT-PHASE-2.md`      | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                        |
-| `docs/HARDWARE-CHECKLIST.md`     | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                    |
-| `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                      |
-| `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.              |
-| `docs/DESIGN-AGENT-LOOP.md`      | An LLM drives ForgeUI through `forge mcp`, and they take turns with the GPU. The bridge is built; the batch API and job `origin` are not. |
-| `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap and a harness together.                                                                           |
+| Document                         | Why                                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `docs/DESIGN.md`                 | **Authoritative.** Architecture, schema (§7), API (§12), UI (§11). If your change disagrees with it, stop and ask rather than deviating.   |
+| `docs/PHASE-1-HANDOFF.md`        | What Phase 1 delivered and the decisions worth knowing.                                                                                    |
+| `docs/PHASE-2-HANDOFF.md`        | What Phase 2 delivered, what it looks like, and where Phase 3 picks up.                                                                    |
+| `docs/IMPLEMENT-PHASE-1.md`      | The Phase 1 work plan and its conventions.                                                                                                 |
+| `docs/IMPLEMENT-PHASE-2.md`      | The Phase 2 work plan, M5–M9. All of it is done; Phase 3 has no plan document yet.                                                         |
+| `docs/HARDWARE-CHECKLIST.md`     | What running against a real ComfyUI proves, how to run it, and what it does not cover.                                                     |
+| `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                       |
+| `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.               |
+| `docs/DESIGN-AGENT-LOOP.md`      | An LLM drives ForgeUI through `forge mcp`, and they take turns with the GPU. The bridge is built; the batch API and job `origin` are not.  |
+| `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap and a harness together.                                                                            |
+| `docs/DESIGN-MODEL-IMPORT.md`    | `forge models`, the `import/` drop folder, and `source` provenance on imported media. The backend is built; the model page's panel is not. |
 
 ## Layout
 
 ```
-src/cli.ts      `forge` — the Cliffy command: serve, reindex, mcp
+src/cli.ts      `forge` — the Cliffy command: serve, reindex, models, mcp
+src/cli/        `forge models`: the Civitai client and the batch writer (DESIGN-MODEL-IMPORT)
 src/main.ts     boot order, the App handle tests use
 src/mcp/        `forge mcp`: the MCP bridge, a separate process (DESIGN-AGENT-LOOP)
 src/config/     config.yaml layers, CLI overrides, extra_model_paths.yaml
@@ -38,7 +40,8 @@ src/comfy/      http client, ws client, child process, launch flags, proxy
 src/workflows/  manifest validation, param coercion, graph rewrite, loader
 src/jobs/       submit/progress/completion pipeline, node timings, sidecar, png
 src/outputs/    gallery queries, soft delete, reindex
-src/models/     the folder scan, the background hasher, output_models backfill
+src/models/     the folder scan, the background hasher, output_models backfill,
+                the import folder and what Civitai's answers mean
 src/samples/    per-model sample media: file drop, promote, thumbnails
 src/telemetry/  the health log (§7.1): its own SQLite file, the five reports, the VRAM sampler
 src/http/       router, routes/*, /ws hub, media, static
@@ -102,9 +105,13 @@ those use the npm toolchain. Run both sides before you call something green.
 - UI: only the two keyboard bindings from `config.yaml` `keys`; no favorites, no
   batch count, no light theme.
 - A model is named by its display name everywhere it appears, and is a link to
-  its page wherever it has a hash (§8.1). Nothing Civitai exists yet: the URL
-  field and Fetch info are Phase 3, and the space for them is left empty rather
-  than stubbed.
+  its page wherever it has a hash (§8.1).
+- **Civitai is fetched by `forge models`, never by the server.** The CLI writes
+  a batch into `<appdata>/import/`; the app ingests it around the model rescan
+  and deletes it (DESIGN-MODEL-IMPORT §7). Nothing in `src/cli/models.ts` or
+  what it imports may open `app.db` — there is a test for it. A downloaded model
+  is filed under `<appdata>/models/<kind>/`, which is app-owned storage scanned
+  like any other model folder; the folders `config.yaml` names stay read-only.
 
 ## Testing
 

@@ -355,6 +355,17 @@ export interface ModelEntry {
   /** The ends of this model's strength sliders; always a number (§8.1). */
   strength_min: number;
   strength_max: number;
+  /**
+   * What this model wants in a prompt (DESIGN-MODEL-IMPORT §5.5). Empty until
+   * `forge models` has fetched it.
+   */
+  trigger_words: string[];
+  /**
+   * What Civitai knows about it, normalised (§5.5), or null where nobody has
+   * fetched anything. The `description_html` fields are absent unless the
+   * request asked for them with `?html=1`.
+   */
+  source: ModelSource | null;
   thumb_path: string | null;
   thumb_url: string | null;
   output_count: number;
@@ -373,6 +384,42 @@ export interface ModelDetail extends ModelEntry {
   samples: Sample[];
 }
 
+/** The §5.5 source record, as the model page reads it. */
+export interface ModelSource {
+  format?: number;
+  source?: {
+    kind: string;
+    label: string;
+    url: string | null;
+    model_id: number | null;
+    model_version_id: number | null;
+    fetched_at: string | null;
+  };
+  creator?: { username: string; url: string | null } | null;
+  model?: SourceDescription & { name?: string | null; tags?: string[] };
+  version?: SourceDescription & {
+    name?: string | null;
+    base_model?: string | null;
+    published_at?: string | null;
+  };
+  license?: Record<string, unknown> | null;
+  stats?: Record<string, unknown> | null;
+}
+
+export interface SourceDescription {
+  description_text?: string | null;
+  /** Only present when the page asked for it (§7.5). */
+  description_html?: string | null;
+}
+
+/** Where a sample or an output came from, when this app did not make it. */
+export interface MediaSource {
+  kind: string;
+  label: string;
+  url: string | null;
+  imported_at: string | null;
+}
+
 export interface Sample {
   id: string;
   model_hash: string;
@@ -380,6 +427,8 @@ export interface Sample {
   sidecar_path: string;
   kind: string;
   source_url: string | null;
+  /** The §5.4 provenance block; null when this app made it. */
+  source: MediaSource | null;
   params: Record<string, unknown> | null;
   created_at: number;
   media_url: string;

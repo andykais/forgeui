@@ -152,6 +152,66 @@ export interface UiConfig {
   hidden_families: string[];
 }
 
+/**
+ * Where `forge models` drops batches, where ingest files what it fetched, and
+ * who gets asked (DESIGN-MODEL-IMPORT §8). Both halves of the tool read this
+ * same file, which is why the folder is a config entry rather than a flag:
+ * they have to agree on it, and there is exactly one place that says where it
+ * is.
+ */
+export interface ImportConfig {
+  /**
+   * The drop folder; null → `<appdata>/import`. An absolute path may live on
+   * a share, which is how the fetching machine and the serving machine can be
+   * different ones.
+   */
+  dir: string | null;
+  /**
+   * Where ingest files weights fetched with `--download-model`; null →
+   * `<appdata>/models`. It is a model folder like any other and is scanned as
+   * one (§5.1), so point it at a disk with room on it.
+   */
+  model_dir: string | null;
+  /**
+   * Looked up first. `civitai.com` is the same API with a narrower default
+   * filter (§4.0), so this is the `.red` host and `browsing_level` does the
+   * filtering rather than the hostname.
+   */
+  civitai_url: string;
+  /**
+   * Civitai's visibility bitmask: 1 is PG only, 31 is everything. What a
+   * *lookup* may return — `nsfw_level` is what may be kept. Which query
+   * parameter carries it differs per endpoint (§4.0); one place translates
+   * it, and this is the only knob.
+   */
+  browsing_level: number;
+  /** The fallback, and the only source for models Civitai has deleted. */
+  archive_url: string;
+  /**
+   * A Civitai API key, from civitai.com/user/account. Sent as a Bearer
+   * header to Civitai only — never to the archive or the image CDN — and
+   * only needed for gated, early-access or paid models; everything public
+   * works without it. `CIVITAI_TOKEN` in the environment wins over this.
+   *
+   * Stored in plaintext in `config.yaml`: keeping it anywhere safer is out of
+   * scope for now. It is never served by `GET /api/config`.
+   */
+  civitai_token: string | null;
+  /**
+   * The official Civitai CLI, used for `--download-model` only when it is
+   * installed *and* no token is configured — so a token given to ForgeUI is
+   * never silently traded for the CLI's own login. A bare name is looked up
+   * on PATH; null never uses it.
+   */
+  civitai_cli: string | null;
+  /** What `--download-samples` means with no number after it. */
+  samples: number;
+  /** Civitai's nsfwLevel scale: 1 is safe. Images above this are skipped. */
+  nsfw_level: number;
+  /** Slurp the import folder during the boot rescan as well as on demand. */
+  ingest_on_boot: boolean;
+}
+
 export interface Config {
   server: ServerConfig;
   comfy: ComfyConfig;
@@ -160,6 +220,7 @@ export interface Config {
   model_classes: ModelClasses;
   keys: KeyBindings;
   ui: UiConfig;
+  import: ImportConfig;
 }
 
 /** A `config.yaml` document, a CLI override layer, or a `PATCH` body. */
@@ -170,6 +231,7 @@ export interface PartialConfig {
   model_classes?: ModelClasses;
   keys?: Partial<KeyBindings>;
   ui?: PartialUiConfig;
+  import?: Partial<ImportConfig>;
 }
 
 export interface PartialUiConfig {

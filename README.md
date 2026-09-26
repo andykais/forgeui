@@ -8,19 +8,20 @@ Deno · SQLite · Svelte. See `docs/DESIGN.md`.
 
 ## Documents
 
-| File                         | Purpose                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------ |
-| `docs/DESIGN.md`             | Authoritative spec: architecture, schema, API, UI.                                         |
-| `docs/IMPLEMENT-PHASE-1.md`  | Work plan for the first milestone set (M0–M4), with definition of done.                    |
-| `docs/MOCK-REVISIONS.md`     | Changes to the UI mocks that have been decided but may not yet be drawn.                   |
-| `docs/MOCK-REVIEW.md`        | Review log of the mocks against the spec; every item carries its decision. Reference only. |
-| `docs/mocks/`                | Frame PNGs (numbered) and the source `.dc.html` of the mocks.                              |
-| `docs/PHASE-1-HANDOFF.md`    | What Phase 1 delivered and the decisions worth knowing.                                    |
-| `docs/PHASE-2-HANDOFF.md`    | What Phase 2 delivered, the screens it added, and where Phase 3 picks up.                  |
-| `docs/IMPLEMENT-PHASE-2.md`  | Work plan for the model library, samples and node-timing ETA (M5–M9).                      |
-| `docs/HARDWARE-CHECKLIST.md` | What running against a real ComfyUI proves, and what it still does not.                    |
-| `docs/DESIGN-AUDIO.md`       | Proposal: audio as a result, TTS voices, song, and lip-synced video. Not implemented.      |
-| `AGENTS.md`                  | How to navigate and build the repo, and the conventions a coding agent must follow.        |
+| File                          | Purpose                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `docs/DESIGN.md`              | Authoritative spec: architecture, schema, API, UI.                                           |
+| `docs/IMPLEMENT-PHASE-1.md`   | Work plan for the first milestone set (M0–M4), with definition of done.                      |
+| `docs/MOCK-REVISIONS.md`      | Changes to the UI mocks that have been decided but may not yet be drawn.                     |
+| `docs/MOCK-REVIEW.md`         | Review log of the mocks against the spec; every item carries its decision. Reference only.   |
+| `docs/mocks/`                 | Frame PNGs (numbered) and the source `.dc.html` of the mocks.                                |
+| `docs/PHASE-1-HANDOFF.md`     | What Phase 1 delivered and the decisions worth knowing.                                      |
+| `docs/PHASE-2-HANDOFF.md`     | What Phase 2 delivered, the screens it added, and where Phase 3 picks up.                    |
+| `docs/IMPLEMENT-PHASE-2.md`   | Work plan for the model library, samples and node-timing ETA (M5–M9).                        |
+| `docs/HARDWARE-CHECKLIST.md`  | What running against a real ComfyUI proves, and what it still does not.                      |
+| `docs/DESIGN-AUDIO.md`        | Proposal: audio as a result, TTS voices, song, and lip-synced video. Not implemented.        |
+| `docs/DESIGN-MODEL-IMPORT.md` | Proposal: `forge models`, the import folder, and external media provenance. Not implemented. |
+| `AGENTS.md`                   | How to navigate and build the repo, and the conventions a coding agent must follow.          |
 
 Phase 1 is complete and has been verified against a real ComfyUI; see the
 handoff and the hardware checklist. Phase 2 — the model library, samples and the

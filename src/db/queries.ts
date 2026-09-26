@@ -97,6 +97,12 @@ export interface OutputRow {
   tone: string | null;
   /** Denormalised from the sidecar's `origin` (§6.2), for the filters. */
   origin: Origin | null;
+  /**
+   * Where it came from when this app did not make it
+   * (DESIGN-MODEL-IMPORT §5.4), from the sidecar's `source` block. Null means
+   * the job pipeline made it, which is every output today.
+   */
+  source: MediaSource | null;
   /** What a person said about this one afterwards (§6.2); searched. */
   notes: string | null;
   params: Record<string, unknown>;
@@ -311,9 +317,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
     `INSERT INTO outputs (id, job_id, path, sidecar_path, kind, width, height,
                           duration_ms, sha256, workflow_id, workflow_hash,
                           family, prompt, tone, origin_source, origin_project,
-                          origin_note, notes, params_json, deleted_at,
-                          created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          origin_note, source_json, notes, params_json,
+                          deleted_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -332,6 +338,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
     output.origin?.source ?? null,
     output.origin?.project ?? null,
     output.origin?.note ?? null,
+    output.source === null || output.source === undefined
+      ? null
+      : JSON.stringify(output.source),
     output.notes,
     JSON.stringify(output.params),
     output.deleted_at,
@@ -376,7 +385,7 @@ export function normalizeModelHash(hash: string): string {
 
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
   duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
-  origin_source, origin_project, origin_note, notes,
+  origin_source, origin_project, origin_note, source_json, notes,
   params_json, deleted_at, created_at`;
 
 type OutputRecord = [
@@ -388,6 +397,7 @@ type OutputRecord = [
   number | null,
   number | null,
   number | null,
+  string | null,
   string | null,
   string | null,
   string | null,
@@ -420,10 +430,11 @@ function toOutput(record: OutputRecord): OutputRow {
     prompt: record[12],
     tone: record[13],
     origin: toOrigin(record[14], record[15], record[16]),
-    notes: record[17],
-    params: parse<Record<string, unknown>>(record[18], {}),
-    deleted_at: record[19],
-    created_at: record[20],
+    source: parse<MediaSource | null>(record[17], null),
+    notes: record[18],
+    params: parse<Record<string, unknown>>(record[19], {}),
+    deleted_at: record[20],
+    created_at: record[21],
   };
 }
 
@@ -822,6 +833,14 @@ export interface ModelRow {
   /** The ends of this model's strength sliders; null means the default. */
   strength_min: number | null;
   strength_max: number | null;
+  /**
+   * What this model wants in a prompt (DESIGN-MODEL-IMPORT §5.5). The one
+   * part of an import the app *acts* on rather than displays, which is why
+   * it is a column and the rest of the record is not.
+   */
+  trigger_words: string[];
+  /** The §5.5 source record, or null where nobody has fetched one. */
+  civitai: Record<string, unknown> | null;
   output_count: number;
   last_used_at: number | null;
   /** Kept out of the Generate pickers, but still listed on Models (§8.1). */
@@ -831,6 +850,7 @@ export interface ModelRow {
 
 const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
   notes, tags_json, thumb_path, strength_min, strength_max,
+  trigger_words_json, civitai_json,
   output_count, last_used_at, hidden, last_seen_at`;
 
 type ModelRecord = [
@@ -846,6 +866,8 @@ type ModelRecord = [
   string | null,
   number | null,
   number | null,
+  string | null,
+  string | null,
   number,
   number | null,
   number,
@@ -866,10 +888,12 @@ function toModel(record: ModelRecord): ModelRow {
     thumb_path: record[9],
     strength_min: record[10],
     strength_max: record[11],
-    output_count: record[12],
-    last_used_at: record[13],
-    hidden: record[14] !== 0,
-    last_seen_at: record[15],
+    trigger_words: parse<string[]>(record[12], []),
+    civitai: parse<Record<string, unknown> | null>(record[13], null),
+    output_count: record[14],
+    last_used_at: record[15],
+    hidden: record[16] !== 0,
+    last_seen_at: record[17],
   };
 }
 
@@ -1015,6 +1039,9 @@ export interface ModelMetaPatch {
   strength_max?: number | null;
   /** Kept out of the Generate pickers; still listed on Models (§8.1). */
   hidden?: boolean;
+  /** DESIGN-MODEL-IMPORT §5.5; written by ingest, not by the model page. */
+  trigger_words?: string[];
+  civitai?: Record<string, unknown> | null;
 }
 
 /** The edit-in-place header of §8.1. Nothing here touches the file. */
@@ -1056,6 +1083,14 @@ export function updateModelMeta(
   if (patch.strength_max !== undefined) {
     sets.push("strength_max = ?");
     values.push(patch.strength_max);
+  }
+  if (patch.trigger_words !== undefined) {
+    sets.push("trigger_words_json = ?");
+    values.push(JSON.stringify(patch.trigger_words));
+  }
+  if (patch.civitai !== undefined) {
+    sets.push("civitai_json = ?");
+    values.push(patch.civitai === null ? null : JSON.stringify(patch.civitai));
   }
   if (sets.length === 0) return false;
   return db.prepare(`UPDATE models SET ${sets.join(", ")} WHERE hash = ?`)
@@ -1119,13 +1154,28 @@ export interface SampleRow {
   sidecar_path: string;
   kind: string;
   source_url: string | null;
+  /**
+   * Where it came from when this app did not make it
+   * (DESIGN-MODEL-IMPORT §5.4), derived from the sidecar's `source` block.
+   * Null on a promotion, and on every sample written before this existed.
+   */
+  source: MediaSource | null;
   params: Record<string, unknown> | null;
   created_at: number;
 }
 
+/** The §5.4 provenance block, as the API hands it out. */
+export interface MediaSource {
+  kind: string;
+  label: string;
+  url: string | null;
+  imported_at: string | null;
+  [unknownField: string]: unknown;
+}
+
 const SAMPLE_COLUMNS =
-  `id, model_hash, path, sidecar_path, kind, source_url, params_json,
-  created_at`;
+  `id, model_hash, path, sidecar_path, kind, source_url, source_json,
+  params_json, created_at`;
 
 type SampleRecord = [
   string,
@@ -1133,6 +1183,7 @@ type SampleRecord = [
   string,
   string,
   string,
+  string | null,
   string | null,
   string | null,
   number,
@@ -1146,18 +1197,19 @@ function toSample(record: SampleRecord): SampleRow {
     sidecar_path: record[3],
     kind: record[4],
     source_url: record[5],
-    params: record[6] === null
+    source: parse<MediaSource | null>(record[6], null),
+    params: record[7] === null
       ? null
-      : parse<Record<string, unknown>>(record[6], {}),
-    created_at: record[7],
+      : parse<Record<string, unknown>>(record[7], {}),
+    created_at: record[8],
   };
 }
 
 export function insertSample(db: Database, sample: SampleRow): void {
   db.prepare(
     `INSERT INTO samples (id, model_hash, path, sidecar_path, kind,
-                          source_url, params_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                          source_url, source_json, params_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     sample.id,
     sample.model_hash,
@@ -1165,9 +1217,25 @@ export function insertSample(db: Database, sample: SampleRow): void {
     sample.sidecar_path,
     sample.kind,
     sample.source_url,
+    sample.source === null ? null : JSON.stringify(sample.source),
     sample.params === null ? null : JSON.stringify(sample.params),
     sample.created_at,
   );
+}
+
+/**
+ * True when this model already has a sample from that URL. The partial unique
+ * index makes a second insert an error; asking first makes it a skip, which
+ * is what re-running `forge models` should be (§7.2).
+ */
+export function sampleSourceExists(
+  db: Database,
+  modelHash: string,
+  sourceUrl: string,
+): boolean {
+  return db.prepare(
+    `SELECT 1 FROM samples WHERE model_hash = ? AND source_url = ?`,
+  ).value<[number]>(modelHash, sourceUrl) !== undefined;
 }
 
 export function getSample(db: Database, id: string): SampleRow | null {
