@@ -188,9 +188,20 @@ export interface ImportConfig {
   /** The fallback, and the only source for models Civitai has deleted. */
   archive_url: string;
   /**
-   * How to invoke the official Civitai CLI, which owns credentials and
-   * `--download-model`. A bare name is looked up on PATH; null disables
-   * downloads and leaves lookups working.
+   * A Civitai API key, from civitai.com/user/account. Sent as a Bearer
+   * header to Civitai only — never to the archive or the image CDN — and
+   * only needed for gated, early-access or paid models; everything public
+   * works without it. `CIVITAI_TOKEN` in the environment wins over this.
+   *
+   * Stored in plaintext in `config.yaml`: keeping it anywhere safer is out of
+   * scope for now. It is never served by `GET /api/config`.
+   */
+  civitai_token: string | null;
+  /**
+   * The official Civitai CLI, used for `--download-model` only when it is
+   * installed *and* no token is configured — so a token given to ForgeUI is
+   * never silently traded for the CLI's own login. A bare name is looked up
+   * on PATH; null never uses it.
    */
   civitai_cli: string | null;
   /** What `--download-samples` means with no number after it. */

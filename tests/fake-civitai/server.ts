@@ -41,6 +41,11 @@ export interface FakeCivitaiOptions {
 export interface RecordedRequest {
   path: string;
   params: Record<string, string>;
+  /**
+   * The `authorization` header, or null. Recorded so a test can assert where
+   * a Civitai key went — and, more to the point, where it did not.
+   */
+  authorization: string | null;
 }
 
 export interface FakeCivitai {
@@ -77,6 +82,7 @@ export function startFakeCivitai(
     requests.push({
       path: url.pathname,
       params: Object.fromEntries(url.searchParams),
+      authorization: request.headers.get("authorization"),
     });
     const parts = url.pathname.split("/").filter((part) => part.length > 0);
 

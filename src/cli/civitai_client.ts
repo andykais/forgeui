@@ -65,6 +65,11 @@ export interface CivitaiClientOptions {
   archiveUrl: string;
   browsingLevel: number;
   timeoutMs: number;
+  /**
+   * A Civitai API key. Sent to Civitai and to nothing else — not the archive,
+   * which is a different service, and not the image CDN, which is public.
+   */
+  token?: string | null;
   /** Injected by the tests, which point it at a local fake (§10). */
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
@@ -80,6 +85,14 @@ export class CivitaiClient {
   #timeoutMs: number;
   #fetch: typeof globalThis.fetch;
   #now: () => Date;
+  #token: string | null;
+  /**
+   * The URLs this client built for Civitai, which are the only ones the token
+   * goes to. Decided by who built the URL rather than by comparing hosts,
+   * because the hosts are configuration: point both at one server and a host
+   * check would happily hand a Civitai key to the archive.
+   */
+  #forCivitai = new Set<string>();
 
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
@@ -88,6 +101,7 @@ export class CivitaiClient {
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
+    this.#token = options.token ?? null;
   }
 
   get civitaiUrl(): string {
@@ -115,7 +129,7 @@ export class CivitaiClient {
       // A hash lookup needs no visibility parameter: it answers for what it
       // is given (§4.0).
       const version = await this.#json(
-        this.#url(
+        this.#civitaiUrl(
           this.#civitai,
           `/api/v1/model-versions/by-hash/${normalized}`,
           "by-hash",
@@ -124,7 +138,11 @@ export class CivitaiClient {
       if (version !== null) {
         const modelId = (version as { modelId?: number }).modelId;
         const model = modelId === undefined ? null : await this.#json(
-          this.#url(this.#civitai, `/api/v1/models/${modelId}`, "models"),
+          this.#civitaiUrl(
+            this.#civitai,
+            `/api/v1/models/${modelId}`,
+            "models",
+          ),
         );
         return sourceRecordFromCivitai({
           model: (model ?? { id: modelId ?? null }) as Record<string, unknown>,
@@ -155,7 +173,7 @@ export class CivitaiClient {
   ): Promise<LookupResult> {
     if (source !== "archive") {
       const model = await this.#json(
-        this.#url(this.#civitai, `/api/v1/models/${modelId}`, "models"),
+        this.#civitaiUrl(this.#civitai, `/api/v1/models/${modelId}`, "models"),
       );
       if (model !== null) {
         const record = model as Record<string, unknown>;
@@ -192,7 +210,7 @@ export class CivitaiClient {
   ): Promise<LookupResult> {
     if (source !== "archive") {
       const version = await this.#json(
-        this.#url(
+        this.#civitaiUrl(
           this.#civitai,
           `/api/v1/model-versions/${versionId}`,
           "by-hash",
@@ -216,7 +234,7 @@ export class CivitaiClient {
     source: LookupSource = "auto",
   ): Promise<LookupResult> {
     const images = await this.#json(
-      this.#url(this.#civitai, "/api/v1/images", "images", {
+      this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
         imageId: String(imageId),
         limit: "1",
       }),
@@ -311,7 +329,7 @@ export class CivitaiClient {
    */
   async search(query: string): Promise<Candidate[]> {
     const body = await this.#json(
-      this.#url(this.#civitai, "/api/v1/models", "models", {
+      this.#civitaiUrl(this.#civitai, "/api/v1/models", "models", {
         query,
         limit: "20",
       }),
@@ -455,7 +473,7 @@ export class CivitaiClient {
     limit: number,
   ): Promise<Record<string, unknown>[]> {
     const body = await this.#json(
-      this.#url(this.#civitai, "/api/v1/images", "images", {
+      this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
         modelVersionId: String(versionId),
         limit: String(Math.min(Math.max(limit, 1), 200)),
         sort: "Newest",
@@ -477,7 +495,7 @@ export class CivitaiClient {
 
   // ------------------------------------------------------------ plumbing
 
-  #url(
+  #civitaiUrl(
     base: string,
     path: string,
     endpoint: CivitaiEndpoint,
@@ -492,7 +510,9 @@ export class CivitaiClient {
     ) {
       url.searchParams.set(key, value);
     }
-    return url.toString();
+    const built = url.toString();
+    this.#forCivitai.add(built);
+    return built;
   }
 
   /** A 404 is an answer — "not here" — and every other failure is an error. */
@@ -523,11 +543,14 @@ export class CivitaiClient {
 
   async #request(url: string): Promise<Response> {
     const signal = AbortSignal.timeout(this.#timeoutMs);
+    const headers: Record<string, string> = { accept: "application/json" };
+    // A header rather than `?token=`: a query parameter would land in every
+    // error message that prints the URL, and several here do.
+    if (this.#token !== null && this.#forCivitai.has(url)) {
+      headers.authorization = `Bearer ${this.#token}`;
+    }
     try {
-      return await this.#fetch(url, {
-        signal,
-        headers: { accept: "application/json" },
-      });
+      return await this.#fetch(url, { signal, headers });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "TimeoutError") {
         throw new LookupError(`GET ${url} timed out`);

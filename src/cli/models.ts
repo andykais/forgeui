@@ -96,6 +96,8 @@ export function requireOneIdentifier(options: ModelsCommandOptions): void {
 export interface RunModelsOptions extends ModelsCommandOptions {
   config: Config;
   paths: DataPaths;
+  /** Where `CIVITAI_TOKEN` is read from; the tests pass their own. */
+  env?: { get(key: string): string | undefined };
   client?: CivitaiClient;
   log?: (line: string) => void;
 }
@@ -106,11 +108,13 @@ export async function runModels(
   requireOneIdentifier(options);
   const settings = options.config.import;
   const say = options.log ?? ((line: string) => console.log(line));
+  const token = civitaiToken(options.config, options.env);
   const client = options.client ?? new CivitaiClient({
     civitaiUrl: settings.civitai_url,
     archiveUrl: settings.archive_url,
     browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
+    token,
   });
 
   // Discovery writes nothing: it is how you find the URL the other flags
@@ -202,6 +206,7 @@ export async function runModels(
         found,
         staging,
         cli: settings.civitai_cli,
+        token,
         timeoutMs: options.timeoutMs,
         say,
       });
@@ -245,6 +250,21 @@ export async function runModels(
     }
   }
   return result;
+}
+
+/**
+ * The Civitai key: `CIVITAI_TOKEN` first, then `import.civitai_token`. The
+ * environment wins, as it does for every tool that reads both — it is how you
+ * use a different key for one run without editing a file.
+ */
+export function civitaiToken(
+  config: Config,
+  env: { get(key: string): string | undefined } = Deno.env,
+): string | null {
+  const fromEnv = env.get("CIVITAI_TOKEN")?.trim();
+  if (fromEnv) return fromEnv;
+  const fromConfig = config.import.civitai_token?.trim();
+  return fromConfig ? fromConfig : null;
 }
 
 // ------------------------------------------------------------------ lookup
@@ -491,10 +511,11 @@ async function fetchWeights(input: {
   found: LookupResult;
   staging: string;
   cli: string | null;
+  token: string | null;
   timeoutMs: number;
   say: (line: string) => void;
 }): Promise<ImportFile[]> {
-  const { found, staging, cli, say } = input;
+  const { found, staging, cli, token, say } = input;
   const into = join(staging, "model");
   await Deno.mkdir(into, { recursive: true });
 
@@ -502,7 +523,10 @@ async function fetchWeights(input: {
   // paid models a plain GET cannot — and a direct download otherwise, which
   // is the common case and must not need a separate install.
   const versionId = found.record.source.model_version_id;
-  if (cli !== null && await onPath(cli)) {
+  // A token given to ForgeUI wins. The CLI keeps its own login somewhere else
+  // entirely, and preferring it whenever it happened to be installed would
+  // quietly ignore the key in `config.yaml` — the one thing the person set.
+  if (token === null && cli !== null && await onPath(cli)) {
     if (versionId === null) {
       throw new LookupError(
         `${cli} downloads by model version id, and this lookup found none`,
@@ -528,7 +552,7 @@ async function fetchWeights(input: {
       url: primary.download_url!,
       into,
       fallbackName: primary.name,
-      token: Deno.env.get("CIVITAI_TOKEN") ?? null,
+      token,
       timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
       say,
     });

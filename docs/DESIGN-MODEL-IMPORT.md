@@ -277,14 +277,16 @@ Examples:
 AUTH
 
   Lookups, sample images and public model downloads all work anonymously.
-  A gated or paid model needs an account:
+  A gated or paid model needs a key from civitai.com/user/account:
 
-      export CIVITAI_TOKEN=<key>    a personal key from civitai.com/user/account
-      civitai login                 or the official CLI's own device login,
-                                    used automatically when it is installed
+      import:
+        civitai_token: "<key>"      in config.yaml, in plaintext — quoted,
+                                    or YAML may read an all-digit key as a
+                                    number
+      export CIVITAI_TOKEN=<key>    or the environment, which wins
 
-  ForgeUI stores no credential of its own and writes none into config.yaml,
-  the import folder or any sidecar.
+  The key is sent to Civitai only, and never served by GET /api/config. It is
+  never written into the import folder or any sidecar.
 
 EXIT CODES
 
@@ -417,7 +419,7 @@ mature ones, so lookups go to the API directly:
 | lookups, image lists, `by-hash` | `civitai.red/api/v1/*` directly, with `browsingLevel` |
 | deleted models | `civitaiarchive.com/api/*` |
 | `--download-model` | a direct streaming GET; the official CLI when installed |
-| credentials | `CIVITAI_TOKEN`, or the CLI's own login when it is there |
+| credentials | `import.civitai_token` or `CIVITAI_TOKEN`; the CLI's login only when neither is set |
 
 If it grows a `--browsing-level` flag, the lookups can move back behind it;
 the normalising layer of §4.2 is what makes that a one-file change.
@@ -437,15 +439,52 @@ A public model answers an anonymous GET with a redirect to a signed URL. The
 official CLI is a separate install almost nobody has — requiring it made
 `--download-model` fail out of the box on any machine without it, which is the
 one thing that flag must not do. So the download is a streaming `fetch` that
-hashes as it writes, `CIVITAI_TOKEN` is sent when the environment has one, and
-the official CLI is used when it is installed and configured, because it does
-handle the gated and paid models a plain GET cannot.
+hashes as it writes.
 
-One caveat to carry into implementation: the download endpoints are
-`civitai.com`'s, and there are reports of API tokens not authenticating
-against `civitai.red/api/`. `--download-model` therefore stays on `.com` via
-the CLI, which is where the token is known to work. Lookup and download
-talking to different hosts is fine — they are the same database.
+**Credentials live in `config.yaml`, and that retires the CLI's last job.**
+Civitai documents API auth as a plain `Authorization: Bearer <key>` header, so
+a gated model needs a key, not a program. `import.civitai_token` holds one (and
+`CIVITAI_TOKEN` overrides it for a run). It is sent as a header rather than
+`?token=`, because a query parameter would land in every error message that
+prints a URL. Measured before relying on it: an unrecognised key is *ignored*
+by every public endpoint rather than rejected —
+
+```
+/api/v1/models/4384             anon=200  bad-token=200
+/api/v1/model-versions/by-hash  anon=200  bad-token=200
+/api/download/models/9208       anon=307  bad-token=307
+```
+
+— so sending a configured key on every Civitai request cannot break a lookup
+that would have worked without it.
+
+Three rules, each with a test that fails when the rule is removed:
+
+- **The key goes to Civitai and nothing else.** Not the archive, which is a
+  different service, and not the image CDN, which is public. The decision is
+  made by *which builder produced the URL*, not by comparing hosts: the hosts
+  are configuration, and pointing both at one server would make a host check
+  hand a Civitai key to the archive — which is exactly the test setup, and so
+  exactly what a host check could never catch.
+- **It is never served by `GET /api/config`.** Storing it safely on disk is out
+  of scope; not handing it to every HTTP client that can reach the port — the
+  browser, the MCP bridge an LLM drives, a published container port — is a
+  different problem and is not. A set key reads as `(hidden)`, and a `PATCH`
+  that echoes the marker back is dropped rather than stored.
+- **A configured key wins over an installed CLI.** The CLI keeps its own login
+  somewhere else entirely, and preferring it whenever it happened to be on
+  `PATH` would silently ignore the key the person set. It is used only when no
+  key is configured at all.
+
+**Why `@civitai/cli` is not a dependency.** It was proposed, and it is an npm
+package, but not a JavaScript one: its `postinstall` downloads a prebuilt Go
+binary from GitHub Releases, and `bin/civitai.js` execs it. Under Deno's
+`npm:` specifier that script does not run by default, so it would fetch an
+executable lazily on first use; `deno compile` could not bundle it into
+`forge`; and it would pin us to its platform matrix. What it would have bought
+is the auth a Bearer header already provides. If device login — `civitai
+login` in a browser rather than pasting a key — becomes worth having, that is
+the case for revisiting this.
 
 ### 4.1 Resolving the identifier
 
@@ -1124,9 +1163,16 @@ import:
   # The fallback, and the only source for models Civitai has deleted.
   archive_url: https://civitaiarchive.com
 
-  # How to invoke the official Civitai CLI, which owns credentials and
-  # --download-model. A bare name is looked up on PATH; null disables
-  # downloads and leaves lookups working.
+  # A Civitai API key from civitai.com/user/account. Needed only for gated,
+  # early-access or paid models; everything public works without it. Sent as
+  # a Bearer header to Civitai and nothing else — never the archive, never the
+  # image CDN. Plaintext, and never served by GET /api/config.
+  # CIVITAI_TOKEN in the environment wins over this.
+  civitai_token: null
+
+  # The official CLI, used for --download-model only when it is installed AND
+  # no token is set above — so a key given to ForgeUI is never silently
+  # traded for the CLI's own separate login. null never uses it.
   civitai_cli: civitai
 
   # What --download-samples means with no number after it.

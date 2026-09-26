@@ -206,3 +206,56 @@ Deno.test("unknown routes and methods answer in JSON", async () => {
     await wrongMethod.body?.cancel();
   });
 });
+
+/**
+ * `import.civitai_token` is a credential (DESIGN-MODEL-IMPORT §8). Storing it
+ * safely on disk is out of scope; not handing it to every HTTP client that
+ * can reach this port — the browser, the MCP bridge, a published container
+ * port — is not.
+ */
+Deno.test("the Civitai token is never served by /api/config", async () => {
+  await withTestApp(async (app) => {
+    const secret = "0123456789abcdef0123456789abcdef";
+    const patched = await app.json<Config>("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ import: { civitai_token: secret } }),
+    });
+    // Not in the PATCH echo…
+    assertEquals(patched.import.civitai_token, "(hidden)");
+    // …not in a GET…
+    const read = await app.json<Config>("/api/config");
+    assertEquals(read.import.civitai_token, "(hidden)");
+    // …and not anywhere in the raw body, however it might be nested.
+    const raw = await (await app.fetch("/api/config")).text();
+    assert(!raw.includes(secret), "the token leaked into GET /api/config");
+
+    // But it is really there, where the CLI reads it.
+    assertEquals(app.config.config.import.civitai_token, secret);
+    assertStringIncludes(await Deno.readTextFile(app.paths.configFile), secret);
+  });
+});
+
+Deno.test("echoing the redacted config back does not clobber the token", async () => {
+  await withTestApp(async (app) => {
+    const secret = "fedcba9876543210fedcba9876543210";
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ import: { civitai_token: secret } }),
+    });
+    // A client that round-trips what it was given sends the marker back.
+    const read = await app.json<Config>("/api/config");
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ import: read.import }),
+    });
+    assertEquals(app.config.config.import.civitai_token, secret);
+  });
+});
+
+Deno.test("an unset token reads as null, not as hidden", async () => {
+  await withTestApp(async (app) => {
+    // The marker means "one is set"; showing it when none is would lie.
+    const read = await app.json<Config>("/api/config");
+    assertEquals(read.import.civitai_token, null);
+  });
+});

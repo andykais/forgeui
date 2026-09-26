@@ -52,6 +52,24 @@ function port(value: unknown, where: string): number {
   return value;
 }
 
+/**
+ * A credential, typed by hand into YAML — where an unquoted all-digit value,
+ * or one shaped like `1e10`, is a *number*. Coercing it back would be worse
+ * than refusing it: leading zeros and precision go, and the key is silently
+ * corrupted. So refuse, and say how to fix it.
+ */
+function token(value: unknown, where: string): string | null {
+  if (value === null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "bigint") {
+    throw new ConfigError(
+      `${where}: YAML read this key as a number, which would lose digits. ` +
+        `Put it in quotes: civitai_token: "<your key>"`,
+    );
+  }
+  fail(where, "a string");
+}
+
 function count(value: unknown, where: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     fail(where, "a whole number, zero or more");
@@ -201,6 +219,7 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
     "civitai_url",
     "browsing_level",
     "archive_url",
+    "civitai_token",
     "civitai_cli",
     "samples",
     "nsfw_level",
@@ -212,6 +231,7 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
   pick(raw, "civitai_url", out, str, where);
   pick(raw, "browsing_level", out, count, where);
   pick(raw, "archive_url", out, str, where);
+  pick(raw, "civitai_token", out, token, where);
   pick(raw, "civitai_cli", out, nullableStr, where);
   pick(raw, "samples", out, count, where);
   pick(raw, "nsfw_level", out, count, where);

@@ -12,7 +12,12 @@ import { effectiveConfig } from "../../src/config/config.ts";
 import { dataPaths, ensureDataDirs } from "../../src/config/paths.ts";
 import { sha256Hex } from "../../src/workflows/hash.ts";
 import { CivitaiClient } from "../../src/cli/civitai_client.ts";
-import { LookupError, runModels, UsageError } from "../../src/cli/models.ts";
+import {
+  civitaiToken,
+  LookupError,
+  runModels,
+  UsageError,
+} from "../../src/cli/models.ts";
 import type { ImportBatch } from "../../src/models/import.ts";
 
 /**
@@ -740,5 +745,169 @@ Deno.test("a hash the archive only mirrors says there is nothing to import", asy
     );
     assertStringIncludes(error.message, "huggingface");
     assertStringIncludes(error.message, "no model page");
+  }, { noLocalFile: true });
+});
+
+/**
+ * The Civitai key (DESIGN-MODEL-IMPORT §8). It is a credential, so the tests
+ * are mostly about where it must *not* go.
+ */
+
+const TOKEN = "0123456789abcdef0123456789abcdef";
+
+function withToken(
+  h: Harness,
+  token: string | null = TOKEN,
+): { config: Harness["config"]; client: CivitaiClient } {
+  const config = {
+    ...h.config,
+    import: { ...h.config.import, civitai_token: token, civitai_cli: null },
+  };
+  // Built the way `runModels` builds it, so the token takes the same road.
+  const client = new CivitaiClient({
+    civitaiUrl: h.fake.url,
+    archiveUrl: h.fake.url,
+    browsingLevel: config.import.browsing_level,
+    timeoutMs: 5000,
+    token: civitaiToken(config, { get: () => undefined }),
+    now: () => new Date("2026-09-25T10:00:00Z"),
+  });
+  return { config, client };
+}
+
+Deno.test("the token goes to Civitai and never to the archive", async () => {
+  await withCli(async (h) => {
+    const { config, client } = withToken(h);
+    await runModels({
+      ...base,
+      filename: FILENAME,
+      source: "auto",
+      config,
+      paths: h.paths,
+      client,
+      log: () => {},
+    }).catch(() => {});
+
+    const toCivitai = h.fake.requests.filter((r) =>
+      r.path.startsWith("/api/v1/")
+    );
+    assert(toCivitai.length > 0, "Civitai should have been asked");
+    for (const request of toCivitai) {
+      assertEquals(request.authorization, `Bearer ${TOKEN}`, request.path);
+    }
+  });
+
+  // Forced down the archive road, which is a different service and must
+  // never see a Civitai key — both fakes are one server here, which is
+  // exactly the case a host comparison would get wrong.
+  await withCli(async (h) => {
+    const { config, client } = withToken(h);
+    await runModels({
+      ...base,
+      filename: FILENAME,
+      source: "archive",
+      config,
+      paths: h.paths,
+      client,
+      log: () => {},
+    }).catch(() => {});
+    const toArchive = h.fake.requests.filter((r) =>
+      r.path.startsWith("/api/search") || r.path.startsWith("/api/sha256") ||
+      (r.path.startsWith("/api/models/") && !r.path.startsWith("/api/v1/"))
+    );
+    assert(toArchive.length > 0, "the archive should have been asked");
+    for (const request of toArchive) {
+      assertEquals(request.authorization, null, request.path);
+    }
+  });
+});
+
+Deno.test("sample images are fetched without the token", async () => {
+  await withCli(async (h) => {
+    const { config, client } = withToken(h);
+    await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 2,
+      config,
+      paths: h.paths,
+      client,
+      log: () => {},
+    });
+    const images = h.fake.matching("/img/");
+    assert(images.length > 0);
+    // The CDN is public; nothing about it needs a key.
+    for (const request of images) assertEquals(request.authorization, null);
+  });
+});
+
+Deno.test("the token is sent with the model download", async () => {
+  await withCli(async (h) => {
+    const { config, client } = withToken(h);
+    await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      downloadModel: true,
+      config,
+      paths: h.paths,
+      client,
+      log: () => {},
+    });
+    const [download] = h.fake.matching("/api/download/");
+    assertEquals(download?.authorization, `Bearer ${TOKEN}`);
+  }, { noLocalFile: true });
+});
+
+Deno.test("CIVITAI_TOKEN wins over config.yaml", () => {
+  const config = {
+    import: { civitai_token: "from-config" },
+  } as unknown as Parameters<typeof civitaiToken>[0];
+  assertEquals(civitaiToken(config, { get: () => "from-env" }), "from-env");
+  assertEquals(civitaiToken(config, { get: () => undefined }), "from-config");
+  // Blank means unset, in either place.
+  assertEquals(civitaiToken(config, { get: () => "  " }), "from-config");
+  const none = { import: { civitai_token: "" } } as unknown as Parameters<
+    typeof civitaiToken
+  >[0];
+  assertEquals(civitaiToken(none, { get: () => undefined }), null);
+});
+
+Deno.test("a configured token wins over an installed civitai CLI", async () => {
+  await withCli(async (h) => {
+    // A stand-in `civitai` that answers --version, and records any attempt
+    // to download. With a token configured it must never be asked: it keeps
+    // its own login, and using it would silently ignore the key you set.
+    const bin = await Deno.makeTempDir({ prefix: "forgeui-fake-civitai-cli-" });
+    const marker = join(bin, "was-called");
+    const script = join(bin, "civitai");
+    await Deno.writeTextFile(
+      script,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then exit 0; fi\ntouch "${marker}"\nexit 1\n`,
+    );
+    await Deno.chmod(script, 0o755);
+    try {
+      const config = {
+        ...h.config,
+        import: {
+          ...h.config.import,
+          civitai_token: TOKEN,
+          civitai_cli: script,
+        },
+      };
+      await runModels({
+        ...base,
+        sha256checksum: h.hash,
+        downloadModel: true,
+        config,
+        paths: h.paths,
+        client: h.client,
+        env: { get: () => undefined },
+        log: () => {},
+      });
+      await assertRejects(() => Deno.stat(marker), Deno.errors.NotFound);
+      assert(h.fake.matching("/api/download/").length > 0);
+    } finally {
+      await Deno.remove(bin, { recursive: true });
+    }
   }, { noLocalFile: true });
 });

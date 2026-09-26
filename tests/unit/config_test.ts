@@ -264,6 +264,28 @@ Deno.test("the import block defaults, and what a layer may override", () => {
   assertEquals(layered.import.ingest_on_boot, true);
 });
 
+Deno.test("a key YAML read as a number is refused, not corrupted", () => {
+  // Unquoted, an all-digit key is a YAML number. Coercing it back would drop
+  // leading zeros and precision and silently corrupt the credential, so the
+  // only safe answer is to refuse it and say how to write it.
+  assertThrows(
+    () => validatePartialConfig({ import: { civitai_token: 12345678 } }),
+    ConfigError,
+    "Put it in quotes",
+  );
+  // The same value, quoted, is fine — and so is an ordinary hex key.
+  assertEquals(
+    validatePartialConfig({ import: { civitai_token: "0000123" } }).import
+      ?.civitai_token,
+    "0000123",
+  );
+  assertEquals(
+    validatePartialConfig({ import: { civitai_token: null } }).import
+      ?.civitai_token,
+    null,
+  );
+});
+
 Deno.test("import.dir and import.model_dir move the folders", () => {
   const under = dataPaths("/data");
   assertEquals(under.imports, "/data/import");

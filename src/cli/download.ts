@@ -75,9 +75,13 @@ export async function downloadFile(
   if (response.status === 401 || response.status === 403) {
     await response.body?.cancel();
     throw new DownloadError(
-      `${options.url} needs an account (${response.status}). Set CIVITAI_TOKEN ` +
-        `to a key from civitai.com/user/account, or install the official CLI ` +
-        `and run \`civitai login\`.`,
+      `${options.url} needs an account (${response.status}). Put a key from ` +
+        `civitai.com/user/account in config.yaml as import.civitai_token, or ` +
+        `set CIVITAI_TOKEN.${
+          options.token
+            ? " A key was sent and refused, so check that it is current."
+            : ""
+        }`,
     );
   }
   if (!response.ok || response.body === null) {

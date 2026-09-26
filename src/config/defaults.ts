@@ -136,6 +136,7 @@ export function defaultConfig(): Config {
       // the disk (DESIGN-MODEL-IMPORT §8).
       browsing_level: 31,
       archive_url: DEFAULT_ARCHIVE_URL,
+      civitai_token: null,
       civitai_cli: "civitai",
       samples: 4,
       nsfw_level: 1,
