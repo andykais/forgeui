@@ -1,6 +1,7 @@
 import { contentType } from "@std/media-types";
 import { extname, join, normalize, resolve } from "@std/path";
 import type { DataPaths } from "../config/paths.ts";
+import { MAX_EDGE, MIN_EDGE, resizeMedia } from "../media/resize.ts";
 
 /**
  * `GET /api/media/*` (§12) serves the three directories that hold media, and
@@ -12,6 +13,27 @@ const SERVABLE = ["outputs", "inputs", "samples"] as const;
 
 export class MediaPathError extends Error {
   override readonly name = "MediaPathError";
+}
+
+/** A `?max_edge=` that is not a size this route will make. */
+export class MediaParamError extends Error {
+  override readonly name = "MediaParamError";
+}
+
+/**
+ * `?max_edge=`, if the request carries one: null when absent, and a refusal
+ * rather than a guess when it is not a whole number of pixels in range.
+ */
+export function maxEdgeOf(url: URL): number | null {
+  const raw = url.searchParams.get("max_edge");
+  if (raw === null) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < MIN_EDGE || value > MAX_EDGE) {
+    throw new MediaParamError(
+      `max_edge must be a whole number from ${MIN_EDGE} to ${MAX_EDGE}`,
+    );
+  }
+  return value;
 }
 
 /** `outputs/2026/09/05/01J-0.png` → an absolute path inside `<appdata>`. */
@@ -72,10 +94,33 @@ export async function serveMedia(
   }
   if (!stat.isFile) return new Response("not found", { status: 404 });
 
+  const type = contentType(extname(path)) ?? "application/octet-stream";
+  const maxEdge = maxEdgeOf(new URL(req.url));
+  // Pictures and video only: a clip of sound has no edge to be long, so it
+  // is served as it is rather than refused — asking for a preview of every
+  // output should not need to know which ones are audio.
+  if (
+    maxEdge !== null &&
+    (type.startsWith("image/") || type.startsWith("video/"))
+  ) {
+    const resized = await resizeMedia(
+      path,
+      type.startsWith("image/") ? "image" : "video",
+      maxEdge,
+    );
+    return new Response(req.method === "HEAD" ? null : resized.bytes, {
+      headers: {
+        "content-type": resized.contentType,
+        "content-length": String(resized.bytes.length),
+        "cache-control": "private, max-age=31536000, immutable",
+      },
+    });
+  }
+
   const modified = stat.mtime ?? new Date(0);
   const etag = `"${stat.size.toString(16)}-${modified.getTime().toString(16)}"`;
   const headers = new Headers({
-    "content-type": contentType(extname(path)) ?? "application/octet-stream",
+    "content-type": type,
     "accept-ranges": "bytes",
     "last-modified": modified.toUTCString(),
     etag,

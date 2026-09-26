@@ -54,6 +54,24 @@ export interface OutputRef {
   duration_ms?: number | null;
 }
 
+/** An output's bytes, and the row they belong to. */
+export interface MediaBytes {
+  bytes: Uint8Array;
+  mimeType: string;
+  /** False when this is the file itself, including when a preview was asked
+   * for and ForgeUI could not make one. */
+  resized: boolean;
+  output: {
+    id?: string;
+    kind?: string;
+    path?: string;
+    media_url?: string;
+    width?: number | null;
+    height?: number | null;
+    duration_ms?: number | null;
+  };
+}
+
 /** What `POST /api/inputs` gives back: media in the store, ready to bind. */
 export interface StoredInputView {
   sha256: string;
@@ -217,30 +235,55 @@ export class ForgeUi {
   }
 
   /**
-   * The media bytes for an output, for `get_output_image` (§5.1).
+   * The media bytes for an output (§5.1): the file itself for
+   * `get_output_file`, or with `maxEdge` the smaller copy `get_output_preview`
+   * shows (§6.3).
    *
    * Via the output's own `media_url` rather than a path built here: §12 serves
    * everything from `/api/media/<path>`, and the row is what knows the path.
    * Guessing a URL shape worked until it did not, which is what the
    * integration test now pins.
+   *
+   * A ForgeUI with no ffmpeg cannot make the smaller copy and says so with a
+   * 503; that comes back as the full file with `resized: false`, so the
+   * caller can say what it is handing over rather than fail.
    */
-  async media(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  async media(
+    id: string,
+    options: { maxEdge?: number } = {},
+  ): Promise<MediaBytes> {
     const output = await this.get(
       `/api/outputs/${encodeURIComponent(id)}`,
-    ) as { media_url?: string };
+    ) as MediaBytes["output"];
     if (!output.media_url) {
       throw new ForgeUiError(`output ${id} has no media`);
     }
-    const response = await this.#fetch(`${this.#url}${output.media_url}`);
+    const fetchOnce = (maxEdge?: number) =>
+      this.#fetch(
+        `${this.#url}${output.media_url}` +
+          (maxEdge === undefined ? "" : `?max_edge=${maxEdge}`),
+      );
+    let response = await fetchOnce(options.maxEdge);
+    let resized = options.maxEdge !== undefined;
+    if (resized && response.status === 503) {
+      await response.body?.cancel();
+      response = await fetchOnce();
+      resized = false;
+    }
     if (!response.ok) {
       throw new ForgeUiError(
         `GET ${output.media_url}: ${response.status} ${response.statusText}`,
       );
     }
+    const mimeType = response.headers.get("content-type") ??
+      "application/octet-stream";
     return {
       bytes: new Uint8Array(await response.arrayBuffer()),
-      mimeType: response.headers.get("content-type") ??
-        "application/octet-stream",
+      mimeType,
+      // Audio is served as it is whatever was asked (§12), so only a picture
+      // or a clip that came back a different type was actually made smaller.
+      resized: resized && !mimeType.startsWith("audio/"),
+      output,
     };
   }
 
