@@ -170,7 +170,7 @@ Deno.test("every job failing still ends the round", async () => {
 Deno.test("an output's media is fetched by the url the row carries", async () => {
   // §12 serves media from /api/media/<path>, not from a path under the
   // output. Building the URL here instead of reading `media_url` is what made
-  // `get_output_image` answer 404 the first time it met a real output.
+  // `get_output_image` (now `get_output_preview`) answer 404 the first time it met a real output.
   await withTestApp(async (app) => {
     const forge = new ForgeUi({ url: app.url });
     const result = await runRound({

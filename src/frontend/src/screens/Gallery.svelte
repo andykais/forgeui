@@ -152,12 +152,13 @@
   }
 
   /**
-   * Opening the viewer replaces the grid, so the scroller is unmounted and
-   * its offset goes with it: without this, Esc came back to the top of the
-   * gallery rather than to the row you were looking at (§11.2).
+   * The grid stays mounted under the viewer, so its scroll offset survives
+   * by itself (§11.2). What is left to do on the way back is follow the
+   * viewer when it was walked somewhere else — ← / → through the filmstrip,
+   * or a lineage node — and only then: `scrollIntoView` on the tile you
+   * opened would move a grid that is already where you left it, because a
+   * tile can be on screen and still not be what `nearest` scrolls to.
    */
-  let savedScroll: number | null = null;
-  /** The tile that was opened, and where the viewer ended up. */
   let openedFrom: string | null = null;
   let lastViewed = $state<string | null>(null);
   $effect(() => {
@@ -165,32 +166,17 @@
   });
 
   function select(output: Output | null) {
-    if (output && !selectedId && scroller) {
-      savedScroll = scroller.scrollTop;
-      openedFrom = output.id;
-    }
+    if (output && !selectedId) openedFrom = output.id;
     setQuery({ output: output?.id ?? null });
   }
 
-  /**
-   * Back where you were.
-   *
-   * Only when the viewer was walked somewhere else — ← / → through the
-   * filmstrip, or a lineage node — does the grid go looking for that output
-   * instead: `scrollIntoView` on the tile you opened would undo the restore,
-   * because a tile can be on screen at the offset you left and still not be
-   * what `nearest` scrolls to.
-   */
   $effect(() => {
     const el = scroller;
-    if (!el || selectedId !== null || savedScroll === null) return;
-    const top = savedScroll;
+    if (!el || selectedId !== null || openedFrom === null) return;
     const landOn = lastViewed !== openedFrom ? lastViewed : null;
-    savedScroll = null;
     openedFrom = null;
+    if (!landOn) return;
     untrack(() => {
-      el.scrollTop = top;
-      if (!landOn) return;
       el.querySelector(`[data-output-id="${CSS.escape(landOn)}"]`)?.scrollIntoView({
         block: "nearest",
       });
@@ -379,202 +365,207 @@
       onupscale={upscale}
       onopenoutput={openOutput}
     />
-  {:else}
-    <section class="gallery">
-      <header class="filters">
-        <label class="search">
-          <Search size={13} />
-          <input
-            placeholder="Search prompts…"
-            value={searchDraft}
-            oninput={(event) =>
-              (searchDraft = (event.currentTarget as HTMLInputElement).value)}
-            onkeydown={(event) => {
-              if (event.key === "Enter") setQuery({ q: searchDraft || null });
-              if (event.key === "Escape") {
-                searchDraft = "";
-                setQuery({ q: null });
-              }
-            }}
-            onblur={() => setQuery({ q: searchDraft || null })}
-          />
-        </label>
+  {/if}
+  <!--
+    Always mounted: under an open viewer the grid is hidden, not torn down.
+    Torn down, its scroll offset went with it and had to be saved and put
+    back, and a restore can only ever be as good as the moment it runs in.
+    Hidden, the browser simply keeps it — along with every decoded tile.
+  -->
+  <section class="gallery" class:behind={selected !== null} inert={selected !== null}>
+    <header class="filters">
+      <label class="search">
+        <Search size={13} />
+        <input
+          placeholder="Search prompts…"
+          value={searchDraft}
+          oninput={(event) =>
+            (searchDraft = (event.currentTarget as HTMLInputElement).value)}
+          onkeydown={(event) => {
+            if (event.key === "Enter") setQuery({ q: searchDraft || null });
+            if (event.key === "Escape") {
+              searchDraft = "";
+              setQuery({ q: null });
+            }
+          }}
+          onblur={() => setQuery({ q: searchDraft || null })}
+        />
+      </label>
 
-        <div class="chip-wrap">
-          <button class="chip" onclick={() => (workflowOpen = !workflowOpen)}>
-            Workflow: <strong>{filters.workflow ?? "All"}</strong>
-            <ChevronDown size={12} />
-          </button>
-          <Popover
-            open={workflowOpen}
-            title="Workflow"
-            onclose={() => (workflowOpen = false)}
+      <div class="chip-wrap">
+        <button class="chip" onclick={() => (workflowOpen = !workflowOpen)}>
+          Workflow: <strong>{filters.workflow ?? "All"}</strong>
+          <ChevronDown size={12} />
+        </button>
+        <Popover
+          open={workflowOpen}
+          title="Workflow"
+          onclose={() => (workflowOpen = false)}
+        >
+          <button
+            class="option"
+            onclick={() => {
+              setQuery({ workflow: null });
+              workflowOpen = false;
+            }}
           >
+            All workflows
+          </button>
+          {#each app.workflows as workflow (workflow.id)}
             <button
               class="option"
               onclick={() => {
-                setQuery({ workflow: null });
+                setQuery({ workflow: workflow.id });
                 workflowOpen = false;
               }}
             >
-              All workflows
+              {workflow.name}
             </button>
-            {#each app.workflows as workflow (workflow.id)}
-              <button
-                class="option"
-                onclick={() => {
-                  setQuery({ workflow: workflow.id });
-                  workflowOpen = false;
-                }}
-              >
-                {workflow.name}
-              </button>
-            {/each}
-          </Popover>
-        </div>
+          {/each}
+        </Popover>
+      </div>
 
-        <div class="row kinds">
-          {#each [["", "All"], ["image", "Image"], ["video", "Video"], ["audio", "Audio"]] as const as [value, text] (value)}
+      <div class="row kinds">
+        {#each [["", "All"], ["image", "Image"], ["video", "Video"], ["audio", "Audio"]] as const as [value, text] (value)}
+          <button
+            class:active={(filters.kind ?? "") === value}
+            onclick={() => setQuery({ kind: value || null })}
+          >
+            {text}
+          </button>
+        {/each}
+      </div>
+
+      <div class="chip-wrap">
+        <button class="chip" onclick={() => (modelsOpen = !modelsOpen)}>
+          Models: <strong>{modelNames.length > 0 ? modelNames.join(", ") : "All"}</strong>
+          <ChevronDown size={12} />
+        </button>
+        <Popover
+          open={modelsOpen}
+          width={260}
+          title="Models"
+          onclose={() => (modelsOpen = false)}
+        >
+          {#if selectedModels.length > 0}
+            <button class="option" onclick={() => setQuery({ models: null })}>
+              Clear the model filter
+            </button>
+          {/if}
+          {#each modelGroups as group (group.label)}
+            {#if group.models.length > 0}
+              <div class="group mono dim">{group.label}</div>
+              {#each group.models as model (model.id)}
+                <button class="option check" onclick={() => toggleModel(model.hash!)}>
+                  <span class="mark mono">
+                    {selectedModels.includes(model.hash!) ? "✓" : ""}
+                  </span>
+                  <span class="option-name">{model.display_name}</span>
+                  <span class="mono dim">{model.output_count}</span>
+                </button>
+              {/each}
+            {/if}
+          {/each}
+          {#if modelGroups.every((group) => group.models.length === 0)}
+            <p class="empty">
+              Nothing has been hashed yet, so no output can be attributed to a model
+              (§8.1).
+            </p>
+          {/if}
+        </Popover>
+      </div>
+
+      <span class="spacer"></span>
+
+      <div class="chip-wrap">
+        <button class="chip" onclick={() => (sortOpen = !sortOpen)}>
+          Sort: <strong>{filters.sort === "oldest" ? "Oldest" : "Newest"}</strong>
+          <ChevronDown size={12} />
+        </button>
+        <Popover
+          open={sortOpen}
+          width={160}
+          align="right"
+          onclose={() => (sortOpen = false)}
+        >
+          {#each [["newest", "Newest"], ["oldest", "Oldest"]] as const as [value, text] (value)}
             <button
-              class:active={(filters.kind ?? "") === value}
-              onclick={() => setQuery({ kind: value || null })}
+              class="option"
+              onclick={() => {
+                setQuery({ sort: value === "newest" ? null : value });
+                sortOpen = false;
+              }}
             >
               {text}
             </button>
           {/each}
-        </div>
-
-        <div class="chip-wrap">
-          <button class="chip" onclick={() => (modelsOpen = !modelsOpen)}>
-            Models: <strong>{modelNames.length > 0 ? modelNames.join(", ") : "All"}</strong>
-            <ChevronDown size={12} />
-          </button>
-          <Popover
-            open={modelsOpen}
-            width={260}
-            title="Models"
-            onclose={() => (modelsOpen = false)}
-          >
-            {#if selectedModels.length > 0}
-              <button class="option" onclick={() => setQuery({ models: null })}>
-                Clear the model filter
-              </button>
-            {/if}
-            {#each modelGroups as group (group.label)}
-              {#if group.models.length > 0}
-                <div class="group mono dim">{group.label}</div>
-                {#each group.models as model (model.id)}
-                  <button class="option check" onclick={() => toggleModel(model.hash!)}>
-                    <span class="mark mono">
-                      {selectedModels.includes(model.hash!) ? "✓" : ""}
-                    </span>
-                    <span class="option-name">{model.display_name}</span>
-                    <span class="mono dim">{model.output_count}</span>
-                  </button>
-                {/each}
-              {/if}
-            {/each}
-            {#if modelGroups.every((group) => group.models.length === 0)}
-              <p class="empty">
-                Nothing has been hashed yet, so no output can be attributed to a model
-                (§8.1).
-              </p>
-            {/if}
-          </Popover>
-        </div>
-
-        <span class="spacer"></span>
-
-        <div class="chip-wrap">
-          <button class="chip" onclick={() => (sortOpen = !sortOpen)}>
-            Sort: <strong>{filters.sort === "oldest" ? "Oldest" : "Newest"}</strong>
-            <ChevronDown size={12} />
-          </button>
-          <Popover
-            open={sortOpen}
-            width={160}
-            align="right"
-            onclose={() => (sortOpen = false)}
-          >
-            {#each [["newest", "Newest"], ["oldest", "Oldest"]] as const as [value, text] (value)}
-              <button
-                class="option"
-                onclick={() => {
-                  setQuery({ sort: value === "newest" ? null : value });
-                  sortOpen = false;
-                }}
-              >
-                {text}
-              </button>
-            {/each}
-          </Popover>
-        </div>
-
-        <div class="row sizes">
-          {#each sizes as entry (entry.size)}
-            <button
-              class:active={tileSize === entry.size}
-              title={entry.title}
-              aria-label={entry.title}
-              onclick={() => app.setTileSize("gallery", entry.size)}
-            >
-              <entry.icon size={14} />
-            </button>
-          {/each}
-        </div>
-
-        <span class="mono dim total">
-          {total === null ? "…" : `${total.toLocaleString()} outputs`}
-        </span>
-        {#if hasFilters}
-          <button
-            class="clear"
-            onclick={() => setQuery({ workflow: null, kind: null, models: null, q: null })}
-          >
-            Clear filters
-          </button>
-        {/if}
-      </header>
-
-      <div class="body scroll" bind:this={scroller} onscroll={onScroll}>
-        {#if tileSize === "table"}
-          <MediaTable {outputs} selectedId={null} onopen={select} />
-        {:else}
-          {#each rows as row ("divider" in row ? `d:${row.divider}` : row.output.id)}
-            {#if "divider" in row}
-              <div class="divider">
-                <span class="day">{dayLabel(row.divider)}</span>
-                <span class="mono dim">
-                  {dayCounts[row.divider] === undefined
-                    ? "…"
-                    : `${dayCounts[row.divider]} outputs`}
-                </span>
-              </div>
-            {:else}
-              <div class="cell" class:large={tileSize === "large"}>
-                <Tile
-                  output={row.output}
-                  selected={selectedId === row.output.id}
-                  onopen={select}
-                />
-              </div>
-            {/if}
-          {/each}
-        {/if}
-
-        {#if loading}
-          <p class="empty">loading…</p>
-        {:else if outputs.length === 0}
-          <div class="empty-state">
-            <p>No outputs{hasFilters ? " match these filters" : " yet"}.</p>
-            <p class="dim">
-              {app.workflows.length} workflows ready · generate something and it lands here.
-            </p>
-          </div>
-        {/if}
+        </Popover>
       </div>
-    </section>
-  {/if}
+
+      <div class="row sizes">
+        {#each sizes as entry (entry.size)}
+          <button
+            class:active={tileSize === entry.size}
+            title={entry.title}
+            aria-label={entry.title}
+            onclick={() => app.setTileSize("gallery", entry.size)}
+          >
+            <entry.icon size={14} />
+          </button>
+        {/each}
+      </div>
+
+      <span class="mono dim total">
+        {total === null ? "…" : `${total.toLocaleString()} outputs`}
+      </span>
+      {#if hasFilters}
+        <button
+          class="clear"
+          onclick={() => setQuery({ workflow: null, kind: null, models: null, q: null })}
+        >
+          Clear filters
+        </button>
+      {/if}
+    </header>
+
+    <div class="body scroll" bind:this={scroller} onscroll={onScroll}>
+      {#if tileSize === "table"}
+        <MediaTable {outputs} selectedId={null} onopen={select} />
+      {:else}
+        {#each rows as row ("divider" in row ? `d:${row.divider}` : row.output.id)}
+          {#if "divider" in row}
+            <div class="divider">
+              <span class="day">{dayLabel(row.divider)}</span>
+              <span class="mono dim">
+                {dayCounts[row.divider] === undefined
+                  ? "…"
+                  : `${dayCounts[row.divider]} outputs`}
+              </span>
+            </div>
+          {:else}
+            <div class="cell" class:large={tileSize === "large"}>
+              <Tile
+                output={row.output}
+                selected={selectedId === row.output.id}
+                onopen={select}
+              />
+            </div>
+          {/if}
+        {/each}
+      {/if}
+
+      {#if loading}
+        <p class="empty">loading…</p>
+      {:else if outputs.length === 0}
+        <div class="empty-state">
+          <p>No outputs{hasFilters ? " match these filters" : " yet"}.</p>
+          <p class="dim">
+            {app.workflows.length} workflows ready · generate something and it lands here.
+          </p>
+        </div>
+      {/if}
+    </div>
+  </section>
 </div>
 
 <style>
@@ -601,6 +592,17 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  /*
+   * The same box it has on screen, so nothing reflows and the offset means
+   * what it meant — `display: none` would drop the layout box and the
+   * scroll position with it.
+   */
+  .gallery.behind {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
   }
 
   .filters {

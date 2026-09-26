@@ -306,6 +306,20 @@ export function withoutMetadata(layout: Layout): Layout {
   return "wide";
 }
 
+/**
+ * The nearest arrangement that shows the inputs panel.
+ *
+ * The two media layouts are for watching, and Reuse parameters is the end
+ * of watching: it fills a panel that those two hide, so without this the
+ * button changed something off screen and appeared to do nothing. Each one
+ * keeps what it had — the metadata pane stays for `media-split`.
+ */
+export function withInputs(layout: Layout): Layout {
+  if (layout === "media-split") return "split";
+  if (layout === "media") return "wide";
+  return layout;
+}
+
 export interface Config {
   server: { host: string; port: number };
   comfy: {

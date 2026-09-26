@@ -436,3 +436,111 @@ test("a normal window is untouched: three columns, 306px of metadata", async ({ 
   await expect(page.locator(".viewer .id, .main .id")).toBeVisible();
   await page.keyboard.press("Escape");
 });
+
+/**
+ * The results header in half a 16:9 window. The heading and its counts used
+ * to take a column each and wrap over four lines, at two different sizes,
+ * beside filters that did not wrap at all. It is one line now, and the
+ * counts give way to the width rather than to a line break.
+ */
+test("in half a 16:9 window the results header is one line", async ({ page }) => {
+  await page.setViewportSize(HALF);
+  await anOutput(page);
+  const head = page.locator(".results-head");
+  await expect(head).toBeVisible();
+  const box = (await head.boundingBox())!;
+  expect(box.height).toBeLessThan(40);
+  // Nothing inside it is taller than one line of it either.
+  const heights = await head.evaluate((el) =>
+    [...el.children].map((child) => child.getBoundingClientRect().height)
+  );
+  for (const height of heights) expect(height).toBeLessThan(32);
+  // The counts are still there, as the heading's tooltip.
+  await expect(head.locator(".label")).toHaveAttribute("title", /\d+ jobs/);
+});
+
+/**
+ * A queued job's card says two things, a line each, at one size — rather
+ * than one sentence that wrapped wherever each card ran out of room.
+ */
+test("a queued card's details are a line each", async ({ page, request }) => {
+  await page.setViewportSize(HALF);
+  await anOutput(page);
+  const workflow = new URL(page.url()).searchParams.get("workflow")!;
+  const jobs = [];
+  for (let i = 0; i < 4; i++) {
+    const response = await request.post("/api/jobs", {
+      data: { workflow_id: workflow, params: { prompt: `queued card ${i}` } },
+    });
+    jobs.push((await response.json()).id as string);
+  }
+  const details = page.locator(".card.queued .details").first();
+  if (await details.isVisible()) {
+    const lines = await details.evaluate((el) =>
+      [...el.children].map((child) => ({
+        height: child.getBoundingClientRect().height,
+        size: getComputedStyle(child).fontSize,
+      }))
+    );
+    for (const line of lines) {
+      expect(line.height).toBeLessThan(20);
+      expect(line.size).toBe("11px");
+    }
+  }
+  // The fake is fast and the queue may already be empty; either way nothing
+  // is left behind for the files after this one.
+  for (const id of jobs) await request.post(`/api/jobs/${id}/cancel`);
+});
+
+/**
+ * Reuse parameters fills the inputs panel, which the two media layouts
+ * hide. So it brings the panel back — media-split becomes split, keeping
+ * the metadata it had — rather than changing something off screen.
+ */
+test("Reuse parameters from a media layout shows the inputs", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await openOne(page);
+  await choose(page, "media-split");
+  await expect(page.locator("section.panel")).toBeHidden();
+
+  await page.getByRole("button", { name: /Reuse parameters/ }).click();
+  await expect(page.locator(".generate")).toHaveAttribute("data-layout", "split");
+  await expect(page.locator("section.panel")).toBeVisible();
+
+  // Put back what every other test expects to find.
+  await choose(page, "columns");
+  await page.keyboard.press("Escape");
+});
+
+/**
+ * The gallery keeps its place under the viewer: open a tile from further
+ * down, close it, and the grid is where it was rather than at the top.
+ */
+test("the gallery is where you left it after the viewer closes", async ({ page, request }) => {
+  await anOutput(page);
+  const workflow = new URL(page.url()).searchParams.get("workflow")!;
+  for (let i = 0; i < 6; i++) {
+    await request.post("/api/jobs", {
+      data: { workflow_id: workflow, params: { prompt: `a scroll mark ${i}` } },
+    });
+  }
+  // Short enough that a handful of tiles has to scroll.
+  await page.setViewportSize({ width: 960, height: 420 });
+  await page.goto("/gallery");
+  const body = page.locator(".body.scroll");
+  await expect.poll(() =>
+    body.evaluate((el) => el.scrollHeight - el.clientHeight), {
+    timeout: 30_000,
+  }).toBeGreaterThan(150);
+
+  await body.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  const before = await body.evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+
+  // The last tile, which is only on screen because of the scroll.
+  await page.locator(".body .tile .surface").last().click();
+  await expect(page.locator(".main")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".main")).toHaveCount(0);
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(before);
+});

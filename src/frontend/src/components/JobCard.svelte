@@ -45,17 +45,22 @@
       <span class="dim">{preview ? "streaming preview" : "waiting for preview"}</span>
     </div>
     <div class="foot">
+      <!--
+        The node over the numbers rather than between them: squeezed between
+        the percent and the ETA it had forty pixels of a small tile, which is
+        room for "node…" and nothing else.
+      -->
+      <div class="node">
+        <div class="mono node-label">{progress?.node_label ?? ""}</div>
+        <div class="mono dim">
+          {#if progress && progress.max > 0}
+            step {progress.step}/{progress.max} ·
+          {/if}
+          node {progress?.node_index ?? 0} of {progress?.node_total ?? 0}
+        </div>
+      </div>
       <div class="numbers row">
         <span class="pct mono">{Math.round(progress?.pct ?? 0)}<small>%</small></span>
-        <div class="node">
-          <div class="mono node-label">{progress?.node_label ?? ""}</div>
-          <div class="mono dim">
-            {#if progress && progress.max > 0}
-              step {progress.step}/{progress.max} ·
-            {/if}
-            node {progress?.node_index ?? 0} of {progress?.node_total ?? 0}
-          </div>
-        </div>
         <span class="spacer"></span>
         <div class="eta">
           <div class="mono">{clock(progress?.eta_ms)}</div>
@@ -70,10 +75,18 @@
 {:else if job.status === "queued"}
   <div class="card queued">
     <span class="label">Queued</span>
-    <div class="mono dim">
-      {#if position !== undefined}position {position} ·
+    <!--
+      One fact per line, each on one line. As a sentence it wrapped wherever
+      a tile a third of half a screen wide ran out, so no two cards broke it
+      in the same place — and at the body's 13px beside an 11px label.
+    -->
+    <div class="details mono dim">
+      {#if position !== undefined}<span>position {position}</span>{/if}
+      {#if seed !== null && seed >= 0}
+        <span title={`seed ${seed}`}>seed {seed}</span>
+      {:else}
+        <span>random seed</span>
       {/if}
-      {#if seed !== null && seed >= 0}seed {seed}{:else}random seed{/if}
     </div>
     <button onclick={() => api.cancelJob(job.id)}>Cancel</button>
   </div>
@@ -96,7 +109,7 @@
 {:else if job.status === "cancelled"}
   <div class="card queued cancelled">
     <span class="label">Cancelled</span>
-    <div class="mono dim">nothing was written</div>
+    <div class="details mono dim"><span>nothing was written</span></div>
     <button onclick={retry}>Run again ⟳</button>
   </div>
 {/if}
@@ -178,10 +191,11 @@
     color: var(--text-3);
   }
 
-  /* The node name is the one part with no length to it; let it be the part
-     that gives way when the tile is narrow, rather than pushing the ETA off. */
+  /* The node name is the one part with no length to it; it is the part
+     that gives way when the tile is narrow. */
   .node {
     min-width: 0;
+    margin-bottom: 6px;
   }
 
   .node-label {
@@ -195,6 +209,12 @@
   .node div,
   .eta div {
     font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .node .dim {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .eta {
@@ -228,6 +248,23 @@
     gap: 8px;
     background: transparent;
     border: 1px dashed var(--line-2);
+  }
+
+  .details {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .details span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card.queued button {

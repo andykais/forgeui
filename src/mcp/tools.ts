@@ -13,9 +13,10 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
-import { basename } from "@std/path";
+import { basename, join } from "@std/path";
 import type {
   ForgeUi,
+  MediaBytes,
   ModelListing,
   ModelRow,
   StoredInputView,
@@ -51,6 +52,73 @@ const failure = (cause: unknown) => ({
   }],
   isError: true,
 });
+
+/** What a preview is sized to when the model does not say (§6.3). */
+const DEFAULT_PREVIEW_EDGE = 768;
+
+/**
+ * The most `get_output_file` returns inline. Base64 in a JSON-RPC message
+ * grows a file by a third, and a harness holds the whole message in memory;
+ * a longer clip goes to disk through `save_to` instead.
+ */
+const INLINE_LIMIT_MB = 32;
+
+const seconds = (ms: number | null | undefined) =>
+  ms === null || ms === undefined ? undefined : Number((ms / 1000).toFixed(3));
+
+function sizeOf(bytes: Uint8Array): string {
+  const kb = bytes.length / 1024;
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
+/** `video · 1280×720 · 6.04s`: what the original is, in one line. */
+function describeOutput(output: MediaBytes["output"]): string {
+  const parts = [output.kind ?? "output"];
+  if (output.width && output.height) {
+    parts.push(`${output.width}×${output.height}`);
+  }
+  const duration = seconds(output.duration_ms);
+  if (duration !== undefined) parts.push(`${duration}s`);
+  return parts.join(" · ");
+}
+
+/**
+ * The content block for some media: the image and audio types MCP has, and
+ * for video — which it has no type for — the clip as an embedded resource,
+ * the bytes with their MIME type and the URL they came from.
+ */
+function mediaBlock(media: MediaBytes, forgeUrl: string) {
+  const data = encodeBase64(media.bytes);
+  if (media.mimeType.startsWith("image/")) {
+    return { type: "image" as const, data, mimeType: media.mimeType };
+  }
+  if (media.mimeType.startsWith("audio/")) {
+    return { type: "audio" as const, data, mimeType: media.mimeType };
+  }
+  return {
+    type: "resource" as const,
+    resource: {
+      uri: `${forgeUrl}${media.output.media_url ?? ""}`,
+      mimeType: media.mimeType,
+      blob: data,
+    },
+  };
+}
+
+/**
+ * Where `save_to` means: a directory gets the file under the name it has in
+ * ForgeUI, anything else is the file's own path.
+ */
+async function saveTarget(
+  saveTo: string,
+  outputPath: string | undefined,
+  outputId: string,
+): Promise<string> {
+  const isDir = await Deno.stat(saveTo).then((s) => s.isDirectory)
+    .catch(() => false);
+  if (!isDir) return saveTo;
+  return join(saveTo, outputPath ? basename(outputPath) : outputId);
+}
 
 export function createBridgeServer(options: BridgeOptions): McpServer {
   const { forge, llama } = options;
@@ -112,7 +180,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "feeds the next: make a picture, make a take, then attach both and " +
       "run ltx2-ia2v on them. Takes either `output_id` — anything `generate` " +
       "returned, attached whole, at full quality, never the downscaled copy " +
-      "`get_output_image` shows you — or `file`, a path on the machine " +
+      "`get_output_preview` shows you — or `file`, a path on the machine " +
       "running this bridge, for media you did not make here.",
     inputSchema: z.object({
       output_id: z.string().optional().describe(
@@ -221,7 +289,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "Everything recorded about one output: the exact params, seed, models " +
       "and timings that produced it, the origin saying who asked for it and " +
       "why, and `notes` — what a person said about it afterwards. Read the " +
-      "notes on what you made last time before deciding what to make next.",
+      "notes on what you made last time before deciding what to make next. " +
+      "Metadata only: to see the output use get_output_preview, and for the " +
+      "file itself get_output_file.",
     inputSchema: z.object({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
@@ -233,46 +303,113 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
-  server.registerTool("get_output_image", {
+  server.registerTool("get_output_preview", {
     description:
-      "Look at an output. Returns the picture itself, so you can judge it — " +
-      "composition, anatomy, whether it matches what was asked for.",
+      "Look at an output — the convenient way, and the one to reach for " +
+      "first. Returns a small copy sized for judging and sharing: a picture " +
+      "as a JPEG whose longest edge is `max_edge` (768 unless you say), a " +
+      "video as a small, low-bitrate MP4 of the whole clip at that size. " +
+      "Enough to critique composition, anatomy, motion and whether it " +
+      "matches what was asked, at a fraction of the tokens. Never for " +
+      "chaining or keeping: attach_input and get_output_file work from the " +
+      "full-quality original. Audio has no smaller copy; use get_output_file.",
     inputSchema: z.object({
       output_id: z.string(),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
-        "longest edge in pixels; smaller is cheaper and enough to critique",
+        "longest edge in pixels, default 768; smaller is cheaper and enough " +
+          "to critique",
       ),
     }),
   }, async ({ output_id, max_edge }) => {
+    const edge = max_edge ?? DEFAULT_PREVIEW_EDGE;
     try {
-      const { bytes, mimeType } = await forge.media(output_id);
-      if (!mimeType.startsWith("image/")) {
+      const media = await forge.media(output_id, { maxEdge: edge });
+      const { mimeType, output } = media;
+      if (mimeType.startsWith("audio/")) {
         return failure(
-          `output ${output_id} is ${mimeType}, which cannot be looked at; ` +
+          `output ${output_id} is audio, which has no preview; ` +
+            `get_output_file returns the take itself`,
+        );
+      }
+      if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+        return failure(
+          `output ${output_id} is ${mimeType}, which cannot be previewed; ` +
             `use get_output for its metadata`,
         );
       }
-      if (max_edge !== undefined) {
-        // §6.3 puts the resize in ForgeUI, where ffmpeg already is. Until
-        // that route exists the full frame is returned rather than a wrong
-        // one, and the size is said out loud so the cost is not a surprise.
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `(full size — ForgeUI cannot resize yet, so max_edge=${max_edge} was not applied)`,
-            },
-            { type: "image" as const, data: encodeBase64(bytes), mimeType },
-          ],
-        };
+      if (
+        !media.resized && media.bytes.length > INLINE_LIMIT_MB * 1024 * 1024
+      ) {
+        return failure(
+          `ForgeUI has no ffmpeg, so there is no smaller copy of ${output_id}, ` +
+            `and the file itself is ${sizeOf(media.bytes)}; ` +
+            `get_output_file with save_to writes it to disk`,
+        );
+      }
+      const note = media.resized
+        ? `preview, longest edge at most ${edge}px, ${sizeOf(media.bytes)} — ` +
+          `the original is ${describeOutput(output)}`
+        : `full size (${describeOutput(output)}, ${sizeOf(media.bytes)}): ` +
+          `ForgeUI has no ffmpeg, so max_edge=${edge} was not applied`;
+      return {
+        content: [
+          { type: "text" as const, text: note },
+          mediaBlock(media, forge.url),
+        ],
+      };
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("get_output_file", {
+    description:
+      "The output itself, byte for byte — the full-resolution picture, the " +
+      "whole video, the audio take — exactly as ComfyUI wrote it. Large: a " +
+      "video can be hundreds of megabytes, so to only look at something use " +
+      "get_output_preview. Returned inline as an image, audio or video " +
+      "block, or with `save_to` written to a path on the machine running " +
+      "this bridge and the path handed back instead of the bytes — the way " +
+      "to pass a result to another program. Inline stops at " +
+      `${INLINE_LIMIT_MB} MB; past that, save_to is the way.`,
+    inputSchema: z.object({
+      output_id: z.string(),
+      save_to: z.string().optional().describe(
+        "absolute path of a file to write, or of an existing directory to " +
+          "write it into under its own name",
+      ),
+    }),
+  }, async ({ output_id, save_to }) => {
+    try {
+      const media = await forge.media(output_id);
+      if (save_to !== undefined) {
+        const path = await saveTarget(save_to, media.output.path, output_id);
+        await Deno.writeFile(path, media.bytes);
+        return text({
+          saved: path,
+          kind: media.output.kind,
+          mime_type: media.mimeType,
+          bytes: media.bytes.length,
+          width: media.output.width ?? undefined,
+          height: media.output.height ?? undefined,
+          duration_s: seconds(media.output.duration_ms),
+        });
+      }
+      if (media.bytes.length > INLINE_LIMIT_MB * 1024 * 1024) {
+        return failure(
+          `output ${output_id} is ${sizeOf(media.bytes)}, too big to return ` +
+            `inline; pass save_to to write it to disk, or look at it with ` +
+            `get_output_preview`,
+        );
       }
       return {
-        content: [{
-          type: "image" as const,
-          data: encodeBase64(bytes),
-          mimeType,
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: `${describeOutput(media.output)}, ${sizeOf(media.bytes)}`,
+          },
+          mediaBlock(media, forge.url),
+        ],
       };
     } catch (cause) {
       return failure(cause);
