@@ -417,3 +417,91 @@ Deno.test("weights that do not hash to the batch's name are refused", async () =
     await Deno.remove(fixtures.dir, { recursive: true });
   }
 });
+
+Deno.test("a batch with no model to attach to says so, rather than nothing", async () => {
+  const fixtures = await modelFixtures();
+  try {
+    await withTestApp(async (app) => {
+      // Metadata for a model that is not on this machine — what you get from
+      // `forge models --url …` without `--download-model`. It cannot be
+      // applied, because metadata attaches to a `models` row and a row only
+      // exists once a file has been hashed. Saying nothing made that look
+      // like the import had silently failed, which is what it looks like
+      // from outside.
+      const absent = await sha256Hex("a model nobody has");
+      const dir = await writeBatch(app.paths.imports, absent);
+
+      const lines: string[] = [];
+      const write = console.log;
+      console.log = (...args: unknown[]) => lines.push(args.join(" "));
+      try {
+        await app.models.rescan();
+        await app.models.idle();
+      } finally {
+        console.log = write;
+      }
+
+      const said = lines.join("\n");
+      assertStringIncludes(
+        said,
+        "waiting for a model this library has not seen",
+      );
+      // Names the model and the file to go looking for, and what to do.
+      assertStringIncludes(said, "CyberRealistic");
+      assertStringIncludes(said, CHECKPOINT);
+      assertStringIncludes(said, "--download-model");
+      // And the batch is kept, because it is not wrong — only early.
+      assert(await exists(dir));
+    }, { argv: fixtures.argv });
+  } finally {
+    await Deno.remove(fixtures.dir, { recursive: true });
+  }
+});
+
+Deno.test("a batch carrying its own weights is not reported as stuck", async () => {
+  const fixtures = await modelFixtures();
+  try {
+    await withTestApp(async (app) => {
+      const weights = await writeFakeSafetensors(
+        join(fixtures.dir, "staged2.safetensors"),
+        { name: "carried" },
+      );
+      const hash = await sha256Hex(weights);
+      await writeBatch(app.paths.imports, hash, {
+        model: {
+          sha256: hash,
+          filename: "carried.safetensors",
+          kind: "checkpoints",
+          display_name: "Carried",
+          tags: [],
+        },
+        files: [{
+          file: "model/carried.safetensors",
+          kind: "checkpoints",
+          sha256: hash,
+        }],
+      }, { "model/carried.safetensors": weights });
+
+      const lines: string[] = [];
+      const write = console.log;
+      console.log = (...args: unknown[]) => lines.push(args.join(" "));
+      try {
+        await app.models.rescan();
+        await app.models.idle();
+      } finally {
+        console.log = write;
+      }
+
+      // It brought its own file, so it was mid-flight rather than stuck: the
+      // warning is for the case a person has to act on.
+      const said = lines.join("\n");
+      assert(
+        !said.includes("waiting for a model this library has not seen"),
+        `a self-contained batch should not be reported as stuck:\n${said}`,
+      );
+      assertEquals(await exists(join(app.paths.imports, hash)), false);
+    }, { argv: fixtures.argv });
+  } finally {
+    await Deno.remove(fixtures.dir, { recursive: true });
+  }
+});

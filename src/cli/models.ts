@@ -225,6 +225,25 @@ export async function runModels(
   }
 
   say(`wrote ${dir}`);
+
+  // The app can only attach this to a model it has a row for, and it only has
+  // a row once the file has been scanned and hashed. Saying so here — while
+  // the person is still at the terminal — is the difference between "waiting
+  // for the weights" and "the import silently did nothing".
+  if (!options.downloadModel) {
+    const local = found.filename === null
+      ? null
+      : await findModelFile(options.config, found.filename);
+    if (local === null) {
+      say(
+        `note: ${
+          found.filename ?? "this model"
+        } is not in any configured model folder, so the app will hold this ` +
+          `batch until it is. Put the file there and rescan, or re-run with ` +
+          `--download-model to fetch it too.`,
+      );
+    }
+  }
   return result;
 }
 

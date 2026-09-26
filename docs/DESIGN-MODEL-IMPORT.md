@@ -159,8 +159,28 @@ The less everyday cases:
   actual subject (§4.6).
 - **The model has not been hashed yet.** The batch names a sha256 the
   database has no row for. It stays in the folder, untouched, and is retried
-  after the next hashing pass finishes. No error, no noise; it lands when the
-  hash lands.
+  after the next hashing pass finishes; it lands when the hash lands.
+
+  An earlier draft added "no error, no noise" here, and that was wrong in a
+  way only using it revealed. Metadata attaches to a `models` row, and a row
+  exists only once a file has been scanned and hashed — so a batch for a model
+  that is *not on this machine at all* waits for a hash that is never coming,
+  and silence makes that indistinguishable from the import having failed. It
+  is not an error, but it is something only a person can resolve, so it is
+  reported:
+
+  ```
+  import: 1 batch is waiting for a model this library has not seen
+    DreamShaper — dreamshaper_8.safetensors is not in any configured model folder
+    put the file in a model folder and rescan, or re-run `forge models`
+    with --download-model to fetch it
+  ```
+
+  A batch that brought its own weights is excluded from that count: Phase A
+  filed them and the hasher simply has not caught up, which is the ordinary
+  case the silence was meant for. `forge models` says the same thing at write
+  time, while you are still at the terminal, rather than leaving you to find
+  out after a restart.
 - **The CLI runs on another machine.** `import.dir` can point anywhere, so a
   shared folder makes the fetching host and the serving host different
   machines. Nothing in the format assumes otherwise.

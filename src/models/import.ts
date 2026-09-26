@@ -173,6 +173,12 @@ export class ImportInbox {
    */
   async apply(): Promise<IngestCounts> {
     const counts = emptyCounts();
+    const waiting: {
+      hash: string;
+      name: string;
+      filename: string | null;
+      carriesWeights: boolean;
+    }[] = [];
     for await (const dir of this.#batches()) {
       counts.found++;
       let batch: ImportBatch;
@@ -186,6 +192,14 @@ export class ImportInbox {
       const hash = normalizeModelHash(batch.model.sha256);
       if (getModel(this.#db, hash) === null) {
         counts.waiting++;
+        waiting.push({
+          hash,
+          name: batch.model.display_name ?? batch.model.filename ?? hash,
+          filename: batch.model.filename ?? null,
+          // A batch that brought its own weights is mid-flight rather than
+          // stuck: Phase A filed them and the hasher has not caught up yet.
+          carriesWeights: (batch.files ?? []).length > 0,
+        });
         continue;
       }
       try {
@@ -201,9 +215,33 @@ export class ImportInbox {
       log(
         `import: applied ${counts.applied} batch${
           counts.applied === 1 ? "" : "es"
-        }${counts.waiting > 0 ? `, ${counts.waiting} still hashing` : ""}${
-          counts.failed > 0 ? `, ${counts.failed} failed` : ""
-        }`,
+        }${counts.failed > 0 ? `, ${counts.failed} failed` : ""}`,
+      );
+    }
+
+    // A batch whose model is not here yet used to be skipped in silence, on
+    // the grounds that it is a normal state rather than an error. It is — and
+    // silence still made it look like nothing had happened at all, because
+    // from the outside that is exactly what it looks like. Metadata cannot
+    // attach to a model the library has no row for, and the only way anyone
+    // learns that is if this says so.
+    const stuck = waiting.filter((entry) => !entry.carriesWeights);
+    if (stuck.length > 0) {
+      log(
+        `import: ${stuck.length} batch${
+          stuck.length === 1 ? " is" : "es are"
+        } waiting for a model this library has not seen`,
+      );
+      for (const entry of stuck.slice(0, 5)) {
+        log(
+          `  ${entry.name} — ${entry.filename ?? entry.hash.slice(0, 12)} is ` +
+            `not in any configured model folder`,
+        );
+      }
+      if (stuck.length > 5) log(`  …and ${stuck.length - 5} more`);
+      log(
+        `  put the file in a model folder and rescan, or re-run \`forge ` +
+          `models\` with --download-model to fetch it`,
       );
     }
     return counts;

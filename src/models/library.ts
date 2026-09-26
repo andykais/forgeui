@@ -337,7 +337,12 @@ export class ModelLibrary {
    * hashing has given their models an identity
    * (DESIGN-MODEL-IMPORT §7.1).
    */
-  async rescan(): Promise<{ models: number; queued: number }> {
+  async rescan(
+    options: { ingest?: boolean } = {},
+  ): Promise<{ models: number; queued: number }> {
+    // `import.ingest_on_boot: false` turns the boot pass off; an explicit
+    // Rescan always ingests, because that is what the button is for.
+    const ingest = options.ingest ?? true;
     if (this.#scanning) await this.#scanning;
     let finish = () => {};
     this.#scanning = new Promise((resolve) => {
@@ -346,7 +351,7 @@ export class ModelLibrary {
     try {
       // Phase A, before the walk, so a downloaded model is one more file the
       // scan finds rather than something that waits for the next pass.
-      this.#imports = await this.inbox.file();
+      if (ingest) this.#imports = await this.inbox.file();
       const result = await this.scanner.rescan((progress) =>
         this.#broadcastRescan(progress)
       );
@@ -370,7 +375,7 @@ export class ModelLibrary {
       // can be applied now; otherwise the hasher calls back when it drains and
       // a downloaded model gains its metadata a beat after it appears, which
       // is the behaviour §8.1 already describes for a file copied in by hand.
-      if (queued === 0) await this.#ingest();
+      if (ingest && queued === 0) await this.#ingest();
       return { models: result.models.length, queued };
     } finally {
       finish();
@@ -380,9 +385,10 @@ export class ModelLibrary {
 
   /** Kick the first scan off without making the boot wait for it (§11.3). */
   startBackground(): void {
-    this.rescan().catch((error) => {
-      console.error("the model scan failed:", error);
-    });
+    this.rescan({ ingest: this.#config.config.import.ingest_on_boot })
+      .catch((error) => {
+        console.error("the model scan failed:", error);
+      });
   }
 
   stop(): void {
