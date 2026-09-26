@@ -309,7 +309,7 @@ Deno.test("a round names its files, and one of them feeds the next round", async
     assert(output.path?.endsWith(".png"), `no file path: ${output.path}`);
     assert(output.media_url?.startsWith("/api/media/"), output.media_url);
 
-    // The whole output, not the downscaled copy `get_output_image` returns.
+    // The whole output, not the downscaled copy `get_output_preview` returns.
     const attached = await callTool<Attached>(app, "attach_input", {
       output_id: output.id,
     });

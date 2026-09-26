@@ -48,7 +48,7 @@ Two things worth getting right:
 
 - **`--mmproj` is not optional for vision.** The vision tower ships as its own
   GGUF and stays at F16; without it the model loads and simply cannot see, and
-  `get_output_image` will hand it a picture it ignores.
+  `get_output_preview` will hand it a picture it ignores.
 - **`ttl` is a backstop, not the mechanism.** The bridge evicts explicitly, so
   the timer never runs during a round. It exists for the round you walked away
   from: without it the VLM stays resident, and your own next generation from
@@ -259,7 +259,7 @@ lifecycle now.
 **`--mmproj` is the flag that makes the loop a loop.** Qwen3.8-27B is a native
 vision-language model, but llama.cpp ships the vision tower as its own GGUF and
 does not load it unless told. Without it the model writes prompts and is blind
-to `get_output_image`: it will generate happily and never see what it made.
+to `get_output_preview`: it will generate happily and never see what it made.
 Keep the projector at F16 — it is under a gigabyte and quantising it is what
 degrades visual grounding first.
 
@@ -327,12 +327,13 @@ Five things in there are deliberate:
   it: `llm:qwen3.8-27b` reads better in the gallery than
   `llm:Qwen3.8-27B-UD-Q6_K_L.gguf`. Change it in both places or neither.
 - **`input: ["text", "image"]` is required for the critique half.** Without it
-  pi will not send `get_output_image`'s picture to the model, and `--mmproj`
+  pi will not send `get_output_preview`'s picture to the model, and `--mmproj`
   will have been for nothing. Both halves are needed; neither is sufficient.
-- **`inputLimits.images.resize` is where downscaling happens today.**
-  `get_output_image` accepts `max_edge` but does not yet apply it (§6), and a
-  1024² PNG is several megabytes and a lot of vision tokens. Resizing client
-  side costs nothing and is enough to judge composition and anatomy.
+- **`inputLimits.images.resize` is a second line, not the first.**
+  `get_output_preview` already arrives at 768px (`max_edge` moves it) as long
+  as ForgeUI's machine has ffmpeg; without ffmpeg it says so and returns the
+  full frame, and this is what keeps a 1024² PNG from costing a lot of vision
+  tokens.
 - **`contextWindow` must match `--ctx-size`, not the model's spec sheet.**
   Qwen3.8-27B is documented at 256K, but llama.cpp only allocates what
   `--ctx-size` asks for; declaring 200000 against a 32768 server means pi packs
@@ -425,7 +426,22 @@ reference media that was not made here. The path is read by the **bridge**,
 not by ForgeUI, so it is a path on whichever machine runs `forge mcp`.
 
 The file that gets attached is the real one, hardlinked — not the downscaled
-picture `get_output_image` returns. That one is for looking at.
+picture `get_output_preview` returns. That one is for looking at.
+
+Two tools hand media to the model, and the split is deliberate:
+
+- **`get_output_preview`** — the convenient one. A picture as a JPEG and a
+  video as a small MP4, fitted inside `max_edge` (768 by default). Cheap
+  enough to call on every output of a round. Audio has no preview.
+- **`get_output_file`** — the output itself, byte for byte: the PNG, the full
+  video, the audio take. Inline up to 32 MB; with `save_to` it is written to a
+  path on the bridge's machine instead, which is how a finished video leaves.
+
+MCP has image and audio content blocks but none for video, so both tools send
+a clip as an embedded resource: `{"type":"resource","resource":{"uri",
+"mimeType":"video/mp4","blob"}}`. Whether the model can watch it is up to the
+harness and the model; most VLMs cannot, and the preview is still the cheap
+way to hand one to a person.
 
 ---
 
@@ -442,4 +458,4 @@ picture `get_output_image` returns. That one is for looking at.
 | pi packs a prompt the server rejects | `contextWindow` in `models.json` exceeds `--ctx-size` (§5.4) |
 | The tool call dies after N seconds | the harness's MCP timeout, not the bridge. §4 |
 | `Mcp-Method header is absent` | you are hand-rolling a client; the 2026-07-28 HTTP binding mirrors `method` and `params.name` into headers |
-| Images are enormous in context | `get_output_image` returns the full frame today — `max_edge` is accepted but not yet applied (DESIGN-AGENT-LOOP §6.3 puts the resize in ForgeUI, where ffmpeg already is). Until then, resize client side: `inputLimits.images.resize` in `models.json` (§5.4) |
+| Images are enormous in context | the model called `get_output_file` rather than `get_output_preview`, or ForgeUI's machine has no ffmpeg — the preview then says `max_edge … was not applied`. Install ffmpeg where ForgeUI runs, or resize client side: `inputLimits.images.resize` in `models.json` (§5.4) |

@@ -1572,6 +1572,9 @@ DELETE /api/outputs/:id                 soft delete (sets deleted_at); file remo
 POST /api/outputs/:id/restore           undo within the window (clears deleted_at)
 POST /api/system/free_vram              ask ComfyUI to unload its models (`/free`); a verb, the caller decides when
 GET  /api/media/*                       serves outputs/inputs/samples
+GET  /api/media/*?max_edge=N             a smaller copy, whole frame, never enlarged (64 ≤ N ≤ 4096): a picture as JPEG,
+                                        a video as low-bitrate H.264 MP4 with its sound; audio is served as-is.
+                                        Made by ffmpeg per request, not cached; 503 when there is no ffmpeg (DESIGN-AGENT-LOOP §6.3)
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts

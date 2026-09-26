@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { LoraRow, Manifest, WorkflowDetail } from "../types.ts";
+import type { Layout, LoraRow, Manifest, WorkflowDetail } from "../types.ts";
 
 /**
  * Putting a LoRA from a finished run into the panel (§11.2). The number that
@@ -27,7 +27,16 @@ const fakeApi = {
   jobs: vi.fn(async () => []),
 };
 vi.mock("../api.ts", () => ({ api: fakeApi }));
-vi.mock("./app.svelte.ts", () => ({ app: { comfyReady: true } }));
+/** Just enough of the app store: Generate's layout, and a way to change it. */
+const fakeApp = {
+  comfyReady: true,
+  generateLayout: "columns" as Layout,
+  layout: vi.fn(() => fakeApp.generateLayout),
+  setLayout: vi.fn((_screen: string, layout: Layout) => {
+    fakeApp.generateLayout = layout;
+  }),
+};
+vi.mock("./app.svelte.ts", () => ({ app: fakeApp }));
 
 const { panel } = await import("./panel.svelte.ts");
 
@@ -173,6 +182,34 @@ describe("upscaling an output", () => {
     await expect(panel.upscale("up", { id: "01JOUT" }, {})).rejects.toThrow(
       /no image param/,
     );
+  });
+});
+
+/**
+ * Reuse parameters fills the inputs panel, so it has to be on screen: the
+ * two media layouts hide it, and filling a hidden panel looked like the
+ * button doing nothing.
+ */
+describe("reusing parameters shows the inputs", () => {
+  beforeEach(() => fakeApp.setLayout.mockClear());
+
+  test.each([
+    ["media", "wide"],
+    ["media-split", "split"],
+  ] as const)("from %s, it opens %s", async (from, to) => {
+    fakeApp.generateLayout = from;
+    await panel.editWith("up", { prompt: "a granite bowl of figs" });
+    expect(fakeApp.setLayout).toHaveBeenCalledWith("generate", to);
+    expect(panel.values.prompt).toBe("a granite bowl of figs");
+  });
+
+  test("a layout that already shows them is left alone", async () => {
+    const shown = ["columns", "split", "wide", "top", "top-split"] as const;
+    for (const layout of shown) {
+      fakeApp.generateLayout = layout;
+      await panel.editWith("up", {});
+    }
+    expect(fakeApp.setLayout).not.toHaveBeenCalled();
   });
 });
 
