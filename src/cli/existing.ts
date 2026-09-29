@@ -1,65 +1,45 @@
 /**
- * Whether a run of `forge models` would fetch something already fetched
+ * Whether a run of `forge models` would fetch something already dealt with
  * (DESIGN-MODEL-IMPORT §3.2).
  *
- * **`<imports>/imported_checksums.txt` decides.** Every batch this command
- * writes appends its sha256 there, and without `--overwrite` a model listed
- * there is left alone. It is a plain file on purpose: delete a line and that
- * model can be fetched again; add one and it will not be.
+ * **A checksum anywhere in the import folder is left alone** without
+ * `--overwrite` — fetched and waiting, looked up and not found, imported, or
+ * refused by the app (`import_layout.ts`). The folder is the history, and
+ * the history is what decides: delete a checksum's directory and that model
+ * can be fetched again.
  *
- * Finding the checksum is the other half, and should not need the network,
- * since re-running a list of commands ought to cost nothing for the ones
- * already done. A hash is its own answer. A link or a filename is not —
- * finding out what they point at is the lookup itself — so they are matched
- * against what earlier batches recorded, in two places, both files:
+ * Finding the checksum should not need the network, since re-running a list
+ * of commands ought to cost nothing for the ones already done. A hash is its
+ * own answer. A link or a filename is not — finding out what they point at
+ * is the lookup itself — so they are matched against what earlier batches
+ * recorded in their `model.json`: the Civitai model and version ids, the
+ * Hugging Face repo and path, the filename. Where nothing matches, the
+ * lookup runs, and its answer is checked here before anything is downloaded
+ * or written.
  *
- *   <imports>/<sha256>/model.json                  waiting for the app
- *   <appdata>/models-meta/<sha256>/civitai.json    the app ingested it (§7.2)
- *
- * The second is a file ingest writes, not the database: nothing here opens
- * `app.db` (§3.1). Where neither says, the lookup runs, and the list is
- * checked again before anything is downloaded or written.
- *
- * The first time the list is needed and does not exist, it is seeded from
- * those same two places, so nothing fetched before it existed is fetched
- * again because of it.
+ * Files only: nothing here opens `app.db` (§3.1).
  */
 
 import { basename, join } from "@std/path";
 import type { DataPaths } from "../config/paths.ts";
 import { normalizeHash, parseModelUrl } from "../models/civitai.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
+import {
+  importLayout,
+  type ImportState,
+  stateDirs,
+} from "../models/import_layout.ts";
 
 export interface Existing {
   hash: string;
-  /**
-   * `pending`: a batch waits in the import folder. `imported`: the app has
-   * ingested it. `listed`: only the checksum list knows of it — another
-   * machine fetched it, or a line was added by hand.
-   */
-  state: "pending" | "imported" | "listed";
-  /** The batch or record that says what it is, or the list itself. */
-  path: string;
+  state: ImportState;
+  /** The checksum's directory. */
+  dir: string;
   name: string | null;
   version: string | null;
+  /** For a failure: the reason, from its `error.txt`. */
+  reason: string | null;
 }
-
-/** The checksum list, as read: sha256 → whatever note follows it. */
-export interface Ledger {
-  path: string;
-  hashes: Map<string, string>;
-  /** False until the first append writes it, seed and all. */
-  onDisk: boolean;
-}
-
-export const LEDGER_FILE = "imported_checksums.txt";
-
-const LEDGER_HEADER = [
-  "# Checksums `forge models` has fetched. A model listed here is not fetched",
-  "# again unless --overwrite is passed: delete its line to let it be, or add",
-  "# one to keep a model out. One sha256 per line; the rest is a note.",
-  "",
-].join("\n");
 
 /** What a run was asked for, reduced to what can be matched offline. */
 export type Wanted =
@@ -70,11 +50,10 @@ export type Wanted =
 
 interface Recorded {
   hash: string;
-  state: Existing["state"];
-  path: string;
-  filename: string | null;
-  source: Record<string, unknown>;
-  record: Record<string, unknown>;
+  state: ImportState;
+  dir: string;
+  batch: Record<string, unknown> | null;
+  reason: string | null;
 }
 
 /**
@@ -109,151 +88,35 @@ export function wantedFromUrl(url: string): Wanted | null {
 }
 
 /**
- * The list, read — or, before it exists, seeded in memory from the batches
- * waiting and the models already ingested. It reaches the disk with the first
- * batch written, so a run that writes nothing leaves nothing behind.
- */
-export async function readLedger(paths: DataPaths): Promise<Ledger> {
-  const path = join(paths.imports, LEDGER_FILE);
-  let text: string | null = null;
-  try {
-    text = await Deno.readTextFile(path);
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-  if (text !== null) return { path, hashes: parseLedger(text), onDisk: true };
-
-  const hashes = new Map<string, string>();
-  for await (const recorded of everything(paths)) {
-    if (!hashes.has(recorded.hash)) {
-      hashes.set(recorded.hash, label(existing(recorded)));
-    }
-  }
-  return { path, hashes, onDisk: false };
-}
-
-export function parseLedger(text: string): Map<string, string> {
-  const hashes = new Map<string, string>();
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
-    const [first, ...rest] = trimmed.split(/\s+/);
-    const hash = normalizeHash(first ?? "");
-    // A line that is not a checksum is somebody's note, not an error.
-    if (hash !== null) hashes.set(hash, rest.join(" "));
-  }
-  return hashes;
-}
-
-/** One more line, unless the list already has it: the list is a set. */
-export async function appendToLedger(
-  ledger: Ledger,
-  hash: string,
-  note: string,
-): Promise<boolean> {
-  if (ledger.onDisk && ledger.hashes.has(hash)) return false;
-  if (!ledger.hashes.has(hash)) ledger.hashes.set(hash, note);
-  if (ledger.onDisk) {
-    await Deno.writeTextFile(ledger.path, ledgerLine(hash, note), {
-      append: true,
-    });
-  } else {
-    // The first write carries the seed with it.
-    await Deno.writeTextFile(
-      ledger.path,
-      LEDGER_HEADER +
-        [...ledger.hashes].map(([entry, text]) => ledgerLine(entry, text))
-          .join(""),
-    );
-    ledger.onDisk = true;
-  }
-  return true;
-}
-
-/**
- * Whether a checksum counts as fetched: on the list, unless all that is left
- * of it is a batch the app refused. That one is the most worth fetching
- * again, and making someone edit the list after every failure would be a
- * chore the folder already answers.
- */
-export async function isFetched(
-  paths: DataPaths,
-  ledger: Ledger,
-  hash: string,
-): Promise<boolean> {
-  if (!ledger.hashes.has(hash)) return false;
-  if (!await exists(join(paths.imports, ".failed", hash))) return true;
-  return await pending(paths, hash) !== null ||
-    await imported(paths, hash) !== null;
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function ledgerLine(hash: string, note: string): string {
-  // `sha256sum`'s layout, so the usual tools read it.
-  const flat = note.replace(/\s+/g, " ").trim();
-  return flat.length > 0 ? `${hash}  ${flat}\n` : `${hash}\n`;
-}
-
-export function label(
-  entry: { name: string | null; version: string | null },
-): string {
-  return [entry.name, entry.version].filter((part) => part !== null).join(
-    " · ",
-  );
-}
-
-/**
- * The model a run asks for, if it is already on the list — found offline.
- * A hash is looked up directly; a link or filename through the batches that
- * recorded it. Null means "not known to be fetched": the lookup runs.
+ * The model a run asks for, if the import folder already has it — found
+ * offline. Null means "not known here": the lookup runs.
  */
 export async function findExisting(
   paths: DataPaths,
   wanted: Wanted,
-  ledger: Ledger,
 ): Promise<Existing | null> {
   if ("hash" in wanted) {
     const hash = normalizeHash(wanted.hash);
-    if (hash === null || !await isFetched(paths, ledger, hash)) return null;
-    // Straight to the two files, without listing either folder, for a name
-    // to print. The list is the answer either way.
-    const recorded = await pending(paths, hash) ?? await imported(paths, hash);
-    return recorded === null ? listed(ledger, hash) : existing(recorded);
+    if (hash === null) return null;
+    // Straight to the four places, without listing any of them.
+    for (const [state, dir] of stateDirs(importLayout(paths.imports))) {
+      const recorded = await read(state, join(dir, hash), hash);
+      if (recorded !== null) return existing(recorded);
+    }
+    return null;
   }
-
-  // A bare model link can match several versions fetched over time; any one
-  // on the list is the answer.
   for await (const recorded of everything(paths)) {
-    if (!matches(recorded, wanted)) continue;
-    if (await isFetched(paths, ledger, recorded.hash)) {
+    if (recorded.batch !== null && matches(recorded.batch, wanted)) {
       return existing(recorded);
     }
   }
   return null;
 }
 
-/** What the list alone says about a checksum. */
-export function listed(ledger: Ledger, hash: string): Existing {
-  const note = ledger.hashes.get(hash) ?? "";
-  return {
-    hash,
-    state: "listed",
-    path: ledger.path,
-    name: note.length > 0 ? note : null,
-    version: null,
-  };
-}
-
-function matches(recorded: Recorded, wanted: Wanted): boolean {
-  const source = recorded.source;
+function matches(batch: Record<string, unknown>, wanted: Wanted): boolean {
+  const source = object(batch.source) ??
+    object(object(batch.civitai)?.source) ??
+    {};
   if ("civitai" in wanted) {
     if (source.kind !== "civitai" && source.kind !== "civitai-archive") {
       return false;
@@ -275,8 +138,9 @@ function matches(recorded: Recorded, wanted: Wanted): boolean {
   }
   if ("filename" in wanted) {
     const want = wanted.filename.toLowerCase();
+    const model = object(batch.model);
     const names = [
-      recorded.filename,
+      typeof model?.filename === "string" ? model.filename : null,
       typeof source.path === "string" ? basename(source.path) : null,
     ];
     return names.some((name) => name?.toLowerCase() === want);
@@ -284,28 +148,36 @@ function matches(recorded: Recorded, wanted: Wanted): boolean {
   return false;
 }
 
+export function label(
+  entry: { name: string | null; version: string | null },
+): string {
+  return [entry.name, entry.version].filter((part) => part !== null).join(
+    " · ",
+  );
+}
+
 function existing(recorded: Recorded): Existing {
-  const model = recorded.record.model as Record<string, unknown> | undefined;
-  const version = recorded.record.version as
-    | Record<string, unknown>
-    | undefined;
+  const record = object(recorded.batch?.civitai);
+  const model = object(record?.model);
+  const version = object(record?.version);
+  const batchModel = object(recorded.batch?.model);
   return {
     hash: recorded.hash,
     state: recorded.state,
-    path: recorded.path,
-    name: typeof model?.name === "string" ? model.name : null,
+    dir: recorded.dir,
+    name: typeof model?.name === "string"
+      ? model.name
+      : typeof batchModel?.display_name === "string"
+      ? batchModel.display_name
+      : null,
     version: typeof version?.name === "string" ? version.name : null,
+    reason: recorded.reason,
   };
 }
 
-/** Every batch still waiting, then every one already ingested. */
+/** Every checksum directory, in the order the states are listed. */
 async function* everything(paths: DataPaths): AsyncGenerator<Recorded> {
-  for (
-    const [dir, read] of [
-      [paths.imports, pending],
-      [paths.modelsMeta, imported],
-    ] as const
-  ) {
+  for (const [state, dir] of stateDirs(importLayout(paths.imports))) {
     let entries: Deno.DirEntry[];
     try {
       entries = await Array.fromAsync(Deno.readDir(dir));
@@ -313,56 +185,52 @@ async function* everything(paths: DataPaths): AsyncGenerator<Recorded> {
       continue;
     }
     for (const entry of entries) {
-      // Named by hash; `.staging` and `.failed` are neither, and a failed
-      // batch is exactly the one worth fetching again.
-      if (!entry.isDirectory || normalizeHash(entry.name) === null) continue;
-      const recorded = await read(paths, entry.name.toLowerCase());
+      const hash = normalizeHash(entry.name);
+      if (!entry.isDirectory || hash === null) continue;
+      const recorded = await read(state, join(dir, entry.name), hash);
       if (recorded !== null) yield recorded;
     }
   }
 }
 
-async function pending(
-  paths: DataPaths,
+async function read(
+  state: ImportState,
+  dir: string,
   hash: string,
 ): Promise<Recorded | null> {
-  const path = join(paths.imports, hash, "model.json");
-  const batch = await readJson(path);
-  if (batch === null) return null;
-  const model = batch.model as Record<string, unknown> | undefined;
-  return {
-    hash,
-    state: "pending",
-    path,
-    filename: typeof model?.filename === "string" ? model.filename : null,
-    source: object(batch.source) ?? object(object(batch.civitai)?.source) ??
-      {},
-    record: object(batch.civitai) ?? {},
-  };
+  try {
+    if (!(await Deno.stat(dir)).isDirectory) return null;
+  } catch {
+    return null;
+  }
+  const batch = await readJson(join(dir, "model.json"));
+  let reason: string | null = null;
+  if (state === "fetch-failed" || state === "import-failed") {
+    try {
+      reason = reasonFrom(await Deno.readTextFile(join(dir, "error.txt")));
+    } catch {
+      // A failure without its note is still a failure.
+    }
+  }
+  return { hash, state, dir, batch, reason };
 }
 
-async function imported(
-  paths: DataPaths,
-  hash: string,
-): Promise<Recorded | null> {
-  const path = join(paths.modelsMeta, hash, "civitai.json");
-  const record = await readJson(path);
-  if (record === null) return null;
-  return {
-    hash,
-    state: "imported",
-    path,
-    filename: null,
-    source: object(record.source) ?? {},
-    record,
-  };
+/**
+ * The reason in an `error.txt`: the first line of its message. Both writers
+ * start with a timestamp; the CLI's adds the command it ran.
+ */
+function reasonFrom(text: string): string | null {
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) =>
+    line.length > 0
+  );
+  return lines.slice(1).find((line) => !line.startsWith("forge models")) ??
+    null;
 }
 
 async function readJson(path: string): Promise<Record<string, unknown> | null> {
   try {
     return object(JSON.parse(await Deno.readTextFile(path)));
   } catch {
-    // Missing, or not something a run of this command wrote: not a match.
     return null;
   }
 }

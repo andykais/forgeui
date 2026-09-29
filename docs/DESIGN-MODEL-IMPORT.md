@@ -59,7 +59,8 @@ fetches goes anywhere else. It writes files and nothing else. It never opens
 not care whether the app is running.
 
 **The app slurps that folder** on boot and at the end of every model rescan,
-applies each batch to the model it names, and deletes the batch. A downloaded
+applies each batch to the model it names, and keeps its `model.json` as
+history in `import/imported/success/` (§5.1). A downloaded
 weights file is moved into `<appdata>/models/<kind>/` — app-owned storage that
 is scanned and hashed like any other model folder — so a model fetched by the
 CLI simply appears on the Models page. An imported sample lands in
@@ -130,7 +131,8 @@ Three properties of that sequence are load-bearing:
   fetch metadata for forty models, and have all of it appear the first time
   you launch.
 - **Step 3 cannot corrupt step 5.** The CLI writes into
-  `import/.staging/<id>/` and renames the finished directory into place, so
+  `import/fetched/.staging/<id>/` and renames the finished directory into
+  `fetched/success/`, so
   the app either sees a complete batch or sees nothing. There is no lock, no
   handshake and no partially-read JSON.
 - **Step 4 is idempotent.** Running the CLI twice writes the batch twice;
@@ -265,8 +267,8 @@ Options:
       --overwrite             Fetch again a model already fetched, and let the
                               import replace fields you have edited. Without it, a
                               model whose checksum is in
-                              <import dir>/imported_checksums.txt is left alone
-                              (§3.2).
+                              checksum is anywhere in the import folder is left
+                              alone (§3.2).
 
       --dry-run               Print what would be fetched and written; touch nothing.
       --json                  Print the resulting model.json to stdout instead of a
@@ -289,7 +291,7 @@ wrote it:
     their tags    character, zelda, video game, legenda of zelda
     description   1,204 characters
     samples       4
-  wrote /workspace/import/<sha256>
+  wrote /workspace/import/fetched/success/<sha256>
 
 Examples:
 
@@ -399,66 +401,48 @@ deno task start                                      # unchanged; still src/main
 
 ### 3.2 Running it again
 
-*Added after the rest of this document.* Without `--overwrite`, a model that
-has already been fetched is **left alone** — found, where possible, without a
-single request, so re-running a list of commands costs nothing for the ones
-already done.
+*Added after the rest of this document.* Without `--overwrite`, **a checksum
+anywhere in the import folder is left alone** (§5.1): fetched and waiting,
+looked up and not found, imported, or refused by the app. The folder is the
+history, and the history decides — found, where possible, without a single
+request, so re-running a list of commands costs nothing for the ones already
+done.
 
 ```
 already fetched: TotK Zelda - Realistic · Zelda - ZIB - Version 1
-  waiting for the app in /workspace/import/72a47985…
-  72a47985… is in /workspace/import/imported_checksums.txt
-nothing was fetched; remove that line, or pass --overwrite, to fetch it again
+  waiting for the app in /workspace/import/fetched/success/72a47985…
+nothing was fetched; pass --overwrite, or delete /workspace/import/fetched/success/72a47985…, to try again
 ```
 
-**`<imports>/imported_checksums.txt` decides.** Each batch written appends
-its sha256 there — `sha256sum`'s layout, the model's name as the note — once:
-a re-fetch does not add the line twice. A model listed there is not fetched
-again. It is a plain file so that it can be the control: delete a line and
-that model can be fetched again; add one and it will not be. It lives in the
-import folder, so a folder shared between a fetching machine and a serving
-one shares the list too; the app skips it, as it skips anything that is not a
-batch directory.
+| Where | Said as |
+|---|---|
+| `fetched/success/<sha256>/` | already fetched, waiting for the app |
+| `fetched/failure/<sha256>/` | looked up before, and not found — with the reason |
+| `imported/success/<sha256>/` | already imported |
+| `imported/failure/<sha256>/` | already fetched, and the app refused it — with the reason |
 
-```
-# Checksums `forge models` has fetched. A model listed here is not fetched
-# again unless --overwrite is passed: delete its line to let it be, or add
-# one to keep a model out. One sha256 per line; the rest is a note.
-72a47985afc757ee869dd25695849fa42ed15c8b4a54dd6ecfe22efce25a50d6  TotK Zelda - Realistic · Zelda - ZIB - Version 1
-```
-
-Before the list exists it is **seeded** from what already has been fetched —
-batches waiting, and models the app has ingested — and written with the
-first batch after that, so nothing fetched before the list existed is fetched
-again because of it, and a run that writes nothing leaves no file behind. A
-checksum whose only trace is a batch in `.failed/` does not count: that is
-the one most worth fetching again, and editing the list after every failure
-would be a chore the folder already answers.
+Deleting a checksum's directory lets that model be fetched again;
+`--overwrite` does the same for one run.
 
 **Finding the checksum** is the other half. A hash names a model directly, so
-`--sha256checksum` and `--local-file` (hashed locally first) need nothing
-more. A link or a filename does not — finding out what one points at *is* the
-lookup — so they are matched against what earlier batches recorded, in two
-files the CLI may read, neither of them `app.db` (§3.1):
-
-| | |
-|---|---|
-| `<imports>/<sha256>/model.json` | a batch waiting for the app |
-| `<appdata>/models-meta/<sha256>/civitai.json` | a batch the app has ingested (§7.2) |
+`--sha256checksum`, `--local-file` (hashed locally first) and an archive
+`/sha256/` link need nothing more. A link or a filename does not — finding
+out what one points at *is* the lookup — so they are matched against the
+`model.json` earlier runs left in the folder:
 
 | Input | Matches a batch whose |
 |---|---|
 | Civitai link with `modelVersionId` | `source.model_version_id` |
 | Civitai link to a model only | `source.model_id` — "the newest version" is a question only the network can answer, so the version already fetched is taken to be it; `--overwrite` asks |
-| archive `/sha256/<hash>` link | hash |
 | Hugging Face file link | `source.repo` and `source.path` |
 | Hugging Face repo link | `source.repo` |
 | `--filename` | `model.filename`, or the basename of a Hugging Face `source.path` |
 | Civitai image link | nothing: only the network knows which version an image was posted under |
 
-Where nothing matches — a link fetched on another machine, a checksum typed
-into the list — the lookup runs, and the list is checked against its answer
-**before** any sample, weight or batch is downloaded or written.
+Where nothing matches — a link fetched on another machine sharing the folder,
+say — the lookup runs, and its checksum is checked against the folder
+**before** any sample, weight or batch is downloaded or written. Files only:
+none of this opens `app.db` (§3.1).
 
 `--overwrite` does two things, deliberately one flag: it fetches again, and
 it marks the batch so ingest replaces the fields you edited (§7.2). A re-fetch
@@ -812,16 +796,19 @@ the file's `resolve` URL with the Hugging Face token, never the Civitai one.
 
 ```
 <appdata>/import/                     ← new; `import.dir` may move it
-  <sha256>/                           one batch, named by the model it is about
-    model.json                        the manifest (§5.2)
-    samples/
-      0001.jpeg
-      0002.png
-      …
-    model/                            only with --download-model
-      cyberrealisticV90.safetensors
-  .staging/<ulid>/                    a batch being written; renamed into place
-  .failed/<sha256>/                   a batch ingest refused, plus error.txt
+  fetched/                            written by `forge models`
+    success/<sha256>/                 one batch, named by the model it is about
+      model.json                      the manifest (§5.2)
+      samples/
+        0001.jpeg
+        …
+      model/                          only with --download-model
+        cyberrealisticV90.safetensors
+    failure/<sha256>/error.txt        a lookup whose answer was "no"
+    .staging/<ulid>/                  a batch being written; renamed into place
+  imported/                           written by the app
+    success/<sha256>/model.json       an applied batch's manifest, kept as history
+    failure/<sha256>/                 a batch ingest refused, whole, + error.txt
 
 <appdata>/models/<kind>/              ← new; where ingest files downloaded weights
   checkpoints/
@@ -848,16 +835,32 @@ Chosen this way because:
 - **One JSON per model, images beside it.** You can read it. You can hand-write
   it — which is the supported way to import a model the CLI cannot find, and
   is how the integration tests build fixtures.
-- **`.staging` and `.failed` are dot-prefixed** so the ingest walk skips them
-  by the same rule that skips everything else it does not understand.
-- **The batch is deleted on success**, per the requirement, and the deletion is
-  the last step after the database transaction commits. A crash between the
-  two leaves a batch that re-ingests to the same state — which is exactly why
-  sample import is keyed on the source URL.
-
-`.failed/` is the answer to "what if a batch is broken". A batch that throws
-is moved there with the error beside it, so one bad JSON cannot wedge every
-boot from now on. Nothing ever retries it; it is yours to look at or delete.
+- **Who writes where is the first level** (amended): `fetched/` is the CLI's,
+  `imported/` the app's, and each has a `success/` and a `failure/`. The
+  folder is the history of every model either side has handled, and it is
+  what `forge models` consults before asking anything (§3.2).
+- **An applied batch keeps its `model.json`** in `imported/success/` —
+  amended from "deleted on success": the samples have gone into the sample
+  store and the weights into `<appdata>/models/`, so what is left is small,
+  and it is the record of what was imported and from where. The move is the
+  last step, after the database writes; a crash between the two leaves a
+  batch that re-ingests to the same state — which is exactly why sample
+  import is keyed on the source URL. A later import of the same model
+  replaces its record, and clears any refusal of it.
+- **`imported/failure/`** is the answer to "what if a batch is broken". A
+  batch that throws is moved there whole with the error beside it in
+  `error.txt`, so one bad JSON cannot wedge every boot from now on. Nothing
+  retries it; fix it and move it back to `fetched/success/`, or delete it.
+- **`fetched/failure/`** holds only an `error.txt`: when, the command, and the
+  answer. It is written only for a **definitive** no — nothing knows the
+  hash, no model page stands behind it, the downloaded bytes cannot match —
+  and never for a failure to get an answer (a timeout, a 5xx, a missing
+  login), which would keep a model out for good over one bad minute. It is
+  keyed by checksum, so only a lookup that knew one is recorded: a link or a
+  filename that finds nothing has none to be filed under. A later success
+  for the same checksum removes it.
+- **`.staging` is dot-prefixed** so the ingest walk skips it by the same rule
+  that skips everything else it does not understand.
 
 ### 5.2 `model.json`
 
@@ -1181,7 +1184,7 @@ type.
 
 1. **Verify.** The file is hashed and must match the entry's `sha256`, which
    must in turn be the batch's own directory name for the primary file. A
-   mismatch is a failed batch (`.failed/`), not a filed model — half a
+   mismatch is a failed batch (`imported/failure/`), not a filed model — half a
    checkpoint on the Models page is worse than an error.
 2. **File it.** Moved to `<appdata>/models/<kind>/<filename>`, created if
    absent. A name already taken by different bytes gets ` (2)` before the
@@ -1190,7 +1193,7 @@ type.
 3. The entry is marked filed in `model.json`, rewritten in place, so a crash
    between the move and the scan does not file it twice.
 
-**Phase B**, for each `import/<sha256>/model.json`, in one transaction:
+**Phase B**, for each `import/fetched/success/<sha256>/model.json`:
 
 1. **Find the model.** No `models` row for that hash → leave the batch alone
    and move on. This is the normal case for a not-yet-hashed file, not an
@@ -1214,12 +1217,12 @@ type.
 4. **Thumbnail.** If the model has no `thumb_path` and no samples before this
    batch, the first imported sample becomes the thumbnail. A model that had
    one keeps it.
-5. **Delete the batch**, after the transaction commits. By now it holds only
-   `model.json` and whatever sample files could not be moved; the weights left
-   in Phase A.
+5. **Keep the manifest.** `model.json` moves to
+   `imported/success/<sha256>/` and the rest of the batch is removed: the
+   samples are in the sample store by now and the weights left in Phase A.
 
-Anything thrown moves the batch to `.failed/` with the message, and ingest
-continues with the next one.
+Anything thrown moves the batch to `imported/failure/<sha256>/` with the
+message in `error.txt`, and ingest continues with the next one.
 
 ### 7.3 External media in the gallery
 
@@ -1500,7 +1503,8 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   server's parser rather than cliffy's.
 
 **Integration**
-- Ingest applies a hand-written batch to a hashed model and deletes it.
+- Ingest applies a hand-written batch to a hashed model and keeps its
+  `model.json` in `imported/success/`.
 - Ingest leaves a batch for an unhashed model alone, then applies it once the
   hash lands.
 - A batch carrying a weights file is filed into `<appdata>/models/<kind>/`,
@@ -1511,7 +1515,7 @@ Everything the test suite already promises — no network, no GPU, hermetic.
 - `<appdata>/models/<kind>` appears in the generated `extra_model_paths.yaml`
   under that kind.
 - Re-ingesting the same batch imports no second sample.
-- A malformed `model.json` lands in `.failed/` and the next batch still
+- A malformed `model.json` lands in `imported/failure/` and the next batch still
   ingests.
 - `overwrite: false` does not clobber a hand-typed display name;
   `overwrite: true` does.

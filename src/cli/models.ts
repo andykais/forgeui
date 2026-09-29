@@ -10,13 +10,7 @@
  * file or anything it imports opens the database.**
  */
 
-import {
-  basename,
-  dirname,
-  extname,
-  join,
-  resolve as resolvePath,
-} from "@std/path";
+import { basename, extname, join, resolve as resolvePath } from "@std/path";
 import { ulid } from "@std/ulid";
 import type { Config } from "../config/types.ts";
 import type { DataPaths } from "../config/paths.ts";
@@ -45,23 +39,20 @@ import {
   describeCandidate,
   LookupError,
   type LookupSource,
+  NotFoundError,
 } from "./civitai_client.ts";
 import { HuggingFaceClient } from "./huggingface_client.ts";
 import {
-  appendToLedger,
   type Existing,
   findExisting,
-  isFetched,
   label,
-  type Ledger,
-  listed,
-  readLedger,
   type Wanted,
   wantedFromUrl,
 } from "./existing.ts";
+import { type ImportLayout, importLayout } from "../models/import_layout.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
 
-export { LookupError };
+export { LookupError, NotFoundError };
 
 export interface ModelsCommandOptions {
   url?: string;
@@ -182,43 +173,49 @@ export async function runModels(
     localHash = await hashFile(path);
   }
 
-  // `imports/imported_checksums.txt` decides what counts as fetched (§3.2),
-  // seeded the first time from what already is.
-  const ledger = await readLedger(options.paths);
+  const layout = importLayout(options.paths.imports);
 
-  // Without `--overwrite`, a model on that list is left alone, and found
-  // without asking the network where that is possible: re-running a list of
-  // commands costs nothing for the ones already done.
+  // Without `--overwrite`, a checksum anywhere in the import folder is left
+  // alone — fetched, not found, imported, refused — and found without asking
+  // the network where that is possible: re-running a list of commands costs
+  // nothing for the ones already done (§3.2).
   if (!options.overwrite) {
     const wanted = wantedFor(options, localHash);
     const have = wanted === null
       ? null
-      : await findExisting(options.paths, wanted, ledger);
-    if (have !== null) return alreadyFetched(have, ledger, say);
+      : await findExisting(options.paths, wanted);
+    if (have !== null) return alreadyDone(have, say);
   }
 
-  const found = await resolve(options, client, localHash);
-  if (found.sha256 === null) {
-    throw new LookupError(
-      "the model was found but carries no sha256, so nothing could be " +
-        "matched to a file on disk",
-    );
+  // What a "no" is recorded under: the checksum, when it is known before the
+  // answer is, and the answer's once it is.
+  let about = hashBefore(options, localHash);
+  const miss = (cause: unknown) =>
+    options.dryRun
+      ? Promise.resolve()
+      : recordMiss(layout, options, about, cause);
+
+  let found: LookupResult;
+  try {
+    found = await resolve(options, client, localHash);
+    if (found.sha256 === null) {
+      throw new NotFoundError(
+        "the model was found but carries no sha256, so nothing could be " +
+          "matched to a file on disk",
+      );
+    }
+  } catch (cause) {
+    await miss(cause);
+    throw cause;
   }
-  // A link nothing on this machine had recorded, for a model the list has
-  // anyway — fetched elsewhere, or listed by hand. The lookup could not be
+  const sha256 = found.sha256;
+  about = sha256;
+  // A link nothing here had recorded, for a checksum the folder has anyway —
+  // fetched on another machine sharing it, say. The lookup could not be
   // saved, but the samples, the weights and the batch can.
-  if (
-    !options.overwrite && await isFetched(options.paths, ledger, found.sha256)
-  ) {
-    return alreadyFetched(
-      {
-        ...listed(ledger, found.sha256),
-        name: found.record.model.name ?? found.display_name,
-        version: found.record.version.name,
-      },
-      ledger,
-      say,
-    );
+  if (!options.overwrite) {
+    const have = await findExisting(options.paths, { hash: sha256 });
+    if (have !== null) return alreadyDone(have, say);
   }
 
   const batch: ImportBatch = {
@@ -247,7 +244,7 @@ export async function runModels(
     samples: [],
   };
 
-  const dir = join(options.paths.imports, found.sha256);
+  const dir = join(layout.fetched.success, sha256);
   const result: ModelsCommandResult = {
     dir,
     batch,
@@ -268,7 +265,7 @@ export async function runModels(
 
   // Written into `.staging/` and renamed into place, so the app either sees a
   // complete batch or sees nothing: no lock, no handshake, no half-read JSON.
-  const staging = join(options.paths.imports, ".staging", ulid());
+  const staging = join(layout.staging, ulid());
   await Deno.mkdir(staging, { recursive: true });
   try {
     if (options.downloadSamples > 0) {
@@ -308,24 +305,17 @@ export async function runModels(
 
     // An existing batch for the same model is replaced: it is the same
     // question asked again, and two answers to it would collide on ingest.
-    await Deno.mkdir(options.paths.imports, { recursive: true });
+    await Deno.mkdir(layout.fetched.success, { recursive: true });
     await Deno.remove(dir, { recursive: true }).catch(() => {});
     await Deno.rename(staging, dir);
   } catch (cause) {
     await Deno.remove(staging, { recursive: true }).catch(() => {});
+    await miss(cause);
     throw cause;
   }
-
-  // On the list the moment the batch exists, so a second run — or a second
-  // machine sharing this folder — leaves it alone.
-  await appendToLedger(
-    ledger,
-    found.sha256,
-    label({
-      name: found.record.model.name ?? found.display_name,
-      version: found.record.version.name,
-    }),
-  );
+  // An earlier "no" for this checksum has been answered now.
+  await Deno.remove(join(layout.fetched.failure, sha256), { recursive: true })
+    .catch(() => {});
 
   for (const line of summarize(found)) say(line);
   if (options.downloadSamples > 0) {
@@ -386,29 +376,93 @@ function huggingFace(client: CivitaiClient): HuggingFaceClient {
 }
 
 /** The run that fetches nothing, and says why and how to make it. */
-function alreadyFetched(
+function alreadyDone(
   have: Existing,
-  ledger: Ledger,
   say: (line: string) => void,
 ): ModelsCommandResult {
-  say(`already fetched: ${label(have) || have.hash}`);
-  if (have.state === "pending") {
-    say(`  waiting for the app in ${dirname(have.path)}`);
-  } else if (have.state === "imported") {
-    say(`  imported by the app; its record is ${have.path}`);
+  const what = label(have) || have.hash;
+  switch (have.state) {
+    case "fetched":
+      say(`already fetched: ${what}`);
+      say(`  waiting for the app in ${have.dir}`);
+      break;
+    case "fetch-failed":
+      say(`looked up before, and not found: ${what}`);
+      if (have.reason) say(`  ${have.reason}`);
+      say(`  recorded in ${join(have.dir, "error.txt")}`);
+      break;
+    case "imported":
+      say(`already imported: ${what}`);
+      say(`  its record is ${join(have.dir, "model.json")}`);
+      break;
+    case "import-failed":
+      say(`already fetched, and the app refused it: ${what}`);
+      if (have.reason) say(`  ${have.reason}`);
+      say(`  see ${join(have.dir, "error.txt")}`);
+      break;
   }
-  say(`  ${have.hash} is in ${ledger.path}`);
   say(
-    "nothing was fetched; remove that line, or pass --overwrite, to fetch it again",
+    `nothing was fetched; pass --overwrite, or delete ${have.dir}, to try again`,
   );
   return {
-    dir: have.state === "listed" ? dirname(ledger.path) : dirname(have.path),
+    dir: have.dir,
     batch: null,
     samples: 0,
     skipped: 0,
     files: 0,
     existing: have,
   };
+}
+
+/** The checksum a run is about before it asks anything, when it says. */
+function hashBefore(
+  options: ModelsCommandOptions,
+  localHash: string | undefined,
+): string | null {
+  const wanted = wantedFor(options, localHash);
+  return wanted !== null && "hash" in wanted
+    ? normalizeHash(wanted.hash)
+    : null;
+}
+
+/**
+ * A lookup whose answer was *no*, kept in `fetched/failure/<sha256>/` so it
+ * is not asked again (§3.2). Only a definitive no: a timeout, a 5xx or a
+ * missing login is a failure to get an answer, and recording one would keep
+ * a model out for good over one bad minute. And only under a checksum — a
+ * link or a filename that finds nothing has none to be filed under.
+ */
+async function recordMiss(
+  layout: ImportLayout,
+  options: ModelsCommandOptions,
+  hash: string | null,
+  cause: unknown,
+): Promise<void> {
+  if (!(cause instanceof NotFoundError) || hash === null) return;
+  const dir = join(layout.fetched.failure, hash);
+  try {
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+      join(dir, "error.txt"),
+      `${isoSeconds(new Date())}\n${describeRun(options)}\n${cause.message}\n`,
+    );
+  } catch {
+    // Not being able to write the note must not hide the error it is about.
+  }
+}
+
+/** The command, as far as it says which model and where to ask. */
+function describeRun(options: ModelsCommandOptions): string {
+  const parts = ["forge models"];
+  const add = (flag: string, value: string | undefined) => {
+    if (value !== undefined) parts.push(flag, value);
+  };
+  add("--url", options.url);
+  add("--filename", options.filename);
+  add("--local-file", options.localFile);
+  add("--sha256checksum", options.sha256checksum);
+  if (options.source !== "auto") parts.push("--import-source", options.source);
+  return parts.join(" ");
 }
 
 // ------------------------------------------------------------------ lookup
@@ -725,7 +779,7 @@ async function fetchWeights(input: {
     await runCivitaiCli(cli, versionId, into);
   } else {
     if (chosen === null) {
-      throw new LookupError(
+      throw new NotFoundError(
         versionId === null
           ? "this lookup found no downloadable file"
           : `no download URL for model version ${versionId}`,
@@ -772,7 +826,7 @@ async function fetchWeights(input: {
   // the batch's name. If those differ, the model lands but its description,
   // samples and trigger words wait forever for a file that never comes.
   if (!files.some((file) => file.sha256 === found.sha256)) {
-    throw new LookupError(
+    throw new NotFoundError(
       `downloaded ${files.map((file) => file.file).join(", ")}, which hashes ` +
         `to ${files.map((file) => file.sha256).join(", ")}, not the ` +
         `${found.sha256} this lookup is about. Nothing was written: that ` +

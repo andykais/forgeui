@@ -22,7 +22,11 @@ import {
   sourceRecordFromHuggingFace,
   WEIGHT_FILE,
 } from "../models/huggingface.ts";
-import { type Candidate, LookupError } from "./civitai_client.ts";
+import {
+  type Candidate,
+  LookupError,
+  NotFoundError,
+} from "./civitai_client.ts";
 
 export interface HuggingFaceClientOptions {
   hubUrl: string;
@@ -105,12 +109,14 @@ export class HuggingFaceClient {
         }),
     );
     if (entry === undefined || entry.type !== "file") {
-      throw new LookupError(`${ref.repo} has no file ${path} at ${revision}`);
+      throw new NotFoundError(
+        `${ref.repo} has no file ${path} at ${revision}`,
+      );
     }
     if (!entry.lfs) {
       // Only LFS files carry a sha256 in the Hub's answer, and a batch is
       // named by one. Weights are always LFS; a small text file is not.
-      throw new LookupError(
+      throw new NotFoundError(
         `${path} in ${ref.repo} is not stored in LFS, so the Hub gives no ` +
           `sha256 for it`,
       );
@@ -178,7 +184,7 @@ export class HuggingFaceClient {
       }
       return found;
     }
-    throw new LookupError(
+    throw new NotFoundError(
       `none of the Hugging Face copies the archive lists still holds a file ` +
         `with this hash`,
     );
@@ -311,7 +317,7 @@ export class HuggingFaceClient {
     } catch (cause) {
       const status = (cause as { statusCode?: number }).statusCode;
       if (status === 404) {
-        throw new LookupError(`Hugging Face has no ${what}`);
+        throw new NotFoundError(`Hugging Face has no ${what}`);
       }
       if (status === 401 || status === 403) {
         throw new LookupError(

@@ -92,7 +92,8 @@ async function writeBatch(
   overrides: Partial<ImportBatch> = {},
   files: Record<string, Uint8Array> = {},
 ): Promise<string> {
-  const dir = join(importsDir, hash);
+  // Where `forge models` leaves a batch: `fetched/success/` (§5.1).
+  const dir = join(importsDir, "fetched", "success", hash);
   await Deno.mkdir(join(dir, "samples"), { recursive: true });
   for (const [name, bytes] of Object.entries(files)) {
     await Deno.mkdir(join(dir, name, ".."), { recursive: true });
@@ -135,7 +136,7 @@ async function withImports(
   }
 }
 
-Deno.test("a batch is applied to its model and then deleted", async () => {
+Deno.test("a batch is applied to its model and kept as history", async () => {
   await withImports(async ({ app, hash }) => {
     const dir = await writeBatch(app.paths.imports, hash, {
       samples: [{
@@ -176,8 +177,20 @@ Deno.test("a batch is applied to its model and then deleted", async () => {
       3,
     );
 
-    // The batch is gone; the raw record is kept beside the model's metadata.
+    // The batch has moved on: its model.json kept in `imported/success/` as
+    // the record that it happened, the samples in the sample store, the rest
+    // gone. The raw record is kept beside the model's metadata too.
     assertEquals(await exists(dir), false);
+    const kept = join(app.paths.imports, "imported", "success", hash);
+    assertEquals(
+      [...Deno.readDirSync(kept)].map((entry) => entry.name),
+      ["model.json"],
+    );
+    assertEquals(
+      JSON.parse(await Deno.readTextFile(join(kept, "model.json"))).model
+        .sha256,
+      hash,
+    );
     assert(
       await exists(join(app.paths.modelsMeta, hash, "civitai.json")),
       "the raw upstream record should be kept in models-meta/",
@@ -275,7 +288,7 @@ Deno.test("a batch for an unhashed model waits, then lands", async () => {
 Deno.test("a malformed batch is set aside and the next one still lands", async () => {
   await withImports(async ({ app, hash }) => {
     // Sorts before the good one, so it is met first.
-    const badDir = join(app.paths.imports, "0000-broken");
+    const badDir = join(app.paths.imports, "fetched", "success", "0000-broken");
     await Deno.mkdir(badDir, { recursive: true });
     await Deno.writeTextFile(join(badDir, "model.json"), "{ not json");
     const goodDir = await writeBatch(app.paths.imports, hash);
@@ -285,7 +298,12 @@ Deno.test("a malformed batch is set aside and the next one still lands", async (
 
     assertEquals(await exists(badDir), false);
     assertEquals(await exists(goodDir), false);
-    const failed = join(app.paths.imports, ".failed", "0000-broken");
+    const failed = join(
+      app.paths.imports,
+      "imported",
+      "failure",
+      "0000-broken",
+    );
     assert(await exists(failed), "a bad batch is moved aside, not deleted");
     assertStringIncludes(
       await Deno.readTextFile(join(failed, "error.txt")),
@@ -303,7 +321,7 @@ Deno.test("a batch from a newer format is refused rather than misread", async ()
     await app.models.idle();
     assertStringIncludes(
       await Deno.readTextFile(
-        join(app.paths.imports, ".failed", hash, "error.txt"),
+        join(app.paths.imports, "imported", "failure", hash, "error.txt"),
       ),
       "newer than this build reads",
     );
@@ -392,7 +410,9 @@ Deno.test("rescan-models?wait=1 answers once the batch has landed", async () => 
       const model = await app.json<ModelDetail>(`/api/models/${hash}`);
       assertEquals(model.display_name, "CyberRealistic");
       assertEquals(model.trigger_words, ["cyberrealistic", "photo"]);
-      assert(!(await exists(join(app.paths.imports, hash))));
+      assert(
+        !(await exists(join(app.paths.imports, "fetched", "success", hash))),
+      );
     }, { argv: fixtures.argv });
   } finally {
     await Deno.remove(fixtures.dir, { recursive: true });
@@ -440,7 +460,10 @@ Deno.test("a downloaded model is filed, scanned, hashed and applied", async () =
       const model = await app.json<ModelDetail>(`/api/models/${hash}`);
       assertEquals(model.display_name, "Downloaded");
       assertEquals(model.trigger_words, ["downloaded"]);
-      assertEquals(await exists(join(app.paths.imports, hash)), false);
+      assertEquals(
+        await exists(join(app.paths.imports, "fetched", "success", hash)),
+        false,
+      );
     }, { argv: fixtures.argv });
   } finally {
     await Deno.remove(fixtures.dir, { recursive: true });
@@ -473,7 +496,7 @@ Deno.test("weights that do not hash to the batch's name are refused", async () =
       );
       assertStringIncludes(
         await Deno.readTextFile(
-          join(app.paths.imports, ".failed", claimed, "error.txt"),
+          join(app.paths.imports, "imported", "failure", claimed, "error.txt"),
         ),
         "but the batch says",
       );
@@ -564,7 +587,10 @@ Deno.test("a batch carrying its own weights is not reported as stuck", async () 
         !said.includes("waiting for a model this library has not seen"),
         `a self-contained batch should not be reported as stuck:\n${said}`,
       );
-      assertEquals(await exists(join(app.paths.imports, hash)), false);
+      assertEquals(
+        await exists(join(app.paths.imports, "fetched", "success", hash)),
+        false,
+      );
     }, { argv: fixtures.argv });
   } finally {
     await Deno.remove(fixtures.dir, { recursive: true });

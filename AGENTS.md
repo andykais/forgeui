@@ -107,8 +107,9 @@ those use the npm toolchain. Run both sides before you call something green.
 - A model is named by its display name everywhere it appears, and is a link to
   its page wherever it has a hash (§8.1).
 - **Civitai and Hugging Face are fetched by `forge models`, never by the
-  server.** The CLI writes a batch into `<appdata>/import/`; the app ingests it
-  around the model rescan and deletes it (DESIGN-MODEL-IMPORT §7). Nothing in
+  server.** The CLI writes a batch into `<appdata>/import/fetched/success/`; the
+  app ingests it around the model rescan and keeps its `model.json` in
+  `import/imported/success/` (DESIGN-MODEL-IMPORT §5.1, §7). Nothing in
   `src/cli/models.ts` or what it imports may open `app.db` — there is a test for
   it. A downloaded model is filed under `<appdata>/models/<kind>/`, which is
   app-owned storage scanned like any other model folder; the folders

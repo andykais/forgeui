@@ -29,7 +29,18 @@ import {
 import type { HuggingFaceClient } from "./huggingface_client.ts";
 
 export class LookupError extends Error {
-  override readonly name = "LookupError";
+  override readonly name: string = "LookupError";
+}
+
+/**
+ * A lookup whose answer was *no* — nobody knows this hash, no model page
+ * stands behind it, the bytes cannot match — as opposed to one that failed
+ * to get an answer (a timeout, a 5xx, a login). Only this kind is recorded
+ * in `fetched/failure/` (§3.2): recording a flaky connection would keep a
+ * model out for good over one bad minute.
+ */
+export class NotFoundError extends LookupError {
+  override readonly name = "NotFoundError";
 }
 
 /** A file the archive indexes, which is identified by its hash. */
@@ -207,7 +218,7 @@ export class CivitaiClient {
       );
     }
 
-    throw new LookupError(
+    throw new NotFoundError(
       `nothing at ${tried.join(" or ")} knows the hash ${normalized}`,
     );
   }
@@ -685,7 +696,7 @@ function mirrorOnly(
     : source === "huggingface"
     ? " None of the copies are on Hugging Face."
     : " Mirrors are indexed by hash; only models carry metadata.";
-  return new LookupError(
+  return new NotFoundError(
     `the archive has a file with that hash${
       where.length > 0 ? ` on ${where.join(", ")}` : ""
     }, but no model page for it — so there is no description, no tags and ` +

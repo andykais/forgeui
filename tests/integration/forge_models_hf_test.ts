@@ -173,7 +173,10 @@ Deno.test("a huggingface.co file link imports its title and README", async () =>
       client: h.client,
       log: () => {},
     });
-    assertEquals(result.dir, join(h.paths.imports, h.hash));
+    assertEquals(
+      result.dir,
+      join(h.paths.imports, "fetched", "success", h.hash),
+    );
     const batch = await readBatch(result.dir);
     assertEquals(batch.model.sha256, h.hash);
     assertEquals(batch.model.filename, FILE);

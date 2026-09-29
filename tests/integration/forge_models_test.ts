@@ -15,6 +15,7 @@ import { CivitaiClient } from "../../src/cli/civitai_client.ts";
 import {
   civitaiToken,
   LookupError,
+  NotFoundError,
   runModels,
   UsageError,
 } from "../../src/cli/models.ts";
@@ -271,7 +272,10 @@ Deno.test("--local-file hashes what is on disk and writes a batch", async () => 
       log: () => {},
     });
 
-    assertEquals(result.dir, join(h.paths.imports, h.hash));
+    assertEquals(
+      result.dir,
+      join(h.paths.imports, "fetched", "success", h.hash),
+    );
     const batch = await readBatch(result.dir);
     assertEquals(batch.format, 1);
     assertEquals(batch.model.sha256, h.hash);
@@ -386,7 +390,9 @@ Deno.test("the batch is renamed into place, never written in halves", async () =
     // Staging is empty afterwards: the finished directory was renamed, so the
     // app never sees a partial batch.
     const staged: string[] = [];
-    for await (const entry of Deno.readDir(join(h.paths.imports, ".staging"))) {
+    for await (
+      const entry of Deno.readDir(join(h.paths.imports, "fetched", ".staging"))
+    ) {
       staged.push(entry.name);
     }
     assertEquals(staged, []);
@@ -601,11 +607,7 @@ Deno.test("--search lists candidates and writes nothing", async () => {
     assertStringIncludes(lines.join("\n"), "CyberRealistic");
     assertStringIncludes(lines.join("\n"), "modelVersionId=501240");
     // Discovery is read-only: it is how you find a URL, not a way to import.
-    const staged: string[] = [];
-    for await (const entry of Deno.readDir(h.paths.imports)) {
-      staged.push(entry.name);
-    }
-    assertEquals(staged.filter((name) => !name.startsWith(".")), []);
+    assertEquals(await namesIn(h.paths.imports), []);
   }, { noLocalFile: true });
 });
 
@@ -687,7 +689,10 @@ Deno.test("--sha256checksum names the file it was given, not the primary", async
       client: h.client,
       log: () => {},
     });
-    assertEquals(result.dir, join(h.paths.imports, h.hash));
+    assertEquals(
+      result.dir,
+      join(h.paths.imports, "fetched", "success", h.hash),
+    );
     const batch = await readBatch(result.dir);
     assertEquals(batch.model.sha256, h.hash);
     assertEquals(batch.model.filename, FILENAME);
@@ -759,11 +764,18 @@ Deno.test("a download that cannot match its batch writes nothing", async () => {
       LookupError,
       "could never be matched",
     );
-    const left: string[] = [];
-    for await (const entry of Deno.readDir(h.paths.imports)) {
-      if (!entry.name.startsWith(".")) left.push(entry.name);
-    }
-    assertEquals(left, []);
+    // No batch — but the "no" is kept, so the same bytes are not fetched
+    // again for nothing (§3.2).
+    assertEquals(
+      await namesIn(join(h.paths.imports, "fetched", "success")),
+      [],
+    );
+    assertStringIncludes(
+      await Deno.readTextFile(
+        join(h.paths.imports, "fetched", "failure", h.hash, "error.txt"),
+      ),
+      "could never be matched",
+    );
   }, { noLocalFile: true });
 });
 
@@ -795,7 +807,9 @@ Deno.test("a gated model says what to do rather than writing half a batch", asyn
     // The staging directory is cleaned up, so a failed run leaves nothing for
     // the app to trip over.
     const staged: string[] = [];
-    for await (const entry of Deno.readDir(join(h.paths.imports, ".staging"))) {
+    for await (
+      const entry of Deno.readDir(join(h.paths.imports, "fetched", ".staging"))
+    ) {
       staged.push(entry.name);
     }
     assertEquals(staged, []);
@@ -1110,23 +1124,50 @@ Deno.test("a configured token wins over an installed civitai CLI", async () => {
 });
 
 /**
- * Re-running (DESIGN-MODEL-IMPORT §3.2): without `--overwrite`, a model
- * already fetched is left alone, and found without a single request.
+ * Re-running (DESIGN-MODEL-IMPORT §3.2): a checksum anywhere in the import
+ * folder is left alone without `--overwrite` — fetched, not found, imported
+ * or refused — and found without a single request where that is possible.
  */
+
+/** A directory's entries, not counting dot-names; none if it is absent. */
+async function namesIn(dir: string): Promise<string[]> {
+  try {
+    return (await Array.fromAsync(Deno.readDir(dir)))
+      .map((entry) => entry.name)
+      .filter((name) => !name.startsWith("."))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runner(h: Harness) {
+  return (
+    extra: Record<string, unknown>,
+    log: (line: string) => void = () => {},
+  ) =>
+    runModels({
+      ...base,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log,
+      ...extra,
+    });
+}
+
 Deno.test("a second run for the same model asks nothing and writes nothing", async () => {
   await withCli(async (h) => {
-    const run = (
-      extra: Record<string, unknown>,
-      log: (line: string) => void = () => {},
-    ) =>
-      runModels({
-        ...base,
-        config: h.config,
-        paths: h.paths,
-        client: h.client,
-        log,
-        ...extra,
-      });
+    const run = runner(h);
     const first = await run({ sha256checksum: h.hash });
     const written = await Deno.readTextFile(join(first.dir, "model.json"));
 
@@ -1145,19 +1186,14 @@ Deno.test("a second run for the same model asks nothing and writes nothing", asy
     ) {
       const before = h.fake.requests.length;
       const lines: string[] = [];
-      const again = await run(extra, (line: string) => lines.push(line));
+      const again = await run(extra, (line) => lines.push(line));
       assertEquals(h.fake.requests.length, before, JSON.stringify(extra));
       assertEquals(again.batch, null);
-      assertEquals(again.existing?.state, "pending");
+      assertEquals(again.existing?.state, "fetched");
       assertEquals(again.existing?.hash, h.hash);
-      assertStringIncludes(
-        lines.join("\n"),
-        "already fetched: CyberRealistic · v9.0",
-      );
-      assertStringIncludes(
-        lines.join("\n"),
-        "remove that line, or pass --overwrite, to fetch it again",
-      );
+      const said = lines.join("\n");
+      assertStringIncludes(said, "already fetched: CyberRealistic · v9.0");
+      assertStringIncludes(said, "nothing was fetched; pass --overwrite");
     }
     // Untouched, not rewritten with the same content.
     assertEquals(
@@ -1167,233 +1203,158 @@ Deno.test("a second run for the same model asks nothing and writes nothing", asy
   });
 });
 
-Deno.test("a model the app has already ingested is not fetched again", async () => {
+Deno.test("a hash nobody knows is recorded, and not asked about again", async () => {
   await withCli(async (h) => {
-    const first = await runModels({
+    const run = runner(h);
+    const unknown = "f".repeat(64);
+    await assertRejects(
+      () => run({ sha256checksum: unknown }),
+      NotFoundError,
+      "knows the hash",
+    );
+    const note = await Deno.readTextFile(
+      join(h.paths.imports, "fetched", "failure", unknown, "error.txt"),
+    );
+    // When, what was asked, and the answer.
+    assertStringIncludes(note, `forge models --sha256checksum ${unknown}`);
+    assertStringIncludes(note, "knows the hash");
+
+    const before = h.fake.requests.length;
+    const lines: string[] = [];
+    const again = await run(
+      { url: `https://civitaiarchive.com/sha256/${unknown}` },
+      (line) => lines.push(line),
+    );
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(again.existing?.state, "fetch-failed");
+    assertStringIncludes(lines.join("\n"), "looked up before, and not found");
+    assertStringIncludes(lines.join("\n"), "knows the hash");
+
+    // --overwrite asks again, and is told no again.
+    await assertRejects(
+      () => run({ sha256checksum: unknown, overwrite: true }),
+      NotFoundError,
+    );
+    assert(h.fake.requests.length > before);
+  }, { noLocalFile: true });
+});
+
+Deno.test("a failure to get an answer is not recorded as a no", async () => {
+  await withCli(async (h) => {
+    // Nothing listening: a timeout, a refused connection, a 5xx are the
+    // network's failures, not the model's, and recording one would keep the
+    // model out for good over one bad minute.
+    const offline = new CivitaiClient({
+      civitaiUrl: "http://127.0.0.1:9",
+      archiveUrl: "http://127.0.0.1:9",
+      browsingLevel: 31,
+      timeoutMs: 2000,
+    });
+    const error = await runModels({
       ...base,
       sha256checksum: h.hash,
       config: h.config,
       paths: h.paths,
-      client: h.client,
+      client: offline,
       log: () => {},
-    });
-    // What ingest leaves behind (§7.2): the record in models-meta, and the
-    // batch gone.
-    const batch = await readBatch(first.dir);
-    const meta = join(h.paths.modelsMeta, h.hash);
-    await Deno.mkdir(meta, { recursive: true });
-    await Deno.writeTextFile(
-      join(meta, "civitai.json"),
-      JSON.stringify({ source: batch.source, ...batch.civitai }),
+    }).catch((cause) => cause);
+    assert(error instanceof LookupError && !(error instanceof NotFoundError));
+    assertEquals(
+      await namesIn(join(h.paths.imports, "fetched", "failure")),
+      [],
     );
-    await Deno.remove(first.dir, { recursive: true });
+  }, { noLocalFile: true });
+});
 
-    const before = h.fake.requests.length;
-    const again = await runModels({
-      ...base,
-      url: "https://civitai.red/models/15003?modelVersionId=501240",
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
-    assertEquals(h.fake.requests.length, before);
-    assertEquals(again.existing?.state, "imported");
+Deno.test("a fetch that succeeds after a no clears the no", async () => {
+  await withCli(async (h) => {
+    const failure = join(h.paths.imports, "fetched", "failure", h.hash);
+    await Deno.mkdir(failure, { recursive: true });
+    await Deno.writeTextFile(join(failure, "error.txt"), "then\nnot found\n");
+    const result = await runner(h)({ sha256checksum: h.hash, overwrite: true });
+    assert(result.batch !== null);
+    assert(!(await exists(failure)), "the old no should be gone");
   });
 });
 
-Deno.test("--overwrite fetches again; a failed batch or another version does not count", async () => {
+Deno.test("what the app imported, and what it refused, are left alone", async () => {
   await withCli(async (h) => {
-    const first = await runModels({
-      ...base,
-      sha256checksum: h.hash,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
+    const run = runner(h);
+    const first = await run({ sha256checksum: h.hash });
 
-    // Another version of the same model is another file.
-    const other = await runModels({
-      ...base,
+    // What ingest leaves behind (§7.2): the model.json in imported/success.
+    const imported = join(h.paths.imports, "imported", "success", h.hash);
+    await Deno.mkdir(imported, { recursive: true });
+    await Deno.rename(
+      join(first.dir, "model.json"),
+      join(imported, "model.json"),
+    );
+    await Deno.remove(first.dir, { recursive: true });
+
+    let before = h.fake.requests.length;
+    const again = await run({
+      url: "https://civitai.red/models/15003?modelVersionId=501240",
+    });
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(again.existing?.state, "imported");
+
+    // Refused instead: the batch in imported/failure, with its reason.
+    const refused = join(h.paths.imports, "imported", "failure", h.hash);
+    await Deno.mkdir(join(refused, ".."), { recursive: true });
+    await Deno.rename(imported, refused);
+    await Deno.writeTextFile(
+      join(refused, "error.txt"),
+      "2026-09-30T00:00:00.000Z\nsamples/0001.png: hashes to 00, but the batch says 11\n",
+    );
+    const lines: string[] = [];
+    before = h.fake.requests.length;
+    const refusedAgain = await run(
+      { filename: FILENAME },
+      (line) => lines.push(line),
+    );
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(refusedAgain.existing?.state, "import-failed");
+    assertStringIncludes(lines.join("\n"), "the app refused it");
+    assertStringIncludes(lines.join("\n"), "but the batch says 11");
+
+    // --overwrite fetches it again, into fetched/success, for another try.
+    const retried = await run({ sha256checksum: h.hash, overwrite: true });
+    assert(h.fake.requests.length > before);
+    assertEquals(retried.existing, undefined);
+    assertEquals((await readBatch(retried.dir)).overwrite, true);
+  });
+});
+
+Deno.test("another version of the same model is another file", async () => {
+  await withCli(async (h) => {
+    const run = runner(h);
+    await run({ sha256checksum: h.hash });
+    const other = await run({
       url: "https://civitai.red/models/15003?modelVersionId=999999",
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
     }).catch((cause) => cause);
     assert(
       other instanceof LookupError,
       "it should have asked, and been told no",
     );
-
-    const before = h.fake.requests.length;
-    const again = await runModels({
-      ...base,
-      sha256checksum: h.hash,
-      overwrite: true,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
-    assert(h.fake.requests.length > before, "--overwrite should ask again");
-    assertEquals(again.existing, undefined);
-    assertEquals((await readBatch(again.dir)).overwrite, true);
-
-    // A batch the app refused is the one most worth fetching again.
-    await Deno.mkdir(join(h.paths.imports, ".failed"), { recursive: true });
-    await Deno.rename(first.dir, join(h.paths.imports, ".failed", h.hash));
-    const retried = await runModels({
-      ...base,
-      sha256checksum: h.hash,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
-    assertEquals(retried.existing, undefined);
-    assert(retried.batch !== null);
   });
 });
 
-/**
- * `imports/imported_checksums.txt` (§3.2): what counts as fetched, as a file
- * a person can edit.
- */
-Deno.test("each batch written appends its checksum, once", async () => {
+Deno.test("a link nothing here recorded is still stopped before anything is written", async () => {
   await withCli(async (h) => {
-    const ledger = join(h.paths.imports, "imported_checksums.txt");
-    const run = (extra: Record<string, unknown>) =>
-      runModels({
-        ...base,
-        sha256checksum: h.hash,
-        config: h.config,
-        paths: h.paths,
-        client: h.client,
-        log: () => {},
-        ...extra,
-      });
-
-    // A dry run writes nothing, the list included.
-    await run({ dryRun: true });
-    assert(!(await exists(ledger)), "a dry run wrote the list");
-
-    await run({});
-    const lines = (await Deno.readTextFile(ledger)).split("\n");
-    assert(lines[0]!.startsWith("#"), "the list says what it is");
-    assertEquals(
-      lines.filter((line) => line.startsWith(h.hash)),
-      [`${h.hash}  CyberRealistic · v9.0`],
-    );
-
-    // Fetched again: the list is a set, not a log.
-    await run({ overwrite: true });
-    assertEquals(
-      (await Deno.readTextFile(ledger)).split("\n").filter((line) =>
-        line.startsWith(h.hash)
-      ).length,
-      1,
-    );
-  });
-});
-
-Deno.test("deleting a line from the list lets that model be fetched again", async () => {
-  await withCli(async (h) => {
-    const ledger = join(h.paths.imports, "imported_checksums.txt");
-    const run = () =>
-      runModels({
-        ...base,
-        sha256checksum: h.hash,
-        config: h.config,
-        paths: h.paths,
-        client: h.client,
-        log: () => {},
-      });
-    await run();
-    // The batch is still waiting; the list is what decides, all the same.
-    const text = await Deno.readTextFile(ledger);
-    await Deno.writeTextFile(
-      ledger,
-      text.split("\n").filter((line) => !line.startsWith(h.hash)).join("\n"),
-    );
-    const before = h.fake.requests.length;
-    const again = await run();
-    assert(h.fake.requests.length > before, "it should have asked again");
-    assertEquals(again.existing, undefined);
-    assertStringIncludes(await Deno.readTextFile(ledger), h.hash);
-  });
-});
-
-Deno.test("a checksum listed by hand keeps a model out, even by link", async () => {
-  await withCli(async (h) => {
-    // Nothing on this machine has fetched it: another machine did, or the
-    // line was typed. A link cannot be matched offline, so the lookup runs —
-    // and then nothing is downloaded or written.
-    await Deno.mkdir(h.paths.imports, { recursive: true });
-    await Deno.writeTextFile(
-      join(h.paths.imports, "imported_checksums.txt"),
-      `# mine\n${h.hash.toUpperCase()}  fetched on the other box\n`,
-    );
-    const lines: string[] = [];
-    const result = await runModels({
-      ...base,
+    // Another machine sharing this folder imported it; nothing here says
+    // which link it was. The lookup runs — and then nothing is downloaded.
+    const elsewhere = join(h.paths.imports, "imported", "success", h.hash);
+    await Deno.mkdir(elsewhere, { recursive: true });
+    const result = await runner(h)({
       url: "https://civitai.red/models/15003?modelVersionId=501240",
       downloadSamples: 4,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: (line) => lines.push(line),
     });
-    assertEquals(result.existing?.state, "listed");
+    assertEquals(result.existing?.state, "imported");
     assertEquals(result.batch, null);
     assertEquals(h.fake.matching("/img/"), [], "no sample was downloaded");
-    assert(!(await exists(join(h.paths.imports, h.hash))));
-    assertStringIncludes(lines.join("\n"), "already fetched: CyberRealistic");
+    assertEquals(
+      await namesIn(join(h.paths.imports, "fetched", "success")),
+      [],
+    );
   }, { noLocalFile: true });
 });
-
-Deno.test("the list is seeded from what the app already imported", async () => {
-  await withCli(async (h) => {
-    // An ingest from before the list existed: the record is there, the list
-    // is not, and the model is not fetched again because of it.
-    const first = await runModels({
-      ...base,
-      sha256checksum: h.hash,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
-    const batch = await readBatch(first.dir);
-    const meta = join(h.paths.modelsMeta, h.hash);
-    await Deno.mkdir(meta, { recursive: true });
-    await Deno.writeTextFile(
-      join(meta, "civitai.json"),
-      JSON.stringify({ source: batch.source, ...batch.civitai }),
-    );
-    await Deno.remove(first.dir, { recursive: true });
-    await Deno.remove(join(h.paths.imports, "imported_checksums.txt"));
-
-    const again = await runModels({
-      ...base,
-      sha256checksum: h.hash,
-      config: h.config,
-      paths: h.paths,
-      client: h.client,
-      log: () => {},
-    });
-    assertEquals(again.existing?.state, "imported");
-    // Seeded in memory: this run wrote nothing, so neither is the list.
-    assert(!(await exists(join(h.paths.imports, "imported_checksums.txt"))));
-  });
-});
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}

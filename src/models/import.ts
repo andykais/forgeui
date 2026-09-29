@@ -2,11 +2,14 @@
  * The import folder, and what the app does with what it finds there
  * (DESIGN-MODEL-IMPORT §7.1, §7.2).
  *
- * `forge models` writes batches here and exits; this picks them up on boot
- * and around every model rescan, applies each one to the model it names, and
- * deletes it. The two halves never share a process, a database handle or a
- * lock — they meet on the filesystem, which is what makes "the CLI cannot
- * corrupt anything" true by construction rather than by care.
+ * `forge models` writes batches into `fetched/success/` and exits; this picks
+ * them up on boot and around every model rescan, applies each one to the
+ * model it names, and moves it on: its `model.json` to `imported/success/`
+ * as the record that it happened, or the whole batch to `imported/failure/`
+ * with the reason (`import_layout.ts`). The two halves never share a
+ * process, a database handle or a lock — they meet on the filesystem, which
+ * is what makes "the CLI cannot corrupt anything" true by construction rather
+ * than by care.
  *
  * Ingest runs in **two phases around the scan**, because weights force it: a
  * batch carrying a file the library has never seen cannot be applied until
@@ -15,7 +18,7 @@
  *
  *   Phase A  file the weights into `<appdata>/models/<kind>/`
  *   …the ordinary scan and the hasher run…
- *   Phase B  apply the metadata and the samples, then delete the batch
+ *   Phase B  apply the metadata and the samples, then keep its model.json
  */
 
 import { basename, extname, join } from "@std/path";
@@ -32,6 +35,7 @@ import {
 import type { SampleStore } from "../samples/store.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import { log, logError } from "../log.ts";
+import { type ImportLayout, importLayout } from "./import_layout.ts";
 
 /** What a batch's `model.json` holds (§5.2). */
 export interface ImportBatch {
@@ -90,11 +94,11 @@ export interface IngestCounts {
   found: number;
   /** Weights files moved into the download folder by Phase A. */
   filed: number;
-  /** Batches fully applied and deleted by Phase B. */
+  /** Batches fully applied by Phase B, and moved to `imported/success/`. */
   applied: number;
   /** Batches left alone because their model has not been hashed yet. */
   waiting: number;
-  /** Batches moved to `.failed/`. */
+  /** Batches moved to `imported/failure/`. */
   failed: number;
 }
 
@@ -119,10 +123,12 @@ export class ImportInbox {
   #paths: DataPaths;
   #samples?: SampleStore;
   #now: () => number;
+  #layout: ImportLayout;
 
   constructor(options: ImportInboxOptions) {
     this.#db = options.db;
     this.#paths = options.paths;
+    this.#layout = importLayout(options.paths.imports);
     this.#samples = options.samples;
     this.#now = options.now ?? Date.now;
   }
@@ -167,9 +173,10 @@ export class ImportInbox {
   }
 
   /**
-   * Phase B: apply every batch whose model the library now knows, and delete
-   * it. A batch naming a hash with no row is left exactly as it is — that is
-   * a file still being hashed, not an error, and it lands on a later pass.
+   * Phase B: apply every batch whose model the library now knows, and keep
+   * its `model.json` as history. A batch naming a hash with no row is left
+   * exactly as it is — that is a file still being hashed, not an error, and
+   * it lands on a later pass.
    */
   async apply(): Promise<IngestCounts> {
     const counts = emptyCounts();
@@ -204,7 +211,7 @@ export class ImportInbox {
       }
       try {
         await this.#apply(dir, batch, hash);
-        await Deno.remove(dir, { recursive: true });
+        await this.#keep(dir, hash);
         counts.applied++;
       } catch (cause) {
         counts.failed++;
@@ -241,7 +248,7 @@ export class ImportInbox {
       if (stuck.length > 5) log(`  …and ${stuck.length - 5} more`);
       log(
         `  put the file in a model folder and rescan, or re-run \`forge ` +
-          `models\` with --download-model to fetch it`,
+          `models\` with --overwrite --download-model to fetch it`,
       );
     }
     return counts;
@@ -421,14 +428,13 @@ export class ImportInbox {
 
   // --------------------------------------------------------------- files
 
-  /** Every batch directory, skipping the dot-prefixed bookkeeping ones. */
+  /** Every batch waiting in `fetched/success/`. */
   async *#batches(): AsyncGenerator<string> {
+    const from = this.#layout.fetched.success;
     let entries: Deno.DirEntry[];
     try {
       entries = [];
-      for await (const entry of Deno.readDir(this.#paths.imports)) {
-        entries.push(entry);
-      }
+      for await (const entry of Deno.readDir(from)) entries.push(entry);
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) return;
       throw error;
@@ -436,8 +442,27 @@ export class ImportInbox {
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       if (!entry.isDirectory || entry.name.startsWith(".")) continue;
-      yield join(this.#paths.imports, entry.name);
+      yield join(from, entry.name);
     }
+  }
+
+  /**
+   * An applied batch's `model.json`, kept in `imported/success/` as the
+   * record that it happened and what it said. The rest of the batch has
+   * gone where it belongs — samples into the sample store, weights filed —
+   * so what is left is dropped. A second import of the same model replaces
+   * the first's record: it is the same question, answered again.
+   */
+  async #keep(dir: string, hash: string): Promise<void> {
+    const into = join(this.#layout.imported.success, hash);
+    await Deno.remove(into, { recursive: true }).catch(() => {});
+    await Deno.mkdir(into, { recursive: true });
+    await move(join(dir, "model.json"), join(into, "model.json"));
+    await Deno.remove(dir, { recursive: true });
+    // An earlier refusal of the same model has been answered now.
+    await Deno.remove(join(this.#layout.imported.failure, hash), {
+      recursive: true,
+    }).catch(() => {});
   }
 
   async #read(dir: string): Promise<ImportBatch> {
@@ -501,18 +526,18 @@ export class ImportInbox {
   }
 
   /**
-   * A batch that throws goes to `.failed/` with the reason beside it, so one
-   * bad JSON cannot wedge every boot from now on. Nothing ever retries it; it
-   * is yours to look at or delete.
+   * A batch that throws goes to `imported/failure/`, whole, with the reason
+   * beside it in `error.txt`, so one bad JSON cannot wedge every boot from
+   * now on. Nothing ever retries it: it is yours to look at, fix and move
+   * back, or delete — and while it is there, `forge models` leaves that
+   * checksum alone unless told `--overwrite` (§3.2).
    */
   async #fail(dir: string, cause: unknown): Promise<void> {
     const message = cause instanceof Error ? cause.message : String(cause);
     logError(`import: ${basename(dir)} refused: ${message}`);
-    const failed = join(this.#paths.imports, ".failed", basename(dir));
+    const failed = join(this.#layout.imported.failure, basename(dir));
     try {
-      await Deno.mkdir(join(this.#paths.imports, ".failed"), {
-        recursive: true,
-      });
+      await Deno.mkdir(this.#layout.imported.failure, { recursive: true });
       await Deno.remove(failed, { recursive: true }).catch(() => {});
       await Deno.rename(dir, failed);
       await Deno.writeTextFile(
