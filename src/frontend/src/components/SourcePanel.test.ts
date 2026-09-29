@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import SourcePanel from "./SourcePanel.svelte";
 import type { ModelSource } from "../types.ts";
 
@@ -51,9 +51,40 @@ describe("SourcePanel", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
   });
 
-  test("prefers the version's description over the model's", () => {
-    render(SourcePanel, { source: source() });
-    expect(screen.getByText("Better at handling Character LoRA.")).toBeTruthy();
+  test("shows the version's description, then the model's overview", () => {
+    // The version's is what this file is; the overview is where an author
+    // puts what applies to all of them — which download is which, say — so
+    // neither stands in for the other.
+    const { container } = render(SourcePanel, { source: source() });
+    const blocks = [...container.querySelectorAll<HTMLElement>(".description")];
+    expect(blocks.map((block) => block.dataset.title)).toEqual([
+      "This version · 8",
+      "Overview",
+    ]);
+    expect(blocks[0]!.textContent).toContain("Better at handling Character LoRA.");
+    expect(blocks[1]!.querySelector("h1")?.textContent).toBe("DreamShaper");
+  });
+
+  test("the overview alone, when the version has none", () => {
+    const { container } = render(SourcePanel, {
+      source: source({ version: { name: "8", description_text: null } }),
+    });
+    const titles = [...container.querySelectorAll<HTMLElement>(".description")].map(
+      (block) => block.dataset.title,
+    );
+    expect(titles).toEqual(["Overview"]);
+  });
+
+  test("the same text in both is shown once", () => {
+    const same = "One description, pasted into both.";
+    const { container } = render(SourcePanel, {
+      source: source({
+        model: { name: "M", description_text: same },
+        version: { name: "1", description_text: same },
+      }),
+    });
+    expect(container.querySelectorAll(".description").length).toBe(1);
+    expect(screen.getAllByText(same).length).toBe(1);
   });
 
   test("renders the Markdown by default, and the source on request", async () => {
@@ -65,22 +96,26 @@ describe("SourcePanel", () => {
         },
       }),
     });
-    const body = () => container.querySelector(".body")!;
+    const block = container.querySelector<HTMLElement>('[data-title^="This version"]')!;
+    const body = () => block.querySelector(".body")!;
+    const button = (name: string) => within(block).getByRole("button", { name });
     expect(body().querySelector("h2")?.textContent).toBe("Usage");
     expect(body().querySelector("li strong")?.textContent).toBe("cfg");
     const link = body().querySelector("a")!;
     expect(link.getAttribute("href")).toBe("https://example.com/g");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-    expect(
-      screen.getByRole("button", { name: "Preview" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(button("Preview").getAttribute("aria-pressed")).toBe("true");
 
-    await fireEvent.click(screen.getByRole("button", { name: "Source" }));
+    await fireEvent.click(button("Source"));
     expect(body().querySelector("h2")).toBeNull();
     expect(body().textContent).toContain("## Usage");
     expect(body().textContent).toContain("[the guide](https://example.com/g)");
 
-    await fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    // Each description has its own toggle: the overview is still rendered.
+    const overview = container.querySelector<HTMLElement>('[data-title="Overview"]')!;
+    expect(overview.querySelector(".body.rendered")).not.toBeNull();
+
+    await fireEvent.click(button("Preview"));
     expect(body().querySelector("h2")).not.toBeNull();
   });
 
@@ -96,9 +131,10 @@ describe("SourcePanel", () => {
         },
       }),
     });
+    const block = container.querySelector<HTMLElement>('[data-title^="This version"]')!;
     for (const view of ["Preview", "Source"]) {
-      await fireEvent.click(screen.getByRole("button", { name: view }));
-      const body = container.querySelector(".body")!;
+      await fireEvent.click(within(block).getByRole("button", { name: view }));
+      const body = block.querySelector(".body")!;
       expect(body.querySelector("img")).toBeNull();
       expect(body.querySelector("b")).toBeNull();
       expect(body.querySelector("script")).toBeNull();

@@ -1229,7 +1229,13 @@ Two rules for rendering it, both non-negotiable:
 **As built**, the panel renders `description_text` — the Markdown §5.5
 derives at fetch time — with [`marked`](https://marked.js.org) (~13 KB
 gzipped), and a **Preview / Source** toggle beside *Show more* switches to the
-Markdown itself. Preview is the default. Both rules above hold in
+Markdown itself. Preview is the default. **Both** of Civitai's descriptions
+are shown, each with its own toggle: the version's (`version.description_*`,
+what this file is, headed *This version · <name>*) and beneath it the model's
+overview (`model.description_*`, headed *Overview*), where authors put what
+applies to every version — which download is which, how to prompt it. Either
+alone is shown alone; the same text in both is shown once. A Hugging Face
+README is the model's, so it is the overview. Both rules above hold in
 `src/frontend/src/lib/markdown.ts`, which is a renderer rather than a
 sanitiser pass: raw HTML in the Markdown is escaped and shown as text, a link
 that is not `http(s):` keeps its words and loses its `href`, and an image is
