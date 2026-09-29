@@ -417,7 +417,7 @@ nothing was fetched; pass --overwrite, or delete /workspace/import/fetched/succe
 | Where | Said as |
 |---|---|
 | `fetched/success/<sha256>/` | already fetched, waiting for the app |
-| `fetched/failure/<sha256>/` | looked up before, and not found — with the reason |
+| `fetched/failure/<sha256>/` | looked up before, and not found — or, for any other kind of failure, "it failed (rate-limited)" and so on — with the reason |
 | `imported/success/<sha256>/` | already imported |
 | `imported/failure/<sha256>/` | already fetched, and the app refused it — with the reason |
 
@@ -768,6 +768,15 @@ the hash, which is the case that used to end in "mirrors only carry no
 metadata". `--import-source huggingface` goes straight to it, still through
 the archive, because there is no other index.
 
+Which means **the archive being unavailable closes the road to Hugging Face
+too**, and both messages say so rather than leaving it to be inferred: an
+archive 429 or outage reads "…answered 429. https://civitai.red had no match
+first. Hugging Face could not be checked either: the archive is the only
+index of its copies by hash.", and a hash the archive has never seen reads
+"nothing at civitai.red or civitaiarchive.com knows the hash …. Hugging Face
+was not asked: it cannot be searched by hash, and the archive, the only index
+of its copies, lists none of this file."
+
 **By filename.** The same road: the archive's filename index, limited to its
 Hugging Face rows, then by hash. **`--search`** with `--import-source
 huggingface` is the Hub's own model search.
@@ -851,14 +860,37 @@ Chosen this way because:
   batch that throws is moved there whole with the error beside it in
   `error.txt`, so one bad JSON cannot wedge every boot from now on. Nothing
   retries it; fix it and move it back to `fetched/success/`, or delete it.
-- **`fetched/failure/`** holds only an `error.txt`: when, the command, and the
-  answer. It is written only for a **definitive** no — nothing knows the
-  hash, no model page stands behind it, the downloaded bytes cannot match —
-  and never for a failure to get an answer (a timeout, a 5xx, a missing
-  login), which would keep a model out for good over one bad minute. It is
-  keyed by checksum, so only a lookup that knew one is recorded: a link or a
-  filename that finds nothing has none to be filed under. A later success
-  for the same checksum removes it.
+- **`fetched/failure/`** holds only an `error.txt`, for **any** lookup or
+  download that failed — amended from "only a definitive no", because a rate
+  limit hidden from the folder was exactly the failure worth finding again.
+  Each one says what kind it was, in a header both sides write the same way:
+
+  ```
+  when: 2026-09-30T12:00:00Z
+  command: forge models --sha256checksum 6ce0…
+  failure: rate-limited
+
+  GET https://civitaiarchive.com/api/sha256/6ce0… answered 429: {…} (retry after 2640)
+  ```
+
+  | `failure:` | Means | Worth another try |
+  |---|---|---|
+  | `not-found` | the sources answered no: nothing knows the hash, no model page, bytes that cannot match | rarely |
+  | `rate-limited` | 429 | yes, later |
+  | `needs-login` | 401 / 403: gated, private, paid | with a token |
+  | `server-error` | 5xx | yes |
+  | `unreachable` | timeout, refused connection, DNS | yes |
+  | `download-failed` | the weights started and did not finish | yes |
+  | `error` | anything else a source said | read it |
+  | `refused` | *(the app, in `imported/failure/`)* ingest would not apply the batch | fix it first |
+
+  Every one is skipped like any other checksum here (§3.2) until it is
+  pruned — `grep -l 'failure: rate-limited' import/fetched/failure/*/error.txt`
+  lists the rate-limited ones — or `--overwrite` is passed. It is keyed by
+  checksum, so only a lookup that knew one is recorded: a link or a filename
+  that finds nothing has none to be filed under. A mistake in the command
+  itself is not about the model and is not recorded. A later success for the
+  same checksum removes it.
 - **`.staging` is dot-prefixed** so the ingest walk skips it by the same rule
   that skips everything else it does not understand.
 

@@ -28,19 +28,53 @@ import {
 } from "../models/huggingface.ts";
 import type { HuggingFaceClient } from "./huggingface_client.ts";
 
+/**
+ * Why a lookup failed, in a word `fetched/failure/<sha256>/error.txt` carries
+ * (§3.2) — so the ones worth trying again can be told from the ones that
+ * are not, and pruned by grepping for `failure: rate-limited`.
+ */
+export type FailureKind =
+  /** The sources answered, and the answer was no. */
+  | "not-found"
+  /** 429: asked too often; try again later. */
+  | "rate-limited"
+  /** 401 / 403: gated, private or paid, and no key that works. */
+  | "needs-login"
+  /** 5xx: the source is having a bad time. */
+  | "server-error"
+  /** No answer at all: a timeout, a refused connection, DNS. */
+  | "unreachable"
+  /** The download started and did not finish. */
+  | "download-failed"
+  | "error";
+
 export class LookupError extends Error {
   override readonly name: string = "LookupError";
+  readonly kind: FailureKind;
+  constructor(message: string, kind: FailureKind = "error") {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 /**
  * A lookup whose answer was *no* — nobody knows this hash, no model page
  * stands behind it, the bytes cannot match — as opposed to one that failed
- * to get an answer (a timeout, a 5xx, a login). Only this kind is recorded
- * in `fetched/failure/` (§3.2): recording a flaky connection would keep a
- * model out for good over one bad minute.
+ * to get an answer.
  */
 export class NotFoundError extends LookupError {
   override readonly name = "NotFoundError";
+  constructor(message: string) {
+    super(message, "not-found");
+  }
+}
+
+/** Kind of an HTTP status that is not a success. */
+export function statusKind(status: number): FailureKind {
+  if (status === 429) return "rate-limited";
+  if (status === 401 || status === 403) return "needs-login";
+  if (status >= 500) return "server-error";
+  return "error";
 }
 
 /** A file the archive indexes, which is identified by its hash. */
@@ -198,7 +232,22 @@ export class CivitaiClient {
     if (source !== "civitai") {
       // Hugging Face cannot be asked for a hash; the archive's index of its
       // copies is the only road there, so `huggingface` asks the archive too.
-      const files = await this.#archiveFiles(normalized);
+      let files: Record<string, unknown>[];
+      try {
+        files = await this.#archiveFiles(normalized);
+      } catch (cause) {
+        // A rate limit or an outage at the archive closes the road to
+        // Hugging Face too, which the bare HTTP error would not say.
+        if (!(cause instanceof LookupError)) throw cause;
+        const before = tried.length > 0
+          ? ` ${tried.join(" and ")} had no match first.`
+          : "";
+        const hub = asks(source, "huggingface") && this.#huggingface !== null
+          ? " Hugging Face could not be checked either: the archive is the " +
+            "only index of its copies by hash."
+          : "";
+        throw new LookupError(`${cause.message}.${before}${hub}`, cause.kind);
+      }
       if (asks(source, "archive")) {
         const found = await this.#archiveModel(files);
         if (found !== null) return pinToHash(found, normalized);
@@ -219,7 +268,12 @@ export class CivitaiClient {
     }
 
     throw new NotFoundError(
-      `nothing at ${tried.join(" or ")} knows the hash ${normalized}`,
+      `nothing at ${tried.join(" or ")} knows the hash ${normalized}${
+        source === "auto" && this.#huggingface !== null
+          ? ". Hugging Face was not asked: it cannot be searched by hash, and " +
+            "the archive, the only index of its copies, lists none of this file"
+          : ""
+      }`,
     );
   }
 
@@ -608,10 +662,12 @@ export class CivitaiClient {
     }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 200);
+      const retry = response.headers.get("retry-after");
       throw new LookupError(
         `GET ${url} answered ${response.status}${
           detail.length > 0 ? `: ${detail}` : ""
-        }`,
+        }${retry ? ` (retry after ${retry})` : ""}`,
+        statusKind(response.status),
       );
     }
     try {
@@ -637,10 +693,11 @@ export class CivitaiClient {
       return await this.#fetch(url, { signal, headers });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "TimeoutError") {
-        throw new LookupError(`GET ${url} timed out`);
+        throw new LookupError(`GET ${url} timed out`, "unreachable");
       }
       throw new LookupError(
         `GET ${url} failed: ${cause instanceof Error ? cause.message : cause}`,
+        "unreachable",
       );
     }
   }

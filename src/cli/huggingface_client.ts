@@ -26,6 +26,7 @@ import {
   type Candidate,
   LookupError,
   NotFoundError,
+  statusKind,
 } from "./civitai_client.ts";
 
 export interface HuggingFaceClientOptions {
@@ -327,17 +328,29 @@ export class HuggingFaceClient {
             `repo, accept its terms on its page first.${
               this.#token === undefined ? "" : " A token was sent."
             }`,
+          "needs-login",
+        );
+      }
+      if (status === 429) {
+        throw new LookupError(
+          `Hugging Face is rate-limiting this address (429) while asking ` +
+            `about ${what}; try again later`,
+          "rate-limited",
         );
       }
       if (cause instanceof DOMException && cause.name === "TimeoutError") {
         throw new LookupError(
           `Hugging Face did not answer about ${what} in time`,
+          "unreachable",
         );
       }
       throw new LookupError(
         `asking Hugging Face about ${what} failed: ${
           cause instanceof Error ? cause.message : cause
         }`,
+        status === undefined
+          ? (cause instanceof TypeError ? "unreachable" : "error")
+          : statusKind(status),
       );
     }
   }

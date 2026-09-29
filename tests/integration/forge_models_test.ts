@@ -1215,8 +1215,12 @@ Deno.test("a hash nobody knows is recorded, and not asked about again", async ()
     const note = await Deno.readTextFile(
       join(h.paths.imports, "fetched", "failure", unknown, "error.txt"),
     );
-    // When, what was asked, and the answer.
-    assertStringIncludes(note, `forge models --sha256checksum ${unknown}`);
+    // When, what was asked, what kind of failure, and the answer.
+    assertStringIncludes(
+      note,
+      `command: forge models --sha256checksum ${unknown}`,
+    );
+    assertStringIncludes(note, "failure: not-found\n");
     assertStringIncludes(note, "knows the hash");
 
     const before = h.fake.requests.length;
@@ -1239,11 +1243,10 @@ Deno.test("a hash nobody knows is recorded, and not asked about again", async ()
   }, { noLocalFile: true });
 });
 
-Deno.test("a failure to get an answer is not recorded as a no", async () => {
+Deno.test("a failure to get an answer is recorded too, as what it was", async () => {
   await withCli(async (h) => {
-    // Nothing listening: a timeout, a refused connection, a 5xx are the
-    // network's failures, not the model's, and recording one would keep the
-    // model out for good over one bad minute.
+    // Nothing listening. Not the model's fault — so it is recorded under
+    // its own word, to be pruned by, not as a "no".
     const offline = new CivitaiClient({
       civitaiUrl: "http://127.0.0.1:9",
       archiveUrl: "http://127.0.0.1:9",
@@ -1259,9 +1262,61 @@ Deno.test("a failure to get an answer is not recorded as a no", async () => {
       log: () => {},
     }).catch((cause) => cause);
     assert(error instanceof LookupError && !(error instanceof NotFoundError));
-    assertEquals(
-      await namesIn(join(h.paths.imports, "fetched", "failure")),
-      [],
+    assertStringIncludes(
+      await Deno.readTextFile(
+        join(h.paths.imports, "fetched", "failure", h.hash, "error.txt"),
+      ),
+      "failure: unreachable",
+    );
+  }, { noLocalFile: true });
+});
+
+Deno.test("a rate limit is recorded as one, and said as one next time", async () => {
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    h.fake.configure({
+      models: { 15003: model },
+      // Civitai does not know it, and the archive is over its budget.
+      failWith: {
+        "/api/sha256/": {
+          status: 429,
+          body: JSON.stringify({
+            status: "error",
+            message:
+              "You've hit our hourly API limit. Try again in about 44 minutes",
+          }),
+          headers: { "retry-after": "2640" },
+        },
+      },
+    });
+    const error = await runner(h)({ sha256checksum: h.hash }).catch((
+      cause,
+    ) => cause);
+    assert(error instanceof LookupError);
+    assertEquals(error.kind, "rate-limited");
+    assertStringIncludes(error.message, "answered 429");
+
+    const note = await Deno.readTextFile(
+      join(h.paths.imports, "fetched", "failure", h.hash, "error.txt"),
+    );
+    // The header a person prunes by, and the answer as it came.
+    assertStringIncludes(note, "failure: rate-limited\n");
+    assertStringIncludes(
+      note,
+      `command: forge models --sha256checksum ${h.hash}`,
+    );
+    assertStringIncludes(note, "hourly API limit");
+    assertStringIncludes(note, "retry after 2640");
+
+    const lines: string[] = [];
+    const again = await runner(h)(
+      { sha256checksum: h.hash },
+      (line) => lines.push(line),
+    );
+    assertEquals(again.existing?.failure, "rate-limited");
+    assertStringIncludes(
+      lines.join("\n"),
+      "looked up before, and it failed (rate-limited)",
     );
   }, { noLocalFile: true });
 });
@@ -1304,7 +1359,7 @@ Deno.test("what the app imported, and what it refused, are left alone", async ()
     await Deno.rename(imported, refused);
     await Deno.writeTextFile(
       join(refused, "error.txt"),
-      "2026-09-30T00:00:00.000Z\nsamples/0001.png: hashes to 00, but the batch says 11\n",
+      "when: 2026-09-30T00:00:00.000Z\nfailure: refused\n\nsamples/0001.png: hashes to 00, but the batch says 11\n",
     );
     const lines: string[] = [];
     before = h.fake.requests.length;

@@ -602,3 +602,44 @@ Deno.test("a Hugging Face link already fetched is not asked about again", async 
     }
   });
 });
+
+Deno.test("a hash nothing knows says why Hugging Face was not asked", async () => {
+  await withHub(async (h) => {
+    const unknown = "e".repeat(64);
+    const error = await runModels({
+      ...base,
+      sha256checksum: unknown,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    }).catch((cause) => cause);
+    assert(error instanceof LookupError);
+    assertStringIncludes(error.message, "Hugging Face was not asked");
+    assertStringIncludes(error.message, "cannot be searched by hash");
+  });
+});
+
+Deno.test("an archive rate limit says Hugging Face could not be checked either", async () => {
+  await withHub(async (h) => {
+    h.fake.configure({
+      failWith: { "/api/sha256/": { status: 429, body: "slow down" } },
+    });
+    const error = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    }).catch((cause) => cause);
+    assert(error instanceof LookupError);
+    assertEquals(error.kind, "rate-limited");
+    assertStringIncludes(error.message, "answered 429");
+    assertStringIncludes(error.message, "had no match first");
+    assertStringIncludes(
+      error.message,
+      "Hugging Face could not be checked either",
+    );
+  });
+});

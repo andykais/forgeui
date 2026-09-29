@@ -56,3 +56,45 @@ export function stateDirs(layout: ImportLayout): [ImportState, string][] {
     ["import-failed", layout.imported.failure],
   ];
 }
+
+/**
+ * `error.txt`, as both sides write it: a few `key: value` lines, a blank
+ * line, then the message as it was reported.
+ *
+ *   when: 2026-09-30T12:00:00Z
+ *   command: forge models --sha256checksum 6ce0…
+ *   failure: rate-limited
+ *
+ *   GET https://civitaiarchive.com/api/sha256/6ce0… answered 429: …
+ *
+ * `failure:` is the word to prune by — `not-found`, `rate-limited`,
+ * `needs-login`, `server-error`, `unreachable`, `download-failed`, `error`
+ * from `forge models`; `refused` from the app.
+ */
+export interface ErrorNote {
+  when: string;
+  command?: string;
+  failure: string;
+  message: string;
+}
+
+export function formatErrorNote(note: ErrorNote): string {
+  const head = [
+    `when: ${note.when}`,
+    ...(note.command === undefined ? [] : [`command: ${note.command}`]),
+    `failure: ${note.failure}`,
+  ];
+  return `${head.join("\n")}\n\n${note.message.trimEnd()}\n`;
+}
+
+export function parseErrorNote(text: string): Partial<ErrorNote> {
+  const blank = text.indexOf("\n\n");
+  const head = blank < 0 ? text : text.slice(0, blank);
+  const note: Partial<ErrorNote> = {};
+  for (const line of head.split("\n")) {
+    const match = line.match(/^(when|command|failure):\s*(.*)$/);
+    if (match) note[match[1] as "when" | "command" | "failure"] = match[2]!;
+  }
+  if (blank >= 0) note.message = text.slice(blank + 2).trim();
+  return note;
+}

@@ -31,6 +31,7 @@ import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
 import {
   CIVITAI_AUTH_HINT,
+  DownloadError,
   downloadFile,
   HUGGINGFACE_AUTH_HINT,
 } from "./download.ts";
@@ -49,7 +50,11 @@ import {
   type Wanted,
   wantedFromUrl,
 } from "./existing.ts";
-import { type ImportLayout, importLayout } from "../models/import_layout.ts";
+import {
+  formatErrorNote,
+  type ImportLayout,
+  importLayout,
+} from "../models/import_layout.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
 
 export { LookupError, NotFoundError };
@@ -387,7 +392,11 @@ function alreadyDone(
       say(`  waiting for the app in ${have.dir}`);
       break;
     case "fetch-failed":
-      say(`looked up before, and not found: ${what}`);
+      say(
+        have.failure === null || have.failure === "not-found"
+          ? `looked up before, and not found: ${what}`
+          : `looked up before, and it failed (${have.failure}): ${what}`,
+      );
       if (have.reason) say(`  ${have.reason}`);
       say(`  recorded in ${join(have.dir, "error.txt")}`);
       break;
@@ -426,11 +435,12 @@ function hashBefore(
 }
 
 /**
- * A lookup whose answer was *no*, kept in `fetched/failure/<sha256>/` so it
- * is not asked again (§3.2). Only a definitive no: a timeout, a 5xx or a
- * missing login is a failure to get an answer, and recording one would keep
- * a model out for good over one bad minute. And only under a checksum — a
- * link or a filename that finds nothing has none to be filed under.
+ * A lookup or download that failed, kept in `fetched/failure/<sha256>/` so it
+ * is not asked again without `--overwrite` (§3.2) — with what kind of
+ * failure it was, so a not-found can be told from a rate limit when pruning
+ * the ones worth another try. Only under a checksum: a link or a filename
+ * that finds nothing has none to be filed under. A mistake in the command
+ * itself is not about the model, and is not recorded.
  */
 async function recordMiss(
   layout: ImportLayout,
@@ -438,13 +448,21 @@ async function recordMiss(
   hash: string | null,
   cause: unknown,
 ): Promise<void> {
-  if (!(cause instanceof NotFoundError) || hash === null) return;
+  if (hash === null) return;
+  if (!(cause instanceof LookupError) && !(cause instanceof DownloadError)) {
+    return;
+  }
   const dir = join(layout.fetched.failure, hash);
   try {
     await Deno.mkdir(dir, { recursive: true });
     await Deno.writeTextFile(
       join(dir, "error.txt"),
-      `${isoSeconds(new Date())}\n${describeRun(options)}\n${cause.message}\n`,
+      formatErrorNote({
+        when: isoSeconds(new Date()),
+        command: describeRun(options),
+        failure: cause.kind,
+        message: cause.message,
+      }),
     );
   } catch {
     // Not being able to write the note must not hide the error it is about.

@@ -35,7 +35,11 @@ import {
 import type { SampleStore } from "../samples/store.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import { log, logError } from "../log.ts";
-import { type ImportLayout, importLayout } from "./import_layout.ts";
+import {
+  formatErrorNote,
+  type ImportLayout,
+  importLayout,
+} from "./import_layout.ts";
 
 /** What a batch's `model.json` holds (§5.2). */
 export interface ImportBatch {
@@ -542,7 +546,11 @@ export class ImportInbox {
       await Deno.rename(dir, failed);
       await Deno.writeTextFile(
         join(failed, "error.txt"),
-        `${new Date(this.#now()).toISOString()}\n${message}\n`,
+        formatErrorNote({
+          when: new Date(this.#now()).toISOString(),
+          failure: "refused",
+          message,
+        }),
       );
     } catch (error) {
       logError(

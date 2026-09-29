@@ -305,6 +305,11 @@ Deno.test("a malformed batch is set aside and the next one still lands", async (
       "0000-broken",
     );
     assert(await exists(failed), "a bad batch is moved aside, not deleted");
+    // The same note `forge models` writes, so one grep prunes both sides.
+    assertStringIncludes(
+      await Deno.readTextFile(join(failed, "error.txt")),
+      "failure: refused\n",
+    );
     assertStringIncludes(
       await Deno.readTextFile(join(failed, "error.txt")),
       "invalid JSON",

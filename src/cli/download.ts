@@ -31,6 +31,20 @@ export const HUGGINGFACE_AUTH_HINT =
 
 export class DownloadError extends Error {
   override readonly name = "DownloadError";
+  /** As `LookupError.kind`: what `fetched/failure/…/error.txt` records. */
+  readonly kind:
+    | "needs-login"
+    | "rate-limited"
+    | "server-error"
+    | "unreachable"
+    | "download-failed";
+  constructor(
+    message: string,
+    kind: DownloadError["kind"] = "download-failed",
+  ) {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 export interface DownloadedFile {
@@ -80,6 +94,7 @@ export async function downloadFile(
       `GET ${options.url} failed: ${
         cause instanceof Error ? cause.message : cause
       }`,
+      "unreachable",
     );
   }
 
@@ -93,11 +108,19 @@ export async function downloadFile(
           ? " A key was sent and refused, so check that it is current."
           : ""
       }`,
+      "needs-login",
     );
   }
   if (!response.ok || response.body === null) {
     await response.body?.cancel();
-    throw new DownloadError(`GET ${options.url} answered ${response.status}`);
+    throw new DownloadError(
+      `GET ${options.url} answered ${response.status}`,
+      response.status === 429
+        ? "rate-limited"
+        : response.status >= 500
+        ? "server-error"
+        : "download-failed",
+    );
   }
 
   const filename = suggestedName(response) ?? basename(options.fallbackName);

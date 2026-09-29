@@ -27,6 +27,7 @@ import { parseHuggingFaceUrl } from "../models/huggingface.ts";
 import {
   importLayout,
   type ImportState,
+  parseErrorNote,
   stateDirs,
 } from "../models/import_layout.ts";
 
@@ -39,6 +40,8 @@ export interface Existing {
   version: string | null;
   /** For a failure: the reason, from its `error.txt`. */
   reason: string | null;
+  /** For a failure: its kind — `not-found`, `rate-limited`, `refused`, … */
+  failure: string | null;
 }
 
 /** What a run was asked for, reduced to what can be matched offline. */
@@ -54,6 +57,7 @@ interface Recorded {
   dir: string;
   batch: Record<string, unknown> | null;
   reason: string | null;
+  failure: string | null;
 }
 
 /**
@@ -172,6 +176,7 @@ function existing(recorded: Recorded): Existing {
       : null,
     version: typeof version?.name === "string" ? version.name : null,
     reason: recorded.reason,
+    failure: recorded.failure,
   };
 }
 
@@ -205,26 +210,19 @@ async function read(
   }
   const batch = await readJson(join(dir, "model.json"));
   let reason: string | null = null;
+  let failure: string | null = null;
   if (state === "fetch-failed" || state === "import-failed") {
     try {
-      reason = reasonFrom(await Deno.readTextFile(join(dir, "error.txt")));
+      const note = parseErrorNote(
+        await Deno.readTextFile(join(dir, "error.txt")),
+      );
+      reason = note.message?.split("\n")[0]?.trim() || null;
+      failure = note.failure ?? null;
     } catch {
       // A failure without its note is still a failure.
     }
   }
-  return { hash, state, dir, batch, reason };
-}
-
-/**
- * The reason in an `error.txt`: the first line of its message. Both writers
- * start with a timestamp; the CLI's adds the command it ran.
- */
-function reasonFrom(text: string): string | null {
-  const lines = text.split("\n").map((line) => line.trim()).filter((line) =>
-    line.length > 0
-  );
-  return lines.slice(1).find((line) => !line.startsWith("forge models")) ??
-    null;
+  return { hash, state, dir, batch, reason, failure };
 }
 
 async function readJson(path: string): Promise<Record<string, unknown> | null> {

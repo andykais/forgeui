@@ -45,6 +45,14 @@ export interface FakeCivitaiOptions {
   hubRepos?: Record<string, FakeHubRepo>;
   /** Answer every Hub request for this repo with this status: gated, gone. */
   hubStatus?: Record<string, number>;
+  /**
+   * Answer any request whose path contains the key with this instead: a 429
+   * with the archive's own wording, a 503, whatever a test needs.
+   */
+  failWith?: Record<
+    string,
+    { status: number; body?: string; headers?: Record<string, string> }
+  >;
 }
 
 export interface FakeHubRepo {
@@ -103,6 +111,14 @@ export function startFakeCivitai(
     });
     const parts = url.pathname.split("/").filter((part) => part.length > 0)
       .map((part) => decodeURIComponent(part));
+
+    for (const [fragment, failure] of Object.entries(options.failWith ?? {})) {
+      if (!url.pathname.includes(fragment)) continue;
+      return new Response(failure.body ?? "", {
+        status: failure.status,
+        headers: failure.headers,
+      });
+    }
 
     const hub = await hubRoute(request, url, parts, options);
     if (hub !== null) return hub;
