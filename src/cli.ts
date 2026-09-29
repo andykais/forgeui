@@ -132,8 +132,9 @@ const models = new Command()
   )
   .option(
     "--overwrite",
-    "Rewrite what is already there. Without it an existing batch field is " +
-      "left for the app to fill only where the model has nothing.",
+    "Fetch again a model already fetched — without it, a model with a batch " +
+      "waiting or already imported is left alone and nothing is asked of the " +
+      "network — and let the import replace fields you have edited.",
   )
   .option(
     "--dry-run",

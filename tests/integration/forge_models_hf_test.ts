@@ -572,3 +572,30 @@ Deno.test("--search with huggingface lists repos and writes nothing", async () =
     assertEquals(h.fake.matching("/api/v1/models"), []);
   });
 });
+
+Deno.test("a Hugging Face link already fetched is not asked about again", async () => {
+  await withHub(async (h) => {
+    const run = (url: string) =>
+      runModels({
+        ...base,
+        url,
+        config: h.config,
+        paths: h.paths,
+        client: h.client,
+        log: () => {},
+      });
+    await run(`https://huggingface.co/${REPO}/blob/main/${FILE}`);
+    for (
+      const url of [
+        `https://huggingface.co/${REPO}/resolve/main/${FILE}`,
+        // The repo alone: it holds the one file already fetched.
+        `https://huggingface.co/${REPO}`,
+      ]
+    ) {
+      const before = h.fake.requests.length;
+      const again = await run(url);
+      assertEquals(h.fake.requests.length, before, url);
+      assertEquals(again.existing?.hash, h.hash);
+    }
+  });
+});

@@ -10,7 +10,13 @@
  * file or anything it imports opens the database.**
  */
 
-import { basename, extname, join, resolve as resolvePath } from "@std/path";
+import {
+  basename,
+  dirname,
+  extname,
+  join,
+  resolve as resolvePath,
+} from "@std/path";
 import { ulid } from "@std/ulid";
 import type { Config } from "../config/types.ts";
 import type { DataPaths } from "../config/paths.ts";
@@ -41,6 +47,12 @@ import {
   type LookupSource,
 } from "./civitai_client.ts";
 import { HuggingFaceClient } from "./huggingface_client.ts";
+import {
+  type Existing,
+  findExisting,
+  type Wanted,
+  wantedFromUrl,
+} from "./existing.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
 
 export { LookupError };
@@ -72,6 +84,12 @@ export interface ModelsCommandResult {
   samples: number;
   skipped: number;
   files: number;
+  /**
+   * Set when nothing was fetched because this model already was: a batch
+   * waiting in the import folder, or one the app has ingested. Only without
+   * `--overwrite`.
+   */
+  existing?: Existing;
 }
 
 export class UsageError extends Error {
@@ -149,7 +167,49 @@ export async function runModels(
     return { dir: "", batch: null, samples: 0, skipped: 0, files: 0 };
   }
 
-  const found = await resolve(options, client, say);
+  // A local file is hashed once, here, for both questions: whether this was
+  // already fetched, and — if not — what to ask for.
+  let localHash: string | undefined;
+  if (options.localFile !== undefined) {
+    const path = await resolveLocalFile(options.config, options.localFile);
+    say(`hashing ${path}`);
+    localHash = await hashFile(path);
+  }
+
+  // Without `--overwrite`, a model already fetched is left alone, and found
+  // without asking the network: re-running a list of commands costs nothing
+  // for the ones already done (§3.2).
+  if (!options.overwrite) {
+    const wanted = wantedFor(options, localHash);
+    const have = wanted === null
+      ? null
+      : await findExisting(options.paths, wanted);
+    if (have !== null) {
+      say(
+        `already fetched: ${
+          [have.name, have.version].filter((part) => part !== null).join(
+            " · ",
+          ) || have.hash
+        }`,
+      );
+      say(
+        have.state === "pending"
+          ? `  waiting for the app in ${dirname(have.path)}`
+          : `  imported by the app; its copy is ${have.path}`,
+      );
+      say("nothing was fetched; --overwrite fetches it again");
+      return {
+        dir: dirname(have.path),
+        batch: null,
+        samples: 0,
+        skipped: 0,
+        files: 0,
+        existing: have,
+      };
+    }
+  }
+
+  const found = await resolve(options, client, localHash);
   if (found.sha256 === null) {
     throw new LookupError(
       "the model was found but carries no sha256, so nothing could be " +
@@ -312,22 +372,33 @@ function huggingFace(client: CivitaiClient): HuggingFaceClient {
 
 // ------------------------------------------------------------------ lookup
 
+/** What to look for among the batches already fetched (`existing.ts`). */
+function wantedFor(
+  options: ModelsCommandOptions,
+  localHash: string | undefined,
+): Wanted | null {
+  if (options.sha256checksum !== undefined) {
+    return { hash: options.sha256checksum };
+  }
+  if (localHash !== undefined) return { hash: localHash };
+  if (options.filename !== undefined) return { filename: options.filename };
+  if (options.url !== undefined) return wantedFromUrl(options.url);
+  return null;
+}
+
 async function resolve(
   options: RunModelsOptions,
   client: CivitaiClient,
-  say: (line: string) => void,
+  localHash?: string,
 ): Promise<LookupResult> {
   if (options.sha256checksum !== undefined) {
     return await client.byHash(options.sha256checksum, options.source);
   }
 
-  if (options.localFile !== undefined) {
+  if (localHash !== undefined) {
     // The exact road: a hash beats every name-based search, and the answer is
     // about *your* file rather than one that happens to share its name.
-    const path = await resolveLocalFile(options.config, options.localFile);
-    say(`hashing ${path}`);
-    const hash = await hashFile(path);
-    return await client.byHash(hash, options.source);
+    return await client.byHash(localHash, options.source);
   }
 
   if (options.filename !== undefined) {

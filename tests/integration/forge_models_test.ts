@@ -1108,3 +1108,148 @@ Deno.test("a configured token wins over an installed civitai CLI", async () => {
     }
   }, { noLocalFile: true });
 });
+
+/**
+ * Re-running (DESIGN-MODEL-IMPORT §3.2): without `--overwrite`, a model
+ * already fetched is left alone, and found without a single request.
+ */
+Deno.test("a second run for the same model asks nothing and writes nothing", async () => {
+  await withCli(async (h) => {
+    const run = (
+      extra: Record<string, unknown>,
+      log: (line: string) => void = () => {},
+    ) =>
+      runModels({
+        ...base,
+        config: h.config,
+        paths: h.paths,
+        client: h.client,
+        log,
+        ...extra,
+      });
+    const first = await run({ sha256checksum: h.hash });
+    const written = await Deno.readTextFile(join(first.dir, "model.json"));
+
+    // Every way of naming the same model, each found offline.
+    for (
+      const extra of [
+        { sha256checksum: h.hash.toUpperCase() },
+        { url: "https://civitai.red/models/15003?modelVersionId=501240" },
+        // A bare model link is "the newest version", which only the network
+        // knows; the one already fetched is taken to be it.
+        { url: "https://civitai.com/models/15003/cyberrealistic" },
+        { url: `https://civitaiarchive.com/sha256/${h.hash}` },
+        { filename: FILENAME.toUpperCase() },
+        { localFile: FILENAME },
+      ]
+    ) {
+      const before = h.fake.requests.length;
+      const lines: string[] = [];
+      const again = await run(extra, (line: string) => lines.push(line));
+      assertEquals(h.fake.requests.length, before, JSON.stringify(extra));
+      assertEquals(again.batch, null);
+      assertEquals(again.existing?.state, "pending");
+      assertEquals(again.existing?.hash, h.hash);
+      assertStringIncludes(
+        lines.join("\n"),
+        "already fetched: CyberRealistic · v9.0",
+      );
+      assertStringIncludes(lines.join("\n"), "--overwrite fetches it again");
+    }
+    // Untouched, not rewritten with the same content.
+    assertEquals(
+      await Deno.readTextFile(join(first.dir, "model.json")),
+      written,
+    );
+  });
+});
+
+Deno.test("a model the app has already ingested is not fetched again", async () => {
+  await withCli(async (h) => {
+    const first = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    // What ingest leaves behind (§7.2): the record in models-meta, and the
+    // batch gone.
+    const batch = await readBatch(first.dir);
+    const meta = join(h.paths.modelsMeta, h.hash);
+    await Deno.mkdir(meta, { recursive: true });
+    await Deno.writeTextFile(
+      join(meta, "civitai.json"),
+      JSON.stringify({ source: batch.source, ...batch.civitai }),
+    );
+    await Deno.remove(first.dir, { recursive: true });
+
+    const before = h.fake.requests.length;
+    const again = await runModels({
+      ...base,
+      url: "https://civitai.red/models/15003?modelVersionId=501240",
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(again.existing?.state, "imported");
+  });
+});
+
+Deno.test("--overwrite fetches again; a failed batch or another version does not count", async () => {
+  await withCli(async (h) => {
+    const first = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+
+    // Another version of the same model is another file.
+    const other = await runModels({
+      ...base,
+      url: "https://civitai.red/models/15003?modelVersionId=999999",
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    }).catch((cause) => cause);
+    assert(
+      other instanceof LookupError,
+      "it should have asked, and been told no",
+    );
+
+    const before = h.fake.requests.length;
+    const again = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      overwrite: true,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assert(h.fake.requests.length > before, "--overwrite should ask again");
+    assertEquals(again.existing, undefined);
+    assertEquals((await readBatch(again.dir)).overwrite, true);
+
+    // A batch the app refused is the one most worth fetching again.
+    await Deno.mkdir(join(h.paths.imports, ".failed"), { recursive: true });
+    await Deno.rename(first.dir, join(h.paths.imports, ".failed", h.hash));
+    const retried = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(retried.existing, undefined);
+    assert(retried.batch !== null);
+  });
+});

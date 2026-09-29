@@ -262,8 +262,10 @@ Options:
       --download-model        Download the model weights into the batch. The app
                               files them under <appdata>/models/<kind>/ on ingest.
                               Public models need no login; see AUTH for the rest.
-      --overwrite             Rewrite files already on disk. Without it every file
-                              that exists is left exactly as it is.
+      --overwrite             Fetch again a model already fetched, and let the
+                              import replace fields you have edited. Without it, a
+                              model already fetched is left alone and nothing is
+                              asked of the network (§3.2).
 
       --dry-run               Print what would be fetched and written; touch nothing.
       --json                  Print the resulting model.json to stdout instead of a
@@ -393,6 +395,50 @@ deno task start                                      # unchanged; still src/main
 ```
 
 ---
+
+### 3.2 Running it again
+
+*Added after the rest of this document.* Without `--overwrite`, a model that
+has already been fetched is **left alone, and found without a single
+request**: re-running a list of commands costs nothing for the ones already
+done.
+
+```
+already fetched: TotK Zelda - Realistic · Zelda - ZIB - Version 1
+  waiting for the app in /workspace/import/72a47985…
+nothing was fetched; --overwrite fetches it again
+```
+
+"Already fetched" is either of two files, both of which the CLI may read —
+neither is `app.db` (§3.1):
+
+| | |
+|---|---|
+| `<imports>/<sha256>/model.json` | a batch waiting for the app |
+| `<appdata>/models-meta/<sha256>/civitai.json` | a batch the app has ingested (§7.2) |
+
+On a machine that only fetches for a library elsewhere the second does not
+exist, and only the first counts. A batch in `.failed/` counts for nothing:
+it is the one most worth fetching again.
+
+A hash names a batch directly, so `--sha256checksum` and `--local-file`
+(hashed locally first) look straight at the two files. A link or a filename
+does not — finding out what one points at *is* the lookup — so those are
+matched against what earlier batches recorded:
+
+| Input | Matches a batch whose |
+|---|---|
+| Civitai link with `modelVersionId` | `source.model_version_id` |
+| Civitai link to a model only | `source.model_id` — "the newest version" is a question only the network can answer, so the version already fetched is taken to be it; `--overwrite` asks |
+| archive `/sha256/<hash>` link | hash |
+| Hugging Face file link | `source.repo` and `source.path` |
+| Hugging Face repo link | `source.repo` |
+| `--filename` | `model.filename`, or the basename of a Hugging Face `source.path` |
+| Civitai image link | nothing: only the network knows which version an image was posted under |
+
+`--overwrite` does two things, deliberately one flag: it fetches again, and
+it marks the batch so ingest replaces the fields you edited (§7.2). A re-fetch
+that then kept the old values would be fetching for nothing.
 
 ## 4. Lookup
 
