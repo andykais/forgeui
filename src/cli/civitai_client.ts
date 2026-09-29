@@ -16,6 +16,7 @@ import {
   type CivitaiEndpoint,
   type LookupResult,
   normalizeHash,
+  pinToHash,
   sourceRecordFromArchive,
   sourceRecordFromCivitai,
   visibilityParams,
@@ -144,19 +145,25 @@ export class CivitaiClient {
             "models",
           ),
         );
-        return sourceRecordFromCivitai({
-          model: (model ?? { id: modelId ?? null }) as Record<string, unknown>,
-          version: version as Record<string, unknown>,
-          baseUrl: this.#civitai,
-          fetchedAt: this.#now(),
-        });
+        return pinToHash(
+          sourceRecordFromCivitai({
+            model: (model ?? { id: modelId ?? null }) as Record<
+              string,
+              unknown
+            >,
+            version: version as Record<string, unknown>,
+            baseUrl: this.#civitai,
+            fetchedAt: this.#now(),
+          }),
+          normalized,
+        );
       }
       tried.push(this.#civitai);
     }
 
     if (source !== "red") {
       const found = await this.#archiveByHash(normalized);
-      if (found !== null) return found;
+      if (found !== null) return pinToHash(found, normalized);
       tried.push(this.#archive);
     }
 

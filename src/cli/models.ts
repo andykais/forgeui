@@ -523,10 +523,22 @@ async function fetchWeights(input: {
   // paid models a plain GET cannot — and a direct download otherwise, which
   // is the common case and must not need a separate install.
   const versionId = found.record.source.model_version_id;
+  const wanted = found.files.filter((file) => file.download_url !== null);
+  // The file the batch is named after, when the version lists it: a hash
+  // lookup may have named its fp16 or pruned variant rather than the primary.
+  // Failing that the primary, unless the version ships nothing marked as
+  // one: pulling every variant is rarely what "download the model" means.
+  const chosen = wanted.find((file) => file.sha256 === found.sha256) ??
+    wanted.find((file) => file.primary) ?? wanted[0] ?? null;
   // A token given to ForgeUI wins. The CLI keeps its own login somewhere else
   // entirely, and preferring it whenever it happened to be installed would
   // quietly ignore the key in `config.yaml` — the one thing the person set.
-  if (token === null && cli !== null && await onPath(cli)) {
+  // It also downloads by version, which means the primary file, so it is no
+  // use when the one wanted is a variant.
+  if (
+    token === null && cli !== null && (chosen?.primary ?? true) &&
+    await onPath(cli)
+  ) {
     if (versionId === null) {
       throw new LookupError(
         `${cli} downloads by model version id, and this lookup found none`,
@@ -535,23 +547,18 @@ async function fetchWeights(input: {
     say(`downloading the weights with ${cli}…`);
     await runCivitaiCli(cli, versionId, into);
   } else {
-    const wanted = found.files.filter((file) => file.download_url !== null);
-    if (wanted.length === 0) {
+    if (chosen === null) {
       throw new LookupError(
         versionId === null
           ? "this lookup found no downloadable file"
           : `no download URL for model version ${versionId}`,
       );
     }
-    // The primary file only, unless the version ships nothing marked as one:
-    // a version can carry pruned, fp16 and config variants, and pulling all
-    // of them is rarely what "download the model" means.
-    const primary = wanted.find((file) => file.primary) ?? wanted[0]!;
-    say(`downloading ${primary.name}…`);
+    say(`downloading ${chosen.name}…`);
     await downloadFile({
-      url: primary.download_url!,
+      url: chosen.download_url!,
       into,
-      fallbackName: primary.name,
+      fallbackName: chosen.name,
       token,
       timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
       say,
@@ -580,6 +587,17 @@ async function fetchWeights(input: {
   }
   if (files.length === 0) {
     throw new LookupError(`nothing was downloaded into ${into}`);
+  }
+  // Ingest files the weights by what they hash to and applies the metadata by
+  // the batch's name. If those differ, the model lands but its description,
+  // samples and trigger words wait forever for a file that never comes.
+  if (!files.some((file) => file.sha256 === found.sha256)) {
+    throw new LookupError(
+      `downloaded ${files.map((file) => file.file).join(", ")}, which hashes ` +
+        `to ${files.map((file) => file.sha256).join(", ")}, not the ` +
+        `${found.sha256} this lookup is about. Nothing was written: that ` +
+        `batch could never be matched to its model.`,
+    );
   }
   return files;
 }

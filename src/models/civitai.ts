@@ -330,6 +330,26 @@ function describe(html: unknown): {
 }
 
 /**
+ * A hash lookup is about the file that hash names. A version ships several
+ * files — fp16 and fp32, pruned and full, a VAE — and the source records name
+ * the version's *primary* file, which is right for a URL but wrong here: a
+ * batch keyed on the primary's hash describes a file that is not the one on
+ * disk, so ingest waits for a model that will never arrive (§4.1, §7.2).
+ *
+ * The given hash always wins. When the version lists that file, its name
+ * comes too; when it does not, the primary's name would be a lie, so there
+ * is none.
+ */
+export function pinToHash(found: LookupResult, hash: string): LookupResult {
+  const file = found.files.find((entry) => entry.sha256 === hash);
+  return {
+    ...found,
+    sha256: hash,
+    filename: file?.name ?? (found.sha256 === hash ? found.filename : null),
+  };
+}
+
+/**
  * Civitai's `/models/<id>` plus one of its versions, into §5.5's record.
  * `version` is the one the lookup landed on; without it the newest is used,
  * which is what a bare `/models/<id>` link means.

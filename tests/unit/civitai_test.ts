@@ -6,6 +6,7 @@ import {
   normalizeTriggerWords,
   originalImageUrl,
   parseModelUrl,
+  pinToHash,
   sourceRecordFromArchive,
   sourceRecordFromCivitai,
   visibilityParams,
@@ -381,4 +382,32 @@ Deno.test("text: `<b and c >` is read as a tag, as a browser would", () => {
 
 Deno.test("text: entities and collapsed whitespace", () => {
   assertEquals(htmlToText("<p>a &amp; b &hellip;  c</p>"), "a & b … c");
+});
+
+Deno.test("pin: a hash lookup names the file it was given", () => {
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const c = "c".repeat(64);
+  const found = sourceRecordFromCivitai({
+    model: { id: 1, name: "M", type: "Checkpoint" },
+    version: {
+      id: 2,
+      files: [
+        { name: "m_fp32.safetensors", primary: true, hashes: { SHA256: a } },
+        { name: "m_fp16.safetensors", hashes: { SHA256: b.toUpperCase() } },
+      ],
+    },
+    baseUrl: "https://civitai.red",
+    fetchedAt: new Date("2026-09-29T00:00:00Z"),
+  });
+  assertEquals([found.sha256, found.filename], [a, "m_fp32.safetensors"]);
+
+  const variant = pinToHash(found, b);
+  assertEquals([variant.sha256, variant.filename], [b, "m_fp16.safetensors"]);
+  // The primary pinned to itself is unchanged.
+  assertEquals(pinToHash(found, a).filename, "m_fp32.safetensors");
+  // A hash the version does not list keeps the hash and drops the name,
+  // which would otherwise be some other file's.
+  const unknown = pinToHash(found, c);
+  assertEquals([unknown.sha256, unknown.filename], [c, null]);
 });

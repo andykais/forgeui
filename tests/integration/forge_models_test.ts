@@ -570,6 +570,130 @@ Deno.test("--download-model works with no local file and no civitai CLI", async 
   }, { noLocalFile: true });
 });
 
+/**
+ * A version ships several files, and the source record names its primary.
+ * The hash given names one of the others — the fp16 file here — and that is
+ * the file the batch has to be about, or ingest waits for a model that is
+ * never coming (the bug this was written for).
+ */
+function twoFileVersion(h: Harness) {
+  const model = civitaiModel(h.hash, h.fake.url);
+  const version = model.modelVersions[0]!;
+  version.files = [
+    {
+      name: "cyberrealistic_v90_fp32.safetensors",
+      primary: true,
+      sizeKB: 8,
+      downloadUrl: `${h.fake.url}/api/download/models/501240?precision=fp32`,
+      hashes: { SHA256: "E".repeat(64) },
+    },
+    {
+      name: FILENAME,
+      primary: false,
+      sizeKB: 4,
+      downloadUrl: `${h.fake.url}/api/download/models/501240?precision=fp16`,
+      hashes: { SHA256: h.hash.toUpperCase() },
+    },
+  ];
+  // `configure` replaces what the fake serves rather than adding to it.
+  h.fake.configure({
+    models: { 15003: model },
+    versionsByHash: { [h.hash]: version },
+    download: { bytes: h.bytes, filename: FILENAME },
+  });
+}
+
+Deno.test("--sha256checksum names the file it was given, not the primary", async () => {
+  await withCli(async (h) => {
+    twoFileVersion(h);
+    const result = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals(result.dir, join(h.paths.imports, h.hash));
+    const batch = await readBatch(result.dir);
+    assertEquals(batch.model.sha256, h.hash);
+    assertEquals(batch.model.filename, FILENAME);
+  }, { noLocalFile: true });
+});
+
+Deno.test("--local-file of a non-primary file is keyed on that file", async () => {
+  await withCli(async (h) => {
+    twoFileVersion(h);
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    assertEquals((await readBatch(result.dir)).model.sha256, h.hash);
+  });
+});
+
+Deno.test("--download-model fetches the variant the hash names", async () => {
+  await withCli(async (h) => {
+    twoFileVersion(h);
+    const result = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      downloadModel: true,
+      config: {
+        ...h.config,
+        import: { ...h.config.import, civitai_cli: null },
+      },
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    const [download] = h.fake.matching("/api/download/");
+    assertEquals(download!.params.precision, "fp16");
+    assertEquals((await readBatch(result.dir)).files![0]!.sha256, h.hash);
+  }, { noLocalFile: true });
+});
+
+Deno.test("a download that cannot match its batch writes nothing", async () => {
+  await withCli(async (h) => {
+    // Civitai's listing says one hash; the bytes it serves are another.
+    const model = civitaiModel(h.hash, h.fake.url);
+    h.fake.configure({
+      models: { 15003: model },
+      versionsByHash: { [h.hash]: model.modelVersions[0]! },
+      download: {
+        bytes: new TextEncoder().encode("other"),
+        filename: FILENAME,
+      },
+    });
+    await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      LookupError,
+      "could never be matched",
+    );
+    const left: string[] = [];
+    for await (const entry of Deno.readDir(h.paths.imports)) {
+      if (!entry.name.startsWith(".")) left.push(entry.name);
+    }
+    assertEquals(left, []);
+  }, { noLocalFile: true });
+});
+
 Deno.test("a gated model says what to do rather than writing half a batch", async () => {
   await withCli(async (h) => {
     const model = civitaiModel(h.hash, h.fake.url);

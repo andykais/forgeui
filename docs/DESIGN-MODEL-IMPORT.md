@@ -508,6 +508,15 @@ the archive; `--source` pins it to one.
    `model_version_id`, then
    `GET https://civitaiarchive.com/api/models/<id>?modelVersionId=<v>`.
 
+Either answer is a whole version, and a version ships several files — fp32
+and fp16, pruned and full, sometimes a VAE. **The batch is about the file the
+hash names, not the version's primary**: its `model.sha256` is the hash given,
+its `filename` is that file's name (or none, when the version does not list
+it), and `--download-model` fetches that file. Keyed on the primary instead,
+a batch describes a file that is not on disk, and §7.2 waits for it forever.
+For the same reason a download whose bytes do not hash to the batch's name is
+refused before anything is written.
+
 The archive is second rather than absent because it answers for **models
 Civitai has deleted** — `deletedAt` is a field it returns rather than a 404 it
 throws — which is a large fraction of the models people actually have on disk
