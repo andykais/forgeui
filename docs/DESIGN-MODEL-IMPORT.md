@@ -234,8 +234,9 @@ Options:
                               (Default: $FORGEUI_DATA_DIR, else ~/.forgeui)
 
       --url          <url>    civitai.red, civitai.com or civitaiarchive.com link to
-                              a model, a model version or an image. The site in the
-                              link is tried first. Accepts every form in §4.1.
+                              a model, a model version or an image, or a
+                              huggingface.co link to a repo or a file in one. The
+                              site in the link is tried first. Every form: §4.1, §4.5.
       --filename     <name>   Look up a model by filename on civitai.red and
                               civitaiarchive.com. A remote lookup: nothing on this
                               machine is read. Near misses are listed, not refused.
@@ -243,13 +244,15 @@ Options:
                               hash up. Takes a path, or a filename in one of the
                               configured model folders.
       --sha256checksum <hex>  SHA256 of the model file — the identity ForgeUI uses.
-      --search       <text>   List what Civitai has under this name and write nothing.
+      --search       <text>   List what Civitai has under this name and write nothing
+                              — or Hugging Face, with --import-source huggingface.
                               How you find the --url for something not on this
                               machine yet.
 
-      --source       <name>   Where to look, when the input does not say:
-                              auto (default) tries civitai.red, then
-                              civitaiarchive.com. red | archive pin it to one.
+      --import-source <name>  Where to look. auto (default) tries civitai.red, then
+                              civitaiarchive.com, then the Hugging Face copies the
+                              archive knows of. civitai.red | civitai.com |
+                              civitaiarchive | huggingface asks that one only.
 
       --download-samples <n>  Download up to <n> images from the model's page as
                               samples, newest first. (Default: 0)
@@ -273,6 +276,8 @@ Examples:
   forge models --url https://civitai.red/models/4384?modelVersionId=128713
   forge models --sha256checksum 6ce0161689b3853acaa037… --download-samples=4 --overwrite
   forge models --url https://civitaiarchive.com/sha256/6ce0161689b3… --download-model
+  forge models --url https://huggingface.co/XLabs-AI/flux-RealismLora
+  forge models --import-source huggingface --sha256checksum e869ac7d6942cb32…
 
 AUTH
 
@@ -288,10 +293,14 @@ AUTH
   The key is sent to Civitai only, and never served by GET /api/config. It is
   never written into the import folder or any sidecar.
 
+  Hugging Face is the same, with its own token, for gated and private repos:
+  import.huggingface_token, or HF_TOKEN, from huggingface.co/settings/tokens.
+  Each site gets its own key and never the other's.
+
 EXIT CODES
 
   0  wrote a batch (or, with --dry-run, would have)
-  1  the model was not found on civitai.red or in the archive
+  1  the model was not found at any source asked
   2  bad arguments, or none of --url/--filename/--sha256checksum
   3  a download failed, or --download-model without a login
   4  the import folder is not writable
@@ -493,7 +502,8 @@ is what actually has files, images and a `baseModel`.
 
 **`--sha256checksum <hex>`** — the direct road, and the one the other two end
 up on. When the input does not name a site, the order is civitai.red, then
-the archive; `--source` pins it to one.
+the archive, then the Hugging Face copies the archive knows of (§4.5);
+`--import-source` pins it to one.
 
 1. `GET https://civitai.red/api/v1/model-versions/by-hash/<hash>`, which
    answers with the version, its files and its `baseModel` in one call and
@@ -650,6 +660,60 @@ absent entirely it is 0. Samples are *always* accompanied by the metadata
 batch — there is no way to fetch images without fetching what they are of.
 
 ---
+
+### 4.5 Hugging Face
+
+*Added after the rest of this document.* Hugging Face is a source for **a
+title and a README**, and not much else: it has no sample images, no
+trigger-word field (a card's `instance_prompt` is read when there is one),
+and no idea which ComfyUI folder a file belongs in. Whatever the safetensors
+header carries, the model scan has already read.
+
+`forge models` talks to it through **`@huggingface/hub`**, Hugging Face's own
+JavaScript client. The `hf` CLI most people know is Python, and a Deno binary
+cannot depend on it; the JS client has a CLI of its own (`hfjs`), but only the
+library is used. It compiles into `forge`. The README is a plain GET of the
+file's `resolve` URL rather than the library's `downloadFile`, which goes
+through Xet reconstruction — a lot of machinery for six kilobytes.
+
+**By link.** `huggingface.co/<owner>/<repo>`, with `/blob/<rev>/<path>`,
+`/resolve/<rev>/<path>` or `/tree/<rev>` after it (`hf.co` too). A file link
+is exact. A repo link means its one weight file — the only one at the root,
+or the only one anywhere — and when there are more (a diffusers layout, two
+precisions) the answer is the list of file links, not a guess. The file's
+sha256 is its LFS `oid` from `paths-info`; a batch is named by it (§4.1).
+
+**By hash.** The Hub cannot be asked "which repo has this file". The archive
+can: `/api/sha256/<hash>` lists Hugging Face copies with their URLs. Most are
+re-uploads — one SDXL Turbo file has forty-eight, one of them
+`stabilityai/sdxl-turbo` — so the copies are ranked by likes, then downloads,
+eight at a time, and the choice is printed with how to override it (`--url`).
+In `auto` this happens only when the archive has **no Civitai model** behind
+the hash, which is the case that used to end in "mirrors only carry no
+metadata". `--import-source huggingface` goes straight to it, still through
+the archive, because there is no other index.
+
+**By filename.** The same road: the archive's filename index, limited to its
+Hugging Face rows, then by hash. **`--search`** with `--import-source
+huggingface` is the Hub's own model search.
+
+**What it maps to.** The §5.5 record, with `source.kind: "huggingface"` and
+`repo`, `revision`, `path` beside the Civitai ids (null here):
+
+| Record | From |
+|---|---|
+| `display_name` | the repo name (`sdxl-turbo`) |
+| `creator` | the repo's owner |
+| `model.description_text` | README.md, front matter stripped, HTML in it turned into Markdown, relative links made absolute into the repo |
+| `model.tags` | the repo's tags without a colon (`license:…`, `region:…` are index keys) |
+| `version.base_model` | `cardData.base_model` |
+| `trigger_words` | `cardData.instance_prompt` |
+| `family` | `base_model`, else the repo id, through a small table; unset otherwise |
+| `kind` | tags and path (`lora`, `vae/`, `text_encoder*/`, …), else the pipeline, else `other` |
+| `license`, `stats` | `cardData.license*`; likes and downloads |
+
+`--download-samples` fetches nothing and says so. `--download-model` fetches
+the file's `resolve` URL with the Hugging Face token, never the Civitai one.
 
 ## 5. Folders and formats
 
@@ -1198,6 +1262,13 @@ import:
   # no token is set above — so a key given to ForgeUI is never silently
   # traded for the CLI's own separate login. null never uses it.
   civitai_cli: civitai
+
+  # The Hugging Face Hub, for titles and READMEs (§4.5), and a token for its
+  # gated and private repos from huggingface.co/settings/tokens. HF_TOKEN in
+  # the environment wins. Plaintext, and never served by /api/config, exactly
+  # as civitai_token is.
+  huggingface_url: https://huggingface.co
+  huggingface_token: null
 
   # What --download-samples means with no number after it.
   samples: 4

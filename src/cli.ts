@@ -16,10 +16,11 @@ import { CivitaiUrlError } from "./models/civitai.ts";
 import {
   LookupError,
   type ModelsCommandOptions,
+  parseImportSource,
   runModels,
   UsageError,
 } from "./cli/models.ts";
-import type { LookupSource } from "./cli/civitai_client.ts";
+import { HuggingFaceUrlError } from "./models/huggingface.ts";
 import { ForgeUi } from "./mcp/forgeui.ts";
 import { LlamaSwap } from "./mcp/llama.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
@@ -107,13 +108,15 @@ const models = new Command()
   )
   .option(
     "--search <text:string>",
-    "List what Civitai has under this name and write nothing. How you find " +
-      "the --url for a model that is not on this machine yet.",
+    "List what Civitai has under this name and write nothing — or Hugging " +
+      "Face, with --import-source huggingface. How you find the --url for a " +
+      "model that is not on this machine yet.",
   )
   .option(
-    "--source <name:string>",
-    "Where to look when the input does not say: auto tries civitai.red, " +
-      "then civitaiarchive.com. red | archive pin it to one.",
+    "--import-source <name:string>",
+    "Where to look. auto tries civitai.red, then civitaiarchive.com, then " +
+      "the Hugging Face copies the archive knows of. civitai.red | " +
+      "civitai.com | civitaiarchive | huggingface asks that one only.",
     { default: "auto" },
   )
   .option(
@@ -226,7 +229,7 @@ async function runModelsCommand(options: {
   localFile?: string;
   sha256checksum?: string;
   search?: string;
-  source: string;
+  importSource: string;
   downloadSamples?: number | boolean;
   downloadModel?: boolean;
   overwrite?: boolean;
@@ -236,15 +239,16 @@ async function runModelsCommand(options: {
   timeout: number;
 }): Promise<number> {
   try {
-    if (!["auto", "red", "archive"].includes(options.source)) {
-      throw new UsageError(
-        `--source: expected auto, red or archive, got "${options.source}"`,
-      );
-    }
+    const chosen = parseImportSource(options.importSource);
     const { store } = await loadConfig({
       dataDir: options.dataDir ?? resolveDataDir(),
     });
     const settings = store.config.import;
+    // Naming a Civitai host asks that host, whatever config.yaml points at.
+    const config = chosen.civitaiUrl === null ? store.config : {
+      ...store.config,
+      import: { ...settings, civitai_url: chosen.civitaiUrl },
+    };
     // `--download-samples` with no number means the configured default;
     // absent entirely it means none.
     const samples = options.downloadSamples === true
@@ -259,7 +263,7 @@ async function runModelsCommand(options: {
       localFile: options.localFile,
       sha256checksum: options.sha256checksum,
       search: options.search,
-      source: options.source as LookupSource,
+      source: chosen.source,
       downloadSamples: samples,
       downloadModel: options.downloadModel === true,
       overwrite: options.overwrite === true,
@@ -269,7 +273,7 @@ async function runModelsCommand(options: {
     };
     const result = await runModels({
       ...command,
-      config: store.config,
+      config,
       paths: store.paths,
     });
     if (options.json && result.batch !== null) {
@@ -277,7 +281,10 @@ async function runModelsCommand(options: {
     }
     return 0;
   } catch (cause) {
-    if (cause instanceof UsageError || cause instanceof CivitaiUrlError) {
+    if (
+      cause instanceof UsageError || cause instanceof CivitaiUrlError ||
+      cause instanceof HuggingFaceUrlError
+    ) {
       console.error(`forge models: ${cause.message}`);
       return cause instanceof UsageError &&
           /login|download|civitai_cli/.test(cause.message)

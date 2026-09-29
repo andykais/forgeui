@@ -241,12 +241,16 @@ export function visibilityParams(
 export interface SourceRecord {
   format: 1;
   source: {
-    kind: "civitai" | "civitai-archive";
+    kind: "civitai" | "civitai-archive" | "huggingface";
     label: string;
     url: string;
     model_id: number | null;
     model_version_id: number | null;
     fetched_at: string;
+    /** Hugging Face names a model by repo, revision and file (§4.5). */
+    repo?: string;
+    revision?: string | null;
+    path?: string;
   };
   creator: { username: string; url: string | null } | null;
   model: {
@@ -583,7 +587,7 @@ function pick(
   return Object.keys(out).length > 0 ? out : null;
 }
 
-function isoSeconds(date: Date): string {
+export function isoSeconds(date: Date): string {
   return `${date.toISOString().slice(0, 19)}Z`;
 }
 

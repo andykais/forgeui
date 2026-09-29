@@ -16,8 +16,9 @@ const CONFIG_HEADER = `# ForgeUI configuration.
 # CLI flags (--comfy-path, --comfy-url, --models-dir kind=path, --port) override
 # these values for one run and are never written back.
 #
-# import.civitai_token is kept here in plaintext. CIVITAI_TOKEN in the
-# environment is the alternative, and wins when both are set.
+# import.civitai_token and import.huggingface_token are kept here in
+# plaintext. CIVITAI_TOKEN and HF_TOKEN in the environment are the
+# alternatives, and win when both are set.
 `;
 
 export interface EnvSource {

@@ -138,6 +138,8 @@ export function defaultConfig(): Config {
       archive_url: DEFAULT_ARCHIVE_URL,
       civitai_token: null,
       civitai_cli: "civitai",
+      huggingface_url: "https://huggingface.co",
+      huggingface_token: null,
       samples: 4,
       nsfw_level: 1,
       ingest_on_boot: true,

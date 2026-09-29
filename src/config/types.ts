@@ -204,6 +204,18 @@ export interface ImportConfig {
    * on PATH; null never uses it.
    */
   civitai_cli: string | null;
+  /**
+   * The Hugging Face Hub, asked for titles and READMEs (§4.5). A setting for
+   * the same reason `civitai_url` is: a mirror, or the tests' fake.
+   */
+  huggingface_url: string;
+  /**
+   * A Hugging Face access token, from huggingface.co/settings/tokens. Sent to
+   * the Hub only, and needed only for gated and private repos. `HF_TOKEN` in
+   * the environment wins over this. Plaintext, and never served by
+   * `GET /api/config`, exactly as `civitai_token` is.
+   */
+  huggingface_token: string | null;
   /** What `--download-samples` means with no number after it. */
   samples: number;
   /** Civitai's nsfwLevel scale: 1 is safe. Images above this are skipped. */

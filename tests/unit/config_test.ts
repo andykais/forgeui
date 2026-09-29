@@ -284,6 +284,12 @@ Deno.test("a key YAML read as a number is refused, not corrupted", () => {
       ?.civitai_token,
     null,
   );
+  // The Hugging Face token is held to the same rule, and the hint names it.
+  assertThrows(
+    () => validatePartialConfig({ import: { huggingface_token: 1e10 } }),
+    ConfigError,
+    'huggingface_token: "<your key>"',
+  );
 });
 
 Deno.test("import.dir and import.model_dir move the folders", () => {

@@ -1,5 +1,5 @@
 /**
- * A stand-in for Civitai and CivArchive, in the shape of `tests/fake-comfy/`
+ * A stand-in for Civitai, CivArchive and the Hugging Face Hub, in the shape of `tests/fake-comfy/`
  * and for the same reason: the default suite must need nothing, and the real
  * Civitai is not a dependency a test gets to have
  * (DESIGN-MODEL-IMPORT §10).
@@ -36,6 +36,23 @@ export interface FakeCivitaiOptions {
   download?: { bytes: Uint8Array; filename: string };
   /** Answer downloads with this status instead, for the gated-model path. */
   downloadStatus?: number;
+  /**
+   * Hugging Face repos, by `owner/repo`: the Hub's `/api/models/<repo>` body
+   * (`id`, `pipeline_tag`, `cardData`, `siblings`, …) and the files in it.
+   * A file with `sha256` is an LFS file; `text` or `bytes` is what `resolve`
+   * serves for it.
+   */
+  hubRepos?: Record<string, FakeHubRepo>;
+  /** Answer every Hub request for this repo with this status: gated, gone. */
+  hubStatus?: Record<string, number>;
+}
+
+export interface FakeHubRepo {
+  info: Record<string, unknown>;
+  files: Record<
+    string,
+    { sha256?: string; size?: number; text?: string; bytes?: Uint8Array }
+  >;
 }
 
 export interface RecordedRequest {
@@ -77,14 +94,18 @@ export function startFakeCivitai(
       headers: { "content-type": "application/json" },
     });
 
-  const handler = (request: Request): Response => {
+  const handler = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     requests.push({
       path: url.pathname,
       params: Object.fromEntries(url.searchParams),
       authorization: request.headers.get("authorization"),
     });
-    const parts = url.pathname.split("/").filter((part) => part.length > 0);
+    const parts = url.pathname.split("/").filter((part) => part.length > 0)
+      .map((part) => decodeURIComponent(part));
+
+    const hub = await hubRoute(request, url, parts, options);
+    if (hub !== null) return hub;
 
     // The CDN: any path under /img/ serves the same bytes.
     if (parts[0] === "img") {
@@ -180,4 +201,88 @@ export function startFakeCivitai(
       await server.shutdown();
     },
   };
+}
+
+/**
+ * The Hub's routes, as `@huggingface/hub` calls them: model info at
+ * `/api/models/<owner>/<repo>/revision/<rev>`, `paths-info` as a POST, the
+ * model search, and `/<owner>/<repo>/resolve/<rev>/<path>` for the bytes.
+ * Null for anything else, which is Civitai's or the archive's.
+ */
+async function hubRoute(
+  request: Request,
+  url: URL,
+  parts: string[],
+  options: FakeCivitaiOptions,
+): Promise<Response | null> {
+  const repos = options.hubRepos ?? {};
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  const refused = (repo: string) => {
+    const status = options.hubStatus?.[repo];
+    return status === undefined
+      ? null
+      : json({ error: `status ${status}` }, status);
+  };
+
+  // The search: `/api/models?search=…`, no repo in the path.
+  if (parts[0] === "api" && parts[1] === "models" && parts.length === 2) {
+    const query = (url.searchParams.get("search") ?? "").toLowerCase();
+    return json(
+      Object.values(repos).map((repo) => repo.info).filter((info) =>
+        String(info.id).toLowerCase().includes(query)
+      ),
+    );
+  }
+
+  if (parts[0] === "api" && parts[1] === "models" && parts.length >= 5) {
+    const repo = `${parts[2]}/${parts[3]}`;
+    const found = repos[repo];
+    if (found === undefined) return null;
+    const refusal = refused(repo);
+    if (refusal !== null) return refusal;
+    if (parts[4] === "revision") return json(found.info);
+    if (parts[4] === "paths-info" && request.method === "POST") {
+      const body = await request.json() as { paths: string[] };
+      return json(
+        body.paths.filter((path) => path in found.files).map((path) => {
+          const file = found.files[path]!;
+          return {
+            type: "file",
+            path,
+            oid: "0".repeat(40),
+            size: file.size ?? file.bytes?.byteLength ?? file.text?.length ?? 0,
+            ...(file.sha256 === undefined
+              ? {}
+              : { lfs: { oid: file.sha256, size: file.size ?? 0 } }),
+          };
+        }),
+      );
+    }
+    return null;
+  }
+
+  if (parts[2] === "resolve" && parts.length >= 5) {
+    const repo = `${parts[0]}/${parts[1]}`;
+    const found = repos[repo];
+    if (found === undefined) return null;
+    const refusal = refused(repo);
+    if (refusal !== null) return refusal;
+    const path = parts.slice(4).join("/");
+    const file = found.files[path];
+    if (file === undefined) return json({ error: "no such file" }, 404);
+    const bytes = file.bytes ?? new TextEncoder().encode(file.text ?? "");
+    return new Response(bytes.buffer as ArrayBuffer, {
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": `attachment; filename="${
+          path.split("/").pop()
+        }"`,
+      },
+    });
+  }
+  return null;
 }

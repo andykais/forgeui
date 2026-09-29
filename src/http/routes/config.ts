@@ -7,8 +7,8 @@ import type { AppContext, Route } from "../server.ts";
  * overrides); `PATCH` merges a partial document into the file. Settings has no
  * save button, so a PATCH is one field blur.
  *
- * With one exception: `import.civitai_token` never leaves this process. It is
- * a credential, and this route answers anything that can reach the port — the
+ * With one exception: the tokens in `import` — `civitai_token` and
+ * `huggingface_token` — never leave this process. Each is a credential, and this route answers anything that can reach the port — the
  * browser, the MCP bridge an LLM drives, and whatever else is on a container's
  * published port. Keeping the token *safe on disk* is out of scope; not
  * handing it to every HTTP client is not the same problem, and is not.
@@ -20,12 +20,16 @@ import type { AppContext, Route } from "../server.ts";
  */
 export const REDACTED_TOKEN = "(hidden)";
 
+/** Every credential in the `import` block. */
+const TOKENS = ["civitai_token", "huggingface_token"] as const;
+
 export function redact(config: Config): Config {
-  if (config.import.civitai_token === null) return config;
-  return {
-    ...config,
-    import: { ...config.import, civitai_token: REDACTED_TOKEN },
-  };
+  if (TOKENS.every((key) => config.import[key] === null)) return config;
+  const importing = { ...config.import };
+  for (const key of TOKENS) {
+    if (importing[key] !== null) importing[key] = REDACTED_TOKEN;
+  }
+  return { ...config, import: importing };
 }
 
 /**
@@ -38,10 +42,11 @@ function withoutEchoedToken(body: unknown): unknown {
   const record = body as Record<string, unknown>;
   const section = record.import;
   if (typeof section !== "object" || section === null) return body;
-  const importing = section as Record<string, unknown>;
-  if (importing.civitai_token !== REDACTED_TOKEN) return body;
-  const { civitai_token: _echoed, ...rest } = importing;
-  return { ...record, import: rest };
+  const importing = { ...section as Record<string, unknown> };
+  for (const key of TOKENS) {
+    if (importing[key] === REDACTED_TOKEN) delete importing[key];
+  }
+  return { ...record, import: importing };
 }
 
 export function configRoutes(ctx: AppContext): Route[] {

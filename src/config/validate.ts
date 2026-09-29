@@ -64,7 +64,7 @@ function token(value: unknown, where: string): string | null {
   if (typeof value === "number" || typeof value === "bigint") {
     throw new ConfigError(
       `${where}: YAML read this key as a number, which would lose digits. ` +
-        `Put it in quotes: civitai_token: "<your key>"`,
+        `Put it in quotes: ${where.split(".").pop()}: "<your key>"`,
     );
   }
   fail(where, "a string");
@@ -221,6 +221,8 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
     "archive_url",
     "civitai_token",
     "civitai_cli",
+    "huggingface_url",
+    "huggingface_token",
     "samples",
     "nsfw_level",
     "ingest_on_boot",
@@ -233,6 +235,8 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
   pick(raw, "archive_url", out, str, where);
   pick(raw, "civitai_token", out, token, where);
   pick(raw, "civitai_cli", out, nullableStr, where);
+  pick(raw, "huggingface_url", out, str, where);
+  pick(raw, "huggingface_token", out, token, where);
   pick(raw, "samples", out, count, where);
   pick(raw, "nsfw_level", out, count, where);
   pick(raw, "ingest_on_boot", out, bool, where);

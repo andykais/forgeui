@@ -417,3 +417,176 @@ export function htmlToText(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+/**
+ * A README that is already Markdown, with the HTML inside it turned into
+ * Markdown too (DESIGN-MODEL-IMPORT §4.5).
+ *
+ * Hugging Face model cards are Markdown with HTML mixed in — a centred
+ * `<h1 align="center">`, a row of `<img>` badges, a `<details>` block — and
+ * the page's renderer shows raw HTML as text, which is correct for safety and
+ * ugly for these. So the HTML goes here, the way `htmlToText` does it:
+ * headings stay headings, links stay links, images become links, and
+ * everything else is unwrapped. Code is left exactly as written, because
+ * `<think>` in a code fence is an example, not markup.
+ *
+ * `resolve` turns the card's relative links into absolute ones, since a
+ * relative link means "in this repo" and the page is not in this repo.
+ */
+export function markdownWithoutHtml(
+  markdown: string,
+  resolve: (path: string, image: boolean) => string | null = () => null,
+): string {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  let prose: string[] = [];
+  let fence: string | null = null;
+
+  const flushProse = () => {
+    if (prose.length > 0) out.push(proseWithoutHtml(prose.join("\n"), resolve));
+    prose = [];
+  };
+
+  for (const line of lines) {
+    const opener = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (fence === null && opener) {
+      flushProse();
+      fence = opener[1]!;
+      out.push(line);
+      continue;
+    }
+    if (fence !== null) {
+      out.push(line);
+      if (line.trim().startsWith(fence)) fence = null;
+      continue;
+    }
+    prose.push(line);
+  }
+  flushProse();
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function proseWithoutHtml(
+  text: string,
+  resolve: (path: string, image: boolean) => string | null,
+): string {
+  // Inline code spans are kept whole, as the fences are, and so are
+  // autolinks: `<https://…>` is Markdown, and would read as a tag named
+  // `https`.
+  return text.split(/(`+[^`]*`+|<[a-z][a-z0-9+.-]*:[^\s<>]*>)/i).map((
+    part,
+    at,
+  ) => at % 2 === 1 ? part : relativeLinks(htmlInMarkdown(part), resolve))
+    .join("");
+}
+
+function htmlInMarkdown(text: string): string {
+  if (!text.includes("<")) return text;
+  const out: string[] = [];
+  let link: string | null = null;
+  let dropping: string | null = null;
+
+  for (const token of tokenize(text)) {
+    if (dropping !== null) {
+      if (token.kind === "tag" && token.closing && token.name === dropping) {
+        dropping = null;
+      }
+      continue;
+    }
+    if (token.kind === "text") {
+      // Verbatim: this is Markdown, and its own renderer decodes entities.
+      out.push(token.text!);
+      continue;
+    }
+    const name = token.name!;
+    if (DROP_CONTENT.has(name)) {
+      if (!token.closing && !token.selfClosing) dropping = name;
+      continue;
+    }
+    switch (name) {
+      case "br":
+        out.push("\n");
+        break;
+      case "h1":
+      case "h2":
+      case "h3":
+      case "h4":
+      case "h5":
+      case "h6":
+        out.push(
+          token.closing ? "\n\n" : `\n\n${"#".repeat(Number(name[1]))} `,
+        );
+        break;
+      case "p":
+      case "div":
+      case "details":
+      case "table":
+      case "center":
+        out.push("\n\n");
+        break;
+      case "summary":
+        out.push(token.closing ? "**\n\n" : "\n\n**");
+        break;
+      case "tr":
+        if (token.closing) out.push("\n");
+        break;
+      case "td":
+      case "th":
+        if (token.closing) out.push(" ");
+        break;
+      case "li":
+        if (!token.closing) out.push("\n- ");
+        break;
+      case "strong":
+      case "b":
+        out.push("**");
+        break;
+      case "em":
+      case "i":
+        out.push("*");
+        break;
+      case "code":
+        out.push("`");
+        break;
+      case "img": {
+        // Never an image: a link to it, like everywhere else on this page.
+        const src = token.attrs?.src ?? "";
+        const alt = (token.attrs?.alt ?? "").trim() || "image";
+        // Markdown's image, which the page renders as a link; kept an image
+        // here so a relative `src` resolves to the file, not its web page.
+        out.push(src.length > 0 ? `![${alt}](${src})` : "");
+        break;
+      }
+      case "a":
+        if (token.closing) {
+          if (link !== null) out.push(`](${link})`);
+          link = null;
+        } else {
+          const href = (token.attrs?.href ?? "").trim();
+          if (href.length > 0) {
+            link = href;
+            out.push("[");
+          }
+        }
+        break;
+    }
+  }
+  return out.join("");
+}
+
+/** `[text](path)` and `![alt](path)` with a relative path, made absolute. */
+function relativeLinks(
+  text: string,
+  resolve: (path: string, image: boolean) => string | null,
+): string {
+  return text.replace(
+    /(!?)\[([^\]]*)\]\(\s*([^)\s]+)(\s+"[^"]*")?\s*\)/g,
+    (whole, bang: string, label: string, target: string) => {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) {
+        return whole;
+      }
+      const absolute = resolve(target, bang === "!");
+      return absolute === null ? whole : `${bang}[${label}](${absolute})`;
+    },
+  );
+}

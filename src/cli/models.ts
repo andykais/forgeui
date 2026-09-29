@@ -29,13 +29,19 @@ import { IMPORT_FORMAT } from "../models/import.ts";
 import { parseCivitaiMeta, readInfotext } from "../media/infotext.ts";
 import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
-import { downloadFile } from "./download.ts";
+import {
+  CIVITAI_AUTH_HINT,
+  downloadFile,
+  HUGGINGFACE_AUTH_HINT,
+} from "./download.ts";
 import {
   CivitaiClient,
   describeCandidate,
   LookupError,
   type LookupSource,
 } from "./civitai_client.ts";
+import { HuggingFaceClient } from "./huggingface_client.ts";
+import { parseHuggingFaceUrl } from "../models/huggingface.ts";
 
 export { LookupError };
 
@@ -48,6 +54,7 @@ export interface ModelsCommandOptions {
   sha256checksum?: string;
   /** Discovery: list what Civitai has under this name and write nothing. */
   search?: string;
+  /** `--import-source`: which site answers, or `auto` for the §4.1 order. */
   source: LookupSource;
   downloadSamples: number;
   downloadModel: boolean;
@@ -96,7 +103,7 @@ export function requireOneIdentifier(options: ModelsCommandOptions): void {
 export interface RunModelsOptions extends ModelsCommandOptions {
   config: Config;
   paths: DataPaths;
-  /** Where `CIVITAI_TOKEN` is read from; the tests pass their own. */
+  /** Where `CIVITAI_TOKEN` and `HF_TOKEN` are read from; tests pass their own. */
   env?: { get(key: string): string | undefined };
   client?: CivitaiClient;
   log?: (line: string) => void;
@@ -109,20 +116,33 @@ export async function runModels(
   const settings = options.config.import;
   const say = options.log ?? ((line: string) => console.log(line));
   const token = civitaiToken(options.config, options.env);
+  const hfToken = huggingFaceToken(options.config, options.env);
   const client = options.client ?? new CivitaiClient({
     civitaiUrl: settings.civitai_url,
     archiveUrl: settings.archive_url,
     browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
     token,
+    huggingface: new HuggingFaceClient({
+      hubUrl: settings.huggingface_url,
+      token: hfToken,
+      timeoutMs: options.timeoutMs,
+      say,
+    }),
   });
 
   // Discovery writes nothing: it is how you find the URL the other flags
   // want, without anything being on disk first.
   if (options.search !== undefined) {
-    const found = await client.search(options.search);
+    const onHub = options.source === "huggingface";
+    const found = onHub
+      ? await huggingFace(client).search(options.search)
+      : await client.search(options.search);
     if (found.length === 0) {
-      throw new LookupError(`nothing on Civitai matches "${options.search}"`);
+      throw new LookupError(
+        `nothing on ${onHub ? "Hugging Face" : "Civitai"} matches ` +
+          `"${options.search}"`,
+      );
     }
     say(`${found.length} match${found.length === 1 ? "" : "es"}:`);
     for (const candidate of found) say(describeCandidate(candidate));
@@ -202,11 +222,14 @@ export async function runModels(
     }
 
     if (options.downloadModel) {
+      const onHub = found.record.source.kind === "huggingface";
       const files = await fetchWeights({
         found,
         staging,
-        cli: settings.civitai_cli,
-        token,
+        // The Civitai CLI knows nothing of Hugging Face, and each site gets
+        // its own key and never the other's.
+        cli: onHub ? null : settings.civitai_cli,
+        token: onHub ? hfToken : token,
         timeoutMs: options.timeoutMs,
         say,
       });
@@ -267,6 +290,24 @@ export function civitaiToken(
   return fromConfig ? fromConfig : null;
 }
 
+/** The Hugging Face token: `HF_TOKEN` first, as the Hub's own tools read it. */
+export function huggingFaceToken(
+  config: Config,
+  env: { get(key: string): string | undefined } = Deno.env,
+): string | null {
+  const fromEnv = env.get("HF_TOKEN")?.trim();
+  if (fromEnv) return fromEnv;
+  const fromConfig = config.import.huggingface_token?.trim();
+  return fromConfig ? fromConfig : null;
+}
+
+function huggingFace(client: CivitaiClient): HuggingFaceClient {
+  if (client.huggingface === null) {
+    throw new LookupError("this client was built without Hugging Face");
+  }
+  return client.huggingface;
+}
+
 // ------------------------------------------------------------------ lookup
 
 async function resolve(
@@ -293,8 +334,28 @@ async function resolve(
     return await client.byFilename(options.filename, options.source);
   }
 
+  // A Hugging Face link is a repo and maybe a file in it, and only the Hub
+  // can answer for it (§4.5).
+  const hub = parseHuggingFaceUrl(options.url!);
+  if (hub !== null) {
+    if (options.source !== "auto" && options.source !== "huggingface") {
+      throw new UsageError(
+        `--url names a Hugging Face repo, which --import-source ` +
+          `${sourceName(options.source)} cannot answer for`,
+      );
+    }
+    return await huggingFace(client).byRef(hub);
+  }
+
   const ref = parseModelUrl(options.url!);
-  // A URL that names a site is asked there first; `--source` still wins.
+  if (options.source === "huggingface") {
+    throw new UsageError(
+      "--url names a Civitai model, which --import-source huggingface " +
+        "cannot answer for; pass a huggingface.co link, or drop the flag",
+    );
+  }
+  // A URL that names a site is asked there first; `--import-source` still
+  // wins.
   const source: LookupSource = options.source !== "auto"
     ? options.source
     : ref.site === "archive"
@@ -393,6 +454,12 @@ async function fetchSamples(input: {
 }): Promise<{ samples: ImportSample[]; skipped: number }> {
   const { client, found, staging, limit, nsfwLevel, say } = input;
   const versionId = found.record.source.model_version_id;
+  if (found.record.source.kind === "huggingface") {
+    // Not a failure: a model card's pictures are decoration, not samples with
+    // a prompt behind them, and there is nothing else to fetch.
+    say("Hugging Face has no sample images; none were fetched");
+    return { samples: [], skipped: 0 };
+  }
 
   // The lookup's own images carry dimensions and links; the images endpoint
   // carries `meta`. Where both exist, they are joined on the image id.
@@ -559,6 +626,9 @@ async function fetchWeights(input: {
       url: chosen.download_url!,
       into,
       fallbackName: chosen.name,
+      authHint: found.record.source.kind === "huggingface"
+        ? HUGGINGFACE_AUTH_HINT
+        : CIVITAI_AUTH_HINT,
       token,
       timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
       say,
@@ -680,4 +750,41 @@ function isoSeconds(date: Date): string {
 /** Exposed for the CLI's own error path, which prints it beside the usage. */
 export function describeHash(value: string): string | null {
   return normalizeHash(value);
+}
+
+/** How `--import-source` spells a source, for messages. */
+export function sourceName(source: LookupSource): string {
+  return source === "civitai"
+    ? "civitai.red/civitai.com"
+    : source === "archive"
+    ? "civitaiarchive"
+    : source;
+}
+
+/**
+ * `--import-source`, spelled as the sites are. `civitai.red` and `civitai.com`
+ * are one API on two hosts (§4.0), so both are the `civitai` source, pointed
+ * at the host named.
+ */
+export function parseImportSource(
+  value: string,
+): { source: LookupSource; civitaiUrl: string | null } {
+  switch (value.trim().toLowerCase()) {
+    case "auto":
+      return { source: "auto", civitaiUrl: null };
+    case "civitai.red":
+      return { source: "civitai", civitaiUrl: "https://civitai.red" };
+    case "civitai.com":
+      return { source: "civitai", civitaiUrl: "https://civitai.com" };
+    case "civitaiarchive":
+    case "civitaiarchive.com":
+      return { source: "archive", civitaiUrl: null };
+    case "huggingface":
+    case "huggingface.co":
+      return { source: "huggingface", civitaiUrl: null };
+  }
+  throw new UsageError(
+    `--import-source: expected auto, civitai.red, civitai.com, ` +
+      `civitaiarchive or huggingface, got "${value}"`,
+  );
 }

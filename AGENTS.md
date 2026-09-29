@@ -31,7 +31,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 
 ```
 src/cli.ts      `forge` — the Cliffy command: serve, reindex, models, mcp
-src/cli/        `forge models`: the Civitai client and the batch writer (DESIGN-MODEL-IMPORT)
+src/cli/        `forge models`: the Civitai and Hugging Face clients, the batch writer (DESIGN-MODEL-IMPORT)
 src/main.ts     boot order, the App handle tests use
 src/mcp/        `forge mcp`: the MCP bridge, a separate process (DESIGN-AGENT-LOOP)
 src/config/     config.yaml layers, CLI overrides, extra_model_paths.yaml
@@ -78,15 +78,15 @@ those use the npm toolchain. Run both sides before you call something green.
 
 ## Conventions
 
-- TypeScript strict, Deno std + `node:sqlite`, no ORM. The two exceptions are
-  `forge`'s own dependencies — Cliffy for the command line, and the MCP server
+- TypeScript strict, Deno std + `node:sqlite`, no ORM. The exceptions are
+  `forge`'s own dependencies — Cliffy for the command line, the MCP server
   package for `forge mcp`, which speaks a protocol that is not worth
-  hand-rolling. **`deno task test` must never need llama-swap**: the bridge's
-  arbitration goes behind an interface with a fake, as `tests/fake-comfy/`
-  stands in for ComfyUI. Every SQL statement lives in `src/db/queries.ts`, one
-  function per query — with the same rule inside `src/telemetry/queries.ts` for
-  the telemetry database, which is its own file and its own migration chain
-  (§7.1).
+  hand-rolling, and `@huggingface/hub` for `forge models`' Hugging Face lookups.
+  **`deno task test` must never need llama-swap**: the bridge's arbitration goes
+  behind an interface with a fake, as `tests/fake-comfy/` stands in for ComfyUI.
+  Every SQL statement lives in `src/db/queries.ts`, one function per query —
+  with the same rule inside `src/telemetry/queries.ts` for the telemetry
+  database, which is its own file and its own migration chain (§7.1).
 - **Open SQLite only through `openDatabase()`** (`src/db/db.ts`), and reach the
   driver only through `src/db/sqlite.ts` — the small wrapper over Deno's
   built-in `node:sqlite` that gives back the positional rows the queries are
@@ -106,12 +106,13 @@ those use the npm toolchain. Run both sides before you call something green.
   batch count, no light theme.
 - A model is named by its display name everywhere it appears, and is a link to
   its page wherever it has a hash (§8.1).
-- **Civitai is fetched by `forge models`, never by the server.** The CLI writes
-  a batch into `<appdata>/import/`; the app ingests it around the model rescan
-  and deletes it (DESIGN-MODEL-IMPORT §7). Nothing in `src/cli/models.ts` or
-  what it imports may open `app.db` — there is a test for it. A downloaded model
-  is filed under `<appdata>/models/<kind>/`, which is app-owned storage scanned
-  like any other model folder; the folders `config.yaml` names stay read-only.
+- **Civitai and Hugging Face are fetched by `forge models`, never by the
+  server.** The CLI writes a batch into `<appdata>/import/`; the app ingests it
+  around the model rescan and deletes it (DESIGN-MODEL-IMPORT §7). Nothing in
+  `src/cli/models.ts` or what it imports may open `app.db` — there is a test for
+  it. A downloaded model is filed under `<appdata>/models/<kind>/`, which is
+  app-owned storage scanned like any other model folder; the folders
+  `config.yaml` names stay read-only.
 
 ## Testing
 

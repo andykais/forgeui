@@ -259,3 +259,26 @@ Deno.test("an unset token reads as null, not as hidden", async () => {
     assertEquals(read.import.civitai_token, null);
   });
 });
+
+Deno.test("the Hugging Face token is hidden the same way", async () => {
+  await withTestApp(async (app) => {
+    const secret = "hf_0123456789abcdefABCDEF";
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ import: { huggingface_token: secret } }),
+    });
+    const read = await app.json<Config>("/api/config");
+    assertEquals(read.import.huggingface_token, "(hidden)");
+    // The other one was never set, so it is not claimed to be.
+    assertEquals(read.import.civitai_token, null);
+    const raw = await (await app.fetch("/api/config")).text();
+    assert(!raw.includes(secret), "the token leaked into GET /api/config");
+
+    // Round-tripping the redacted block keeps the real one.
+    await app.json("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ import: read.import }),
+    });
+    assertEquals(app.config.config.import.huggingface_token, secret);
+  });
+});

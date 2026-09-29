@@ -7,7 +7,8 @@
  * the input does not name a site is **civitai.red, then civitaiarchive.com**:
  * the first is the same API `.com` serves with a wider default filter, and
  * the second is the only one of the two that answers for a model Civitai has
- * deleted.
+ * deleted. Hugging Face comes third, and only when the archive knows the hash
+ * as a Hugging Face copy with no Civitai model behind it (§4.5).
  *
  * Nothing here opens `app.db` or imports anything that does.
  */
@@ -21,6 +22,11 @@ import {
   sourceRecordFromCivitai,
   visibilityParams,
 } from "../models/civitai.ts";
+import {
+  type HuggingFaceRef,
+  parseHuggingFaceUrl,
+} from "../models/huggingface.ts";
+import type { HuggingFaceClient } from "./huggingface_client.ts";
 
 export class LookupError extends Error {
   override readonly name = "LookupError";
@@ -37,7 +43,8 @@ export interface ArchiveFile {
 
 /** One row of a name search: enough to choose by, and the link to choose it. */
 export interface Candidate {
-  result: LookupResult;
+  /** Civitai's search carries the whole answer; Hugging Face's, a link. */
+  result?: LookupResult;
   name: string;
   url: string;
   kind: string;
@@ -71,13 +78,23 @@ export interface CivitaiClientOptions {
    * which is a different service, and not the image CDN, which is public.
    */
   token?: string | null;
+  /** Where a hash the archive knows only as a Hugging Face copy goes. */
+  huggingface?: HuggingFaceClient | null;
   /** Injected by the tests, which point it at a local fake (§10). */
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
 }
 
-/** `auto` is the order above; the others pin it to one source. */
-export type LookupSource = "auto" | "red" | "archive";
+/**
+ * `auto` is the order above; the others pin a lookup to one source, which is
+ * what `--import-source` sets. `civitai` is whichever Civitai host the client
+ * was built for — `civitai.red` and `civitai.com` are the same API (§4.0).
+ */
+export type LookupSource = "auto" | "civitai" | "archive" | "huggingface";
+
+function asks(source: LookupSource, site: Exclude<LookupSource, "auto">) {
+  return source === "auto" || source === site;
+}
 
 export class CivitaiClient {
   #civitai: string;
@@ -94,6 +111,7 @@ export class CivitaiClient {
    * check would happily hand a Civitai key to the archive.
    */
   #forCivitai = new Set<string>();
+  #huggingface: HuggingFaceClient | null;
 
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
@@ -103,6 +121,11 @@ export class CivitaiClient {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
     this.#token = options.token ?? null;
+    this.#huggingface = options.huggingface ?? null;
+  }
+
+  get huggingface(): HuggingFaceClient | null {
+    return this.#huggingface;
   }
 
   get civitaiUrl(): string {
@@ -126,7 +149,7 @@ export class CivitaiClient {
     }
     const tried: string[] = [];
 
-    if (source !== "archive") {
+    if (asks(source, "civitai")) {
       // A hash lookup needs no visibility parameter: it answers for what it
       // is given (§4.0).
       const version = await this.#json(
@@ -161,10 +184,27 @@ export class CivitaiClient {
       tried.push(this.#civitai);
     }
 
-    if (source !== "red") {
-      const found = await this.#archiveByHash(normalized);
-      if (found !== null) return pinToHash(found, normalized);
-      tried.push(this.#archive);
+    if (source !== "civitai") {
+      // Hugging Face cannot be asked for a hash; the archive's index of its
+      // copies is the only road there, so `huggingface` asks the archive too.
+      const files = await this.#archiveFiles(normalized);
+      if (asks(source, "archive")) {
+        const found = await this.#archiveModel(files);
+        if (found !== null) return pinToHash(found, normalized);
+      }
+      const copies = huggingFaceCopies(files);
+      if (
+        asks(source, "huggingface") && copies.length > 0 &&
+        this.#huggingface !== null
+      ) {
+        return await this.#huggingface.byCopies(normalized, copies);
+      }
+      if (files.length > 0) throw mirrorOnly(files, copies.length, source);
+      tried.push(
+        source === "huggingface"
+          ? `${this.#archive} (Hugging Face's only index by hash)`
+          : this.#archive,
+      );
     }
 
     throw new LookupError(
@@ -178,7 +218,8 @@ export class CivitaiClient {
     versionId: number | null,
     source: LookupSource = "auto",
   ): Promise<LookupResult> {
-    if (source !== "archive") {
+    civitaiOnly(source);
+    if (asks(source, "civitai")) {
       const model = await this.#json(
         this.#civitaiUrl(this.#civitai, `/api/v1/models/${modelId}`, "models"),
       );
@@ -203,7 +244,7 @@ export class CivitaiClient {
         });
       }
     }
-    if (source !== "red") {
+    if (asks(source, "archive")) {
       const found = await this.#archiveByModelId(modelId, versionId);
       if (found !== null) return found;
     }
@@ -215,7 +256,8 @@ export class CivitaiClient {
     versionId: number,
     source: LookupSource = "auto",
   ): Promise<LookupResult> {
-    if (source !== "archive") {
+    civitaiOnly(source);
+    if (asks(source, "civitai")) {
       const version = await this.#json(
         this.#civitaiUrl(
           this.#civitai,
@@ -228,7 +270,7 @@ export class CivitaiClient {
         if (modelId !== null) return await this.byModelId(modelId, versionId);
       }
     }
-    if (source !== "red") {
+    if (asks(source, "archive")) {
       const found = await this.#archiveByModelId(null, versionId);
       if (found !== null) return found;
     }
@@ -240,6 +282,7 @@ export class CivitaiClient {
     imageId: number,
     source: LookupSource = "auto",
   ): Promise<LookupResult> {
+    civitaiOnly(source);
     const images = await this.#json(
       this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
         imageId: String(imageId),
@@ -272,27 +315,31 @@ export class CivitaiClient {
     const stem = filename.replace(/\.[^.]+$/, "");
     const near: Candidate[] = [];
 
-    if (source !== "archive") {
+    if (asks(source, "civitai")) {
       const found = await this.search(stem);
       // An exact filename match is the best answer there is: it means this is
       // the file, not something with a similar name.
       const exact = found.filter((candidate) =>
         candidate.files.some((file) => file.name === filename)
       );
-      if (exact.length === 1) return exact[0]!.result;
+      if (exact.length === 1) return exact[0]!.result!;
       if (exact.length > 1) throw new LookupError(ambiguous(filename, exact));
       near.push(...found);
     }
 
-    if (source !== "red") {
+    if (source !== "civitai") {
       // The archive indexes by filename directly, and answers for files
-      // Civitai has deleted.
+      // Civitai has deleted — and for Hugging Face's, which is the only way
+      // to find one of those by name rather than by repo.
       const files = await this.filesOnArchive(filename);
       const wanted = filename.toLowerCase();
       const hashes = [
         ...new Set(
           files
             .filter((file) => file.name.toLowerCase() === wanted)
+            .filter((file) =>
+              source !== "huggingface" || file.platform === "huggingface"
+            )
             .map((file) => file.sha256),
         ),
       ];
@@ -324,8 +371,12 @@ export class CivitaiClient {
       );
     }
     throw new LookupError(
-      `nothing on Civitai or the archive matches "${filename}". Try --url ` +
-        `with a link, or --sha256checksum if you know the hash.`,
+      source === "huggingface"
+        ? `the archive indexes no Hugging Face file named "${filename}". ` +
+          `Hugging Face itself cannot be searched by filename; pass --url ` +
+          `with the repo, or --search to find it.`
+        : `nothing on Civitai or the archive matches "${filename}". Try ` +
+          `--url with a link, or --sha256checksum if you know the hash.`,
     );
   }
 
@@ -404,13 +455,19 @@ export class CivitaiClient {
 
   // ------------------------------------------------------------- archive
 
-  async #archiveByHash(hash: string): Promise<LookupResult | null> {
+  /** Every copy of a file the archive has seen: Civitai's and mirrors'. */
+  async #archiveFiles(hash: string): Promise<Record<string, unknown>[]> {
     const found = await this.#json(
       `${this.#archive}/api/sha256/${hash}`,
     ) as { files?: Record<string, unknown>[] } | null;
-    const files = found?.files ?? [];
-    if (files.length === 0) return null;
+    return found?.files ?? [];
+  }
 
+  /** The Civitai model behind those copies, if there is one. */
+  async #archiveModel(
+    files: Record<string, unknown>[],
+  ): Promise<LookupResult | null> {
+    if (files.length === 0) return null;
     const file =
       files.find((entry) =>
         entry.source === "civitai" && entry.model_id != null
@@ -421,29 +478,9 @@ export class CivitaiClient {
     const versionId = file.model_version_id == null
       ? NaN
       : Number(file.model_version_id);
-    if (!Number.isFinite(modelId)) {
-      // The archive indexes mirrors as well as models: HuggingFace and
-      // ModelScope copies are recorded by hash with no model record behind
-      // them. Knowing the bytes exist somewhere is not the same as having
-      // anything to import, and saying "nothing knows this hash" when the
-      // archive plainly does would send someone hunting for a bug.
-      const where = [
-        ...new Set(
-          files
-            .map((entry) =>
-              typeof entry.source === "string" ? entry.source : null
-            )
-            .filter((entry): entry is string => entry !== null),
-        ),
-      ];
-      throw new LookupError(
-        `the archive has a file with that hash${
-          where.length > 0 ? ` on ${where.join(", ")}` : ""
-        }, but no model page for it — so there is no description, no tags and ` +
-          `no samples to import. Mirrors are indexed by hash; only models ` +
-          `carry metadata.`,
-      );
-    }
+    // Mirrors only: Hugging Face and ModelScope copies are recorded by hash
+    // with no model record behind them. The caller decides what that means.
+    if (!Number.isFinite(modelId)) return null;
     return await this.#archiveByModelId(
       modelId,
       Number.isFinite(versionId) ? versionId : null,
@@ -567,4 +604,62 @@ export class CivitaiClient {
       );
     }
   }
+}
+
+/** A Civitai link names a Civitai model; Hugging Face cannot answer for it. */
+function civitaiOnly(source: LookupSource): void {
+  if (source === "huggingface") {
+    throw new LookupError(
+      "that names a Civitai model, which Hugging Face cannot look up; drop " +
+        "--import-source, or pass a huggingface.co link",
+    );
+  }
+}
+
+/** The archive's Hugging Face copies of a file, as repo references. */
+export function huggingFaceCopies(
+  files: Record<string, unknown>[],
+): HuggingFaceRef[] {
+  const out: HuggingFaceRef[] = [];
+  for (const file of files) {
+    if (file.source !== "huggingface" || typeof file.url !== "string") continue;
+    try {
+      const ref = parseHuggingFaceUrl(file.url);
+      if (ref !== null && ref.path !== null) out.push(ref);
+    } catch {
+      // A dataset or a space: not a model card to read.
+    }
+  }
+  return out;
+}
+
+/**
+ * The archive knows the bytes, but no model page stands behind them. Saying
+ * "nothing knows this hash" when the archive plainly does would send someone
+ * hunting for a bug, so this says what it does know and what would help.
+ */
+function mirrorOnly(
+  files: Record<string, unknown>[],
+  huggingFace: number,
+  source: LookupSource,
+): LookupError {
+  const where = [
+    ...new Set(
+      files
+        .map((entry) => typeof entry.source === "string" ? entry.source : null)
+        .filter((entry): entry is string => entry !== null),
+    ),
+  ];
+  const hint = huggingFace > 0 && source === "archive"
+    ? ` ${huggingFace} of the copies are on Hugging Face: --import-source ` +
+      `huggingface reads the model card from one of them.`
+    : source === "huggingface"
+    ? " None of the copies are on Hugging Face."
+    : " Mirrors are indexed by hash; only models carry metadata.";
+  return new LookupError(
+    `the archive has a file with that hash${
+      where.length > 0 ? ` on ${where.join(", ")}` : ""
+    }, but no model page for it — so there is no description, no tags and ` +
+      `no samples to import.${hint}`,
+  );
 }

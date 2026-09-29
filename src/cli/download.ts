@@ -20,6 +20,15 @@ import { basename, join } from "@std/path";
 import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
 
+export const CIVITAI_AUTH_HINT =
+  "Put a key from civitai.com/user/account in config.yaml as " +
+  "import.civitai_token, or set CIVITAI_TOKEN.";
+
+export const HUGGINGFACE_AUTH_HINT =
+  "Put a token from huggingface.co/settings/tokens in config.yaml as " +
+  "import.huggingface_token, or set HF_TOKEN; a gated repo also needs its " +
+  "terms accepted on its page.";
+
 export class DownloadError extends Error {
   override readonly name = "DownloadError";
 }
@@ -38,6 +47,8 @@ export interface DownloadOptions {
   /** Used as the name when the server does not suggest one. */
   fallbackName: string;
   token?: string | null;
+  /** What to do about a 401 or 403: where this site's key goes. */
+  authHint?: string;
   timeoutMs: number;
   say?: (line: string) => void;
   fetch?: typeof globalThis.fetch;
@@ -75,13 +86,13 @@ export async function downloadFile(
   if (response.status === 401 || response.status === 403) {
     await response.body?.cancel();
     throw new DownloadError(
-      `${options.url} needs an account (${response.status}). Put a key from ` +
-        `civitai.com/user/account in config.yaml as import.civitai_token, or ` +
-        `set CIVITAI_TOKEN.${
-          options.token
-            ? " A key was sent and refused, so check that it is current."
-            : ""
-        }`,
+      `${options.url} needs an account (${response.status}). ${
+        options.authHint ?? CIVITAI_AUTH_HINT
+      }${
+        options.token
+          ? " A key was sent and refused, so check that it is current."
+          : ""
+      }`,
     );
   }
   if (!response.ok || response.body === null) {
