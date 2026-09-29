@@ -1600,7 +1600,8 @@ GET  /api/telemetry/:report/entries     the table: keyset paginated on (at, id) 
 POST /api/maintenance/reindex
 POST /api/maintenance/sweep-staging
 POST /api/maintenance/sweep-inputs      {dry_run: bool} → {count, bytes, files[]}; dry_run feeds the preview
-POST /api/maintenance/rescan-models
+POST /api/maintenance/rescan-models     ?wait=1 answers only once the hashing it queued and the import batches after it are
+                                        done — the model page's Rescan, which reloads itself (and no other tab) on the answer
 ```
 
 ---

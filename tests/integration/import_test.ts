@@ -365,6 +365,40 @@ Deno.test("a family the import knows replaces the app's; an unknown one does not
   });
 });
 
+Deno.test("rescan-models?wait=1 answers once the batch has landed", async () => {
+  const fixtures = await modelFixtures();
+  try {
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const { models } = await app.json<{ models: ModelView[] }>("/api/models");
+      const hash = models.find((m) => m.filename === CHECKPOINT)!.hash!;
+
+      // A new file to hash, which is what defers the batch: with anything
+      // queued, Phase B runs when the hasher drains, not inside the rescan.
+      await writeFakeSafetensors(
+        join(fixtures.dir, "checkpoints", "another.safetensors"),
+        { name: "another" },
+      );
+      await writeBatch(app.paths.imports, hash);
+
+      const result = await app.json<{ queued: number }>(
+        "/api/maintenance/rescan-models?wait=1",
+        { method: "POST" },
+      );
+      assertEquals(result.queued, 1);
+      // No `idle()`: the answer is itself the promise that it is done, which
+      // is what lets the model page reload once and see the import.
+      const model = await app.json<ModelDetail>(`/api/models/${hash}`);
+      assertEquals(model.display_name, "CyberRealistic");
+      assertEquals(model.trigger_words, ["cyberrealistic", "photo"]);
+      assert(!(await exists(join(app.paths.imports, hash))));
+    }, { argv: fixtures.argv });
+  } finally {
+    await Deno.remove(fixtures.dir, { recursive: true });
+  }
+});
+
 Deno.test("a downloaded model is filed, scanned, hashed and applied", async () => {
   const fixtures = await modelFixtures();
   try {

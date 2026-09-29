@@ -4,6 +4,7 @@
   import Copy from "@lucide/svelte/icons/copy";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
@@ -37,6 +38,7 @@
   let selectedId = $state<string | null>(null);
   let importing = $state(false);
   let rereading = $state(false);
+  let rescanning = $state(false);
   let viewer = $state<ReturnType<typeof Viewer> | null>(null);
   /**
    * The outputs grid, for the one thing the keys need from it: how many
@@ -80,6 +82,51 @@
       rereading = false;
     }
   }
+  /**
+   * The Models page's Rescan, from here: import batches, the folder walk and
+   * hashing, waited out to the end so the batch for this model has landed —
+   * then this page, and only this page, reloads. Nothing pushes model edits
+   * to other tabs, so a second tab on the same model keeps what it showed,
+   * which is what makes flipping between them a before-and-after.
+   */
+  async function rescanAll() {
+    if (!model) return;
+    rescanning = true;
+    const before = model;
+    try {
+      await api.rescanModels({ wait: true });
+      await load();
+      await app.refreshModels();
+      const changed = model ? changedFields(before, model) : [];
+      toasts.message(
+        changed.length > 0
+          ? `Rescanned: ${changed.join(", ")} changed`
+          : "Rescanned: nothing changed here",
+      );
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "the rescan failed");
+    } finally {
+      rescanning = false;
+    }
+  }
+
+  /** What a rescan moved, in the words the page uses for them. */
+  function changedFields(a: ModelDetail, b: ModelDetail): string[] {
+    const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+    const fields: [string, unknown, unknown][] = [
+      ["name", a.display_name, b.display_name],
+      ["family", a.family, b.family],
+      ["trigger words", a.trigger_words, b.trigger_words],
+      ["tags", a.tags, b.tags],
+      ["notes", a.notes, b.notes],
+      ["source", a.source, b.source],
+      ["samples", a.samples.map((s) => s.id), b.samples.map((s) => s.id)],
+      ["thumbnail", a.thumb_url, b.thumb_url],
+      ["hash", a.hash, b.hash],
+    ];
+    return fields.filter(([, x, y]) => !same(x, y)).map(([label]) => label);
+  }
+
   /** Named rather than inline, so `model` is narrowed where it is read. */
   function toggleHidden() {
     if (!model) return;
@@ -496,6 +543,20 @@
               onclick={reread}
             >
               {rereading ? "Re-reading…" : "Re-read this file"}
+            </button>
+            <!--
+              The Models page's Rescan, which is what picks up a `forge
+              models` batch; this tab reloads when it has finished, and no
+              other tab does.
+            -->
+            <button
+              class="reread"
+              disabled={rescanning}
+              title="Rescan the model folders and the import folder, then reload this page"
+              onclick={rescanAll}
+            >
+              <RefreshCw size={11} />
+              {rescanning ? "Rescanning…" : "Rescan"}
             </button>
             <!--
               Hidden is out of the Generate pickers, not gone: it is still

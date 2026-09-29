@@ -260,9 +260,13 @@ export const api = {
     request<{ families: FamilyCount[] }>("/api/families").then((body) =>
       body.families
     ),
-  rescanModels: () =>
+  /**
+   * The full rescan: import batches, the folder walk, hashing. With `wait`,
+   * it answers only once all of that — batches included — has finished.
+   */
+  rescanModels: (options: { wait?: boolean } = {}) =>
     request<{ models: number; queued: number }>(
-      "/api/maintenance/rescan-models",
+      `/api/maintenance/rescan-models${options.wait ? "?wait=1" : ""}`,
       {
         method: "POST",
       },
