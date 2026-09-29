@@ -528,8 +528,8 @@
           identifier that survives being renamed or refiled. Nothing is sent
           anywhere: they are ordinary links, opened when clicked (§8.1).
         -->
-        {#if model.hash}
-          <div class="lookups mono dim">
+        <div class="lookups mono dim">
+          {#if model.hash}
             <!--
               Re-reads the file, header and hash both, past the caches the
               ordinary scan uses to skip files that have not moved — which is
@@ -544,11 +544,13 @@
             >
               {rereading ? "Re-reading…" : "Re-read this file"}
             </button>
-            <!--
-              The Models page's Rescan, which is what picks up a `forge
-              models` batch; this tab reloads when it has finished, and no
-              other tab does.
-            -->
+          {/if}
+          <!--
+            The Models page's Rescan, which is what picks up a `forge models`
+            batch; this tab reloads when it has finished, and no other tab
+            does. Offered whether or not the file has a hash yet — a model
+            still being read is exactly one a rescan is for.
+          -->
             <button
               class="reread"
               disabled={rescanning}
@@ -558,6 +560,7 @@
               <RefreshCw size={11} />
               {rescanning ? "Rescanning…" : "Rescan"}
             </button>
+          {#if model.hash}
             <!--
               Hidden is out of the Generate pickers, not gone: it is still
               here, still in the Models list behind Show hidden (§8.1).
@@ -588,8 +591,8 @@
               target="_blank"
               rel="noreferrer noopener"
             >civitai</a>
-          </div>
-        {/if}
+          {/if}
+        </div>
 
         <!--
           What a LoRA's strength sliders reach in the panel (§8.1). Typed by

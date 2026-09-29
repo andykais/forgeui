@@ -1235,13 +1235,9 @@ type.
    `tags` are filled **only where the model's own value is null or empty**,
    unless the batch says `overwrite: true`, in which case they are replaced.
    **`notes` are never written** (amended): they are the one field kept for
-   what you write about a model. Earlier builds of `forge models` put
-   `Trigger words: …` there — a copy of `trigger_words`, which has its own
-   field — so a batch that still carries a `model.notes` string takes it
-   back out: the model's notes are cleared when they are exactly that string,
-   or a single `Trigger words: …` line, and left alone otherwise. Moving the
-   old batches from `imported/success/` back to `fetched/success/` is the
-   one-off cleanup; a batch written now has no `notes` at all. A hand-typed display name surviving an import is the default
+   what you write about a model, and a batch has no `notes` at all. Earlier
+   builds of `forge models` put `Trigger words: …` there, a copy of
+   `trigger_words`, which has its own field. A hand-typed display name surviving an import is the default
    because losing one is the kind of thing you only notice a week later.
    **`family` is the exception** (amended): a family the batch knows replaces
    the model's, overwrite or not, because the base model a file was trained

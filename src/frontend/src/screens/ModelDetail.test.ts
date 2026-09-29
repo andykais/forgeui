@@ -131,6 +131,10 @@ describe("the model page header", () => {
     expect(screen.queryByTitle(/Add a tag/)).toBeNull();
     // No hash to show, and no samples strip to hang media off.
     expect(screen.getByText("still being read")).toBeTruthy();
+    // Rescan is offered all the same: a model still being read is exactly
+    // one a rescan is for. The hash-keyed actions are not.
+    expect(screen.getByRole("button", { name: /Rescan/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Re-read this file/ })).toBeNull();
     expect(screen.queryByText("Samples")).toBeNull();
   });
 
