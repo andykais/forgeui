@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import SourcePanel from "./SourcePanel.svelte";
 import type { ModelSource } from "../types.ts";
 
 /**
  * The model page's source panel (DESIGN-MODEL-IMPORT §7.5). Two of these are
- * about safety rather than looks: the description is rendered as text, and no
- * image inside it is ever loaded.
+ * about safety rather than looks: no markup a stranger wrote reaches the page
+ * as markup, and no image inside the description is ever loaded.
  */
 
 function source(overrides: Partial<ModelSource> = {}): ModelSource {
@@ -56,7 +56,35 @@ describe("SourcePanel", () => {
     expect(screen.getByText("Better at handling Character LoRA.")).toBeTruthy();
   });
 
-  test("renders the description as text, never as markup", () => {
+  test("renders the Markdown by default, and the source on request", async () => {
+    const { container } = render(SourcePanel, {
+      source: source({
+        version: {
+          description_text:
+            "## Usage\n\n- **cfg** 4\n- see [the guide](https://example.com/g)",
+        },
+      }),
+    });
+    const body = () => container.querySelector(".body")!;
+    expect(body().querySelector("h2")?.textContent).toBe("Usage");
+    expect(body().querySelector("li strong")?.textContent).toBe("cfg");
+    const link = body().querySelector("a")!;
+    expect(link.getAttribute("href")).toBe("https://example.com/g");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+    expect(
+      screen.getByRole("button", { name: "Preview" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Source" }));
+    expect(body().querySelector("h2")).toBeNull();
+    expect(body().textContent).toContain("## Usage");
+    expect(body().textContent).toContain("[the guide](https://example.com/g)");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(body().querySelector("h2")).not.toBeNull();
+  });
+
+  test("never renders markup a stranger wrote, in either view", async () => {
     // The server only ever sends `description_text`, but if markup reached
     // this component it must still land on the page as characters.
     const { container } = render(SourcePanel, {
@@ -68,11 +96,14 @@ describe("SourcePanel", () => {
         },
       }),
     });
-    const body = container.querySelector(".body")!;
-    expect(body.querySelector("img")).toBeNull();
-    expect(body.querySelector("b")).toBeNull();
-    expect(body.querySelector("script")).toBeNull();
-    expect(body.textContent).toContain("<b>bold</b>");
+    for (const view of ["Preview", "Source"]) {
+      await fireEvent.click(screen.getByRole("button", { name: view }));
+      const body = container.querySelector(".body")!;
+      expect(body.querySelector("img")).toBeNull();
+      expect(body.querySelector("b")).toBeNull();
+      expect(body.querySelector("script")).toBeNull();
+      expect(body.textContent).toContain("<b>bold</b>");
+    }
   });
 
   test("loads no image at all, whatever the description holds", () => {

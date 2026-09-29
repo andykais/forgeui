@@ -1137,6 +1137,21 @@ Two rules for rendering it, both non-negotiable:
   images are decoration; the samples strip is the images that matter, and
   those are on disk.
 
+**As built**, the panel renders `description_text` — the Markdown §5.5
+derives at fetch time — with [`marked`](https://marked.js.org) (~13 KB
+gzipped), and a **Preview / Source** toggle beside *Show more* switches to the
+Markdown itself. Preview is the default. Both rules above hold in
+`src/frontend/src/lib/markdown.ts`, which is a renderer rather than a
+sanitiser pass: raw HTML in the Markdown is escaped and shown as text, a link
+that is not `http(s):` keeps its words and loses its `href`, and an image is
+rendered as a link to it. Each rule has a test that fails when it is removed.
+The server's `description_html` stays what `?html=1` returns for a caller
+that wants it; the page does not ask for it.
+
+The HTML→Markdown step moves whitespace outside emphasis markers, because
+Civitai's editor writes `<strong>PS: </strong>the` constantly and `**PS: **the`
+is not bold in Markdown — it is four visible asterisks.
+
 The trigger words get their own line above the panel, monospaced, each one a
 click to copy — the one piece of this that is an input rather than a document.
 

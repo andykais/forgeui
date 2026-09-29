@@ -376,8 +376,9 @@ Deno.test("text: input that is not HTML at all comes back as itself", () => {
 Deno.test("text: `<b and c >` is read as a tag, as a browser would", () => {
   // Not a quirk worth fixing: under-recognising tags is the dangerous
   // direction for the sanitiser that shares this tokeniser, and a browser
-  // parses this the same way. Real editor output escapes `<` as `&lt;`.
-  assertEquals(htmlToText("a < b and c > d"), "a ** d");
+  // parses this the same way. Real editor output escapes `<` as `&lt;`. The
+  // bold it opens is never closed, so what comes out is only this stable.
+  assertEquals(htmlToText("a < b and c > d"), "a  **d");
 });
 
 Deno.test("text: entities and collapsed whitespace", () => {
@@ -410,4 +411,25 @@ Deno.test("pin: a hash lookup names the file it was given", () => {
   // which would otherwise be some other file's.
   const unknown = pinToHash(found, c);
   assertEquals([unknown.sha256, unknown.filename], [c, null]);
+});
+
+Deno.test("text: bold that Markdown will actually read as bold", () => {
+  // Civitai's editor leaves the space inside the tag, which Markdown does not
+  // count as emphasis: `**PS: **the` would render with its asterisks showing.
+  assertEquals(
+    htmlToText("<p><strong>PS: </strong>the goal</p>"),
+    "**PS:** the goal",
+  );
+  assertEquals(
+    htmlToText(
+      '<p><a href="https://h.example"><strong>Live demo</strong></a>' +
+        "<strong> (CPU is slow).</strong></p>",
+    ),
+    "[**Live demo**](https://h.example) **(CPU is slow).**",
+  );
+  // Nested, and empty.
+  assertEquals(htmlToText("<b><i> both </i></b>x"), "***both*** x");
+  assertEquals(htmlToText("a<strong> </strong>b<em></em>c"), "a bc");
+  // A private-use character in the text is not taken for a marker.
+  assertEquals(htmlToText("a\uE001b"), "ab");
 });

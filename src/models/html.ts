@@ -257,6 +257,34 @@ export function sanitizeHtml(html: string): string {
 
 const LINK_RELS = 'target="_blank" rel="noopener noreferrer nofollow"';
 
+// Emphasis is written as placeholders and settled at the end, because whether
+// `**` means bold depends on what ends up either side of it.
+const STRONG_OPEN = "\uE001";
+const STRONG_CLOSE = "\uE002";
+const EM_OPEN = "\uE003";
+const EM_CLOSE = "\uE004";
+
+/**
+ * Markdown only reads `**` as bold when it hugs the text: `**PS: **the` and
+ * `** (CPU is slow).**` are literal asterisks. Civitai's editor writes exactly
+ * that — `<strong>PS: </strong>the` — all the time, so the whitespace moves
+ * outside the markers, and a pair left holding nothing goes.
+ */
+function settleEmphasis(text: string): string {
+  let settled = text;
+  for (;;) {
+    const next = settled
+      .replace(/([\uE001\uE003])(\s+)/g, "$2$1")
+      .replace(/(\s+)([\uE002\uE004])/g, "$2$1")
+      .replace(/\uE001\uE002|\uE003\uE004/g, "");
+    if (next === settled) break;
+    settled = next;
+  }
+  return settled
+    .replace(/[\uE001\uE002]/g, "**")
+    .replace(/[\uE003\uE004]/g, "*");
+}
+
 /**
  * The API's copy: Markdown. Headings become `#` lines, list items `-` lines,
  * links `[text](url)`, images vanish, and everything else is unwrapped.
@@ -287,7 +315,12 @@ export function htmlToText(html: string): string {
 
   for (const token of tokenize(html)) {
     if (token.kind === "text") {
-      const decoded = decodeEntities(token.text!);
+      // The placeholders below are private-use characters; one arriving in
+      // the text itself would otherwise turn into asterisks.
+      const decoded = decodeEntities(token.text!).replace(
+        /[\uE001-\uE004]/g,
+        "",
+      );
       // Whitespace between `<li>` and its `<p>` is not content, and must not
       // clear the marker flag.
       if (justMarked && decoded.trim().length === 0) continue;
@@ -358,11 +391,11 @@ export function htmlToText(html: string): string {
         break;
       case "strong":
       case "b":
-        push("**");
+        push(token.closing ? STRONG_CLOSE : STRONG_OPEN);
         break;
       case "em":
       case "i":
-        push("*");
+        push(token.closing ? EM_CLOSE : EM_OPEN);
         break;
       case "a":
         if (token.closing) {
@@ -379,7 +412,7 @@ export function htmlToText(html: string): string {
     }
   }
 
-  return out.join("")
+  return settleEmphasis(out.join(""))
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
