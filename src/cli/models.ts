@@ -193,12 +193,12 @@ export async function runModels(
   };
 
   if (options.dryRun) {
-    say(`would write ${dir}`);
-    say(`  ${found.display_name ?? found.filename ?? found.sha256}`);
+    for (const line of summarize(found)) say(line);
     if (options.downloadSamples > 0) {
-      say(`  up to ${options.downloadSamples} samples`);
+      say(`  samples       up to ${options.downloadSamples}`);
     }
-    if (options.downloadModel) say(`  the weights`);
+    if (options.downloadModel) say(`  weights       would be downloaded`);
+    say(`would write ${dir}`);
     return result;
   }
 
@@ -252,26 +252,28 @@ export async function runModels(
     throw cause;
   }
 
-  say(`wrote ${dir}`);
-
-  // The app can only attach this to a model it has a row for, and it only has
-  // a row once the file has been scanned and hashed. Saying so here — while
-  // the person is still at the terminal — is the difference between "waiting
-  // for the weights" and "the import silently did nothing".
-  if (!options.downloadModel) {
-    const local = found.filename === null
-      ? null
-      : await findModelFile(options.config, found.filename);
-    if (local === null) {
-      say(
-        `note: ${
-          found.filename ?? "this model"
-        } is not in any configured model folder, so the app will hold this ` +
-          `batch until it is. Put the file there and rescan, or re-run with ` +
-          `--download-model to fetch it too.`,
-      );
-    }
+  for (const line of summarize(found)) say(line);
+  if (options.downloadSamples > 0) {
+    say(
+      `  samples       ${result.samples}${
+        result.skipped > 0
+          ? ` (${result.skipped} over import.nsfw_level, skipped)`
+          : ""
+      }`,
+    );
   }
+  if (batch.files && batch.files.length > 0) {
+    say(
+      `  weights       ${
+        batch.files.map((file) =>
+          file.size == null
+            ? basename(file.file)
+            : `${basename(file.file)} (${mebibytes(file.size)})`
+        ).join(", ")
+      }`,
+    );
+  }
+  say(`wrote ${dir}`);
   return result;
 }
 
@@ -552,11 +554,7 @@ async function fetchSamples(input: {
     });
   }
 
-  say(
-    `fetched ${samples.length} sample${samples.length === 1 ? "" : "s"}${
-      skipped > 0 ? `, skipped ${skipped}` : ""
-    }`,
-  );
+  // Counted in the summary rather than said here, next to what they are of.
   return { samples, skipped };
 }
 
@@ -787,4 +785,76 @@ export function parseImportSource(
     `--import-source: expected auto, civitai.red, civitai.com, ` +
       `civitaiarchive or huggingface, got "${value}"`,
   );
+}
+
+/**
+ * What a run found, said back before it is written: where it came from, and
+ * enough of what it holds to tell at a glance whether it is the right model —
+ * which version, for which base model, triggered by what. A model's versions
+ * differ in exactly those, so they are what is shown.
+ */
+export function summarize(found: LookupResult): string[] {
+  const { record } = found;
+  const row = (label: string, value: string) =>
+    `  ${label.padEnd(13)} ${value}`;
+  const host = (() => {
+    try {
+      return new URL(record.source.url).host;
+    } catch {
+      return null;
+    }
+  })();
+  const lines = [
+    `from ${record.source.label}${
+      host === null ? "" : ` (${host})`
+    }: ${record.source.url}`,
+  ];
+  const name = record.model.name ?? found.display_name ?? found.filename;
+  if (name) lines.push(row("model", name));
+  if (record.version.name) lines.push(row("version", record.version.name));
+  lines.push(row("file", found.filename ?? found.sha256 ?? "unknown"));
+  lines.push(row(
+    "kind",
+    [
+      found.kind,
+      found.family === null
+        ? `family unknown${
+          record.version.base_model ? ` (${record.version.base_model})` : ""
+        }, the app's is kept`
+        : `${found.family}${
+          record.version.base_model ? ` (${record.version.base_model})` : ""
+        }`,
+    ].join(" · "),
+  ));
+  if (record.creator) lines.push(row("by", record.creator.username));
+  lines.push(row(
+    "trigger words",
+    found.trigger_words.length > 0 ? found.trigger_words.join(", ") : "none",
+  ));
+  if (record.model.tags.length > 0) {
+    const shown = record.model.tags.slice(0, 8);
+    lines.push(row(
+      "their tags",
+      `${shown.join(", ")}${
+        record.model.tags.length > shown.length
+          ? ` +${record.model.tags.length - shown.length}`
+          : ""
+      }`,
+    ));
+  }
+  const description = record.version.description_text ??
+    record.model.description_text;
+  lines.push(row(
+    "description",
+    description
+      ? `${description.length.toLocaleString("en")} characters`
+      : "none",
+  ));
+  return lines;
+}
+
+function mebibytes(bytes: number): string {
+  return bytes >= 1 << 30
+    ? `${(bytes / (1 << 30)).toFixed(1)} GiB`
+    : `${(bytes / (1 << 20)).toFixed(1)} MiB`;
 }

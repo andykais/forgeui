@@ -316,15 +316,34 @@ export class CivitaiClient {
     const near: Candidate[] = [];
 
     if (asks(source, "civitai")) {
-      const found = await this.search(stem);
+      const items = await this.#searchItems(stem);
       // An exact filename match is the best answer there is: it means this is
-      // the file, not something with a similar name.
-      const exact = found.filter((candidate) =>
-        candidate.files.some((file) => file.name === filename)
-      );
-      if (exact.length === 1) return exact[0]!.result!;
+      // the file, not something with a similar name. Every version is looked
+      // in, not just the newest a listing shows — a model's older versions
+      // are usually for other base models, and are exactly the files people
+      // have on disk.
+      const exact: Candidate[] = [];
+      for (const model of items) {
+        const versions = Array.isArray(model.modelVersions)
+          ? model.modelVersions as Record<string, unknown>[]
+          : [];
+        for (const version of versions) {
+          const files = Array.isArray(version.files)
+            ? version.files as Record<string, unknown>[]
+            : [];
+          if (!files.some((file) => file.name === filename)) continue;
+          exact.push(this.#candidate(model, version));
+        }
+      }
+      if (exact.length === 1) {
+        // Pinned to the file asked for, as a hash lookup is (§4.1): the
+        // version may ship it beside a differently named primary.
+        const found = exact[0]!.result!;
+        const file = found.files.find((entry) => entry.name === filename);
+        return file?.sha256 ? pinToHash(found, file.sha256) : found;
+      }
       if (exact.length > 1) throw new LookupError(ambiguous(filename, exact));
-      near.push(...found);
+      near.push(...items.map((model) => this.#newest(model)));
     }
 
     if (source !== "civitai") {
@@ -386,40 +405,50 @@ export class CivitaiClient {
    * it nearly matched instead of dead-ending.
    */
   async search(query: string): Promise<Candidate[]> {
+    return (await this.#searchItems(query)).map((model) => this.#newest(model));
+  }
+
+  async #searchItems(query: string): Promise<Record<string, unknown>[]> {
     const body = await this.#json(
       this.#civitaiUrl(this.#civitai, "/api/v1/models", "models", {
         query,
         limit: "20",
       }),
     );
-    const items = Array.isArray((body as { items?: unknown[] })?.items)
+    return Array.isArray((body as { items?: unknown[] })?.items)
       ? (body as { items: Record<string, unknown>[] }).items
       : [];
+  }
 
-    const candidates: Candidate[] = [];
-    for (const model of items) {
-      const versions = Array.isArray(model.modelVersions)
-        ? model.modelVersions as Record<string, unknown>[]
-        : [];
-      // The newest version only: a model with forty of them would otherwise
-      // bury every other result.
-      const version = versions[0] ?? null;
-      const result = sourceRecordFromCivitai({
-        model,
-        version,
-        baseUrl: this.#civitai,
-        fetchedAt: this.#now(),
-      });
-      candidates.push({
-        result,
-        name: result.display_name ?? "(unnamed)",
-        url: result.record.source.url,
-        kind: result.kind,
-        baseModel: result.record.version.base_model,
-        files: result.files.map((file) => ({ name: file.name })),
-      });
-    }
-    return candidates;
+  /**
+   * A listing row shows the newest version only: a model with forty of them
+   * would otherwise bury every other result.
+   */
+  #newest(model: Record<string, unknown>): Candidate {
+    const versions = Array.isArray(model.modelVersions)
+      ? model.modelVersions as Record<string, unknown>[]
+      : [];
+    return this.#candidate(model, versions[0] ?? null);
+  }
+
+  #candidate(
+    model: Record<string, unknown>,
+    version: Record<string, unknown> | null,
+  ): Candidate {
+    const result = sourceRecordFromCivitai({
+      model,
+      version,
+      baseUrl: this.#civitai,
+      fetchedAt: this.#now(),
+    });
+    return {
+      result,
+      name: result.display_name ?? "(unnamed)",
+      url: result.record.source.url,
+      kind: result.kind,
+      baseModel: result.record.version.base_model,
+      files: result.files.map((file) => ({ name: file.name })),
+    };
   }
 
   /**

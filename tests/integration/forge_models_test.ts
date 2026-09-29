@@ -227,6 +227,39 @@ async function readBatch(dir: string): Promise<ImportBatch> {
   return JSON.parse(await Deno.readTextFile(join(dir, "model.json")));
 }
 
+Deno.test("a run says where it came from and what it holds", async () => {
+  await withCli(async (h) => {
+    const lines: string[] = [];
+    const result = await runModels({
+      ...base,
+      sha256checksum: h.hash,
+      downloadSamples: 4,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: (line) => lines.push(line),
+    });
+    const said = lines.join("\n");
+    assertStringIncludes(
+      said,
+      `from Civitai (${new URL(h.fake.url).host}): ${h.fake.url}/models/15003`,
+    );
+    assertStringIncludes(said, "model         CyberRealistic");
+    // The version and its base model: what tells versions apart, trigger
+    // words included.
+    assertStringIncludes(said, "version       v9.0");
+    assertStringIncludes(said, "kind          checkpoints · sd15 (SD 1.5)");
+    assertStringIncludes(said, "by            Cyberdelia");
+    assertStringIncludes(said, "trigger words cyberrealistic, photo");
+    assertStringIncludes(said, "their tags    photorealistic, base model");
+    assertStringIncludes(said, "samples       1 (1 over import.nsfw_level");
+    assert(lines.at(-1) === `wrote ${result.dir}`, said);
+    // The model is not in a model folder here, and nothing nags about it:
+    // the machine running this usually has none (§2).
+    assert(!said.includes("note:"), said);
+  }, { noLocalFile: true });
+});
+
 Deno.test("--local-file hashes what is on disk and writes a batch", async () => {
   await withCli(async (h) => {
     const result = await runModels({
@@ -510,6 +543,46 @@ Deno.test("--filename takes an exact remote match when there is one", async () =
       log: () => {},
     });
     assertEquals(result.batch?.model.sha256, h.hash);
+  }, { noLocalFile: true });
+});
+
+Deno.test("--filename finds a file in a version older than the newest", async () => {
+  await withCli(async (h) => {
+    // The listing's newest version is for another base model with another
+    // file; the one asked for is in the version before it — the shape of
+    // most multi-base LoRAs.
+    const model = civitaiModel(h.hash, h.fake.url);
+    const older = model.modelVersions[0]!;
+    const newer = {
+      ...older,
+      id: 601000,
+      name: "v10 (Flux)",
+      baseModel: "Flux.1 D",
+      trainedWords: ["other"],
+      files: [{
+        name: "cyberrealistic_flux.safetensors",
+        primary: true,
+        sizeKB: 4,
+        downloadUrl: `${h.fake.url}/api/download/models/601000`,
+        hashes: { SHA256: "D".repeat(64) },
+      }],
+    };
+    h.fake.configure({
+      models: { 15003: { ...model, modelVersions: [newer, older] } },
+    });
+    const result = await runModels({
+      ...base,
+      filename: FILENAME,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    const batch = result.batch!;
+    assertEquals(batch.model.sha256, h.hash);
+    assertEquals(batch.model.family, "sd15");
+    // That version's words, not the newest's.
+    assertEquals(batch.model.trigger_words, ["cyberrealistic", "photo"]);
   }, { noLocalFile: true });
 });
 

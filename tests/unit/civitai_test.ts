@@ -93,6 +93,13 @@ Deno.test("family: baseModel onto §8.1's list, and no guess otherwise", () => {
   assertEquals(familyOf("Wan Video 14B t2v"), "wan2");
   assertEquals(familyOf("Qwen"), "qwen-image");
   assertEquals(familyOf("LTXV 2"), "ltx-2");
+  assertEquals(familyOf("ZImageBase"), "z-image");
+  assertEquals(familyOf("ZImageTurbo"), "z-image");
+  // Krea 2 is its own family; Flux.1 Krea is a Flux.
+  assertEquals(familyOf("Krea 2"), "krea2");
+  assertEquals(familyOf("Flux.1 Krea"), "flux");
+  assertEquals(familyOf("Flux.2 Klein 9B"), "flux2");
+  assertEquals(familyOf("Anima"), "anima");
   // Unmapped leaves the family alone rather than inventing one.
   assertEquals(familyOf("Some New Thing"), null);
   assertEquals(familyOf(null), null);

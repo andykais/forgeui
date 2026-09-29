@@ -129,8 +129,10 @@ const BASE_MODEL_FAMILIES: [RegExp, string][] = [
   [/^illustrious/i, "sdxl"],
   [/^noobai/i, "sdxl"],
   [/^flux\.?\s*2/i, "flux2"],
+  // Krea 2 is its own architecture; Flux.1 Krea is a Flux, and starts "Flux".
+  [/^krea\s*2/i, "krea2"],
+  [/^anima/i, "anima"],
   [/^flux/i, "flux"],
-  [/^chroma/i, "chroma"],
   [/^chroma/i, "chroma"],
   [/^ltxv?\s*2/i, "ltx-2"],
   [/^ltx/i, "ltx"],

@@ -324,7 +324,7 @@ export class ImportInbox {
     // batch says otherwise. A hand-typed display name surviving an import is
     // the default because losing one is the kind of thing you notice a week
     // later (§7.2).
-    const fill = <K extends "display_name" | "family" | "notes">(
+    const fill = <K extends "display_name" | "notes">(
       key: K,
       value: string | null | undefined,
     ) => {
@@ -333,8 +333,12 @@ export class ImportInbox {
       patch[key] = value;
     };
     fill("display_name", batch.model.display_name);
-    fill("family", batch.model.family);
     fill("notes", batch.model.notes);
+    // The family is not a matter of taste. When the source names the base
+    // model it was trained on, that is a better answer than a header guess or
+    // an earlier pick, so it replaces them; when it does not know, whatever
+    // the app has stays (§7.2).
+    if (batch.model.family) patch.family = batch.model.family;
 
     const tags = batch.model.tags ?? [];
     if (tags.length > 0 && (overwrite || model.tags.length === 0)) {

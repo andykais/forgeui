@@ -334,6 +334,37 @@ Deno.test("overwrite decides whether a hand-typed name survives", async () => {
   });
 });
 
+Deno.test("a family the import knows replaces the app's; an unknown one does not", async () => {
+  await withImports(async ({ app, hash }) => {
+    // Picked by hand, or guessed by the header probe: either way, not what
+    // the model's own page says it was trained on.
+    await app.json(`/api/models/${hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ family: "flux" }),
+    });
+
+    // No `overwrite`, and the family still moves: it is a fact, not a taste.
+    await writeBatch(app.paths.imports, hash);
+    await app.models.rescan();
+    await app.models.idle();
+    let model = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(model.family, "sd15");
+
+    // A source that does not know leaves the app's answer where it is.
+    await app.json(`/api/models/${hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ family: "sdxl" }),
+    });
+    await writeBatch(app.paths.imports, hash, {
+      model: { ...batchJson(hash).model, family: null },
+    });
+    await app.models.rescan();
+    await app.models.idle();
+    model = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(model.family, "sdxl");
+  });
+});
+
 Deno.test("a downloaded model is filed, scanned, hashed and applied", async () => {
   const fixtures = await modelFixtures();
   try {

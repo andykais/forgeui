@@ -178,9 +178,12 @@ The less everyday cases:
 
   A batch that brought its own weights is excluded from that count: Phase A
   filed them and the hasher simply has not caught up, which is the ordinary
-  case the silence was meant for. `forge models` says the same thing at write
-  time, while you are still at the terminal, rather than leaving you to find
-  out after a restart.
+  case the silence was meant for. The app's log is the only place this is
+  said: `forge models` used to repeat it at write time, and dropped it,
+  because the usual machine running the CLI has no model folders at all —
+  it fetches for a library somewhere else — so the note fired on every run
+  and meant nothing there. What the CLI says instead is where the answer
+  came from and what it holds (§3).
 - **The CLI runs on another machine.** `import.dir` can point anywhere, so a
   shared folder makes the fetching host and the serving host different
   machines. Nothing in the format assumes otherwise.
@@ -269,6 +272,21 @@ Options:
       --browsing-level <n>    Civitai's visibility bitmask, for what a lookup is
                               allowed to return. (Default: config import.browsing_level)
       --timeout      <ms>     Per-request timeout. (Default: 30000)
+
+Each run says where the answer came from and what it holds, then where it
+wrote it:
+
+  from Civitai (civitai.red): https://civitai.red/models/2299667?modelVersionId=2646788
+    model         TotK Zelda - Realistic LORA
+    version       Zelda - ZIB - Version 1
+    file          ZeldaReal_ZIB.safetensors
+    kind          loras · z-image (ZImageBase)
+    by            <creator>
+    trigger words Zeldareal
+    their tags    character, zelda, video game, legenda of zelda
+    description   1,204 characters
+    samples       4
+  wrote /workspace/import/<sha256>
 
 Examples:
 
@@ -546,7 +564,10 @@ remote** lookup: nothing on this machine is read, because the case this exists
 for is a model that is not here yet. Civitai first, then the archive:
 
 1. `GET /api/v1/models?query=<stem>` — a result is taken when one of its
-   version files carries exactly that filename.
+   version files carries exactly that filename — in **any** version, not
+   just the newest the listing shows, since a multi-base LoRA's older
+   versions are the files people have. The batch is that version's, pinned to
+   that file.
 2. `GET https://civitaiarchive.com/api/search?q=<filename>`, whose
    `kind: "file"` rows carry `url: "/sha256/<hash>"`. One distinct hash under
    that exact name is an answer; several are listed as `--sha256checksum`
@@ -1106,11 +1127,15 @@ type.
    error, and it is the case a `--download-model` batch is in until the hasher
    reaches the file Phase A just filed.
 2. **Metadata.** `civitai_json` is set from `source` + `civitai` — the column
-   has existed since §7 and has never been written. `family`, `display_name`,
-   `tags` and `notes` are filled **only where the model's own value is null or
+   has existed since §7 and has never been written. `display_name`, `tags`
+   and `notes` are filled **only where the model's own value is null or
    empty**, unless the batch says `overwrite: true`, in which case they are
    replaced. A hand-typed display name surviving an import is the default
    because losing one is the kind of thing you only notice a week later.
+   **`family` is the exception** (amended): a family the batch knows replaces
+   the model's, overwrite or not, because the base model a file was trained
+   on is a fact the source has and a header probe or an earlier pick only
+   guesses at. A batch whose family is null leaves the model's alone.
 3. **Samples.** Each entry is imported through the existing `SampleStore`,
    which already takes `sourceUrl` and `raw` and has never been given either.
    The file is moved rather than copied where the filesystem allows it.
