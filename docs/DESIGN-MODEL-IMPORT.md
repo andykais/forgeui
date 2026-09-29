@@ -909,7 +909,6 @@ Chosen this way because:
     "display_name": "SD 1.5 base",
     "family": "sd15",
     "tags": ["base model"],
-    "notes": "Trigger words: none.\n\nStable Diffusion is a latent text-to-image…",
     "strength_min": null,
     "strength_max": null
   },
@@ -1232,10 +1231,17 @@ type.
    error, and it is the case a `--download-model` batch is in until the hasher
    reaches the file Phase A just filed.
 2. **Metadata.** `civitai_json` is set from `source` + `civitai` — the column
-   has existed since §7 and has never been written. `display_name`, `tags`
-   and `notes` are filled **only where the model's own value is null or
-   empty**, unless the batch says `overwrite: true`, in which case they are
-   replaced. A hand-typed display name surviving an import is the default
+   has existed since §7 and has never been written. `display_name` and
+   `tags` are filled **only where the model's own value is null or empty**,
+   unless the batch says `overwrite: true`, in which case they are replaced.
+   **`notes` are never written** (amended): they are the one field kept for
+   what you write about a model. Earlier builds of `forge models` put
+   `Trigger words: …` there — a copy of `trigger_words`, which has its own
+   field — so a batch that still carries a `model.notes` string takes it
+   back out: the model's notes are cleared when they are exactly that string,
+   or a single `Trigger words: …` line, and left alone otherwise. Moving the
+   old batches from `imported/success/` back to `fetched/success/` is the
+   one-off cleanup; a batch written now has no `notes` at all. A hand-typed display name surviving an import is the default
    because losing one is the kind of thing you only notice a week later.
    **`family` is the exception** (amended): a family the batch knows replaces
    the model's, overwrite or not, because the base model a file was trained

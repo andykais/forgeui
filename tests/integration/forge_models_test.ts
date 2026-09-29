@@ -291,8 +291,9 @@ Deno.test("--local-file hashes what is on disk and writes a batch", async () => 
     );
     // The comma-separated single string is split, trimmed and de-duplicated.
     assertEquals(batch.model.trigger_words, ["cyberrealistic", "photo"]);
-    // Notes get the trigger words and not eight kilobytes of HTML.
-    assertEquals(batch.model.notes, "Trigger words: cyberrealistic, photo");
+    // Notes are the user's: the batch carries none, not even the trigger
+    // words, which have their own field.
+    assert(!("notes" in batch.model), "the batch should carry no notes");
 
     const record = batch.civitai as {
       model: { description_text: string; description_html: string };

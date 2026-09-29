@@ -335,7 +335,7 @@ export class ImportInbox {
     // batch says otherwise. A hand-typed display name surviving an import is
     // the default because losing one is the kind of thing you notice a week
     // later (§7.2).
-    const fill = <K extends "display_name" | "notes">(
+    const fill = <K extends "display_name">(
       key: K,
       value: string | null | undefined,
     ) => {
@@ -344,7 +344,20 @@ export class ImportInbox {
       patch[key] = value;
     };
     fill("display_name", batch.model.display_name);
-    fill("notes", batch.model.notes);
+    // `notes` are yours alone, and ingest never writes them (amended §7.2).
+    // Earlier builds of `forge models` wrote `Trigger words: …` there, a copy
+    // of `trigger_words`; a batch that still carries a `notes` string is the
+    // record of that, and takes it back out — but only where the model's
+    // notes are still exactly what an import put there. Anything typed, or
+    // typed onto it, stays.
+    if (importedNotes(model.notes, batch.model.notes)) {
+      patch.notes = null;
+      log(
+        `import: cleared the notes an earlier import wrote on ${
+          model.display_name ?? batch.model.display_name ?? hash.slice(0, 12)
+        }`,
+      );
+    }
     // The family is not a matter of taste. When the source names the base
     // model it was trained on, that is a better answer than a header guess or
     // an earlier pick, so it replaces them; when it does not know, whatever
@@ -560,6 +573,20 @@ export class ImportInbox {
       );
     }
   }
+}
+
+/**
+ * Whether a model's notes are nothing but what an earlier `forge models`
+ * wrote: the batch's own `notes`, or the one line that build always wrote.
+ */
+export function importedNotes(
+  current: string | null,
+  fromBatch: string | null | undefined,
+): boolean {
+  if (typeof fromBatch !== "string" || current === null) return false;
+  const notes = current.trim();
+  if (notes.length === 0) return false;
+  return notes === fromBatch.trim() || /^Trigger words: [^\n]*$/.test(notes);
 }
 
 /** A `source` block from a batch, with the fields the badge needs assured. */

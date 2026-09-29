@@ -51,7 +51,6 @@ function batchJson(hash: string, overrides: Partial<ImportBatch> = {}) {
       display_name: "CyberRealistic",
       family: "sd15",
       tags: ["photorealistic", "base model"],
-      notes: "A photoreal SD 1.5 finetune.",
       trigger_words: ["cyberrealistic", "photo"],
     },
     source: {
@@ -422,6 +421,46 @@ Deno.test("rescan-models?wait=1 answers once the batch has landed", async () => 
   } finally {
     await Deno.remove(fixtures.dir, { recursive: true });
   }
+});
+
+Deno.test("ingest never writes notes, and takes back the ones it once wrote", async () => {
+  await withImports(async ({ app, hash }) => {
+    const notesAfter = async (
+      mine: string | null,
+      batchNotes: string | null | undefined,
+    ) => {
+      await app.json(`/api/models/${hash}`, {
+        method: "PATCH",
+        body: JSON.stringify({ notes: mine }),
+      });
+      const model = { ...batchJson(hash).model };
+      if (batchNotes !== undefined) model.notes = batchNotes;
+      await writeBatch(app.paths.imports, hash, { model, overwrite: true });
+      await app.models.rescan();
+      await app.models.idle();
+      return (await app.json<ModelDetail>(`/api/models/${hash}`)).notes;
+    };
+    const line = "Trigger words: cyberrealistic, photo";
+
+    // A batch from an earlier build: the line it wrote is taken back out.
+    assertEquals(await notesAfter(line, line), null);
+    // …as is the same line from a batch whose words have changed since.
+    assertEquals(
+      await notesAfter("Trigger words: cyberrealistic", line),
+      null,
+    );
+    // Anything typed stays — on its own, or typed onto the line.
+    assertEquals(await notesAfter("my own note", line), "my own note");
+    assertEquals(
+      await notesAfter(`${line}\nworks best at 0.7`, line),
+      `${line}\nworks best at 0.7`,
+    );
+    // A batch without notes, as `forge models` now writes, touches nothing —
+    // and neither does one that says something, even with --overwrite:
+    // notes are never written by ingest.
+    assertEquals(await notesAfter(line, undefined), line);
+    assertEquals(await notesAfter(null, "An author's blurb."), null);
+  });
 });
 
 Deno.test("a downloaded model is filed, scanned, hashed and applied", async () => {

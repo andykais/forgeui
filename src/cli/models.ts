@@ -241,7 +241,6 @@ export async function runModels(
       // Promoting one is a click on the model page, not something ingest
       // decides.
       tags: [],
-      notes: notesFrom(found),
       trigger_words: found.trigger_words,
     },
     source: found.record.source as unknown as Record<string, unknown>,
@@ -910,19 +909,6 @@ async function hashFile(path: string): Promise<string> {
       // already closed by the stream
     }
   }
-}
-
-// ------------------------------------------------------------------- notes
-
-/**
- * What lands in the model's `notes`, which is a field a person types into:
- * the trigger words, and nothing else. The author's description is six to
- * eight kilobytes of HTML and belongs in the source record, where the model
- * page renders it under its own heading (§5.5).
- */
-function notesFrom(found: LookupResult): string | null {
-  if (found.trigger_words.length === 0) return null;
-  return `Trigger words: ${found.trigger_words.join(", ")}`;
 }
 
 function isoSeconds(date: Date): string {
