@@ -48,8 +48,14 @@ import {
 } from "./civitai_client.ts";
 import { HuggingFaceClient } from "./huggingface_client.ts";
 import {
+  appendToLedger,
   type Existing,
   findExisting,
+  isFetched,
+  label,
+  type Ledger,
+  listed,
+  readLedger,
   type Wanted,
   wantedFromUrl,
 } from "./existing.ts";
@@ -176,37 +182,19 @@ export async function runModels(
     localHash = await hashFile(path);
   }
 
-  // Without `--overwrite`, a model already fetched is left alone, and found
-  // without asking the network: re-running a list of commands costs nothing
-  // for the ones already done (§3.2).
+  // `imports/imported_checksums.txt` decides what counts as fetched (§3.2),
+  // seeded the first time from what already is.
+  const ledger = await readLedger(options.paths);
+
+  // Without `--overwrite`, a model on that list is left alone, and found
+  // without asking the network where that is possible: re-running a list of
+  // commands costs nothing for the ones already done.
   if (!options.overwrite) {
     const wanted = wantedFor(options, localHash);
     const have = wanted === null
       ? null
-      : await findExisting(options.paths, wanted);
-    if (have !== null) {
-      say(
-        `already fetched: ${
-          [have.name, have.version].filter((part) => part !== null).join(
-            " · ",
-          ) || have.hash
-        }`,
-      );
-      say(
-        have.state === "pending"
-          ? `  waiting for the app in ${dirname(have.path)}`
-          : `  imported by the app; its copy is ${have.path}`,
-      );
-      say("nothing was fetched; --overwrite fetches it again");
-      return {
-        dir: dirname(have.path),
-        batch: null,
-        samples: 0,
-        skipped: 0,
-        files: 0,
-        existing: have,
-      };
-    }
+      : await findExisting(options.paths, wanted, ledger);
+    if (have !== null) return alreadyFetched(have, ledger, say);
   }
 
   const found = await resolve(options, client, localHash);
@@ -214,6 +202,22 @@ export async function runModels(
     throw new LookupError(
       "the model was found but carries no sha256, so nothing could be " +
         "matched to a file on disk",
+    );
+  }
+  // A link nothing on this machine had recorded, for a model the list has
+  // anyway — fetched elsewhere, or listed by hand. The lookup could not be
+  // saved, but the samples, the weights and the batch can.
+  if (
+    !options.overwrite && await isFetched(options.paths, ledger, found.sha256)
+  ) {
+    return alreadyFetched(
+      {
+        ...listed(ledger, found.sha256),
+        name: found.record.model.name ?? found.display_name,
+        version: found.record.version.name,
+      },
+      ledger,
+      say,
     );
   }
 
@@ -312,6 +316,17 @@ export async function runModels(
     throw cause;
   }
 
+  // On the list the moment the batch exists, so a second run — or a second
+  // machine sharing this folder — leaves it alone.
+  await appendToLedger(
+    ledger,
+    found.sha256,
+    label({
+      name: found.record.model.name ?? found.display_name,
+      version: found.record.version.name,
+    }),
+  );
+
   for (const line of summarize(found)) say(line);
   if (options.downloadSamples > 0) {
     say(
@@ -368,6 +383,32 @@ function huggingFace(client: CivitaiClient): HuggingFaceClient {
     throw new LookupError("this client was built without Hugging Face");
   }
   return client.huggingface;
+}
+
+/** The run that fetches nothing, and says why and how to make it. */
+function alreadyFetched(
+  have: Existing,
+  ledger: Ledger,
+  say: (line: string) => void,
+): ModelsCommandResult {
+  say(`already fetched: ${label(have) || have.hash}`);
+  if (have.state === "pending") {
+    say(`  waiting for the app in ${dirname(have.path)}`);
+  } else if (have.state === "imported") {
+    say(`  imported by the app; its record is ${have.path}`);
+  }
+  say(`  ${have.hash} is in ${ledger.path}`);
+  say(
+    "nothing was fetched; remove that line, or pass --overwrite, to fetch it again",
+  );
+  return {
+    dir: have.state === "listed" ? dirname(ledger.path) : dirname(have.path),
+    batch: null,
+    samples: 0,
+    skipped: 0,
+    files: 0,
+    existing: have,
+  };
 }
 
 // ------------------------------------------------------------------ lookup

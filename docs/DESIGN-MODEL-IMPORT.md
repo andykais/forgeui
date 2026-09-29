@@ -264,8 +264,9 @@ Options:
                               Public models need no login; see AUTH for the rest.
       --overwrite             Fetch again a model already fetched, and let the
                               import replace fields you have edited. Without it, a
-                              model already fetched is left alone and nothing is
-                              asked of the network (§3.2).
+                              model whose checksum is in
+                              <import dir>/imported_checksums.txt is left alone
+                              (§3.2).
 
       --dry-run               Print what would be fetched and written; touch nothing.
       --json                  Print the resulting model.json to stdout instead of a
@@ -399,32 +400,51 @@ deno task start                                      # unchanged; still src/main
 ### 3.2 Running it again
 
 *Added after the rest of this document.* Without `--overwrite`, a model that
-has already been fetched is **left alone, and found without a single
-request**: re-running a list of commands costs nothing for the ones already
-done.
+has already been fetched is **left alone** — found, where possible, without a
+single request, so re-running a list of commands costs nothing for the ones
+already done.
 
 ```
 already fetched: TotK Zelda - Realistic · Zelda - ZIB - Version 1
   waiting for the app in /workspace/import/72a47985…
-nothing was fetched; --overwrite fetches it again
+  72a47985… is in /workspace/import/imported_checksums.txt
+nothing was fetched; remove that line, or pass --overwrite, to fetch it again
 ```
 
-"Already fetched" is either of two files, both of which the CLI may read —
-neither is `app.db` (§3.1):
+**`<imports>/imported_checksums.txt` decides.** Each batch written appends
+its sha256 there — `sha256sum`'s layout, the model's name as the note — once:
+a re-fetch does not add the line twice. A model listed there is not fetched
+again. It is a plain file so that it can be the control: delete a line and
+that model can be fetched again; add one and it will not be. It lives in the
+import folder, so a folder shared between a fetching machine and a serving
+one shares the list too; the app skips it, as it skips anything that is not a
+batch directory.
+
+```
+# Checksums `forge models` has fetched. A model listed here is not fetched
+# again unless --overwrite is passed: delete its line to let it be, or add
+# one to keep a model out. One sha256 per line; the rest is a note.
+72a47985afc757ee869dd25695849fa42ed15c8b4a54dd6ecfe22efce25a50d6  TotK Zelda - Realistic · Zelda - ZIB - Version 1
+```
+
+Before the list exists it is **seeded** from what already has been fetched —
+batches waiting, and models the app has ingested — and written with the
+first batch after that, so nothing fetched before the list existed is fetched
+again because of it, and a run that writes nothing leaves no file behind. A
+checksum whose only trace is a batch in `.failed/` does not count: that is
+the one most worth fetching again, and editing the list after every failure
+would be a chore the folder already answers.
+
+**Finding the checksum** is the other half. A hash names a model directly, so
+`--sha256checksum` and `--local-file` (hashed locally first) need nothing
+more. A link or a filename does not — finding out what one points at *is* the
+lookup — so they are matched against what earlier batches recorded, in two
+files the CLI may read, neither of them `app.db` (§3.1):
 
 | | |
 |---|---|
 | `<imports>/<sha256>/model.json` | a batch waiting for the app |
 | `<appdata>/models-meta/<sha256>/civitai.json` | a batch the app has ingested (§7.2) |
-
-On a machine that only fetches for a library elsewhere the second does not
-exist, and only the first counts. A batch in `.failed/` counts for nothing:
-it is the one most worth fetching again.
-
-A hash names a batch directly, so `--sha256checksum` and `--local-file`
-(hashed locally first) look straight at the two files. A link or a filename
-does not — finding out what one points at *is* the lookup — so those are
-matched against what earlier batches recorded:
 
 | Input | Matches a batch whose |
 |---|---|
@@ -435,6 +455,10 @@ matched against what earlier batches recorded:
 | Hugging Face repo link | `source.repo` |
 | `--filename` | `model.filename`, or the basename of a Hugging Face `source.path` |
 | Civitai image link | nothing: only the network knows which version an image was posted under |
+
+Where nothing matches — a link fetched on another machine, a checksum typed
+into the list — the lookup runs, and the list is checked against its answer
+**before** any sample, weight or batch is downloaded or written.
 
 `--overwrite` does two things, deliberately one flag: it fetches again, and
 it marks the batch so ingest replaces the fields you edited (§7.2). A re-fetch

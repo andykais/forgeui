@@ -440,3 +440,20 @@ Deno.test("text: bold that Markdown will actually read as bold", () => {
   // A private-use character in the text is not taken for a marker.
   assertEquals(htmlToText("a\uE001b"), "ab");
 });
+
+Deno.test("checksum list: hashes, notes, comments and junk", async () => {
+  const { parseLedger } = await import("../../src/cli/existing.ts");
+  const a = "a".repeat(64);
+  const b = "B".repeat(64);
+  const parsed = parseLedger(
+    [
+      "# a comment",
+      "",
+      `${a}  DreamShaper · 8`,
+      `  ${b}`,
+      "not a checksum at all",
+      `${"c".repeat(63)}  one short`,
+    ].join("\n"),
+  );
+  assertEquals([...parsed], [[a, "DreamShaper · 8"], [b.toLowerCase(), ""]]);
+});

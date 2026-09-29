@@ -132,9 +132,9 @@ const models = new Command()
   )
   .option(
     "--overwrite",
-    "Fetch again a model already fetched — without it, a model with a batch " +
-      "waiting or already imported is left alone and nothing is asked of the " +
-      "network — and let the import replace fields you have edited.",
+    "Fetch again a model already fetched — without it, a model whose " +
+      "checksum is in <import dir>/imported_checksums.txt is left alone — " +
+      "and let the import replace fields you have edited.",
   )
   .option(
     "--dry-run",
