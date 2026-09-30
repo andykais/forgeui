@@ -18,6 +18,7 @@
   } from "../router.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
   import { matcher } from "../lib/search.ts";
+  import { rescanSummary } from "../lib/models.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import type { ModelEntry } from "../types.ts";
   import ModelCard from "../components/ModelCard.svelte";
@@ -210,11 +211,7 @@
     rescanning = true;
     try {
       const result = await api.rescanModels();
-      toasts.message(
-        result.queued > 0
-          ? `${result.models} models · hashing ${result.queued}`
-          : `${result.models} models, nothing new to hash`,
-      );
+      toasts.message(rescanSummary(result));
       await load();
       await app.refreshModels();
     } catch (cause) {

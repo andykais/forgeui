@@ -96,6 +96,11 @@ export class ImportError extends Error {
 export interface IngestCounts {
   /** Batches on disk at the start of the pass. */
   found: number;
+  /**
+   * Sample files in the batches this pass took on: every batch Phase A
+   * read and filed, or every batch Phase B applied.
+   */
+  samples: number;
   /** Weights files moved into the download folder by Phase A. */
   filed: number;
   /** Batches fully applied by Phase B, and moved to `imported/success/`. */
@@ -107,7 +112,7 @@ export interface IngestCounts {
 }
 
 export function emptyCounts(): IngestCounts {
-  return { found: 0, filed: 0, applied: 0, waiting: 0, failed: 0 };
+  return { found: 0, samples: 0, filed: 0, applied: 0, waiting: 0, failed: 0 };
 }
 
 export interface ImportInboxOptions {
@@ -155,7 +160,11 @@ export class ImportInbox {
         await this.#fail(dir, cause);
         continue;
       }
-      if (!batch.files || batch.files.length === 0) continue;
+      const samples = (batch.samples ?? []).length;
+      if (!batch.files || batch.files.length === 0) {
+        counts.samples += samples;
+        continue;
+      }
       try {
         let moved = false;
         for (const entry of batch.files) {
@@ -168,6 +177,7 @@ export class ImportInbox {
         // Written back before the scan, so a crash between the move and the
         // next pass cannot file the same bytes twice.
         if (moved) await this.#write(dir, batch);
+        counts.samples += samples;
       } catch (cause) {
         counts.failed++;
         await this.#fail(dir, cause);
@@ -217,6 +227,7 @@ export class ImportInbox {
         await this.#apply(dir, batch, hash);
         await this.#keep(dir, hash);
         counts.applied++;
+        counts.samples += (batch.samples ?? []).length;
       } catch (cause) {
         counts.failed++;
         await this.#fail(dir, cause);

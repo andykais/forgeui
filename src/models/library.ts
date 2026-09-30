@@ -195,6 +195,19 @@ export interface ModelListFilters {
 }
 
 /** §8.1's sort dropdown, spelled as the Gallery's is (§11.2). */
+/** `POST /api/maintenance/rescan-models`, before its `progress` (§12). */
+export interface RescanResult {
+  models: number;
+  queued: number;
+  /**
+   * Import batches this rescan is applying (DESIGN-MODEL-IMPORT §7.1), and
+   * the samples in them. With nothing to hash they were applied before the
+   * answer, and this is what landed; otherwise it is what is on disk to
+   * apply once the hashing is done.
+   */
+  imports: { batches: number; samples: number };
+}
+
 export type ModelSort = "added" | "oldest" | "name";
 
 export interface FamilyCount {
@@ -339,7 +352,7 @@ export class ModelLibrary {
    */
   async rescan(
     options: { ingest?: boolean } = {},
-  ): Promise<{ models: number; queued: number }> {
+  ): Promise<RescanResult> {
     // `import.ingest_on_boot: false` turns the boot pass off; an explicit
     // Rescan always ingests, because that is what the button is for.
     const ingest = options.ingest ?? true;
@@ -352,6 +365,15 @@ export class ModelLibrary {
       // Phase A, before the walk, so a downloaded model is one more file the
       // scan finds rather than something that waits for the next pass.
       if (ingest) this.#imports = await this.inbox.file();
+      // What this pass is going to import: the batches Phase A did not
+      // refuse, and the samples they carry. Phase B narrows it below when
+      // it runs now.
+      let imports = ingest
+        ? {
+          batches: this.#imports.found - this.#imports.failed,
+          samples: this.#imports.samples,
+        }
+        : { batches: 0, samples: 0 };
       const result = await this.scanner.rescan((progress) =>
         this.#broadcastRescan(progress)
       );
@@ -375,8 +397,16 @@ export class ModelLibrary {
       // can be applied now; otherwise the hasher calls back when it drains and
       // a downloaded model gains its metadata a beat after it appears, which
       // is the behaviour §8.1 already describes for a file copied in by hand.
-      if (ingest && queued === 0) await this.#ingest();
-      return { models: result.models.length, queued };
+      if (ingest && queued === 0) {
+        await this.#ingest();
+        // Applied already, so what landed rather than what was waiting: a
+        // batch for a model this library has never seen does not count.
+        imports = {
+          batches: this.#imports.applied,
+          samples: this.#imports.samples,
+        };
+      }
+      return { models: result.models.length, queued, imports };
     } finally {
       finish();
       this.#scanning = null;

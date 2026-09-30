@@ -6,7 +6,11 @@ import { tinyPng } from "../fixtures/png.ts";
 import { sha256Hex } from "../../src/workflows/hash.ts";
 import { parseSidecar } from "../../src/jobs/sidecar.ts";
 import type { ImportBatch } from "../../src/models/import.ts";
-import type { ModelDetail, ModelView } from "../../src/models/library.ts";
+import type {
+  ModelDetail,
+  ModelView,
+  RescanResult,
+} from "../../src/models/library.ts";
 import type { SampleView } from "../../src/samples/store.ts";
 
 /**
@@ -404,11 +408,13 @@ Deno.test("rescan-models?wait=1 answers once the batch has landed", async () => 
       );
       await writeBatch(app.paths.imports, hash);
 
-      const result = await app.json<{ queued: number }>(
+      const result = await app.json<RescanResult>(
         "/api/maintenance/rescan-models?wait=1",
         { method: "POST" },
       );
       assertEquals(result.queued, 1);
+      // Applied after the hashing, so the answer counts what is on disk.
+      assertEquals(result.imports, { batches: 1, samples: 0 });
       // No `idle()`: the answer is itself the promise that it is done, which
       // is what lets the model page reload once and see the import.
       const model = await app.json<ModelDetail>(`/api/models/${hash}`);
@@ -421,6 +427,49 @@ Deno.test("rescan-models?wait=1 answers once the batch has landed", async () => 
   } finally {
     await Deno.remove(fixtures.dir, { recursive: true });
   }
+});
+
+Deno.test("rescan-models says what it imported, for the toast", async () => {
+  await withImports(async ({ app, hash }) => {
+    const sample = (n: number) => ({
+      file: `samples/000${n}.png`,
+      kind: "image",
+    });
+    await writeBatch(app.paths.imports, hash, {
+      samples: [sample(1), sample(2)],
+    }, {
+      "samples/0001.png": samplePng(),
+      "samples/0002.png": samplePng(),
+    });
+    // A model this library has never seen: it waits, and is not counted.
+    const stranger = "b".repeat(64);
+    await writeBatch(app.paths.imports, stranger, {
+      samples: [sample(1)],
+    }, { "samples/0001.png": samplePng() });
+    // Refused on reading, before anything is applied.
+    const broken = join(
+      app.paths.imports,
+      "fetched",
+      "success",
+      "c".repeat(64),
+    );
+    await Deno.mkdir(broken, { recursive: true });
+    await Deno.writeTextFile(join(broken, "model.json"), "{");
+
+    const result = await app.json<RescanResult>(
+      "/api/maintenance/rescan-models",
+      { method: "POST" },
+    );
+    assertEquals(result.queued, 0);
+    assertEquals(result.imports, { batches: 1, samples: 2 });
+
+    // Nothing left to import, and the batch still waiting says nothing.
+    const again = await app.json<RescanResult>(
+      "/api/maintenance/rescan-models",
+      { method: "POST" },
+    );
+    assertEquals(again.imports, { batches: 0, samples: 0 });
+  });
 });
 
 Deno.test("ingest never writes notes, whatever a batch says", async () => {

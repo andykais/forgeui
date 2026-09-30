@@ -12,6 +12,7 @@ import type {
   Output,
   OutputDetail,
   RescanProgress,
+  RescanResult,
   Sample,
   Storage,
   TelemetryEntryPage,
@@ -265,7 +266,7 @@ export const api = {
    * it answers only once all of that — batches included — has finished.
    */
   rescanModels: (options: { wait?: boolean } = {}) =>
-    request<{ models: number; queued: number }>(
+    request<RescanResult>(
       `/api/maintenance/rescan-models${options.wait ? "?wait=1" : ""}`,
       {
         method: "POST",

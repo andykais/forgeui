@@ -1276,7 +1276,12 @@ Neither phase runs on a timer or on an HTTP request of its own. Progress is
 broadcast on the existing `rescan_progress` channel with three added counters
 (`imports_found`, `imports_filed`, `imports_applied`), so the Models page's
 existing progress line says what is happening without a new socket message
-type.
+type. The Rescan answer carries the same thing as a number to show: `imports:
+{batches, samples}`, which the toast appends to its hashing line — `42 models,
+nothing new to hash · importing 3 metadata, 12 samples`. With nothing to hash
+Phase B has already run, so the numbers are what landed, and a batch for a
+model the library has never seen is not among them; with hashing queued they
+are the readable batches on disk, which Phase B applies when it drains.
 
 ### 7.2 What ingest applies
 

@@ -474,6 +474,14 @@ export interface RescanProgress {
   models: number;
 }
 
+/** What `POST /api/maintenance/rescan-models` answers (§12). */
+export interface RescanResult {
+  models: number;
+  queued: number;
+  /** Import batches the rescan is applying, and the samples in them. */
+  imports: { batches: number; samples: number };
+}
+
 export interface HashingProgress {
   running: boolean;
   done: number;

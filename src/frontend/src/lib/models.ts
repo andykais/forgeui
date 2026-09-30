@@ -1,4 +1,4 @@
-import type { ModelEntry } from "../types.ts";
+import type { ModelEntry, RescanResult } from "../types.ts";
 
 /** The first of each group wins, so the caller's sort decides which. */
 function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
@@ -31,4 +31,20 @@ export function byChoice(models: ModelEntry[]): ModelEntry[] {
  */
 export function byModel(models: ModelEntry[]): ModelEntry[] {
   return uniqueBy(models, (model) => model.hash ?? model.path);
+}
+
+/**
+ * The toast a Rescan ends with: the files, what is left to hash, and what
+ * `forge models` left in the import folder for this pass to apply
+ * (DESIGN-MODEL-IMPORT §7.1).
+ */
+export function rescanSummary(result: RescanResult): string {
+  const hashing =
+    result.queued > 0
+      ? `${result.models} models · hashing ${result.queued}`
+      : `${result.models} models, nothing new to hash`;
+  const { batches, samples } = result.imports;
+  if (batches === 0) return hashing;
+  const extra = samples > 0 ? `, ${samples} ${samples === 1 ? "sample" : "samples"}` : "";
+  return `${hashing} · importing ${batches} metadata${extra}`;
 }

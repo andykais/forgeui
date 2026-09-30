@@ -4,6 +4,7 @@
   import { app } from "../stores/app.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
   import { bytes, relativeTime } from "../lib/format.ts";
+  import { rescanSummary } from "../lib/models.ts";
 
   /**
    * Settings (§11.2, frame 08), read-only in Phase 1: the connection, the
@@ -61,11 +62,7 @@
     try {
       const result = await api.rescanModels();
       await app.refreshModels();
-      toasts.message(
-        result.queued > 0
-          ? `${result.models} models · hashing ${result.queued}`
-          : `${result.models} models, nothing new to hash`,
-      );
+      toasts.message(rescanSummary(result));
     } catch (cause) {
       toasts.message(cause instanceof Error ? cause.message : "the rescan failed");
     } finally {
