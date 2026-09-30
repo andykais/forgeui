@@ -31,7 +31,7 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 
 ```
 src/cli.ts      `forge` — the Cliffy command: serve, reindex, models, mcp
-src/cli/        `forge models`: the Civitai and Hugging Face clients, the batch writer (DESIGN-MODEL-IMPORT)
+src/cli/        `forge models`: the Civitai (+ archive, Tensor.Art) and Hugging Face clients, the batch writer (DESIGN-MODEL-IMPORT)
 src/main.ts     boot order, the App handle tests use
 src/mcp/        `forge mcp`: the MCP bridge, a separate process (DESIGN-AGENT-LOOP)
 src/config/     config.yaml layers, CLI overrides, extra_model_paths.yaml

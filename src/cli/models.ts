@@ -56,6 +56,7 @@ import {
   importLayout,
 } from "../models/import_layout.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
+import { parseTensorArtUrl } from "../models/tensorart.ts";
 
 export { LookupError, NotFoundError };
 
@@ -143,6 +144,7 @@ export async function runModels(
     browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
     token,
+    say,
     huggingface: new HuggingFaceClient({
       hubUrl: settings.huggingface_url,
       token: hfToken,
@@ -154,15 +156,18 @@ export async function runModels(
   // Discovery writes nothing: it is how you find the URL the other flags
   // want, without anything being on disk first.
   if (options.search !== undefined) {
-    const onHub = options.source === "huggingface";
-    const found = onHub
+    const site = options.source === "huggingface"
+      ? "Hugging Face"
+      : options.source === "tensorart"
+      ? "Tensor.Art (through the archive)"
+      : "Civitai";
+    const found = options.source === "huggingface"
       ? await huggingFace(client).search(options.search)
+      : options.source === "tensorart"
+      ? await client.searchTensorArt(options.search)
       : await client.search(options.search);
     if (found.length === 0) {
-      throw new LookupError(
-        `nothing on ${onHub ? "Hugging Face" : "Civitai"} matches ` +
-          `"${options.search}"`,
-      );
+      throw new LookupError(`nothing on ${site} matches "${options.search}"`);
     }
     say(`${found.length} match${found.length === 1 ? "" : "es"}:`);
     for (const candidate of found) say(describeCandidate(candidate));
@@ -287,14 +292,17 @@ export async function runModels(
     }
 
     if (options.downloadModel) {
-      const onHub = found.record.source.kind === "huggingface";
+      const kind = found.record.source.kind;
       const files = await fetchWeights({
         found,
         staging,
-        // The Civitai CLI knows nothing of Hugging Face, and each site gets
-        // its own key and never the other's.
-        cli: onHub ? null : settings.civitai_cli,
-        token: onHub ? hfToken : token,
+        // The Civitai CLI knows nothing of the other sites.
+        cli: kind === "civitai" || kind === "civitai-archive"
+          ? settings.civitai_cli
+          : null,
+        // Each site gets its own key and never the other's; which one is
+        // decided by where the chosen file is, not where the lookup was.
+        tokens: { civitai: token, huggingface: hfToken },
         timeoutMs: options.timeoutMs,
         say,
       });
@@ -532,11 +540,26 @@ async function resolve(
     return await huggingFace(client).byRef(hub);
   }
 
+  // A Tensor.Art link, or the archive's page for one: only the archive's
+  // mirror can answer for it (§4.6).
+  const tensor = parseTensorArtUrl(options.url!);
+  if (tensor !== null) {
+    if (options.source !== "auto" && options.source !== "tensorart") {
+      throw new UsageError(
+        `--url names a Tensor.Art model, which --import-source ` +
+          `${sourceName(options.source)} cannot answer for`,
+      );
+    }
+    return await client.byTensorArt(tensor);
+  }
+
   const ref = parseModelUrl(options.url!);
-  if (options.source === "huggingface") {
+  if (options.source === "huggingface" || options.source === "tensorart") {
     throw new UsageError(
-      "--url names a Civitai model, which --import-source huggingface " +
-        "cannot answer for; pass a huggingface.co link, or drop the flag",
+      `--url names a Civitai model, which --import-source ${options.source} ` +
+        `cannot answer for; pass a ${
+          options.source === "huggingface" ? "huggingface.co" : "tensor.art"
+        } link, or drop the flag`,
     );
   }
   // A URL that names a site is asked there first; `--import-source` still
@@ -759,11 +782,11 @@ async function fetchWeights(input: {
   found: LookupResult;
   staging: string;
   cli: string | null;
-  token: string | null;
+  tokens: { civitai: string | null; huggingface: string | null };
   timeoutMs: number;
   say: (line: string) => void;
 }): Promise<ImportFile[]> {
-  const { found, staging, cli, token, say } = input;
+  const { found, staging, cli, say } = input;
   const into = join(staging, "model");
   await Deno.mkdir(into, { recursive: true });
 
@@ -778,6 +801,11 @@ async function fetchWeights(input: {
   // one: pulling every variant is rarely what "download the model" means.
   const chosen = wanted.find((file) => file.sha256 === found.sha256) ??
     wanted.find((file) => file.primary) ?? wanted[0] ?? null;
+  const via = chosen?.download_via ??
+    (found.record.source.kind === "huggingface" ? "huggingface" : "civitai");
+  const token = via === "huggingface"
+    ? input.tokens.huggingface
+    : input.tokens.civitai;
   // A token given to ForgeUI wins. The CLI keeps its own login somewhere else
   // entirely, and preferring it whenever it happened to be installed would
   // quietly ignore the key in `config.yaml` — the one thing the person set.
@@ -795,6 +823,17 @@ async function fetchWeights(input: {
     say(`downloading the weights with ${cli}…`);
     await runCivitaiCli(cli, versionId, into);
   } else {
+    if (chosen === null && found.record.source.kind === "tensorart") {
+      // Recorded as needing a login, which is what it is: the bytes are on
+      // Tensor.Art, behind its browser session (§4.6).
+      throw new LookupError(
+        `Tensor.Art serves downloads only to a logged-in browser, and the ` +
+          `archive knows no public copy of this file. Download it from ` +
+          `${found.record.source.url} and put it in a model folder; the ` +
+          `metadata imports without --download-model.`,
+        "needs-login",
+      );
+    }
     if (chosen === null) {
       throw new NotFoundError(
         versionId === null
@@ -807,7 +846,7 @@ async function fetchWeights(input: {
       url: chosen.download_url!,
       into,
       fallbackName: chosen.name,
-      authHint: found.record.source.kind === "huggingface"
+      authHint: via === "huggingface"
         ? HUGGINGFACE_AUTH_HINT
         : CIVITAI_AUTH_HINT,
       token,
@@ -926,6 +965,8 @@ export function sourceName(source: LookupSource): string {
     ? "civitai.red/civitai.com"
     : source === "archive"
     ? "civitaiarchive"
+    : source === "tensorart"
+    ? "tensor.art"
     : source;
 }
 
@@ -950,10 +991,13 @@ export function parseImportSource(
     case "huggingface":
     case "huggingface.co":
       return { source: "huggingface", civitaiUrl: null };
+    case "tensorart":
+    case "tensor.art":
+      return { source: "tensorart", civitaiUrl: null };
   }
   throw new UsageError(
     `--import-source: expected auto, civitai.red, civitai.com, ` +
-      `civitaiarchive or huggingface, got "${value}"`,
+      `civitaiarchive, huggingface or tensor.art, got "${value}"`,
   );
 }
 

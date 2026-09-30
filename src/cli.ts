@@ -21,6 +21,7 @@ import {
   UsageError,
 } from "./cli/models.ts";
 import { HuggingFaceUrlError } from "./models/huggingface.ts";
+import { TensorArtUrlError } from "./models/tensorart.ts";
 import { ForgeUi } from "./mcp/forgeui.ts";
 import { LlamaSwap } from "./mcp/llama.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
@@ -115,8 +116,9 @@ const models = new Command()
   .option(
     "--import-source <name:string>",
     "Where to look. auto tries civitai.red, then civitaiarchive.com, then " +
-      "the Hugging Face copies the archive knows of. civitai.red | " +
-      "civitai.com | civitaiarchive | huggingface asks that one only.",
+      "the Tensor.Art and Hugging Face copies the archive knows of. " +
+      "civitai.red | civitai.com | civitaiarchive | huggingface | tensor.art " +
+      "asks that one only.",
     { default: "auto" },
   )
   .option(
@@ -284,7 +286,7 @@ async function runModelsCommand(options: {
   } catch (cause) {
     if (
       cause instanceof UsageError || cause instanceof CivitaiUrlError ||
-      cause instanceof HuggingFaceUrlError
+      cause instanceof HuggingFaceUrlError || cause instanceof TensorArtUrlError
     ) {
       console.error(`forge models: ${cause.message}`);
       return cause instanceof UsageError &&

@@ -24,6 +24,7 @@ import { basename, join } from "@std/path";
 import type { DataPaths } from "../config/paths.ts";
 import { normalizeHash, parseModelUrl } from "../models/civitai.ts";
 import { parseHuggingFaceUrl } from "../models/huggingface.ts";
+import { parseTensorArtUrl } from "../models/tensorart.ts";
 import {
   importLayout,
   type ImportState,
@@ -49,6 +50,7 @@ export type Wanted =
   | { hash: string }
   | { civitai: { model_id: number | null; model_version_id: number | null } }
   | { huggingface: { repo: string; path: string | null } }
+  | { tensorart: { model_id: string; version_id: string | null } }
   | { filename: string };
 
 interface Recorded {
@@ -74,6 +76,13 @@ export function wantedFromUrl(url: string): Wanted | null {
   if (hub !== null) {
     return { huggingface: { repo: hub.repo, path: hub.path } };
   }
+  let tensor;
+  try {
+    tensor = parseTensorArtUrl(url);
+  } catch {
+    return null;
+  }
+  if (tensor !== null) return { tensorart: tensor };
   let ref;
   try {
     ref = parseModelUrl(url);
@@ -133,6 +142,13 @@ function matches(batch: Record<string, unknown>, wanted: Wanted): boolean {
       return source.model_version_id === model_version_id;
     }
     return source.model_id === model_id;
+  }
+  if ("tensorart" in wanted) {
+    if (source.kind !== "tensorart") return false;
+    const { model_id, version_id } = wanted.tensorart;
+    if (source.tensorart_model_id !== model_id) return false;
+    // A bare model link means its newest version, as Civitai's does.
+    return version_id === null || source.tensorart_version_id === version_id;
   }
   if ("huggingface" in wanted) {
     if (source.kind !== "huggingface") return false;

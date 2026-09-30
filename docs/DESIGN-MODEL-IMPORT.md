@@ -239,9 +239,10 @@ Options:
                               (Default: $FORGEUI_DATA_DIR, else ~/.forgeui)
 
       --url          <url>    civitai.red, civitai.com or civitaiarchive.com link to
-                              a model, a model version or an image, or a
-                              huggingface.co link to a repo or a file in one. The
-                              site in the link is tried first. Every form: §4.1, §4.5.
+                              a model, a model version or an image; a huggingface.co
+                              link to a repo or a file in one; or a tensor.art model
+                              link. The site in the link is tried first. Every form:
+                              §4.1, §4.5, §4.6.
       --filename     <name>   Look up a model by filename on civitai.red and
                               civitaiarchive.com. A remote lookup: nothing on this
                               machine is read. Near misses are listed, not refused.
@@ -255,9 +256,10 @@ Options:
                               machine yet.
 
       --import-source <name>  Where to look. auto (default) tries civitai.red, then
-                              civitaiarchive.com, then the Hugging Face copies the
-                              archive knows of. civitai.red | civitai.com |
-                              civitaiarchive | huggingface asks that one only.
+                              civitaiarchive.com, then the Tensor.Art and Hugging
+                              Face copies the archive knows of. civitai.red |
+                              civitai.com | civitaiarchive | huggingface |
+                              tensor.art asks that one only.
 
       --download-samples <n>  Download up to <n> images from the model's page as
                               samples, newest first. (Default: 0)
@@ -798,6 +800,73 @@ huggingface` is the Hub's own model search.
 
 `--download-samples` fetches nothing and says so. `--download-model` fetches
 the file's `resolve` URL with the Hugging Face token, never the Civitai one.
+
+### 4.6 Tensor.Art
+
+*Added after the rest of this document.* **Tensor.Art itself cannot be asked
+by a script**, and this section is mostly about what is asked instead.
+Checked against the live site:
+
+- `tensor.art` answers every request with Cloudflare's browser challenge
+  ("Just a moment…"), which only a real browser passes.
+- `api.tensor.art` is reachable, but a `proxy-wasm` gateway in front of it
+  answers **every** request that lacks the web app's request signature with
+  the same `405 {"errCode":"SYSTEM.FAIL"}` — including paths that do not
+  exist. The signature is computed by the site's JavaScript, and the scheme
+  is not published.
+- The official developer API (TAMS, `ap-east-1.tensorart.cloud`) has
+  `GET /v1/models/:modelId`, but it needs an account with an application key
+  signed SHA256withRSA, and it returns no file hash — which every batch is
+  keyed by — and no download.
+
+So **pasting browser cookies would not get a script past either wall**: the
+Cloudflare clearance cookie is bound to the browser that earned it, and the
+API wants a signature no cookie carries. Getting round both would be defeating
+the site's bot protection, which this command does not do.
+
+What *can* be asked is **CivArchive's mirror of Tensor.Art**. Every model it
+has seen has a server-rendered page at
+`/tensorart/models/<id>/versions/<vid>` (a bare `/tensorart/models/<id>`
+redirects to the newest version) with its data embedded as `__NEXT_DATA__`:
+description, creator, base model, trigger words, tags, showcase images, and
+each file with its **sha256** and the **public copies** of the same bytes
+elsewhere. That is everything this command needs, without a login.
+
+**By link.** `tensor.art/models/<id>`, optionally `/<versionId>` after it (a
+slug there is ignored), or the archive's own `/tensorart/models/…` link.
+
+**By hash.** The archive's `/api/sha256/<hash>` lists Tensor.Art copies with
+their ids. In `auto` they come after a Civitai model and before Hugging Face,
+since a Tensor.Art page is a model page and a README is not. Re-uploads happen
+there too — one FLUX file has two pages, the original at 1.8 million downloads
+and a copy with no description — so of up to six copies the most downloaded
+is used, and the choice is printed with `--url` as the way to pick another.
+`--import-source tensor.art` (or `tensorart`) goes straight to them. This also
+fixed a latent bug: with no Civitai entry, the archive road used to take the
+first file's `model_id` — which for a Tensor.Art entry is a Tensor.Art id —
+and ask the archive's *Civitai* endpoint for it.
+
+**By filename** and **`--search`**: the archive's search rows for Tensor.Art,
+which name the version page; the page has the file's hash.
+
+**Ids are strings.** Tensor.Art's are 18 digits, past what a JavaScript number
+holds exactly (`765307161749456877` parses as `…900`). The archive writes
+them as strings, and they stay strings: `source.tensorart_model_id` and
+`source.tensorart_version_id` in the record, beside the Civitai ids (null
+here).
+
+**Samples** are the showcase images, off `image.tensorartassets.com`, which
+serves them without a login; they carry no generation data, and link back to
+the model's page (the images have none of their own).
+
+**`--download-model`** cannot use Tensor.Art's own download, which needs the
+logged-in browser. It fetches a **public copy of the same bytes** the archive
+lists for the file — a Civitai download that is not deleted, gated or paid,
+then a Hugging Face `resolve` URL — with that site's token, and the download
+is checked against the sha256 like any other (§7.2). When no public copy is
+known it says so, names the Tensor.Art page to download from by hand, and is
+recorded as `failure: needs-login`; the metadata still imports without the
+flag.
 
 ## 5. Folders and formats
 

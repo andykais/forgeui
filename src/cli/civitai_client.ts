@@ -7,8 +7,10 @@
  * the input does not name a site is **civitai.red, then civitaiarchive.com**:
  * the first is the same API `.com` serves with a wider default filter, and
  * the second is the only one of the two that answers for a model Civitai has
- * deleted. Hugging Face comes third, and only when the archive knows the hash
- * as a Hugging Face copy with no Civitai model behind it (§4.5).
+ * deleted. Tensor.Art and Hugging Face come after, and only when the archive
+ * knows the hash as their copy with no Civitai model behind it (§4.5, §4.6);
+ * Tensor.Art is read from the archive's mirror of it, which is the only part
+ * of it a script can ask.
  *
  * Nothing here opens `app.db` or imports anything that does.
  */
@@ -26,6 +28,13 @@ import {
   type HuggingFaceRef,
   parseHuggingFaceUrl,
 } from "../models/huggingface.ts";
+import {
+  archivePagePath,
+  pageModel,
+  sourceRecordFromTensorArt,
+  tensorArtModelUrl,
+  type TensorArtRef,
+} from "../models/tensorart.ts";
 import type { HuggingFaceClient } from "./huggingface_client.ts";
 
 /**
@@ -125,6 +134,8 @@ export interface CivitaiClientOptions {
   token?: string | null;
   /** Where a hash the archive knows only as a Hugging Face copy goes. */
   huggingface?: HuggingFaceClient | null;
+  /** The choice made when a hash has several copies. */
+  say?: (line: string) => void;
   /** Injected by the tests, which point it at a local fake (§10). */
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
@@ -135,7 +146,12 @@ export interface CivitaiClientOptions {
  * what `--import-source` sets. `civitai` is whichever Civitai host the client
  * was built for — `civitai.red` and `civitai.com` are the same API (§4.0).
  */
-export type LookupSource = "auto" | "civitai" | "archive" | "huggingface";
+export type LookupSource =
+  | "auto"
+  | "civitai"
+  | "archive"
+  | "huggingface"
+  | "tensorart";
 
 function asks(source: LookupSource, site: Exclude<LookupSource, "auto">) {
   return source === "auto" || source === site;
@@ -157,6 +173,7 @@ export class CivitaiClient {
    */
   #forCivitai = new Set<string>();
   #huggingface: HuggingFaceClient | null;
+  #say: (line: string) => void;
 
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
@@ -167,6 +184,7 @@ export class CivitaiClient {
     this.#now = options.now ?? (() => new Date());
     this.#token = options.token ?? null;
     this.#huggingface = options.huggingface ?? null;
+    this.#say = options.say ?? (() => {});
   }
 
   get huggingface(): HuggingFaceClient | null {
@@ -242,15 +260,29 @@ export class CivitaiClient {
         const before = tried.length > 0
           ? ` ${tried.join(" and ")} had no match first.`
           : "";
-        const hub = asks(source, "huggingface") && this.#huggingface !== null
-          ? " Hugging Face could not be checked either: the archive is the " +
-            "only index of its copies by hash."
+        const others = [
+          ...(asks(source, "tensorart") ? ["Tensor.Art"] : []),
+          ...(asks(source, "huggingface") && this.#huggingface !== null
+            ? ["Hugging Face"]
+            : []),
+        ];
+        const hub = others.length > 0
+          ? ` ${others.join(" and ")} could not be checked either: the ` +
+            `archive is the only index of ${
+              others.length > 1 ? "their" : "its"
+            } copies by hash.`
           : "";
         throw new LookupError(`${cause.message}.${before}${hub}`, cause.kind);
       }
       if (asks(source, "archive")) {
         const found = await this.#archiveModel(files);
         if (found !== null) return pinToHash(found, normalized);
+      }
+      // A Tensor.Art copy is a model page — description, trigger words,
+      // images — so it comes before Hugging Face's README (§4.6).
+      const tensorArt = tensorArtCopies(files);
+      if (asks(source, "tensorart") && tensorArt.length > 0) {
+        return await this.#bestTensorArt(tensorArt, normalized);
       }
       const copies = huggingFaceCopies(files);
       if (
@@ -263,6 +295,8 @@ export class CivitaiClient {
       tried.push(
         source === "huggingface"
           ? `${this.#archive} (Hugging Face's only index by hash)`
+          : source === "tensorart"
+          ? `${this.#archive} (Tensor.Art's only index by hash)`
           : this.#archive,
       );
     }
@@ -369,6 +403,140 @@ export class CivitaiClient {
   }
 
   /**
+   * A Tensor.Art model, through the archive's mirror of it (§4.6): the site
+   * itself answers no script. `hash`, from a hash lookup, picks the file the
+   * batch is about.
+   */
+  async byTensorArt(
+    ref: TensorArtRef,
+    hash: string | null = null,
+  ): Promise<LookupResult> {
+    const url = `${this.#archive}${archivePagePath(ref)}`;
+    const html = await this.#html(url);
+    if (html === null) {
+      throw new NotFoundError(
+        `the archive has no copy of Tensor.Art model ${ref.model_id}${
+          ref.version_id === null ? "" : ` version ${ref.version_id}`
+        } (${tensorArtModelUrl(ref.model_id)}). Tensor.Art itself cannot be ` +
+          `asked by a script, so the archive's copy is the only one there is.`,
+      );
+    }
+    const model = pageModel(html);
+    if (model === null) {
+      throw new LookupError(
+        `${url} did not carry its model data — the archive's page has ` +
+          `changed shape, which this build does not read`,
+      );
+    }
+    const found = sourceRecordFromTensorArt({
+      model,
+      hash,
+      fetchedAt: this.#now(),
+    });
+    return hash === null ? found : pinToHash(found, hash);
+  }
+
+  /**
+   * One file, several Tensor.Art pages: re-uploads are as common there as on
+   * Hugging Face (one FLUX file has two, the original at 1.8 million
+   * downloads and a copy with no description). The most downloaded of the
+   * first few is taken, and the choice is said with how to make another.
+   */
+  async #bestTensorArt(
+    refs: TensorArtRef[],
+    hash: string,
+  ): Promise<LookupResult> {
+    const distinct = [
+      ...new Map(refs.map((ref) => [ref.model_id, ref])).values(),
+    ];
+    if (distinct.length === 1) {
+      return await this.byTensorArt(distinct[0]!, hash);
+    }
+    const pages: { result: LookupResult; downloads: number }[] = [];
+    for (const ref of distinct.slice(0, 6)) {
+      try {
+        const result = await this.byTensorArt(ref, hash);
+        const downloads = result.record.stats?.downloads;
+        pages.push({
+          result,
+          downloads: typeof downloads === "number" ? downloads : 0,
+        });
+      } catch (cause) {
+        // A copy the archive has lost is not a candidate, and not an error.
+        if (!(cause instanceof NotFoundError)) throw cause;
+      }
+    }
+    if (pages.length === 0) {
+      throw new NotFoundError(
+        `the archive lists ${distinct.length} Tensor.Art copies of this file ` +
+          `and has a page for none of them`,
+      );
+    }
+    pages.sort((a, b) => b.downloads - a.downloads);
+    const best = pages[0]!;
+    if (pages.length > 1) {
+      this.#say(
+        `${pages.length} Tensor.Art models hold this file; using ${best.result.record.source.url} ` +
+          `(${best.downloads.toLocaleString("en")} downloads). Pass --url to ` +
+          `use another.`,
+      );
+    }
+    return best.result;
+  }
+
+  /** `--search … --import-source tensorart`: the archive's Tensor.Art rows. */
+  async searchTensorArt(query: string): Promise<Candidate[]> {
+    const rows = await this.#archiveRows(query);
+    const out: Candidate[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (row.platform !== "tensorart" || row.kind !== "version") continue;
+      const ref = tensorArtRow(row);
+      if (ref === null || seen.has(ref.model_id)) continue;
+      seen.add(ref.model_id);
+      out.push({
+        name: typeof row.name === "string" ? row.name : ref.model_id,
+        url: tensorArtModelUrl(ref.model_id),
+        kind: typeof row.type === "string" ? row.type : "model",
+        baseModel: typeof row.base_model === "string" ? row.base_model : null,
+        files: [],
+      });
+    }
+    return out;
+  }
+
+  /**
+   * A filename, through the archive's Tensor.Art file rows: each names the
+   * version page it belongs to, and the page has the file's hash.
+   */
+  async #byTensorArtFilename(filename: string): Promise<LookupResult | null> {
+    const wanted = filename.toLowerCase();
+    const refs = new Map<string, TensorArtRef>();
+    for (const row of await this.#archiveRows(filename)) {
+      if (row.platform !== "tensorart" || row.kind !== "file") continue;
+      if (String(row.name ?? "").toLowerCase() !== wanted) continue;
+      const ref = tensorArtRow(row);
+      if (ref !== null) refs.set(`${ref.model_id}/${ref.version_id}`, ref);
+    }
+    if (refs.size === 0) return null;
+    if (refs.size > 1) {
+      throw new LookupError(
+        `the archive has ${refs.size} Tensor.Art models with a file named ` +
+          `"${filename}"; pass --url with the one you mean:\n${
+            [...refs.values()].map((ref) =>
+              `  ${tensorArtModelUrl(ref.model_id)}`
+            ).join("\n")
+          }`,
+      );
+    }
+    const found = await this.byTensorArt([...refs.values()][0]!);
+    const file = found.files.find((entry) =>
+      entry.name.toLowerCase() === wanted
+    );
+    return file?.sha256 ? pinToHash(found, file.sha256) : found;
+  }
+
+  /**
    * The name search `--filename` falls back to when nothing on disk matches
    * (§4.1). A result is accepted only when one of its version files carries
    * exactly that filename — two matches is an error listing them, not a guess.
@@ -427,8 +595,10 @@ export class CivitaiClient {
             .map((file) => file.sha256),
         ),
       ];
-      if (hashes.length === 1) return await this.byHash(hashes[0]!, source);
-      if (hashes.length > 1) {
+      if (source !== "tensorart" && hashes.length === 1) {
+        return await this.byHash(hashes[0]!, source);
+      }
+      if (source !== "tensorart" && hashes.length > 1) {
         const rows = hashes.map((hash) => {
           const file = files.find((entry) => entry.sha256 === hash)!;
           return `  ${file.name} [${
@@ -440,6 +610,12 @@ export class CivitaiClient {
           `the archive has ${hashes.length} different files named "${filename}". ` +
             `They are not the same model; pick one:\n${rows.join("\n")}`,
         );
+      }
+      // Tensor.Art's rows name a model page rather than a hash, so they are
+      // a road of their own (§4.6).
+      if (asks(source, "tensorart")) {
+        const found = await this.#byTensorArtFilename(filename);
+        if (found !== null) return found;
       }
     }
 
@@ -455,7 +631,11 @@ export class CivitaiClient {
       );
     }
     throw new LookupError(
-      source === "huggingface"
+      source === "tensorart"
+        ? `the archive indexes no Tensor.Art file named "${filename}". ` +
+          `Tensor.Art itself cannot be asked; pass --url with the model's ` +
+          `tensor.art link, or --search to find it.`
+        : source === "huggingface"
         ? `the archive indexes no Hugging Face file named "${filename}". ` +
           `Hugging Face itself cannot be searched by filename; pass --url ` +
           `with the repo, or --search to find it.`
@@ -523,14 +703,8 @@ export class CivitaiClient {
    * reason the fallback exists.
    */
   async filesOnArchive(filename: string): Promise<ArchiveFile[]> {
-    const body = await this.#json(
-      `${this.#archive}/api/search?q=${encodeURIComponent(filename)}`,
-    );
-    const results = Array.isArray((body as { results?: unknown[] })?.results)
-      ? (body as { results: Record<string, unknown>[] }).results
-      : [];
     const out: ArchiveFile[] = [];
-    for (const row of results) {
+    for (const row of await this.#archiveRows(filename)) {
       if (row.kind !== "file") continue;
       const name = typeof row.name === "string" ? row.name : null;
       const url = typeof row.url === "string" ? row.url : "";
@@ -549,6 +723,44 @@ export class CivitaiClient {
 
   // ------------------------------------------------------------- archive
 
+  /** One search per query per run: several roads read the same rows. */
+  #rows = new Map<string, Promise<Record<string, unknown>[]>>();
+
+  #archiveRows(query: string): Promise<Record<string, unknown>[]> {
+    let rows = this.#rows.get(query);
+    if (rows === undefined) {
+      rows = this.#json(
+        `${this.#archive}/api/search?q=${encodeURIComponent(query)}`,
+      ).then((body) =>
+        Array.isArray((body as { results?: unknown[] })?.results)
+          ? (body as { results: Record<string, unknown>[] }).results
+          : []
+      );
+      this.#rows.set(query, rows);
+    }
+    return rows;
+  }
+
+  /** A page, as text; a 404 is null, as `#json`'s is. */
+  async #html(url: string): Promise<string | null> {
+    const response = await this.#request(url, "text/html");
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.ok) {
+      const retry = response.headers.get("retry-after");
+      await response.body?.cancel();
+      throw new LookupError(
+        `GET ${url} answered ${response.status}${
+          retry ? ` (retry after ${retry})` : ""
+        }`,
+        statusKind(response.status),
+      );
+    }
+    return await response.text();
+  }
+
   /** Every copy of a file the archive has seen: Civitai's and mirrors'. */
   async #archiveFiles(hash: string): Promise<Record<string, unknown>[]> {
     const found = await this.#json(
@@ -562,10 +774,13 @@ export class CivitaiClient {
     files: Record<string, unknown>[],
   ): Promise<LookupResult | null> {
     if (files.length === 0) return null;
-    const file =
-      files.find((entry) =>
-        entry.source === "civitai" && entry.model_id != null
-      ) ?? files[0]!;
+    // Civitai's copies only. A Tensor.Art copy has a `model_id` too — a
+    // Tensor.Art id, which `/api/models/<id>` would read as Civitai's.
+    const file = files.find((entry) =>
+      (entry.source === undefined || entry.source === "civitai") &&
+      entry.model_id != null
+    );
+    if (file === undefined) return null;
     // `Number(null)` is 0, not NaN, so a missing id has to be checked for
     // rather than inferred from the conversion.
     const modelId = file.model_id == null ? NaN : Number(file.model_id);
@@ -681,9 +896,9 @@ export class CivitaiClient {
     }
   }
 
-  async #request(url: string): Promise<Response> {
+  async #request(url: string, accept = "application/json"): Promise<Response> {
     const signal = AbortSignal.timeout(this.#timeoutMs);
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { accept };
     // A header rather than `?token=`: a query parameter would land in every
     // error message that prints the URL, and several here do.
     if (this.#token !== null && this.#forCivitai.has(url)) {
@@ -705,12 +920,34 @@ export class CivitaiClient {
 
 /** A Civitai link names a Civitai model; Hugging Face cannot answer for it. */
 function civitaiOnly(source: LookupSource): void {
-  if (source === "huggingface") {
+  if (source === "huggingface" || source === "tensorart") {
+    const site = source === "huggingface" ? "Hugging Face" : "Tensor.Art";
     throw new LookupError(
-      "that names a Civitai model, which Hugging Face cannot look up; drop " +
-        "--import-source, or pass a huggingface.co link",
+      `that names a Civitai model, which ${site} cannot look up; drop ` +
+        `--import-source, or pass a ${
+          source === "huggingface" ? "huggingface.co" : "tensor.art"
+        } link`,
     );
   }
+}
+
+/** The archive's Tensor.Art copies of a file, as model references. */
+export function tensorArtCopies(
+  files: Record<string, unknown>[],
+): TensorArtRef[] {
+  const out: TensorArtRef[] = [];
+  for (const file of files) {
+    if (file.source !== "tensorart") continue;
+    // Strings, always: these ids are past what a number holds (§4.6).
+    const model = typeof file.model_id === "string" ? file.model_id : null;
+    if (model === null || !/^\d+$/.test(model)) continue;
+    const version = typeof file.model_version_id === "string" &&
+        /^\d+$/.test(file.model_version_id)
+      ? file.model_version_id
+      : null;
+    out.push({ model_id: model, version_id: version });
+  }
+  return out;
 }
 
 /** The archive's Hugging Face copies of a file, as repo references. */
@@ -747,7 +984,9 @@ function mirrorOnly(
         .filter((entry): entry is string => entry !== null),
     ),
   ];
-  const hint = huggingFace > 0 && source === "archive"
+  const hint = source === "tensorart"
+    ? " None of the copies are on Tensor.Art."
+    : huggingFace > 0 && source === "archive"
     ? ` ${huggingFace} of the copies are on Hugging Face: --import-source ` +
       `huggingface reads the model card from one of them.`
     : source === "huggingface"
@@ -759,4 +998,12 @@ function mirrorOnly(
     }, but no model page for it — so there is no description, no tags and ` +
       `no samples to import.${hint}`,
   );
+}
+
+/** The model and version a Tensor.Art search row's archive URL names. */
+function tensorArtRow(row: Record<string, unknown>): TensorArtRef | null {
+  const match = String(row.url ?? "").match(
+    /^\/tensorart\/models\/(\d+)(?:\/versions\/(\d+))?/,
+  );
+  return match ? { model_id: match[1]!, version_id: match[2] ?? null } : null;
 }

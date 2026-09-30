@@ -26,6 +26,13 @@ export interface FakeCivitaiOptions {
   archiveModels?: Record<number, unknown>;
   /** Query → the archive's `/api/search?q=` rows. */
   archiveSearch?: Record<string, unknown[]>;
+  /**
+   * Tensor.Art model id → the model the archive's
+   * `/tensorart/models/<id>/versions/<vid>` page embeds in `__NEXT_DATA__`.
+   * A link without the version redirects to the model's own, as the real
+   * one does.
+   */
+  tensorArtModels?: Record<string, Record<string, unknown>>;
   /** Bytes served for any image URL under `/img/`. */
   imageBytes?: Uint8Array;
   /**
@@ -178,6 +185,33 @@ export function startFakeCivitai(
         const versionId = Number(url.searchParams.get("modelVersionId"));
         return ok({ items: options.images?.[versionId] ?? [] });
       }
+    }
+
+    // civitaiarchive's mirror of Tensor.Art: server-rendered pages.
+    if (parts[0] === "tensorart" && parts[1] === "models" && parts[2]) {
+      const model = options.tensorArtModels?.[parts[2]];
+      const version = (model?.version ?? {}) as { id?: string };
+      if (model === undefined) {
+        return new Response("Error 404", { status: 404 });
+      }
+      if (parts[3] !== "versions") {
+        return new Response(null, {
+          status: 307,
+          headers: {
+            location: `/tensorart/models/${parts[2]}/versions/${version.id}`,
+          },
+        });
+      }
+      if (parts[4] !== version.id) {
+        return new Response("Error 404", { status: 404 });
+      }
+      return new Response(
+        `<!DOCTYPE html><html><body><div id="__next"></div>` +
+          `<script id="__NEXT_DATA__" type="application/json">${
+            JSON.stringify({ props: { pageProps: { model } }, buildId: "fake" })
+          }</script></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
     }
 
     // civitaiarchive: /api/sha256/<hash> and /api/models/<id>

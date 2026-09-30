@@ -243,7 +243,7 @@ export function visibilityParams(
 export interface SourceRecord {
   format: 1;
   source: {
-    kind: "civitai" | "civitai-archive" | "huggingface";
+    kind: "civitai" | "civitai-archive" | "huggingface" | "tensorart";
     label: string;
     url: string;
     model_id: number | null;
@@ -253,6 +253,12 @@ export interface SourceRecord {
     repo?: string;
     revision?: string | null;
     path?: string;
+    /**
+     * Tensor.Art's ids (§4.6), as strings: they are 18 digits, and a
+     * JavaScript number holds 15 of them exactly.
+     */
+    tensorart_model_id?: string;
+    tensorart_version_id?: string;
   };
   creator: { username: string; url: string | null } | null;
   model: {
@@ -291,6 +297,12 @@ export interface LookupResult {
     size: number | null;
     download_url: string | null;
     primary: boolean;
+    /**
+     * Which site `download_url` is on, when it is not the lookup's own —
+     * a Tensor.Art file fetched from a public copy (§4.6) — so the right
+     * token goes with it, and only that one.
+     */
+    download_via?: "civitai" | "huggingface";
   }[];
   /** The images posted with the version, newest first. */
   images: {
