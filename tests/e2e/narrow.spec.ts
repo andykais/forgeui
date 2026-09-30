@@ -474,18 +474,21 @@ test("a queued card's details are a line each", async ({ page, request }) => {
     });
     jobs.push((await response.json()).id as string);
   }
-  const details = page.locator(".card.queued .details").first();
-  if (await details.isVisible()) {
-    const lines = await details.evaluate((el) =>
-      [...el.children].map((child) => ({
+  // Found and measured in one synchronous step: the fake starts a queued
+  // job within milliseconds, and a card looked up in one call can be gone by
+  // the next, which reads as a computed font size of "".
+  const lines = await page.evaluate(() => {
+    const details = document.querySelector(".card.queued .details");
+    return details
+      ? [...details.children].map((child) => ({
         height: child.getBoundingClientRect().height,
         size: getComputedStyle(child).fontSize,
       }))
-    );
-    for (const line of lines) {
-      expect(line.height).toBeLessThan(20);
-      expect(line.size).toBe("11px");
-    }
+      : [];
+  });
+  for (const line of lines) {
+    expect(line.height).toBeLessThan(20);
+    expect(line.size).toBe("11px");
   }
   // The fake is fast and the queue may already be empty; either way nothing
   // is left behind for the files after this one.

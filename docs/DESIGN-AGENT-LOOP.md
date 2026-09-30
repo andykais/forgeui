@@ -158,6 +158,7 @@ bindings; the protocol is identical either way.
 | `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
 | `list_checkpoints` | the diffusion class across every folder holding one, filterable by family | fast |
 | `list_loras` | LoRAs, filterable by family, each with its strength range (§8.1) | fast |
+| `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first few | fast |
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
 | `get_output` | the sidecar: params, seed, models, timings, origin | fast |
 | `get_output_preview` | the convenient look: a picture as an **image block** or a video as a small MP4, downscaled to `max_edge` (768) | fast |
@@ -174,7 +175,9 @@ ignores the prompt: a LoRA trained on SDXL does nothing to a Flux checkpoint,
 and the model has no way to see that from a name. Each returns a projection
 rather than the API's rows — `name` (what a param binds to; a display name
 passed to `generate` reaches ComfyUI and fails there), the display name, the
-family, the kind, tags, notes and the LoRA's strength range — because the
+family, the kind, tags, notes, the LoRA's strength range, and two counts —
+`sample_count`, pictures of what it does that `get_model_samples` will show,
+and `output_count`, what it has made here — because the
 Models screen needs two dozen fields per model, this needs six, and the
 difference is the whole context window when a library holds three hundred
 LoRAs. Both also name the families the library knows, so a filter that

@@ -1278,6 +1278,14 @@ export function firstSamplePathByModel(db: Database): Map<string, string> {
   return new Map(rows);
 }
 
+/** How many samples each model has, for the listings (§12). */
+export function sampleCountByModel(db: Database): Map<string, number> {
+  const rows = db.prepare(
+    `SELECT model_hash, count(*) FROM samples GROUP BY model_hash`,
+  ).values<[string, number]>();
+  return new Map(rows);
+}
+
 /**
  * The most recent thing each model made, for the tile it is pictured by
  * (§8.1). Videos count: a video model's outputs are all videos, so excluding

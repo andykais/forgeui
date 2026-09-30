@@ -23,6 +23,10 @@ export interface JobRow {
 
 /** A model as `GET /api/models` lists it, narrowed to what a picker reads. */
 export interface ModelRow {
+  /** The hash, or `path:…` while it has none (§8.1). */
+  id: string;
+  hash: string | null;
+  filename: string;
   name: string;
   display_name: string;
   family: string;
@@ -32,6 +36,7 @@ export interface ModelRow {
   strength_min: number;
   strength_max: number;
   output_count: number;
+  sample_count: number;
   /** False once the file is gone; the row survives for its outputs (§8.1). */
   present: boolean;
 }
@@ -40,6 +45,17 @@ export interface ModelListing {
   models: ModelRow[];
   /** Every configured folder kind and the class it is filed under (§8.2). */
   classes?: Record<string, string>;
+}
+
+/** A sample on a model's page (§8.3), as `GET /api/models/:hash` lists it. */
+export interface SampleRow {
+  id: string;
+  kind: string;
+  media_url: string;
+  params: Record<string, unknown> | null;
+  source: { label: string; url: string | null } | null;
+  reusable: boolean;
+  created_at: number;
 }
 
 /** One finished file, as `generate` reports it and `attach_input` takes it. */
@@ -258,9 +274,21 @@ export class ForgeUi {
     if (!output.media_url) {
       throw new ForgeUiError(`output ${id} has no media`);
     }
+    return { ...await this.mediaAt(output.media_url, options), output };
+  }
+
+  /**
+   * Any media URL ForgeUI hands out — an output's, a sample's — with or
+   * without `?max_edge=`. The one place the 503 fallback lives, so a sample
+   * preview degrades exactly the way an output preview does.
+   */
+  async mediaAt(
+    mediaUrl: string,
+    options: { maxEdge?: number } = {},
+  ): Promise<Omit<MediaBytes, "output">> {
     const fetchOnce = (maxEdge?: number) =>
       this.#fetch(
-        `${this.#url}${output.media_url}` +
+        `${this.#url}${mediaUrl}` +
           (maxEdge === undefined ? "" : `?max_edge=${maxEdge}`),
       );
     let response = await fetchOnce(options.maxEdge);
@@ -272,7 +300,7 @@ export class ForgeUi {
     }
     if (!response.ok) {
       throw new ForgeUiError(
-        `GET ${output.media_url}: ${response.status} ${response.statusText}`,
+        `GET ${mediaUrl}: ${response.status} ${response.statusText}`,
       );
     }
     const mimeType = response.headers.get("content-type") ??
@@ -283,7 +311,6 @@ export class ForgeUi {
       // Audio is served as it is whatever was asked (§12), so only a picture
       // or a clip that came back a different type was actually made smaller.
       resized: resized && !mimeType.startsWith("audio/"),
-      output,
     };
   }
 

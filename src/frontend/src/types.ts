@@ -383,6 +383,8 @@ export interface ModelEntry {
   thumb_path: string | null;
   thumb_url: string | null;
   output_count: number;
+  /** Samples on its page (§8.3). */
+  sample_count: number;
   last_used_at: number | null;
   /** True until the background hasher has read the file (§8.1). */
   hashing: boolean;

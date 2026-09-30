@@ -24,6 +24,7 @@
     onthumb,
     ondelete,
     onedit,
+    onopen,
   }: {
     samples: Sample[];
     thumbPath?: string | null;
@@ -32,6 +33,8 @@
     onthumb: (sample: Sample) => void;
     ondelete: (sample: Sample) => void;
     onedit: (sample: Sample) => void;
+    /** Show it at full size, in the sample viewer. */
+    onopen?: (sample: Sample) => void;
   } = $props();
 
   let dragging = $state(false);
@@ -54,7 +57,14 @@
   <div class="strip">
     {#each samples as sample (sample.id)}
       <figure class="sample" class:chosen={sample.path === thumbPath}>
-        <MediaThumb src={sample.media_url} kind={sample.kind} lazy />
+        <button
+          class="open"
+          title="Open"
+          aria-label={`Open sample ${sample.id}`}
+          onclick={() => onopen?.(sample)}
+        >
+          <MediaThumb src={sample.media_url} kind={sample.kind} lazy />
+        </button>
         <div class="menu">
           <button
             title="Set as thumbnail"
@@ -174,6 +184,17 @@
     border-radius: var(--radius-tile);
     overflow: hidden;
     background: var(--control);
+  }
+
+  /* The whole square opens it; the menu sits over its bottom edge. */
+  .open {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: zoom-in;
   }
 
   .sample.chosen {

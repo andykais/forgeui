@@ -79,6 +79,7 @@ function lora(name: string, hash: string): ModelEntry {
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
+    sample_count: 0,
     last_used_at: null,
     hashing: false,
     hash_error: null,

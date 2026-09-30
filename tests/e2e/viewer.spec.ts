@@ -117,3 +117,52 @@ test("escape in the model's own fields still reverts the edit", async ({
   // And nothing navigated away from the page underneath it.
   await expect(page).toHaveURL(/\/models\/[0-9a-f]{64}/);
 });
+
+/**
+ * A model's samples open at full size and walk like its outputs do (§8.3):
+ * ← / → and the strip, `f` for the black field, `esc` a step at a time.
+ * The samples are drawn in the page and uploaded through the route, so the
+ * test carries no fixture files.
+ */
+test("a sample opens at full size and ← / → walk the samples", async ({
+  page,
+  request,
+}) => {
+  const lora = await theLora(request);
+  await page.goto(`/models/${lora!.id}`);
+  const before = await page.getByRole("button", { name: /^Open sample/ })
+    .count();
+  await page.evaluate(async (id) => {
+    for (const colour of ["#c33", "#3c3", "#33c"]) {
+      const canvas = new OffscreenCanvas(320, 200);
+      const context = canvas.getContext("2d")!;
+      context.fillStyle = colour;
+      context.fillRect(0, 0, 320, 200);
+      const form = new FormData();
+      form.set("file", await canvas.convertToBlob(), "sample.png");
+      await fetch(`/api/models/${id}/samples`, { method: "POST", body: form });
+    }
+  }, lora!.id);
+  await page.reload();
+  const opens = page.getByRole("button", { name: /^Open sample/ });
+  await expect(opens).toHaveCount(before + 3);
+
+  await opens.first().click();
+  const position = page.locator(".sample-viewer .position");
+  await expect(position).toHaveText(`1 / ${before + 3}`);
+  await page.keyboard.press("ArrowRight");
+  await expect(position).toHaveText(`2 / ${before + 3}`);
+  await page.keyboard.press("ArrowLeft");
+  await expect(position).toHaveText(`1 / ${before + 3}`);
+  await page.locator(".sample-viewer .thumb").nth(2).click();
+  await expect(position).toHaveText(`3 / ${before + 3}`);
+
+  await page.keyboard.press("f");
+  await expect(page.locator(".fullscreen")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fullscreen")).toHaveCount(0);
+  await expect(page.locator(".sample-viewer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".sample-viewer")).toHaveCount(0);
+  await expect(opens.first()).toBeVisible();
+});

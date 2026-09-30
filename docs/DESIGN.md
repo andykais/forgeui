@@ -1578,7 +1578,7 @@ GET  /api/media/*?max_edge=N             a smaller copy, whole frame, never enla
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at, added_at
+GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, sample_count, last_used_at, added_at
                                         tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
                                         sort: added (newest first, default) | oldest | name; added_at is the file's creation time, else its mtime
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by

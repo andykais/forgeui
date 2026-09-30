@@ -19,6 +19,7 @@ import type {
   MediaBytes,
   ModelListing,
   ModelRow,
+  SampleRow,
   StoredInputView,
 } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
@@ -52,6 +53,37 @@ const failure = (cause: unknown) => ({
   }],
   isError: true,
 });
+
+/** A sample strip is a handful of pictures to compare, so smaller still. */
+const DEFAULT_SAMPLE_EDGE = 512;
+const DEFAULT_SAMPLE_PREVIEWS = 4;
+
+const textBlock = (value: string) => ({ type: "text" as const, text: value });
+
+/**
+ * A model by any name a caller might have for it: the `name` the listings
+ * hand out, the file's own name, its display name or its hash. Hidden
+ * models are looked through too — hiding a model tidies the screen, it does
+ * not make its samples someone else's business.
+ */
+async function findModel(
+  forge: ForgeUi,
+  wanted: string,
+): Promise<ModelRow | null> {
+  const hash = wanted.replace(/^sha256:/, "").toLowerCase();
+  const [visible, hidden] = await Promise.all([
+    forge.get<ModelListing>("/api/models"),
+    forge.get<ModelListing>("/api/models?hidden=1"),
+  ]);
+  const all = [...visible.models, ...hidden.models];
+  return all.find((model) => model.name === wanted) ??
+    all.find((model) => model.filename === wanted) ??
+    all.find((model) =>
+      model.hash !== null && model.hash.replace(/^sha256:/, "") === hash
+    ) ??
+    all.find((model) => model.display_name === wanted) ??
+    null;
+}
 
 /** What a preview is sized to when the model does not say (§6.3). */
 const DEFAULT_PREVIEW_EDGE = 768;
@@ -238,7 +270,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "Checkpoints — the base models a workflow generates with, across every " +
       "folder that holds one. Filter by family to see only the ones a " +
       "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
-      "else. Pass the `name` back, not the display name.",
+      "else. Each carries `sample_count` (pictures of what it does, which " +
+      "get_model_samples shows) and `output_count` (what it has made here). " +
+      "Pass the `name` back, not the display name.",
   });
 
   registerLibraryTool(server, forge, {
@@ -249,9 +283,97 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "LoRAs in the library. Filter by family — a LoRA trained for one base " +
       "model does nothing for another, and mixing families is the usual " +
       "cause of a result that ignores the prompt. Each one carries the " +
-      "strength range its owner set, which is the range worth exploring. " +
+      "strength range its owner set, which is the range worth exploring, " +
+      "and `sample_count` and `output_count`: how many example pictures it " +
+      "has (get_model_samples shows them) and how many outputs it has made. " +
       "Pass the `name` back in a workflow's lora list, not the display name.",
     strengths: true,
+  });
+
+  server.registerTool("get_model_samples", {
+    description:
+      "The samples on a model's page: pictures or clips of what that " +
+      "checkpoint or LoRA does — imported from where it was published, " +
+      "dropped in by the owner, or promoted from one of its outputs. Look " +
+      "before choosing a LoRA or its strength: the samples say what it is " +
+      "for far better than its name. Returns each sample's origin and, " +
+      "where it has one, the prompt that made it, followed by a small " +
+      "preview of the first `limit` of them. Name the model as the listings " +
+      "do (`name`), or by its hash.",
+    inputSchema: z.object({
+      model: z.string().describe(
+        "the `name` from list_checkpoints or list_loras, or the model's hash",
+      ),
+      limit: z.number().int().min(0).max(24).optional().describe(
+        "how many previews to include, default 4; 0 for the list alone",
+      ),
+      max_edge: z.number().int().min(128).max(2048).optional().describe(
+        "longest edge of each preview in pixels, default 512",
+      ),
+    }),
+  }, async ({ model, limit, max_edge }) => {
+    try {
+      const row = await findModel(forge, model);
+      if (!row) {
+        return failure(
+          `no model is named "${model}"; list_checkpoints and list_loras ` +
+            `give the names to use`,
+        );
+      }
+      const detail = await forge.get<{ samples?: SampleRow[] }>(
+        `/api/models/${encodeURIComponent(row.id)}`,
+      );
+      const samples = detail.samples ?? [];
+      const listing = {
+        model: row.name,
+        display_name: row.display_name,
+        sample_count: samples.length,
+        output_count: row.output_count,
+        note: samples.length === 0
+          ? row.hash === null
+            ? "this model is still being hashed; samples belong to a hash"
+            : "no samples yet — search_gallery by this model's name finds " +
+              "what it has made here instead"
+          : undefined,
+        samples: samples.map((sample) => ({
+          id: sample.id,
+          kind: sample.kind,
+          origin: sample.source
+            ? `${sample.source.label}${
+              sample.source.url ? ` (${sample.source.url})` : ""
+            }`
+            : sample.reusable
+            ? "promoted from an output"
+            : "dropped in by hand",
+          prompt: typeof sample.params?.prompt === "string"
+            ? sample.params.prompt
+            : undefined,
+        })),
+      };
+      const shown = samples.slice(0, limit ?? DEFAULT_SAMPLE_PREVIEWS);
+      const content: ReturnType<typeof mediaBlock | typeof textBlock>[] = [
+        textBlock(JSON.stringify(listing, null, 2)),
+      ];
+      for (const sample of shown) {
+        const media = await forge.mediaAt(sample.media_url, {
+          maxEdge: max_edge ?? DEFAULT_SAMPLE_EDGE,
+        });
+        content.push(textBlock(
+          `sample ${sample.id}${
+            media.resized ? "" : " (full size: ForgeUI has no ffmpeg)"
+          }`,
+        ));
+        content.push(
+          mediaBlock(
+            { ...media, output: { media_url: sample.media_url } },
+            forge.url,
+          ),
+        );
+      }
+      return { content };
+    } catch (cause) {
+      return failure(cause);
+    }
   });
 
   server.registerTool("search_gallery", {
@@ -624,7 +746,12 @@ function entry(model: ModelRow, strengths: boolean) {
     notes: model.notes ?? undefined,
     strength_min: strengths ? model.strength_min : undefined,
     strength_max: strengths ? model.strength_max : undefined,
-    outputs: model.output_count,
+    // Both, because they answer different questions: samples are what the
+    // model's author (or the owner) says it does, outputs are what it has
+    // actually made here. get_model_samples shows the first; search_gallery
+    // with its name finds the second.
+    sample_count: model.sample_count ?? 0,
+    output_count: model.output_count,
   };
 }
 

@@ -16,6 +16,7 @@ import {
   type ModelRow,
   normalizeModelHash,
   refreshModelUsage,
+  sampleCountByModel,
   type SidecarModelRef,
   updateModelMeta,
   upsertModelProbe,
@@ -94,6 +95,8 @@ export interface ModelView {
   /** The chosen sample, else the most recent output, else nothing (§8.1). */
   thumb_url: string | null;
   output_count: number;
+  /** Samples on its page (§8.3): what it does, as opposed to what it made. */
+  sample_count: number;
   last_used_at: number | null;
   /**
    * Kept out of the Generate pickers (§8.1). The Models screen still lists
@@ -659,6 +662,7 @@ export class ModelLibrary {
       prefer: this.#config.config.ui.model_thumbnail,
       samples: firstSamplePathByModel(this.#db),
       outputs: latestOutputPathByModel(this.#db),
+      sampleCounts: sampleCountByModel(this.#db),
     };
   }
 
@@ -712,6 +716,7 @@ export class ModelLibrary {
       thumb_path: row?.thumb_path ?? null,
       thumb_url: thumbUrl(row, thumbs),
       output_count: row?.output_count ?? 0,
+      sample_count: row ? thumbs.sampleCounts.get(row.hash) ?? 0 : 0,
       last_used_at: row?.last_used_at ?? null,
       // A family the config hides makes every model in it hidden, without
       // touching the per-model flag: turning the family back on brings them
@@ -908,6 +913,8 @@ interface ModelThumbs {
   prefer: ModelThumbnail;
   samples: Map<string, string>;
   outputs: Map<string, string>;
+  /** Not a picture, but read in the same pass for the same rows. */
+  sampleCounts: Map<string, number>;
 }
 
 function matchesClass(view: ModelView, modelClass?: ModelClass): boolean {

@@ -33,6 +33,7 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     thumb_path: null,
     thumb_url: null,
     output_count: 12,
+    sample_count: 0,
     last_used_at: null,
     hashing: false,
     hash_error: null,
