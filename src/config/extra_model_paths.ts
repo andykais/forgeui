@@ -1,3 +1,4 @@
+import { join } from "@std/path";
 import { classOf, DIFFUSION_KINDS } from "./defaults.ts";
 import type { Config } from "./types.ts";
 import type { DataPaths } from "./paths.ts";
@@ -27,8 +28,22 @@ const HEADER =
  */
 export function resolveExtraModelPaths(
   config: Config,
+  /**
+   * `<appdata>/models`, where ingest files what `forge models
+   * --download-model` fetched (DESIGN-MODEL-IMPORT §7.2). It is listed under
+   * every kind the app knows, because a downloaded model has to resolve by
+   * name for whichever loader its workflow uses — exactly like a folder the
+   * user configured, which is the point: nothing downstream can tell the
+   * difference.
+   */
+  downloads?: string | null,
 ): Record<string, string[]> {
-  const configured = config.model_folders;
+  const configured: Record<string, string[]> = { ...config.model_folders };
+  if (downloads) {
+    for (const kind of Object.keys(configured)) {
+      configured[kind] = [...(configured[kind] ?? []), join(downloads, kind)];
+    }
+  }
   const overrides = config.model_classes;
 
   const pooled: string[] = [];
@@ -61,8 +76,11 @@ export function resolveExtraModelPaths(
 }
 
 /** ComfyUI's yaml format: one key per model kind, newline-separated paths. */
-export function renderExtraModelPaths(config: Config): string {
-  const kinds = Object.entries(resolveExtraModelPaths(config))
+export function renderExtraModelPaths(
+  config: Config,
+  downloads?: string | null,
+): string {
+  const kinds = Object.entries(resolveExtraModelPaths(config, downloads))
     .sort(([a], [b]) => a.localeCompare(b));
 
   if (kinds.length === 0) return `${HEADER}forgeui: {}\n`;
@@ -79,7 +97,7 @@ export async function writeExtraModelPaths(
   paths: DataPaths,
   config: Config,
 ): Promise<string> {
-  const text = renderExtraModelPaths(config);
+  const text = renderExtraModelPaths(config, paths.downloads);
   await Deno.writeTextFile(paths.extraModelPaths, text);
   return text;
 }

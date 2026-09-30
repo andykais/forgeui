@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/svelte";
 import type { ModelDetail as ModelDetailType } from "../types.ts";
 
 /**
@@ -10,6 +16,7 @@ import type { ModelDetail as ModelDetailType } from "../types.ts";
 
 const patchModel = vi.fn();
 const model = vi.fn();
+const rescanModels = vi.fn();
 
 vi.mock("../api.ts", () => ({
   ApiError: class ApiError extends Error {
@@ -19,6 +26,7 @@ vi.mock("../api.ts", () => ({
   api: {
     model: (...args: unknown[]) => model(...args),
     patchModel: (...args: unknown[]) => patchModel(...args),
+    rescanModels: (...args: unknown[]) => rescanModels(...args),
     outputs: () => Promise.resolve({ outputs: [], cursor: null }),
     models: () => Promise.resolve({ models: [] }),
     modelsOfKind: () => Promise.resolve([]),
@@ -46,6 +54,8 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     tags: ["film"],
     strength_min: -2,
     strength_max: 2,
+    trigger_words: [],
+    source: null,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
@@ -121,6 +131,10 @@ describe("the model page header", () => {
     expect(screen.queryByTitle(/Add a tag/)).toBeNull();
     // No hash to show, and no samples strip to hang media off.
     expect(screen.getByText("still being read")).toBeTruthy();
+    // Rescan is offered all the same: a model still being read is exactly
+    // one a rescan is for. The hash-keyed actions are not.
+    expect(screen.getByRole("button", { name: /Rescan/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Re-read this file/ })).toBeNull();
     expect(screen.queryByText("Samples")).toBeNull();
   });
 
@@ -203,5 +217,39 @@ describe("the model page header", () => {
     expect(patchModel.mock.calls[1]?.[1]).toEqual({
       notes: "typed while the tag was saving",
     });
+  });
+
+  test("Rescan waits for the import, then reloads this page and no other", async () => {
+    // Two pages on one model, as two tabs would be: the one whose button was
+    // pressed shows what the rescan brought, and the other keeps what it
+    // had, so flipping between them is a before-and-after.
+    model.mockResolvedValue(detail());
+    rescanModels.mockReset();
+    rescanModels.mockResolvedValue({ models: 1, queued: 0 });
+    const first = render(ModelDetail, { id: "a".repeat(64) });
+    const second = render(ModelDetail, { id: "a".repeat(64) });
+    const nameIn = (container: HTMLElement) =>
+      within(container).findByLabelText("Display name") as Promise<
+        HTMLInputElement
+      >;
+    expect((await nameIn(first.container)).value).toBe("Film grain 35mm");
+    expect((await nameIn(second.container)).value).toBe("Film grain 35mm");
+
+    // What the import changed, as the server now answers.
+    model.mockResolvedValue(
+      detail({ display_name: "Film Grain (Civitai)", trigger_words: ["grain"] }),
+    );
+    await fireEvent.click(
+      within(first.container).getByRole("button", { name: /Rescan/ }),
+    );
+
+    await waitFor(async () =>
+      expect((await nameIn(first.container)).value).toBe(
+        "Film Grain (Civitai)",
+      )
+    );
+    // Waited out, import batches included, before the reload.
+    expect(rescanModels).toHaveBeenCalledWith({ wait: true });
+    expect((await nameIn(second.container)).value).toBe("Film grain 35mm");
   });
 });

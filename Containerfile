@@ -110,6 +110,11 @@ RUN deno cache src/main.ts
 # the MCP server package), so it needs its own pass or the bridge reaches for
 # the network the first time it is run (docs/MCP-BRIDGE.md).
 RUN deno cache src/cli.ts
+# …and `forge` itself, compiled to one binary from that cache and put on the
+# PATH, so `forge models …` runs in the container as it does on a host
+# (DESIGN-MODEL-IMPORT §3.1). It lands at /app/forge.
+RUN deno task compile
+ENV PATH="/app:$PATH"
 
 # /workspace is the data dir (config.yaml, app.db, workflows/user, samples,
 # ...); outputs always lives at <data-dir>/outputs, i.e. /workspace/outputs,

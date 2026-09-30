@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { byChoice, byModel } from "./models.ts";
+import { byChoice, byModel, rescanSummary } from "./models.ts";
 import type { ModelEntry } from "../types.ts";
 
 /**
@@ -69,5 +69,30 @@ describe("what a model-filter lists", () => {
       model({ id: "path:b", hash: null, path: "/b.safetensors", name: "b" }),
     ];
     expect(byModel(waiting)).toHaveLength(2);
+  });
+});
+
+describe("rescanSummary", () => {
+  const none = { batches: 0, samples: 0 };
+
+  test("keeps the hashing wording when nothing is waiting to import", () => {
+    expect(rescanSummary({ models: 12, queued: 0, imports: none })).toBe(
+      "12 models, nothing new to hash",
+    );
+    expect(rescanSummary({ models: 12, queued: 3, imports: none })).toBe(
+      "12 models · hashing 3",
+    );
+  });
+
+  test("adds the import batches and their samples after it", () => {
+    expect(
+      rescanSummary({ models: 12, queued: 0, imports: { batches: 2, samples: 7 } }),
+    ).toBe("12 models, nothing new to hash · importing 2 metadata, 7 samples");
+    expect(
+      rescanSummary({ models: 12, queued: 1, imports: { batches: 1, samples: 1 } }),
+    ).toBe("12 models · hashing 1 · importing 1 metadata, 1 sample");
+    expect(
+      rescanSummary({ models: 12, queued: 0, imports: { batches: 1, samples: 0 } }),
+    ).toBe("12 models, nothing new to hash · importing 1 metadata");
   });
 });

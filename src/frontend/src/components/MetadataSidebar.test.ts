@@ -74,6 +74,8 @@ function lora(name: string, hash: string): ModelEntry {
     tags: [],
     strength_min: -2,
     strength_max: 2,
+    trigger_words: [],
+    source: null,
     thumb_path: null,
     thumb_url: null,
     output_count: 0,

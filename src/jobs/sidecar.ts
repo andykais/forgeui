@@ -19,6 +19,16 @@ export interface Sidecar {
    * than as `ui`.
    */
   origin?: SidecarOrigin | null;
+  /**
+   * Where this came from when this app did not make it
+   * (DESIGN-MODEL-IMPORT §5.4). Absent or null means the job pipeline wrote
+   * it, which is every sidecar written to date.
+   *
+   * Distinct from `origin`, which says who *asked* for a run this app
+   * performed. A SwarmUI image has a `source` and no `origin`; a generation
+   * an LLM asked for has an `origin` and no `source`.
+   */
+  source?: SidecarSource | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
   timing: SidecarTiming;
@@ -41,6 +51,20 @@ export interface SidecarOrigin {
   source: string | null;
   project: string | null;
   note: string | null;
+  [unknownField: string]: unknown;
+}
+
+/**
+ * §5.4. `kind` is an open string — `civitai`, `civitai-archive`, `swarmui`,
+ * `comfyui`, `file` — because the point is that the next importer adds a
+ * value rather than a schema. `label` is what the badge says, so the UI needs
+ * no table of kinds.
+ */
+export interface SidecarSource {
+  kind: string;
+  label: string;
+  url: string | null;
+  imported_at: string | null;
   [unknownField: string]: unknown;
 }
 
@@ -82,6 +106,7 @@ export interface SidecarInit {
   params: Record<string, unknown>;
   models?: SidecarModel[];
   origin?: SidecarOrigin | null;
+  source?: SidecarSource | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
   timing?: SidecarTiming;
@@ -108,6 +133,7 @@ export function buildSidecar(init: SidecarInit): Sidecar {
     params: init.params,
     models: init.models ?? [],
     origin: init.origin ?? null,
+    source: init.source ?? null,
     api_graph: init.api_graph,
     outputs: init.outputs,
     timing: init.timing ?? { total_ms: 0, nodes: {} },
@@ -191,6 +217,15 @@ export function parseSidecar(text: string, source = "sidecar"): Sidecar {
     const record = requireRecord(model, at);
     requireString(record.role, `${at}.role`);
     requireString(record.name, `${at}.name`);
+  }
+  // §5.4, and absent on every sidecar written before it existed — so a
+  // missing block is "this app made it" rather than an error. Only `kind`
+  // and `label` are required, because they are the two the badge needs and
+  // the rest of the block is open on purpose.
+  if (raw.source !== null && raw.source !== undefined) {
+    const block = requireRecord(raw.source, `${source}.source`);
+    requireString(block.kind, `${source}.source.kind`);
+    requireString(block.label, `${source}.source.label`);
   }
   if (raw.api_graph !== null) {
     requireRecord(raw.api_graph, `${source}.api_graph`);

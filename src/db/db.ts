@@ -205,6 +205,45 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 10,
+    name: "imported media provenance",
+    // DESIGN-MODEL-IMPORT §9. Where a sample or an output came from when this
+    // app did not make it (§5.4), what a model wants in a prompt (§5.5), and
+    // the index that makes re-running `forge models` free. All of it is in
+    // schema.sql too, so a fresh database gets it at version 1 and this does
+    // nothing there.
+    //
+    // Nothing is backfilled and nothing needs to be: NULL reads as "this app
+    // made it", which is true of every row that exists.
+    //
+    // `models.civitai_json` needs no statement here — it has been in
+    // schema.sql since version 1 and has simply never been written.
+    apply: (db) => {
+      const columnsOf = (table: string) =>
+        new Set(
+          db.prepare(`PRAGMA table_info(${table})`)
+            .values<[number, string]>()
+            .map(([, name]) => name),
+        );
+      for (const table of ["outputs", "samples"]) {
+        if (columnsOf(table).has("source_json")) continue;
+        db.exec(`ALTER TABLE ${table} ADD COLUMN source_json TEXT`);
+      }
+      if (!columnsOf("models").has("trigger_words_json")) {
+        db.exec("ALTER TABLE models ADD COLUMN trigger_words_json TEXT");
+      }
+      // The only statement here that can fail on an existing database, and
+      // only if two samples already share a model and a source URL. None can:
+      // `source_url` has been NULL on every sample ever written, because
+      // nothing has ever set it. Should that stop being true, this fails
+      // inside the migration's transaction and rolls back, which is right.
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS samples_source
+           ON samples(model_hash, source_url) WHERE source_url IS NOT NULL`,
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

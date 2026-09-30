@@ -14,7 +14,7 @@ import {
   type SidecarModelRef,
 } from "../db/queries.ts";
 import { promptText, toneText } from "../jobs/completion.ts";
-import type { Origin } from "../db/queries.ts";
+import type { MediaSource, Origin } from "../db/queries.ts";
 import { readPngSize } from "../jobs/png.ts";
 import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
 import { sha256Hex } from "../workflows/hash.ts";
@@ -38,6 +38,28 @@ function originOf(sidecar: Sidecar): Origin | null {
   return row.source === null && row.project === null && row.note === null
     ? null
     : row;
+}
+
+/**
+ * The sidecar's `source` block (DESIGN-MODEL-IMPORT §5.4), as the row holds
+ * it. Rebuilding this from the file is the whole reason the block is in the
+ * sidecar rather than only in a column: a `reindex` that dropped "this came
+ * from SwarmUI" would be a `reindex` that loses data.
+ */
+function sourceOf(sidecar: Sidecar): MediaSource | null {
+  const text = (value: unknown) => typeof value === "string" ? value : null;
+  const source = sidecar.source;
+  if (!source || typeof source !== "object") return null;
+  const kind = text(source.kind);
+  const label = text(source.label);
+  if (kind === null || label === null) return null;
+  return {
+    ...source,
+    kind,
+    label,
+    url: text(source.url),
+    imported_at: text(source.imported_at),
+  };
 }
 import type { ApiGraph, Manifest } from "../workflows/types.ts";
 
@@ -196,6 +218,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
         prompt: promptText(manifest, sidecar.params),
         tone: toneText(manifest, sidecar.params),
         origin: originOf(sidecar),
+        source: sourceOf(sidecar),
         // The note a person wrote about this frame, which is in the sidecar
         // precisely so that this pass brings it back (§6.2).
         notes: typeof output.notes === "string" && output.notes.length > 0

@@ -1,0 +1,116 @@
+{
+  "id": "765307161749456877",
+  "name": "FLUX",
+  "type": "CHECKPOINT",
+  "description": "<p>FLUX.1 [dev] is a 12 billion parameter rectified flow transformer capable of generating images from text descriptions. For more information, please read our <a target=\"_blank\" rel=\"ugc\" href=\"https://blackforestlabs.ai/announcing-black-forest-labs/\"><strong><u>blog post</u></strong></a>.</p><p></p><p><span>Key Features</span></p><ol><li><p>Cutting-edge output quality, second only to our state-o</p>",
+  "download_count": 1835241,
+  "favorite_count": 0,
+  "rating": 0,
+  "is_nsfw": false,
+  "username": "miaomiao",
+  "creator_id": "694618803287382241",
+  "creator_username": "694618803287382241",
+  "creator_name": "miaomiao",
+  "creator_url": "/tensorart/users/694618803287382241",
+  "created_at": "2024-08-10T04:47:27.000Z",
+  "updated_at": "2024-09-08T11:42:55.000Z",
+  "deleted_at": null,
+  "tags": [
+    "flux"
+  ],
+  "versions": [
+    {
+      "id": "765307161749456877",
+      "name": "Dev fp32",
+      "url": "/tensorart/models/765307161749456877/versions/765307161749456877"
+    }
+  ],
+  "version": {
+    "id": "765307161749456877",
+    "name": "Dev fp32",
+    "base_model": "FLUX.1",
+    "base_model_type": null,
+    "description": null,
+    "download_count": 1835241,
+    "favorite_count": 0,
+    "rating": 0,
+    "created_at": "2024-08-10T04:47:27.000Z",
+    "updated_at": "2024-09-08T11:42:55.000Z",
+    "deleted_at": null,
+    "files": [
+      {
+        "id": "765307161749456877",
+        "name": "flux_dev.safetensors",
+        "size_kb": 23245051.3203125,
+        "sha256": "4610115bb0c89560703c892c59ac2742fa821e60ef5871b33493ba544683abd7",
+        "deleted_at": null,
+        "mirrors": [
+          {
+            "filename": "flux1Dev_v10.safetensors",
+            "url": "https://civitai.com/api/download/models/690425",
+            "source": "civitai",
+            "model_id": "617609",
+            "model_version_id": "690425",
+            "deleted_at": "2025-04-24T17:42:03.780Z",
+            "is_gated": false,
+            "is_paid": false
+          },
+          {
+            "filename": "flux_dev_full_fp32.safetensors",
+            "url": "https://civitai.com/api/download/models/691639?type=Model&format=SafeTensor&size=full&fp=fp32",
+            "source": "civitai",
+            "model_id": "618692",
+            "model_version_id": "691639",
+            "deleted_at": null,
+            "is_gated": false,
+            "is_paid": false
+          },
+          {
+            "filename": "yange_v10.safetensors",
+            "url": "https://huggingface.co/wsj1995/Checkpoint/resolve/main/989171/1108157/yange_v10.safetensors",
+            "source": "huggingface",
+            "model_id": null,
+            "model_version_id": null,
+            "deleted_at": null,
+            "is_gated": false,
+            "is_paid": false
+          }
+        ]
+      }
+    ],
+    "images": [
+      {
+        "id": 1,
+        "url": "https://image.tensorartassets.com/model_showcase/0/626b892f-8793-ff1e-37ac-3bb7c2b9f164.jpeg",
+        "link": "https://image.tensorartassets.com/model_showcase/0/626b892f-8793-ff1e-37ac-3bb7c2b9f164.jpeg",
+        "type": "image"
+      },
+      {
+        "id": 2,
+        "url": "https://image.tensorartassets.com/model_showcase/0/e961c55b-f388-51a5-04af-d0665db86303.png",
+        "link": "https://image.tensorartassets.com/model_showcase/0/e961c55b-f388-51a5-04af-d0665db86303.png",
+        "type": "image"
+      }
+    ],
+    "trigger": [],
+    "allow_download": false,
+    "download_url": "https://tensor.art/models/765307161749456877",
+    "platform_url": "https://tensor.art/models/765307161749456877",
+    "civitai_model_id": 618692,
+    "civitai_model_version_id": null,
+    "url": "/tensorart/models/765307161749456877/versions/765307161749456877",
+    "mirrors": [
+      {
+        "platform": "seaart",
+        "url": "/seaart/models/5c4f26337a770760d2d6d2288d7e4698/versions/86f5b35dcf257ab74b9fa00a8bbf0da3",
+        "platform_url": "https://www.seaart.ai/models/detail/5c4f26337a770760d2d6d2288d7e4698?v=86f5b35dcf257ab74b9fa00a8bbf0da3",
+        "name": "FLUX",
+        "version_name": "Dev",
+        "id": "5c4f26337a770760d2d6d2288d7e4698",
+        "version_id": "86f5b35dcf257ab74b9fa00a8bbf0da3"
+      }
+    ]
+  },
+  "platform": "tensorart",
+  "platform_name": "TensorArt"
+}

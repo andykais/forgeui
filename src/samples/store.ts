@@ -9,6 +9,7 @@ import {
   getSample,
   insertSample,
   listSamples,
+  type MediaSource,
   normalizeModelHash,
   type OutputRow,
   type SampleRow,
@@ -91,8 +92,13 @@ export interface ImportSampleInput {
   modelHash: string;
   bytes: Uint8Array;
   filename: string;
-  /** Where it came from, when that is known; Civitai fills this in Phase 3. */
+  /** Where it came from, when that is known (DESIGN-MODEL-IMPORT §5.4). */
   sourceUrl?: string | null;
+  /**
+   * The provenance block the sidecar carries and the badge reads. Set by
+   * ingest; a file dropped on the model page has none.
+   */
+  source?: MediaSource | null;
   /** Unmapped generation data, stored as `raw` and never interpreted (§8.3). */
   raw?: unknown;
 }
@@ -168,6 +174,7 @@ export class SampleStore {
       }],
       api_graph: null,
       outputs: [output],
+      source: input.source ?? null,
       raw: input.raw ?? null,
     });
     return this.#record({
@@ -180,6 +187,7 @@ export class SampleStore {
       sidecar,
       params: null,
       sourceUrl: input.sourceUrl ?? null,
+      source: input.source ?? null,
     });
   }
 
@@ -236,6 +244,8 @@ export class SampleStore {
           sidecar: promoted,
           params: sidecar.params,
           sourceUrl: null,
+          // A promotion came out of this app; only an import has a source.
+          source: null,
         }),
       );
     }
@@ -266,6 +276,7 @@ export class SampleStore {
     sidecar: Sidecar;
     params: Record<string, unknown> | null;
     sourceUrl: string | null;
+    source: MediaSource | null;
   }): Promise<SampleView> {
     const sidecarName = `${input.id}.json`;
     await Deno.writeTextFile(
@@ -279,6 +290,7 @@ export class SampleStore {
       sidecar_path: `${input.relativeDir}/${sidecarName}`,
       kind: input.kind,
       source_url: input.sourceUrl,
+      source: input.source,
       params: input.params,
       created_at: this.#now(),
     };

@@ -30,8 +30,16 @@ export function maintenanceRoutes(ctx: AppContext): Route[] {
     {
       method: "POST",
       path: "/api/maintenance/rescan-models",
-      handler: async () => {
+      handler: async (_req, { url }) => {
         const result = await ctx.models.rescan();
+        // `?wait=1` answers only once everything the rescan started is done:
+        // the hashing it queued, and the import batches that apply after it.
+        // Without it an import for a model waits on hashing other files, and
+        // the caller reloads before the batch has landed. The model page
+        // asks for this; the Models page does not, since it shows progress.
+        if (url.searchParams.get("wait") === "1") {
+          await ctx.models.idle();
+        }
         return json({ ...result, progress: ctx.models.progress });
       },
     },

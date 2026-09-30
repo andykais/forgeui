@@ -41,6 +41,7 @@
     }
   ],
   "origin": null,
+  "source": null,
   "api_graph": {
     "3": {
       "class_type": "KSampler",
