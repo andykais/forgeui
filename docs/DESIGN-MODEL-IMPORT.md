@@ -1065,8 +1065,21 @@ raw = { format, fields, source }
 ```
 
 `fields` is a closed list — prompt, negative_prompt, seed, steps, cfg,
-sampler, scheduler, denoise, width, height, model, model_hash, loras[] — and
-anything outside it stays in `source` only. The sample's sidecar keeps
+sampler, scheduler, denoise, width, height, model, model_hash,
+model_version_id, clip_skip, loras[] — and anything outside it stays in
+`source` only. A LoRA is `{name, weight?, hash?, model_version_id?}`,
+because Civitai images name them three ways, depending on what made the
+picture: A1111's `resources` (file name, short hash, weight), the site's own
+generator's `civitaiResources` (version id, sometimes the version's name) and
+its `additionalResources` (AIR URNs, `urn:air:sd1:lora:civitai:580018@646924`).
+All three are read and merged on the version id; a `Model` given as an AIR
+URN yields the checkpoint's `model_version_id`.
+
+*Amended, built:* the API serves `raw` as `{format, fields}` on every sample
+view, read from the sidecar. `fields` is re-read from `source` when the
+format is one this build parses, so improving the parser improves every
+sample already imported — the blob is the record, `fields` only a reading of
+it. The blob itself is not served: it can be a whole ComfyUI graph. The sample's sidecar keeps
 `params: {}` and `workflow: null`, so "reusable" stays false and §8.3's rule
 holds by construction rather than by care.
 

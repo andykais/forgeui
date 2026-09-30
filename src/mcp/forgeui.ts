@@ -55,6 +55,8 @@ export interface SampleRow {
   params: Record<string, unknown> | null;
   source: { label: string; url: string | null } | null;
   reusable: boolean;
+  /** Civitai's `meta` or the file's own settings, normalised (§8.3). */
+  raw: { format: string; fields: Record<string, unknown> } | null;
   created_at: number;
 }
 

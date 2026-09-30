@@ -1,3 +1,4 @@
+import { readInfotext } from "../../media/infotext.ts";
 import { NotImplementedError, SampleError } from "../../samples/store.ts";
 import { BodyError, json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
@@ -56,10 +57,14 @@ export function sampleRoutes(ctx: AppContext): Route[] {
           throw new BodyError("expected a multipart upload");
         }
         const { bytes, filename } = await fileFrom(req);
+        // A picture that carries its own settings — A1111's infotext, a
+        // SwarmUI or ComfyUI PNG, one of ours — brings them along (§8.3).
+        const raw = readInfotext(bytes);
         const sample = await ctx.samples.import({
           modelHash: model.hash,
           bytes,
           filename,
+          raw: raw.format === "unknown" ? null : raw,
         });
         return json(sample, { status: 201 });
       },

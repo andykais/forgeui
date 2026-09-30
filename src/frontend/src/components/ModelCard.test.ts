@@ -152,6 +152,7 @@ function sample(overrides: Partial<Sample> = {}): Sample {
     created_at: 1_780_000_000_000,
     media_url: `/api/media/samples/${"a".repeat(64)}/01JSAMPLE.png`,
     reusable: false,
+    raw: null,
     ...overrides,
   };
 }

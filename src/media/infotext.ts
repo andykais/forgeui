@@ -40,7 +40,24 @@ export interface InfotextFields {
   height?: number;
   model?: string;
   model_hash?: string;
-  loras?: { name: string; weight?: number }[];
+  /** Civitai's id for the checkpoint's version, when the source named it. */
+  model_version_id?: number;
+  clip_skip?: number;
+  loras?: InfotextLora[];
+}
+
+/**
+ * One LoRA a picture was made with. Sources name them three different ways
+ * — A1111 by file name and a short hash, Civitai's own generator by version
+ * id alone, sometimes with the version's name — so everything but `name` is
+ * optional, and `name` is the best of whatever was given.
+ */
+export interface InfotextLora {
+  name: string;
+  weight?: number;
+  /** A1111's short hash; a prefix of nothing this app computes. */
+  hash?: string;
+  model_version_id?: number;
 }
 
 export interface Infotext {
@@ -97,6 +114,8 @@ export function parseA1111(text: string): Infotext {
   if (prompt) fields.prompt = prompt;
   if (negative) fields.negative_prompt = negative;
   assignSettings(fields, settings);
+  const loras = lorasInPrompt(prompt);
+  if (loras.length > 0) fields.loras = loras;
   return { format: "a1111-infotext", fields, source: text };
 }
 
@@ -153,6 +172,7 @@ const KNOWN_KEYS = new Set([
   "model",
   "model hash",
   "denoising strength",
+  "clip skip",
 ]);
 
 function assignSettings(
@@ -175,6 +195,7 @@ function assignSettings(
   set("cfg", num(settings["cfg scale"] ?? settings["cfg"]));
   set("seed", num(settings["seed"]));
   set("denoise", num(settings["denoising strength"] ?? settings["denoise"]));
+  set("clip_skip", num(settings["clip skip"]));
   set("sampler", settings["sampler"] || undefined);
   set("scheduler", settings["scheduler"] || undefined);
   set("model", settings["model"] || undefined);
@@ -237,22 +258,122 @@ export function parseCivitaiMeta(meta: Record<string, unknown>): Infotext {
     if (typeof model === "string") fields.model_hash = model;
   }
 
-  const resources = meta.resources;
-  if (Array.isArray(resources)) {
-    const loras: { name: string; weight?: number }[] = [];
-    for (const entry of resources) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const record = entry as Record<string, unknown>;
-      if (record.type !== "lora") continue;
-      const name = str(record.name);
-      if (name === undefined) continue;
-      const weight = num(record.weight);
-      loras.push(weight === undefined ? { name } : { name, weight });
+  set("clip_skip", num(meta.clipSkip ?? meta["Clip skip"]));
+
+  // Three ways of saying what else was loaded, depending on what made the
+  // picture: A1111's `resources` (file name, short hash, weight), Civitai's
+  // own generator's `civitaiResources` (version id, sometimes the version's
+  // name) and its `additionalResources` (AIR URNs). The same LoRA can appear
+  // in two of them, so they are merged on the version id where there is one.
+  const loras: InfotextLora[] = [];
+  const byVersion = new Map<number, InfotextLora>();
+  const addLora = (lora: InfotextLora) => {
+    const known = lora.model_version_id === undefined
+      ? undefined
+      : byVersion.get(lora.model_version_id);
+    if (known) {
+      // Keep the better name: a version's name beats a bare URN.
+      if (known.name.startsWith("urn:") && !lora.name.startsWith("urn:")) {
+        known.name = lora.name;
+      }
+      known.weight ??= lora.weight;
+      return;
     }
-    if (loras.length > 0) fields.loras = loras;
+    loras.push(lora);
+    if (lora.model_version_id !== undefined) {
+      byVersion.set(lora.model_version_id, lora);
+    }
+  };
+
+  for (const record of records(meta.resources)) {
+    const name = str(record.name);
+    if (name === undefined) continue;
+    if (record.type === "lora") {
+      const lora: InfotextLora = { name };
+      const weight = num(record.weight);
+      if (weight !== undefined) lora.weight = weight;
+      const hash = str(record.hash);
+      if (hash !== undefined) lora.hash = hash;
+      addLora(lora);
+    } else if (record.type === "model" && fields.model === undefined) {
+      fields.model = name;
+    }
   }
 
+  for (const record of records(meta.civitaiResources)) {
+    const versionId = num(record.modelVersionId);
+    const versionName = str(record.modelVersionName);
+    if (record.type === "checkpoint") {
+      if (versionId !== undefined) fields.model_version_id = versionId;
+      // A URN or nothing at all says less than the version's own name.
+      if (
+        versionName !== undefined &&
+        (fields.model === undefined || fields.model.startsWith("urn:"))
+      ) {
+        fields.model = versionName;
+      }
+    } else if (record.type === "lora" && versionId !== undefined) {
+      const lora: InfotextLora = {
+        name: versionName ?? `Civitai version ${versionId}`,
+        model_version_id: versionId,
+      };
+      const weight = num(record.weight);
+      if (weight !== undefined) lora.weight = weight;
+      addLora(lora);
+    }
+  }
+
+  for (const record of records(meta.additionalResources)) {
+    const name = str(record.name);
+    if (name === undefined || record.type !== "lora") continue;
+    const lora: InfotextLora = { name };
+    const weight = num(record.strength ?? record.weight);
+    if (weight !== undefined) lora.weight = weight;
+    const versionId = airVersionId(name);
+    if (versionId !== undefined) lora.model_version_id = versionId;
+    addLora(lora);
+  }
+  if (loras.length > 0) fields.loras = loras;
+
+  // `Model` is sometimes an AIR URN, which names the version exactly.
+  const air = fields.model === undefined
+    ? undefined
+    : airVersionId(fields.model);
+  if (air !== undefined) fields.model_version_id ??= air;
+
   return { format: "civitai-meta", fields, source: meta };
+}
+
+/** The objects in a list that may not be a list, or may hold anything. */
+function records(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is Record<string, unknown> =>
+    typeof entry === "object" && entry !== null
+  );
+}
+
+/**
+ * The version id in an AIR URN: `urn:air:sd1:lora:civitai:580018@646924`
+ * is model 580018, version 646924.
+ */
+function airVersionId(value: string): number | undefined {
+  const match = value.match(/^urn:air:[^:]+:[^:]+:civitai:\d+@(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * `<lora:name:0.8>` in an A1111 prompt, which is how that UI records the
+ * LoRAs it loaded — the settings line only has their hashes.
+ */
+function lorasInPrompt(prompt: string): InfotextLora[] {
+  const loras: InfotextLora[] = [];
+  for (const match of prompt.matchAll(/<lora:([^:>]+)(?::([^:>]+))?[^>]*>/g)) {
+    const lora: InfotextLora = { name: match[1]!.trim() };
+    const weight = match[2] === undefined ? NaN : Number(match[2]);
+    if (Number.isFinite(weight)) lora.weight = weight;
+    loras.push(lora);
+  }
+  return loras;
 }
 
 // ------------------------------------------------------------------- files

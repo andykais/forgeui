@@ -450,6 +450,38 @@ export interface Sample {
   media_url: string;
   /** Promoted from an output, so Reuse Parameters works on it (§8.3). */
   reusable: boolean;
+  /**
+   * What made it, when it came with that — Civitai's `meta` or the file's
+   * own settings, read-only (§8.3, DESIGN-MODEL-IMPORT §5.3).
+   */
+  raw: SampleRaw | null;
+}
+
+/** `src/media/infotext.ts`'s reading of a sample's generation data. */
+export interface SampleRaw {
+  format: string;
+  fields: {
+    prompt?: string;
+    negative_prompt?: string;
+    seed?: number;
+    steps?: number;
+    cfg?: number;
+    sampler?: string;
+    scheduler?: string;
+    denoise?: number;
+    width?: number;
+    height?: number;
+    model?: string;
+    model_hash?: string;
+    model_version_id?: number;
+    clip_skip?: number;
+    loras?: {
+      name: string;
+      weight?: number;
+      hash?: string;
+      model_version_id?: number;
+    }[];
+  };
 }
 
 /**

@@ -85,6 +85,15 @@ async function findModel(
     null;
 }
 
+/** An import's generation data minus the prompt, which is listed beside it. */
+function generationOf(sample: SampleRow): Record<string, unknown> | undefined {
+  if (!sample.raw) return undefined;
+  const { prompt: _listed, ...rest } = sample.raw.fields;
+  return Object.keys(rest).length > 0
+    ? { from: sample.raw.format, ...rest }
+    : undefined;
+}
+
 /** What a preview is sized to when the model does not say (§6.3). */
 const DEFAULT_PREVIEW_EDGE = 768;
 
@@ -297,7 +306,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "dropped in by the owner, or promoted from one of its outputs. Look " +
       "before choosing a LoRA or its strength: the samples say what it is " +
       "for far better than its name. Returns each sample's origin and, " +
-      "where it has one, the prompt that made it, followed by a small " +
+      "where the source recorded it, how it was made — prompt, negative, " +
+      "seed, steps, cfg, sampler, the checkpoint, and the LoRAs with their " +
+      "weights, which is the best guide to a LoRA's useful strength — " +
+      "followed by a small " +
       "preview of the first `limit` of them. Name the model as the listings " +
       "do (`name`), or by its hash.",
     inputSchema: z.object({
@@ -345,9 +357,16 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
             : sample.reusable
             ? "promoted from an output"
             : "dropped in by hand",
+          // What made it: the params of a promotion, or what the source said
+          // for an import — prompt, negative, seed, steps, cfg, sampler, the
+          // model and the LoRAs with their weights. The settings a sample was
+          // made with are the best evidence of what a LoRA wants.
           prompt: typeof sample.params?.prompt === "string"
             ? sample.params.prompt
+            : typeof sample.raw?.fields.prompt === "string"
+            ? sample.raw.fields.prompt
             : undefined,
+          generation: generationOf(sample),
         })),
       };
       const shown = samples.slice(0, limit ?? DEFAULT_SAMPLE_PREVIEWS);

@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import { withTestApp } from "../fixtures/app.ts";
 import { writeFakeSafetensors } from "../fixtures/models.ts";
 import { tinyPng } from "../fixtures/png.ts";
+import { withTextChunk } from "../../src/jobs/png.ts";
 import { parseSidecar } from "../../src/jobs/sidecar.ts";
 import type { ModelDetail } from "../../src/models/library.ts";
 import type { SampleView } from "../../src/samples/store.ts";
@@ -134,6 +135,41 @@ Deno.test("a dropped file becomes a sample with its own sidecar", async () => {
     assertEquals(model.samples.map((entry) => entry.id), [sample.id]);
     // …and the thumbnail is still unset: a sample is not chosen by arriving.
     assertEquals(model.thumb_path, null);
+  });
+});
+
+Deno.test("a dropped picture that carries its settings brings them along", async () => {
+  // An A1111 PNG, the commonest kind of file anyone drops on a LoRA's page:
+  // the settings are in the file, so they come with it, read-only (§8.3).
+  await withSamples(async ({ app, hashes }) => {
+    const hash = hashes.get(LORA)!;
+    const png = withTextChunk(
+      tinyPng({ width: 24, height: 16 }),
+      "parameters",
+      "a fox in snow <lora:film-grain-35mm:0.6>\nNegative prompt: blurry\n" +
+        "Steps: 24, Sampler: Euler a, CFG scale: 6, Seed: 42, Size: 24x16",
+    );
+    const response = await upload(
+      app,
+      hash,
+      new File([png as BlobPart], "fox.png", { type: "image/png" }),
+    );
+    assertEquals(response.status, 201);
+    const sample = await response.json() as SampleView;
+
+    assertEquals(sample.raw?.format, "a1111-infotext");
+    assertEquals(sample.raw?.fields.seed, 42);
+    assertEquals(sample.raw?.fields.cfg, 6);
+    assertEquals(sample.raw?.fields.negative_prompt, "blurry");
+    assertEquals(sample.raw?.fields.loras, [
+      { name: "film-grain-35mm", weight: 0.6 },
+    ]);
+    // Still nothing to reuse: raw is shown, never mapped onto params (§8.3).
+    assertEquals(sample.reusable, false);
+
+    // And the model page lists it the same way.
+    const detail = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(detail.samples[0]?.raw?.fields.steps, 24);
   });
 });
 

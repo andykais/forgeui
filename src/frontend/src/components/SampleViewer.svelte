@@ -6,6 +6,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import type { Sample } from "../types.ts";
   import MediaThumb from "./MediaThumb.svelte";
+  import GenerationPanel from "./GenerationPanel.svelte";
 
   /**
    * A model's samples at full size (§8.3), walked the way the outputs below
@@ -45,9 +46,11 @@
   let strip = $state<HTMLDivElement | undefined>(undefined);
 
   const index = $derived(samples.findIndex((sample) => sample.id === selected.id));
-  /** A promotion's prompt, which is the one thing worth reading off it. */
+  /** The prompt, from a promotion's params or an import's generation data. */
   const prompt = $derived(
-    typeof selected.params?.prompt === "string" ? selected.params.prompt : null,
+    typeof selected.params?.prompt === "string"
+      ? selected.params.prompt
+      : (selected.raw?.fields.prompt ?? null),
   );
 
   export function step(delta: number) {
@@ -85,83 +88,92 @@
   </div>
 {/if}
 
-<div class="sample-viewer">
-  <header>
-    <button class="back" onclick={onclose} title="Back to the model">
-      <ArrowLeft size={13} />
-      <span class="back-label">Back to model</span>
-      <span class="key mono">esc</span>
-    </button>
-    <span class="spacer"></span>
-    <div class="row nav">
-      <button
-        title="Previous sample"
-        aria-label="Previous sample"
-        disabled={index <= 0}
-        onclick={() => step(-1)}
-      >
+<div class="sample-viewer" class:with-generation={selected.raw !== null}>
+  <div class="main">
+    <header>
+      <button class="back" onclick={onclose} title="Back to the model">
         <ArrowLeft size={13} />
+        <span class="back-label">Back to model</span>
+        <span class="key mono">esc</span>
       </button>
-      <button
-        title="Next sample"
-        aria-label="Next sample"
-        disabled={index >= samples.length - 1}
-        onclick={() => step(1)}
-      >
-        <ArrowRight size={13} />
-      </button>
-    </div>
-    <span class="position mono">{index + 1} / {samples.length}</span>
-    <div class="row zoom">
-      <button class:active={fit} onclick={() => (fit = true)}>Fit</button>
-      <button class:active={!fit} onclick={() => (fit = false)}>1:1</button>
-    </div>
-  </header>
-
-  <div class="media" class:one-to-one={!fit}>
-    {#if selected.kind === "video"}
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video src={selected.media_url} controls autoplay loop></video>
-    {:else}
-      <img src={selected.media_url} alt={prompt ?? selected.id} />
-    {/if}
-  </div>
-
-  <!-- What the sample is, and what can be done with it. -->
-  <div class="about">
-    {#if selected.source}
-      <a
-        class="origin mono external"
-        href={selected.source.url ?? undefined}
-        target="_blank"
-        rel="noopener noreferrer nofollow"
-        title={`Imported from ${selected.source.label}`}
-      >
-        {selected.source.label} ↗
-      </a>
-    {:else}
-      <span class="origin mono dim">
-        {selected.reusable ? "promoted from an output" : "dropped file"}
-      </span>
-    {/if}
-    {#if selected.path === thumbPath}
-      <span class="badge accent">thumbnail</span>
-    {/if}
-    <span class="prompt" title={prompt ?? undefined}>{prompt ?? ""}</span>
-    <div class="row actions">
-      <button onclick={() => onthumb(selected)} disabled={selected.path === thumbPath}>
-        <Star size={13} /> Set as thumbnail
-      </button>
-      {#if selected.reusable}
-        <button onclick={() => onedit(selected)}>
-          <PencilLine size={13} /> Reuse parameters
+      <span class="spacer"></span>
+      <div class="row nav">
+        <button
+          title="Previous sample"
+          aria-label="Previous sample"
+          disabled={index <= 0}
+          onclick={() => step(-1)}
+        >
+          <ArrowLeft size={13} />
         </button>
+        <button
+          title="Next sample"
+          aria-label="Next sample"
+          disabled={index >= samples.length - 1}
+          onclick={() => step(1)}
+        >
+          <ArrowRight size={13} />
+        </button>
+      </div>
+      <span class="position mono">{index + 1} / {samples.length}</span>
+      <div class="row zoom">
+        <button class:active={fit} onclick={() => (fit = true)}>Fit</button>
+        <button class:active={!fit} onclick={() => (fit = false)}>1:1</button>
+      </div>
+    </header>
+
+    <div class="media" class:one-to-one={!fit}>
+      {#if selected.kind === "video"}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video src={selected.media_url} controls autoplay loop></video>
+      {:else}
+        <img src={selected.media_url} alt={prompt ?? selected.id} />
       {/if}
-      <button class="danger" onclick={() => ondelete(selected)}>
-        <Trash2 size={13} /> Delete
-      </button>
+    </div>
+
+    <!-- What the sample is, and what can be done with it. -->
+    <div class="about">
+      {#if selected.source}
+        <a
+          class="origin mono external"
+          href={selected.source.url ?? undefined}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          title={`Imported from ${selected.source.label}`}
+        >
+          {selected.source.label} ↗
+        </a>
+      {:else}
+        <span class="origin mono dim">
+          {selected.reusable ? "promoted from an output" : "dropped file"}
+        </span>
+      {/if}
+      {#if selected.path === thumbPath}
+        <span class="badge accent">thumbnail</span>
+      {/if}
+      <span class="prompt" title={prompt ?? undefined}>{prompt ?? ""}</span>
+      <div class="row actions">
+        <button onclick={() => onthumb(selected)} disabled={selected.path === thumbPath}>
+          <Star size={13} /> Set as thumbnail
+        </button>
+        {#if selected.reusable}
+          <button onclick={() => onedit(selected)}>
+            <PencilLine size={13} /> Reuse parameters
+          </button>
+        {/if}
+        <button class="danger" onclick={() => ondelete(selected)}>
+          <Trash2 size={13} /> Delete
+        </button>
+      </div>
     </div>
   </div>
+
+  {#if selected.raw}
+    <!-- What it was made with, beside it (§8.3). -->
+    <aside class="side scroll">
+      <GenerationPanel raw={selected.raw} sourceUrl={selected.source?.url ?? null} />
+    </aside>
+  {/if}
 
   <div class="strip scroll" bind:this={strip}>
     {#each samples as sample (sample.id)}
@@ -179,13 +191,40 @@
 </div>
 
 <style>
+  /*
+   * Media over the strip, and the generation data beside the media when
+   * there is any: the same places the output viewer's `columns` layout puts
+   * them, so a sample reads like a take does.
+   */
   .sample-viewer {
     flex: 1;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "main" "strip";
+    min-width: 0;
+    min-height: 0;
+    background: var(--canvas);
+  }
+
+  .sample-viewer.with-generation {
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-areas: "main side" "strip side";
+  }
+
+  .main {
+    grid-area: main;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    background: var(--canvas);
+  }
+
+  .side {
+    grid-area: side;
+    min-width: 0;
+    min-height: 0;
+    background: var(--panel);
+    padding: 10px;
   }
 
   header {
@@ -300,6 +339,7 @@
   }
 
   .strip {
+    grid-area: strip;
     display: flex;
     gap: 6px;
     padding: 8px 12px 10px;
@@ -345,10 +385,17 @@
     object-fit: contain;
   }
 
-  @media (max-width: 1100px) {
+  /* No room for a column beside the media: the panel goes under it. */
+  @media (max-width: 1100px), (max-aspect-ratio: 8 / 9) {
     .back-label,
     .key {
       display: none;
+    }
+
+    .sample-viewer.with-generation {
+      grid-template-columns: none;
+      grid-template-rows: minmax(0, 3fr) minmax(0, 2fr) auto;
+      grid-template-areas: "main" "side" "strip";
     }
   }
 </style>

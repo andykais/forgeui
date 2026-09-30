@@ -23,6 +23,12 @@ import {
   type SidecarOutput,
 } from "../jobs/sidecar.ts";
 import { mediaUrl } from "../outputs/store.ts";
+import {
+  type InfotextFields,
+  type InfotextFormat,
+  parseA1111,
+  parseCivitaiMeta,
+} from "../media/infotext.ts";
 
 /**
  * Samples (§8.3): media that shows what a model does, whether or not this app
@@ -43,13 +49,52 @@ export class SampleNotFoundError extends Error {
   }
 }
 
+/** `{format, fields, source}` as a sidecar stores it, or null. */
+function readRaw(value: unknown): SampleRaw | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { format, fields, source } = value as {
+    format?: unknown;
+    fields?: unknown;
+    source?: unknown;
+  };
+  if (typeof format !== "string" || format === "unknown") return null;
+  if (format === "civitai-meta" && typeof source === "object" && source) {
+    return {
+      format,
+      fields: parseCivitaiMeta(source as Record<string, unknown>).fields,
+    };
+  }
+  if (format === "a1111-infotext" && typeof source === "string") {
+    return { format, fields: parseA1111(source).fields };
+  }
+  return {
+    format: format as InfotextFormat,
+    fields: typeof fields === "object" && fields !== null
+      ? fields as InfotextFields
+      : {},
+  };
+}
+
 /** Civitai import arrives in Phase 3; the route says so rather than pretending. */
 export class NotImplementedError extends Error {
   override readonly name = "NotImplementedError";
 }
 
+/**
+ * A sample's generation data as the API hands it out (§8.3,
+ * DESIGN-MODEL-IMPORT §5.3): the format and the normalised fields. The
+ * untouched blob they were read from stays in the sidecar — it can be a whole
+ * ComfyUI graph, and nothing on screen reads it.
+ */
+export interface SampleRaw {
+  format: InfotextFormat;
+  fields: InfotextFields;
+}
+
 export interface SampleView extends SampleRow {
   media_url: string;
+  /** What made it, when the sample came with that; null otherwise. */
+  raw: SampleRaw | null;
   /**
    * True when the sample carries a generation to reuse — a promotion. A
    * dropped file has empty params and offers no Edit in Generate (§8.3).
@@ -107,6 +152,11 @@ export class SampleStore {
   #db: Database;
   #paths: DataPaths;
   #now: () => number;
+  /**
+   * `raw` by sample id. A sample's sidecar is written once and never edited,
+   * so what was read from it once is what it says for good.
+   */
+  #raws = new Map<string, SampleRaw | null>();
 
   constructor(options: {
     db: Database;
@@ -139,6 +189,7 @@ export class SampleStore {
     return {
       ...row,
       media_url: mediaUrl(row.path),
+      raw: this.#rawOf(row),
       reusable: row.params !== null && Object.keys(row.params).length > 0,
     };
   }
@@ -296,6 +347,28 @@ export class SampleStore {
     };
     insertSample(this.#db, row);
     return this.view(row);
+  }
+
+  /**
+   * The sidecar's `raw`, with its fields read again from the blob they came
+   * from when this build knows the format. A sample imported before the
+   * parser learned Civitai's `civitaiResources` then shows its LoRAs too,
+   * rather than whatever the parser of the day managed — the blob is the
+   * record, and `fields` only ever a reading of it.
+   */
+  #rawOf(row: SampleRow): SampleRaw | null {
+    if (this.#raws.has(row.id)) return this.#raws.get(row.id)!;
+    let raw: SampleRaw | null = null;
+    try {
+      const sidecar = JSON.parse(
+        Deno.readTextFileSync(join(this.#paths.root, row.sidecar_path)),
+      ) as { raw?: unknown };
+      raw = readRaw(sidecar.raw);
+    } catch {
+      // A sample whose sidecar is gone or unreadable still shows its picture.
+    }
+    this.#raws.set(row.id, raw);
+    return raw;
   }
 
   async #folder(

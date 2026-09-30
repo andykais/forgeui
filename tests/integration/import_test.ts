@@ -201,6 +201,65 @@ Deno.test("a batch is applied to its model and kept as history", async () => {
   });
 });
 
+Deno.test("an imported sample's generation data is on the API", async () => {
+  // Saved by `forge models` as the sidecar's `raw`; served from there. The
+  // fields are read again from the blob they came from, so a sample fetched
+  // before the parser learned `civitaiResources` shows its LoRAs anyway.
+  await withImports(async ({ app, hash }) => {
+    await writeBatch(app.paths.imports, hash, {
+      samples: [{
+        file: "samples/0001.png",
+        kind: "image",
+        source: {
+          kind: "civitai",
+          label: "Civitai",
+          url: "https://civitai.com/images/94080991",
+        },
+        raw: {
+          format: "civitai-meta",
+          // What an older parser made of it: the prompt, and no LoRAs.
+          fields: { prompt: "a hiker" },
+          source: {
+            prompt: "a hiker",
+            seed: 746810293,
+            steps: 25,
+            cfgScale: 7,
+            clipSkip: 2,
+            sampler: "DPM++ 2M Karras",
+            civitaiResources: [
+              {
+                type: "checkpoint",
+                modelVersionId: 128713,
+                modelVersionName: "8",
+              },
+              {
+                type: "lora",
+                weight: 0.8,
+                modelVersionId: 1558543,
+                modelVersionName: "Abstract Painting",
+              },
+            ],
+          },
+        },
+      }],
+    }, { "samples/0001.png": samplePng() });
+    await app.models.rescan();
+    await app.models.idle();
+
+    const [sample] = (await app.json<ModelDetail>(`/api/models/${hash}`))
+      .samples;
+    assertEquals(sample!.raw?.format, "civitai-meta");
+    assertEquals(sample!.raw?.fields.seed, 746810293);
+    assertEquals(sample!.raw?.fields.clip_skip, 2);
+    assertEquals(sample!.raw?.fields.model_version_id, 128713);
+    assertEquals(sample!.raw?.fields.loras, [
+      { name: "Abstract Painting", model_version_id: 1558543, weight: 0.8 },
+    ]);
+    // The untouched blob stays in the sidecar; the API hands out the reading.
+    assertEquals("source" in sample!.raw!, false);
+  });
+});
+
 Deno.test("the API serves the text, and the HTML only when asked", async () => {
   await withImports(async ({ app, hash }) => {
     await writeBatch(app.paths.imports, hash);

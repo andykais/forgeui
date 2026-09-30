@@ -804,6 +804,16 @@ way do not offer Edit in Generate; samples promoted from the app's own
 outputs carry a full sidecar and behave like any output. Mapping `raw` onto
 a workflow's params is a later phase.
 
+Where `raw` comes from: `forge models --download-samples` (Civitai's `meta`
+for each image, DESIGN-MODEL-IMPORT §5.3), and a file dropped on the model
+page whose own bytes carry settings (A1111 infotext, SwarmUI, ComfyUI, or one
+of this app's PNGs). The sample view on the API carries `raw: {format,
+fields}` — read from the sidecar, never from a column, so a sample imported
+before the parser improved is read with today's parser — and the sample
+viewer shows it beside the picture: prompt and negative with a copy button,
+the checkpoint and LoRAs (linked to their page here when the library has
+them, to Civitai otherwise), and the settings.
+
 ---
 
 ## 9. Input media (image / mask / video params)

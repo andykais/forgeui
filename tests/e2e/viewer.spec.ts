@@ -130,8 +130,11 @@ test("a sample opens at full size and ← / → walk the samples", async ({
 }) => {
   const lora = await theLora(request);
   await page.goto(`/models/${lora!.id}`);
-  const before = await page.getByRole("button", { name: /^Open sample/ })
-    .count();
+  // The strip's own count, once the page has loaded: counting the buttons
+  // straight after navigating raced the load and saw none.
+  const count = page.locator(".samples header .mono");
+  await expect(count).toBeVisible();
+  const before = Number(await count.innerText());
   await page.evaluate(async (id) => {
     for (const colour of ["#c33", "#3c3", "#33c"]) {
       const canvas = new OffscreenCanvas(320, 200);
