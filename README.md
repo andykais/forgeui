@@ -236,9 +236,13 @@ let the download land there and move it afterwards.
 
 `/workspace` is ForgeUI's data directory (`--data-dir`, §3): `config.yaml`,
 `app.db`, `workflows/user`, `outputs`, `samples`, and everything else the app
-owns — the container's `CMD` passes `--data-dir /workspace` explicitly. On first
-startup, if `/workspace/config.yaml` doesn't exist yet, ForgeUI writes a default
-one there — the same first-run behavior as running it bare-metal — so a fresh
+owns. The image sets it with `ENV FORGEUI_DATA_DIR=/workspace` rather than a
+flag, so every `forge` command in the container finds it —
+`podman exec forgeui forge models --url …` writes into the import folder the
+running app reads, with no `--data-dir` needed. A `--data-dir` passed to a
+command still wins over the variable. On first startup, if
+`/workspace/config.yaml` doesn't exist yet, ForgeUI writes a default one there —
+the same first-run behavior as running it bare-metal — so a fresh
 `forgeui-workspace` volume just works, and you can then hand-edit `config.yaml`
 in the volume (or use Settings) for anything beyond what the container's launch
 flags cover.

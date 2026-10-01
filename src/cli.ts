@@ -56,7 +56,10 @@ function passthrough(
 
 const serve = new Command()
   .description("Serve the UI and manage ComfyUI.")
-  .option("--data-dir <path:string>", "Data directory.")
+  .option(
+    "--data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .option("--host <host:string>", "Interface for the app's server.")
   .option("--port <port:number>", "Port for the app's server.")
   .option("--comfy-mode <mode:string>", "managed | local_url.")
@@ -71,7 +74,10 @@ const serve = new Command()
 
 const reindex = new Command()
   .description("Rebuild app.db from the sidecars on disk.")
-  .option("--data-dir <path:string>", "Data directory.")
+  .option(
+    "--data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .action(async (options) => {
     Deno.exit(await runServer(passthrough(options, ["reindex"])));
   });
@@ -87,7 +93,10 @@ const models = new Command()
     "Fetch model metadata, samples and weights into ForgeUI's import " +
       "folder, for the app to ingest on its next rescan.",
   )
-  .option("-d, --data-dir <path:string>", "Data directory.")
+  .option(
+    "-d, --data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .option(
     "--url <url:string>",
     "civitai.red, civitai.com or civitaiarchive.com link to a model, a " +

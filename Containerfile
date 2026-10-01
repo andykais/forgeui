@@ -120,11 +120,18 @@ ENV PATH="/app:$PATH"
 # ...); outputs always lives at <data-dir>/outputs, i.e. /workspace/outputs,
 # so it can be mounted on its own too (see the README) without needing a
 # separate flag for it. /models is the model library.
+#
+# Set as an environment variable rather than a flag in CMD, so every `forge`
+# command in the container agrees on it: `podman exec forgeui forge models …`
+# runs with no flags at all, and a `--data-dir` that only the server's CMD
+# carried sent it to ~/.forgeui inside the container — an import folder the
+# running app never looks at. `--data-dir` still wins where it is passed.
+ENV FORGEUI_DATA_DIR=/workspace
 VOLUME ["/workspace", "/models"]
 EXPOSE 7777
 
 ENTRYPOINT ["deno", "task", "start"]
-# --data-dir is the /workspace mount (config.yaml, app.db, outputs, ...);
+# The data dir is FORGEUI_DATA_DIR, above, so it is not repeated here.
 # --host 0.0.0.0 so the app is reachable from outside the container;
 # --comfy-path points at the ComfyUI baked into this image;
 # --models-dir wires up the /models layout the README describes. Every kind in
@@ -135,8 +142,7 @@ ENTRYPOINT ["deno", "task", "start"]
 # holds this list to that one.
 # These are per-run overrides (never written to config.yaml), so editing
 # config.yaml for anything else is still safe across restarts.
-CMD ["--data-dir", "/workspace", \
-     "--host", "0.0.0.0", \
+CMD ["--host", "0.0.0.0", \
      "--comfy-path", "/opt/ComfyUI", \
      "--models-dir", "checkpoints=/models/checkpoints", \
      "--models-dir", "Stable-Diffusion=/models/Stable-Diffusion", \

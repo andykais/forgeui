@@ -33,6 +33,33 @@ Deno.test("the Containerfile wires every model kind the app knows", async () => 
   }
 });
 
+/**
+ * The data dir is an environment variable in the image, not a flag in CMD:
+ * `podman exec forgeui forge models …` passes no flags, and with the path in
+ * CMD alone it wrote its batch to ~/.forgeui inside the container, where the
+ * running app never looks.
+ */
+Deno.test("every forge command in the container finds /workspace", async () => {
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const containerfile = await Deno.readTextFile(join(root, "Containerfile"));
+  assertEquals(
+    /^ENV FORGEUI_DATA_DIR=\/workspace$/m.test(containerfile),
+    true,
+    "the image does not set FORGEUI_DATA_DIR=/workspace",
+  );
+  assertEquals(
+    /VOLUME \[[^\]]*"\/workspace"/.test(containerfile),
+    true,
+    "/workspace is not a volume",
+  );
+  // One place says where the data is; a flag in CMD would be a second.
+  assertEquals(
+    containerfile.includes('"--data-dir"'),
+    false,
+    "CMD still passes --data-dir",
+  );
+});
+
 Deno.test("the README lists the same folders the Containerfile mounts", async () => {
   const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
   const readme = await Deno.readTextFile(join(root, "README.md"));
