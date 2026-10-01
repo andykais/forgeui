@@ -817,7 +817,10 @@
     gap: 10px;
     padding: 0 12px 16px;
     align-content: start;
-    align-items: start;
+    /* A card with a summary is two lines taller than one without; the row
+       is as tall as its tallest card, and the others fill it rather than
+       leaving a ragged edge under them. */
+    align-items: stretch;
   }
 
   .table-wrap {

@@ -257,6 +257,7 @@ Deno.test("the re-hash decision compares path, size and mtime", () => {
     mtime: 42,
     display_name: null,
     family: null,
+    summary: null,
     notes: null,
     tags: [],
     strength_min: null,

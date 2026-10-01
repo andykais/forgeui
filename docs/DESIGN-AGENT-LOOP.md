@@ -158,6 +158,8 @@ bindings; the protocol is identical either way.
 | `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
 | `list_checkpoints` | the diffusion class across every folder holding one, filterable by family | fast |
 | `list_loras` | LoRAs, filterable by family, each with its strength range (§8.1) | fast |
+| `set_model_summary` | writes a model's **summary** (DESIGN.md §8.1): one or two sentences, what it *is*; replaces | fast |
+| `set_model_notes` | writes a model's **notes** (§8.1): annotations, what was learned *using* it; read first, then add | fast |
 | `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first few | fast |
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
 | `get_output` | the sidecar: params, seed, models, timings, origin | fast |

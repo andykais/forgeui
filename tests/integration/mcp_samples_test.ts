@@ -279,3 +279,123 @@ Deno.test("get_model_samples carries the model's description too", async () => {
     assertEquals(listing.trigger_words, ["filmgrain"]);
   });
 });
+
+Deno.test("set_model_summary and set_model_notes write two different fields", async () => {
+  await withSamples(async (app, lora) => {
+    const summary = await callTool(app, "set_model_summary", {
+      model: lora.name,
+      text: "Fine 35mm grain for SDXL photographs.",
+    });
+    assert(!summary.isError, JSON.stringify(summary));
+    const afterSummary = JSON.parse(
+      (summary.content[0] as { text: string }).text,
+    );
+    assertEquals(afterSummary.summary, "Fine 35mm grain for SDXL photographs.");
+    assertEquals(afterSummary.notes, null);
+
+    // By hash works too, and the notes land in their own field.
+    const notes = await callTool(app, "set_model_notes", {
+      model: lora.hash!,
+      text: "0.6 is the sweet spot; above 0.9 it bleeds into faces.",
+    });
+    assert(!notes.isError, JSON.stringify(notes));
+
+    // Both are on the listing, beside the name.
+    const listing = JSON.parse(
+      ((await callTool(app, "list_loras", {})).content[0] as { text: string })
+        .text,
+    );
+    const entry = listing.models.find((model: { name: string }) =>
+      model.name.endsWith(LORA)
+    );
+    assertEquals(entry.summary, "Fine 35mm grain for SDXL photographs.");
+    assertEquals(
+      entry.notes,
+      "0.6 is the sweet spot; above 0.9 it bleeds into faces.",
+    );
+
+    // And on the page the owner reads, through the same route.
+    const row = await app.json<Row & { summary: string; notes: string }>(
+      `/api/models/${lora.hash}`,
+    );
+    assertEquals(row.summary, "Fine 35mm grain for SDXL photographs.");
+
+    // An empty string clears.
+    await callTool(app, "set_model_summary", { model: lora.name, text: "" });
+    const cleared = await app.json<{ summary: string | null }>(
+      `/api/models/${lora.hash}`,
+    );
+    assertEquals(cleared.summary, null);
+  });
+});
+
+Deno.test("a summary longer than two sentences is refused before it is sent", async () => {
+  await withSamples(async (app, lora) => {
+    const handler = await callToolRaw(app, "set_model_summary", {
+      model: lora.name,
+      text: "x".repeat(301),
+    });
+    // The schema says 300; the protocol refuses it as an invalid argument
+    // or a tool error, depending on the SDK — either way nothing is written.
+    assert(handler.refused, "a 301-character summary must not be accepted");
+    const row = await app.json<{ summary: string | null }>(
+      `/api/models/${lora.hash}`,
+    );
+    assertEquals(row.summary, null);
+  });
+});
+
+Deno.test("editing a model that does not exist names the listing tools", async () => {
+  await withSamples(async (app) => {
+    const result = await callTool(app, "set_model_notes", {
+      model: "no-such.safetensors",
+      text: "anything",
+    });
+    assert(result.isError);
+    assertStringIncludes(
+      (result.content[0] as { text: string }).text,
+      "list_loras",
+    );
+  });
+});
+
+/** A call whose answer may be a protocol error rather than a result. */
+async function callToolRaw(
+  app: TestApp,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ refused: boolean }> {
+  const handler = createMcpHandler(() =>
+    createBridgeServer({
+      forge: new ForgeUi({ url: app.url }),
+      llama: null,
+      freeVram: false,
+      progress: false,
+      defaultTimeoutMs: 30_000,
+    })
+  );
+  try {
+    const response = await handler.fetch(
+      new Request("http://bridge/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    const body = await response.text();
+    const data = body.split("\n").find((line) => line.startsWith("data:"));
+    if (!data) return { refused: true };
+    const message = JSON.parse(data.slice("data:".length));
+    return { refused: Boolean(message.error || message.result?.isError) };
+  } finally {
+    await handler.close();
+  }
+}

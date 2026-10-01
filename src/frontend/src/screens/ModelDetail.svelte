@@ -122,6 +122,7 @@
       ["family", a.family, b.family],
       ["trigger words", a.trigger_words, b.trigger_words],
       ["tags", a.tags, b.tags],
+      ["summary", a.summary, b.summary],
       ["notes", a.notes, b.notes],
       ["source", a.source, b.source],
       ["samples", a.samples.map((s) => s.id), b.samples.map((s) => s.id)],
@@ -139,6 +140,7 @@
 
   let nameDraft = $state("");
   let notesDraft = $state("");
+  let summaryDraft = $state("");
   /**
    * Where a tag leads: the Models screen, filtered to it, on the tab this
    * model is on. The screen is tabbed by class and falls back to diffusion,
@@ -198,6 +200,7 @@
       }
       nameDraft = detail.display_name;
       notesDraft = detail.notes ?? "";
+      summaryDraft = detail.summary ?? "";
       error = null;
       outputs = detail.hash
         ? (await api.outputs({ models: [detail.hash], limit: 60 })).outputs
@@ -246,6 +249,7 @@
       model = await api.patchModel(model.id, body);
       if ("display_name" in body) nameDraft = model.display_name;
       if ("notes" in body) notesDraft = model.notes ?? "";
+      if ("summary" in body) summaryDraft = model.summary ?? "";
       await app.refreshModels();
     } catch (cause) {
       // A 409 means the hasher has not got here yet, which the badge says.
@@ -253,6 +257,7 @@
       if (model) {
         nameDraft = model.display_name;
         notesDraft = model.notes ?? "";
+        summaryDraft = model.summary ?? "";
       }
     }
   }
@@ -261,6 +266,12 @@
     if (!model || hashing) return;
     if (nameDraft.trim() === model.display_name) return;
     void patch({ display_name: nameDraft.trim() });
+  }
+
+  function commitSummary() {
+    if (!model || hashing) return;
+    if (summaryDraft.trim() === (model.summary ?? "")) return;
+    void patch({ summary: summaryDraft.trim() });
   }
 
   function commitNotes() {
@@ -712,10 +723,34 @@
           {/if}
         </div>
 
+        <!--
+          Two fields that are easy to confuse, so each says what it is for
+          (§8.1): the summary is what the model is, read beside its name in
+          every listing; the notes are what was learned using it.
+        -->
+        <input
+          class="summary"
+          aria-label="Summary"
+          placeholder="Summary — one or two sentences: what this model is"
+          maxlength="300"
+          disabled={hashing}
+          value={summaryDraft}
+          oninput={(event) =>
+            (summaryDraft = (event.currentTarget as HTMLInputElement).value)}
+          onblur={commitSummary}
+          onkeydown={(event) => {
+            if (event.key === "Enter") (event.currentTarget as HTMLInputElement).blur();
+            if (event.key === "Escape") {
+              summaryDraft = model?.summary ?? "";
+              (event.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+        />
+
         <textarea
           class="notes"
           aria-label="Notes"
-          placeholder="Notes"
+          placeholder="Notes — what you have learned using it: strengths that work, what it breaks, what it pairs with"
           disabled={hashing}
           value={notesDraft}
           oninput={(event) =>
@@ -1016,6 +1051,20 @@
     color: var(--text);
   }
 
+
+  .summary {
+    background: var(--control);
+    border: 1px solid transparent;
+    border-radius: var(--radius-input);
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 8px;
+    max-width: 560px;
+  }
+
+  .summary:focus {
+    border-color: var(--edge);
+  }
 
   .notes {
     background: var(--control);

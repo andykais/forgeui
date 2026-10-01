@@ -283,6 +283,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "known; `descriptions: true` adds the author's Markdown description " +
       "and overview. Each carries `sample_count` (pictures of what it does, which " +
       "get_model_samples shows) and `output_count` (what it has made here). " +
+      "`summary` says what a model is and `notes` what was learned using " +
+      "it; set_model_summary and set_model_notes write them. " +
       "Pass the `name` back, not the display name.",
   });
 
@@ -301,6 +303,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "advice usually are. Also " +
       "`sample_count` and `output_count`: how many example pictures it " +
       "has (get_model_samples shows them) and how many outputs it has made. " +
+      "`summary` says what a model is and `notes` what was learned using " +
+      "it; set_model_summary and set_model_notes write them. " +
       "Pass the `name` back in a workflow's lora list, not the display name.",
     strengths: true,
   });
@@ -347,6 +351,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         display_name: row.display_name,
         sample_count: samples.length,
         output_count: row.output_count,
+        summary: row.summary ?? undefined,
+        notes: row.notes ?? undefined,
         trigger_words: row.trigger_words?.length
           ? row.trigger_words
           : undefined,
@@ -411,6 +417,45 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     } catch (cause) {
       return failure(cause);
     }
+  });
+
+  registerModelTextTool(server, forge, {
+    name: "set_model_summary",
+    field: "summary",
+    description:
+      "Write a checkpoint's or LoRA's SUMMARY: one or two sentences saying " +
+      "what the model IS — its style or subject, the base model it is for, " +
+      'what it is best at. e.g. "Painterly watercolour washes for SDXL; ' +
+      'strongest on landscapes, weak on faces." It is shown beside the ' +
+      "name in list_checkpoints and list_loras, on the Models screen, and " +
+      "is searched by their `q`, so it is how you and the owner find the " +
+      "right model later. At most 300 characters. It REPLACES the current " +
+      "summary; pass an empty string to clear it. Not for observations " +
+      "from using it — those are notes (set_model_notes). Write one from " +
+      "the model's description, its samples and what it actually did, " +
+      "rather than copying the author's marketing.",
+    text: z.string().max(300).describe(
+      "the whole new summary, one or two sentences; empty clears it",
+    ),
+  });
+
+  registerModelTextTool(server, forge, {
+    name: "set_model_notes",
+    field: "notes",
+    description:
+      "Write a checkpoint's or LoRA's NOTES: annotations — what has been " +
+      "learned by using it, for whoever uses it next, you included. " +
+      "Working strengths, what it breaks, what it pairs well or badly " +
+      'with, prompts that work, a CFG it needs. e.g. "Above 0.9 it bleeds ' +
+      "into faces. 0.6 with a low CFG is the sweet spot. Fights the " +
+      'film-grain LoRA." Not a description of what the model is — that ' +
+      "is the summary (set_model_summary). Notes REPLACE what is there and " +
+      "may hold a person's own words: read them first (list_loras or " +
+      "get_model_samples show them) and pass back the old text with yours " +
+      "added, unless asked to rewrite them. Empty clears them.",
+    text: z.string().max(20_000).describe(
+      "the whole new notes text, existing notes included; empty clears them",
+    ),
   });
 
   server.registerTool("search_gallery", {
@@ -733,6 +778,63 @@ function registerLibraryTool(
   });
 }
 
+interface ModelTextTool {
+  name: string;
+  field: "summary" | "notes";
+  description: string;
+  text: z.ZodString;
+}
+
+/**
+ * One of the two per-model text fields (DESIGN.md §8.1), written through
+ * `PATCH /api/models/:hash` exactly as the model page writes it. The answer
+ * is the field as stored next to the other one, so a model that has just
+ * written its summary sees the notes it should not have put there.
+ */
+function registerModelTextTool(
+  server: McpServer,
+  forge: ForgeUi,
+  tool: ModelTextTool,
+): void {
+  server.registerTool(tool.name, {
+    description: tool.description,
+    inputSchema: z.object({
+      model: z.string().describe(
+        "the `name` from list_checkpoints or list_loras, or the model's hash",
+      ),
+      text: tool.text,
+    }),
+  }, async ({ model, text: value }) => {
+    try {
+      const row = await findModel(forge, model);
+      if (!row) {
+        return failure(
+          `no model is named "${model}"; list_checkpoints and list_loras ` +
+            `give the names to use`,
+        );
+      }
+      if (row.hash === null) {
+        return failure(
+          `"${row.name}" is still being hashed, and a model is edited by its ` +
+            `hash; try again in a moment`,
+        );
+      }
+      const updated = await forge.patch(
+        `/api/models/${encodeURIComponent(row.hash)}`,
+        { [tool.field]: value.trim() === "" ? null : value },
+      ) as ModelRow;
+      return text({
+        model: updated.name,
+        display_name: updated.display_name,
+        summary: updated.summary ?? null,
+        notes: updated.notes ?? null,
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+}
+
 /** `GET /api/workflows/:id`, narrowed to the half a model can act on. */
 interface WorkflowDetail {
   id: string;
@@ -791,6 +893,8 @@ function entry(model: ModelRow, strengths: boolean, descriptions: boolean) {
     family: model.family,
     kind: model.kind,
     tags: model.tags.length > 0 ? model.tags : undefined,
+    // What it is (one or two sentences), then what was learned using it.
+    summary: model.summary ?? undefined,
     notes: model.notes ?? undefined,
     strength_min: strengths ? model.strength_min : undefined,
     strength_max: strengths ? model.strength_max : undefined,

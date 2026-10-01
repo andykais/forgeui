@@ -83,6 +83,11 @@ export interface ModelView {
   added_at: number | null;
   display_name: string;
   family: string;
+  /**
+   * One or two sentences saying what the model is (§8.1): shown beside its
+   * name in a listing. Not `notes`, which are what was learned using it.
+   */
+  summary: string | null;
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
@@ -707,6 +712,7 @@ export class ModelLibrary {
       // Unset, a display name falls back to the filename minus its extension.
       display_name: row?.display_name ?? basename(filename, extname(filename)),
       family,
+      summary: row?.summary ?? null,
       notes: row?.notes ?? null,
       tags: row?.tags ?? [],
       strength_min: row?.strength_min ?? DEFAULT_STRENGTH_MIN,
@@ -948,5 +954,8 @@ function matchesQuery(view: ModelView, q?: string): boolean {
   return view.display_name.toLowerCase().includes(needle) ||
     view.name.toLowerCase().includes(needle) ||
     view.filename.toLowerCase().includes(needle) ||
+    // What it is, in the owner's words: "watercolour" should find the LoRA
+    // whose summary says so, whatever its file is called.
+    (view.summary?.toLowerCase().includes(needle) ?? false) ||
     view.tags.some((tag) => tag.toLowerCase().includes(needle));
 }

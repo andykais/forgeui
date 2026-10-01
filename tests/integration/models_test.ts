@@ -460,6 +460,64 @@ Deno.test("a hashed model can be named, filed and tagged", async () => {
   });
 });
 
+Deno.test("a summary says what a model is, apart from its notes", async () => {
+  // §8.1: the summary is one or two sentences — what it is, read in every
+  // listing — and the notes are what was learned using it. One field each.
+  await withModels(async (app) => {
+    await scanAndHash(app);
+    const lora = await fixtureLora(app);
+
+    const patched = await app.json<ModelView>(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        summary: "  Fine 35mm grain for SDXL photographs; subtle by default.  ",
+      }),
+    });
+    assertEquals(
+      patched.summary,
+      "Fine 35mm grain for SDXL photographs; subtle by default.",
+    );
+    assertEquals(patched.notes, null, "the notes are a different field");
+
+    // Notes do not disturb it, and it survives a rescan.
+    await app.json(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes: "Bleeds into faces above 0.9" }),
+    });
+    await scanAndHash(app);
+    const again = await fixtureLora(app);
+    assertEquals(
+      again.summary,
+      "Fine 35mm grain for SDXL photographs; subtle by default.",
+    );
+    assertEquals(again.notes, "Bleeds into faces above 0.9");
+
+    // `q` finds a model by what its summary says it is.
+    const found = await models(app, "?kind=loras&q=photographs");
+    assertEquals(found.models.map((model) => model.filename), [
+      lora.filename,
+    ]);
+
+    // One or two sentences: a paragraph is refused, and says where it goes.
+    const long = await app.fetch(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ summary: "x".repeat(301) }),
+    });
+    assertEquals(long.status, 400);
+    assertStringIncludes(
+      (await long.json() as { error: { message: string } }).error.message,
+      "belong in notes",
+    );
+
+    // Blank clears it.
+    const cleared = await app.json<ModelView>(`/api/models/${lora.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ summary: "   " }),
+    });
+    assertEquals(cleared.summary, null);
+  });
+});
+
 Deno.test("one model can be re-read past the caches", async () => {
   await withModels(async (app, fixtures) => {
     // A LoRA whose keys actually say what it is.

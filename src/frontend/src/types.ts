@@ -364,6 +364,9 @@ export interface ModelEntry {
   mtime: number | null;
   /** When the file appeared here: what the newest-first sort reads (§8.1). */
   added_at: number | null;
+  /** One or two sentences: what this model is (§8.1). */
+  summary: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   tags: string[];
   /** The ends of this model's strength sliders; always a number (§8.1). */

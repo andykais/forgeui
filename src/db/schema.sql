@@ -48,7 +48,8 @@ CREATE TABLE models (
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT,              -- the normalised source record (DESIGN-MODEL-IMPORT §5.5); raw copy in models-meta/<hash>/
   trigger_words_json TEXT,        -- what this model wants in a prompt; NULL = nobody has told us (§5.5)
-  notes TEXT, tags_json TEXT,
+  notes TEXT, tags_json TEXT,     -- notes: annotations, what was learned using it (§8.1)
+  summary TEXT,                   -- one or two sentences: what this model is (§8.1)
   strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default (§8.1)
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex

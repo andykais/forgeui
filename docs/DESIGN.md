@@ -508,7 +508,9 @@ CREATE TABLE models (
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
-  civitai_json TEXT, notes TEXT, tags_json TEXT,
+  civitai_json TEXT, tags_json TEXT,
+  summary TEXT,                   -- one or two sentences: what this model is (§8.1)
+  notes TEXT,                     -- annotations: what was learned using it (§8.1)
   strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
@@ -706,7 +708,17 @@ same keyset cursor the gallery uses.
   with only one of the two is still not an empty plate. The setting is in
   `config.yaml` and on the Settings page, and it applies everywhere a model
   is pictured.
-- Each model has: thumbnail (as above), family, notes,
+- **Summary and notes are two different things.** The **summary** is one
+  or two sentences saying what the model *is* — "Painterly watercolour
+  washes for SDXL; strongest on landscapes" — short enough to read in a
+  listing, where it is shown beside the name, and capped at 300 characters
+  so it stays that way. The **notes** are annotations:
+  what was learned by using it — "above 0.9 it bleeds into faces; pair with
+  a low CFG" — open-ended and kept for whoever picks it up next. Both are
+  the owner's alone: an import never writes either, and both can be written
+  over the MCP bridge (`set_model_summary`, `set_model_notes`,
+  DESIGN-AGENT-LOOP §5.1) as well as on the model page.
+- Each model has: thumbnail (as above), family, summary, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
@@ -1594,7 +1606,7 @@ GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insens
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+PATCH /api/models/:hash                 display_name, family, summary, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/rescan           re-read this one file's header and hash, past both caches (§8.1); returns the model
 POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
 DELETE /api/samples/:id

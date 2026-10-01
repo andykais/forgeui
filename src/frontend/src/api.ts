@@ -245,6 +245,7 @@ export const api = {
     patch: {
       display_name?: string | null;
       family?: string | null;
+      summary?: string | null;
       notes?: string | null;
       tags?: string[];
       strength_min?: number | null;

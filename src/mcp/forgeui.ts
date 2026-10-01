@@ -32,6 +32,9 @@ export interface ModelRow {
   family: string;
   kind: string;
   tags: string[];
+  /** One or two sentences: what it is (DESIGN.md §8.1). */
+  summary?: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   strength_min: number;
   strength_max: number;
@@ -192,6 +195,13 @@ export class ForgeUi {
 
   get<T = unknown>(path: string): Promise<T> {
     return this.request(path) as Promise<T>;
+  }
+
+  patch(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   }
 
   post(path: string, body?: unknown): Promise<unknown> {

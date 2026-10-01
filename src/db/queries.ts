@@ -827,6 +827,9 @@ export interface ModelRow {
   mtime: number;
   display_name: string | null;
   family: string | null;
+  /** One or two sentences: what this model is (§8.1). */
+  summary: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
@@ -851,7 +854,7 @@ export interface ModelRow {
 const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
   notes, tags_json, thumb_path, strength_min, strength_max,
   trigger_words_json, civitai_json,
-  output_count, last_used_at, hidden, last_seen_at`;
+  output_count, last_used_at, hidden, last_seen_at, summary`;
 
 type ModelRecord = [
   string,
@@ -872,6 +875,7 @@ type ModelRecord = [
   number | null,
   number,
   number,
+  string | null,
 ];
 
 function toModel(record: ModelRecord): ModelRow {
@@ -894,6 +898,7 @@ function toModel(record: ModelRecord): ModelRow {
     last_used_at: record[15],
     hidden: record[16] !== 0,
     last_seen_at: record[17],
+    summary: record[18],
   };
 }
 
@@ -1032,6 +1037,7 @@ export function markModelSeen(db: Database, hash: string, at: number): void {
 export interface ModelMetaPatch {
   display_name?: string | null;
   family?: string | null;
+  summary?: string | null;
   notes?: string | null;
   tags?: string[];
   thumb_path?: string | null;
@@ -1059,6 +1065,10 @@ export function updateModelMeta(
   if (patch.family !== undefined) {
     sets.push("family = ?");
     values.push(patch.family);
+  }
+  if (patch.summary !== undefined) {
+    sets.push("summary = ?");
+    values.push(patch.summary);
   }
   if (patch.notes !== undefined) {
     sets.push("notes = ?");

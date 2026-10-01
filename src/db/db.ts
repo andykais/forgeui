@@ -244,6 +244,23 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 11,
+    name: "model summary",
+    // DESIGN.md §8.1: one or two sentences saying what a model is, beside
+    // `notes`, which say what was learned using it. In schema.sql too, so
+    // this does nothing on a fresh database.
+    apply: (db) => {
+      const columns = new Set(
+        db.prepare("PRAGMA table_info(models)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!columns.has("summary")) {
+        db.exec("ALTER TABLE models ADD COLUMN summary TEXT");
+      }
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =
