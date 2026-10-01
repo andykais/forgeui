@@ -179,3 +179,103 @@ Deno.test("get_model_samples names the tools that list models when it cannot fin
     );
   });
 });
+
+/**
+ * What `forge models` brought back about the LoRA, as an ingested batch: the
+ * author's two write-ups, already Markdown (DESIGN-MODEL-IMPORT §5.5).
+ */
+async function importDescriptions(app: TestApp, lora: Row): Promise<void> {
+  const dir = join(app.paths.imports, "fetched", "success", lora.hash!);
+  await Deno.mkdir(dir, { recursive: true });
+  const source = {
+    kind: "civitai",
+    label: "Civitai",
+    url: "https://civitai.com/models/82098?modelVersionId=87153",
+    model_id: 82098,
+    model_version_id: 87153,
+    fetched_at: "2026-10-01T10:00:00Z",
+  };
+  await Deno.writeTextFile(
+    join(dir, "model.json"),
+    JSON.stringify({
+      format: 1,
+      forgecli_version: "0.1.0",
+      created_at: "2026-10-01T10:00:00Z",
+      model: {
+        sha256: lora.hash,
+        filename: LORA,
+        kind: "loras",
+        display_name: "Film Grain 35mm",
+        family: "sdxl",
+        tags: [],
+        trigger_words: ["filmgrain"],
+      },
+      source,
+      civitai: {
+        format: 1,
+        source,
+        creator: null,
+        model: {
+          name: "Film Grain 35mm",
+          type: "LORA",
+          tags: [],
+          description_html: "<h2>Overview</h2><p>Grain like Portra 400.</p>",
+          description_text: "## Overview\n\nGrain like **Portra 400**.",
+        },
+        version: {
+          name: "v1",
+          base_model: "SDXL 1.0",
+          description_html: "<p>Use 0.6–0.8.</p>",
+          description_text: "Use **0.6–0.8**; trigger with `filmgrain`.",
+        },
+        trigger_words: ["filmgrain"],
+      },
+      samples: [],
+    }),
+  );
+  await app.models.rescan();
+  await app.models.idle();
+}
+
+Deno.test("the LoRA listing says there is a description, and gives it when asked", async () => {
+  await withSamples(async (app, lora) => {
+    await importDescriptions(app, lora);
+    const find = (result: { content: Block[] }) =>
+      JSON.parse((result.content[0] as { text: string }).text).models.find(
+        (model: { name: string }) => model.name.endsWith(LORA),
+      );
+
+    // By default, the short facts — and a hint that there is more.
+    const brief = find(await callTool(app, "list_loras", {}));
+    assertEquals(brief.trigger_words, ["filmgrain"]);
+    assertEquals(brief.base_model, "SDXL 1.0");
+    assertEquals(brief.has_description, true);
+    assertEquals(brief.description, undefined);
+
+    // Asked for, the Markdown as the model page shows it: the version's
+    // notes as `description`, the model's page as `overview`.
+    const full = find(
+      await callTool(app, "list_loras", { descriptions: true }),
+    );
+    assertEquals(
+      full.description,
+      "Use **0.6–0.8**; trigger with `filmgrain`.",
+    );
+    assertEquals(full.overview, "## Overview\n\nGrain like **Portra 400**.");
+    assertEquals(full.has_description, undefined);
+  });
+});
+
+Deno.test("get_model_samples carries the model's description too", async () => {
+  await withSamples(async (app, lora) => {
+    await importDescriptions(app, lora);
+    const result = await callTool(app, "get_model_samples", {
+      model: lora.name,
+      limit: 0,
+    });
+    const listing = JSON.parse((result.content[0] as { text: string }).text);
+    assertStringIncludes(listing.description, "0.6–0.8");
+    assertStringIncludes(listing.overview, "Portra 400");
+    assertEquals(listing.trigger_words, ["filmgrain"]);
+  });
+});

@@ -279,7 +279,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "Checkpoints — the base models a workflow generates with, across every " +
       "folder that holds one. Filter by family to see only the ones a " +
       "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
-      "else. Each carries `sample_count` (pictures of what it does, which " +
+      "else. Each carries its trigger words and base model where they are " +
+      "known; `descriptions: true` adds the author's Markdown description " +
+      "and overview. Each carries `sample_count` (pictures of what it does, which " +
       "get_model_samples shows) and `output_count` (what it has made here). " +
       "Pass the `name` back, not the display name.",
   });
@@ -293,7 +295,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "model does nothing for another, and mixing families is the usual " +
       "cause of a result that ignores the prompt. Each one carries the " +
       "strength range its owner set, which is the range worth exploring, " +
-      "and `sample_count` and `output_count`: how many example pictures it " +
+      "its trigger words — the words a prompt needs for it to do anything — " +
+      "and with `descriptions: true` the author's Markdown description and " +
+      "overview, which is where the recommended strength and prompting " +
+      "advice usually are. Also " +
+      "`sample_count` and `output_count`: how many example pictures it " +
       "has (get_model_samples shows them) and how many outputs it has made. " +
       "Pass the `name` back in a workflow's lora list, not the display name.",
     strengths: true,
@@ -341,6 +347,18 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         display_name: row.display_name,
         sample_count: samples.length,
         output_count: row.output_count,
+        trigger_words: row.trigger_words?.length
+          ? row.trigger_words
+          : undefined,
+        // One model, so its whole write-up: the Markdown the model page
+        // shows under Description and Overview.
+        description: row.source?.version?.description_text?.trim() ||
+          undefined,
+        overview: row.source?.model?.description_text?.trim() &&
+            row.source.model.description_text.trim() !==
+              row.source?.version?.description_text?.trim()
+          ? row.source.model.description_text.trim()
+          : undefined,
         note: samples.length === 0
           ? row.hash === null
             ? "this model is still being hashed; samples belong to a hash"
@@ -667,8 +685,14 @@ function registerLibraryTool(
       ),
       q: z.string().optional().describe("substring of the name or a tag"),
       tags: z.string().optional().describe("comma-separated; all must match"),
+      descriptions: z.boolean().optional().describe(
+        "include each model's full Markdown `description` (its version's " +
+          "notes) and `overview` (the model's page) as its author wrote " +
+          "them — how to prompt it, what strength, what it is for. Long: " +
+          "narrow with q or family first",
+      ),
     }),
-  }, async ({ family, q, tags }) => {
+  }, async ({ family, q, tags, descriptions }) => {
     try {
       // The family is filtered here rather than by the server, so that an
       // answer of "none" can carry the families this class *does* have. A
@@ -699,7 +723,9 @@ function registerLibraryTool(
         // a page of it is worse than useless here: the model cannot tell a
         // truncated list from the whole shelf, so it picks from the first
         // sixty and never learns the rest exist.
-        models: matched.map((model) => entry(model, tool.strengths ?? false)),
+        models: matched.map((model) =>
+          entry(model, tool.strengths ?? false, descriptions ?? false)
+        ),
       });
     } catch (cause) {
       return failure(cause);
@@ -755,7 +781,10 @@ function supplyHint(param: ManifestParam): string | undefined {
 }
 
 /** What a picker shows: enough to choose with, and nothing the screen needs. */
-function entry(model: ModelRow, strengths: boolean) {
+function entry(model: ModelRow, strengths: boolean, descriptions: boolean) {
+  const source = model.source ?? null;
+  const description = source?.version?.description_text?.trim() || undefined;
+  const overview = source?.model?.description_text?.trim() || undefined;
   return {
     name: model.name,
     display_name: model.display_name,
@@ -771,6 +800,22 @@ function entry(model: ModelRow, strengths: boolean) {
     // with its name finds the second.
     sample_count: model.sample_count ?? 0,
     output_count: model.output_count,
+    // Short, and what decides whether a LoRA does anything at all.
+    trigger_words: model.trigger_words?.length
+      ? model.trigger_words
+      : undefined,
+    base_model: source?.version?.base_model ?? undefined,
+    source_url: source?.source?.url ?? undefined,
+    // The Markdown the model page shows under Description and Overview —
+    // the same two names. Each is kilobytes, so only when asked; without
+    // asking, `has_description` says whether asking would get anything.
+    ...(descriptions
+      ? {
+        description,
+        // Authors often paste the same text in both; once is enough.
+        overview: overview !== description ? overview : undefined,
+      }
+      : { has_description: description || overview ? true : undefined }),
   };
 }
 

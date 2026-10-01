@@ -177,7 +177,14 @@ rather than the API's rows — `name` (what a param binds to; a display name
 passed to `generate` reaches ComfyUI and fails there), the display name, the
 family, the kind, tags, notes, the LoRA's strength range, and two counts —
 `sample_count`, pictures of what it does that `get_model_samples` will show,
-and `output_count`, what it has made here — because the
+and `output_count`, what it has made here — plus, where `forge models` has
+fetched them, the trigger words and base model. The author's two write-ups,
+the Markdown the model page shows as **Description** (the version's notes)
+and **Overview** (the model's page), come back with `descriptions: true`
+and on `get_model_samples`, which is about one model anyway. They are where
+the recommended strength and the prompting advice usually are, and they are
+kilobytes each, so a listing of the whole shelf leaves them out and says
+`has_description` instead. All of this because the
 Models screen needs two dozen fields per model, this needs six, and the
 difference is the whole context window when a library holds three hundred
 LoRAs. Both also name the families the library knows, so a filter that

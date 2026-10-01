@@ -39,6 +39,21 @@ export interface ModelRow {
   sample_count: number;
   /** False once the file is gone; the row survives for its outputs (§8.1). */
   present: boolean;
+  /** What it wants in a prompt (DESIGN-MODEL-IMPORT §5.5). */
+  trigger_words?: string[];
+  /**
+   * The source record `forge models` brought back (§5.5), HTML stripped:
+   * both descriptions are Markdown by the time they get here.
+   */
+  source?: {
+    source?: { label?: string; url?: string | null } | null;
+    model?: { name?: string | null; description_text?: string | null };
+    version?: {
+      name?: string | null;
+      base_model?: string | null;
+      description_text?: string | null;
+    };
+  } | null;
 }
 
 export interface ModelListing {
