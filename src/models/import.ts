@@ -200,6 +200,9 @@ export class ImportInbox {
    */
   async apply(): Promise<IngestCounts> {
     const counts = emptyCounts();
+    // A sample from before samples were hashed must be hashed before a batch
+    // is checked against it, or its twin would get in (§8.3).
+    await this.#samples?.backfillContentHashes();
     const waiting: {
       hash: string;
       name: string;
@@ -423,6 +426,7 @@ export class ImportInbox {
     // first is still imported first and so has the lowest id, which is what
     // "its first sample" reads for the thumbnail.
     const base = this.#now();
+    const written = new Set<string>();
     for (const [index, entry] of (batch.samples ?? []).entries()) {
       const source = toMediaSource(entry.source, this.#now());
       const url = source?.url ?? null;
@@ -448,6 +452,15 @@ export class ImportInbox {
         );
         continue;
       }
+      // The same file under another link — reposted, or listed twice — is
+      // still one sample (§8.3): skipped, or replaced like a link would be.
+      // Never one this batch has just written: that would only swap a
+      // batch's own copies.
+      const same = await this.#samples.duplicateOf(hash, bytes);
+      if (same !== null && !replaced.includes(same.id)) {
+        if (batch.overwrite_samples !== true || written.has(same.id)) continue;
+        replaced.push(same.id);
+      }
       // Removed only once the new bytes are in hand. A thumbnail that was the
       // old copy follows it to the new one rather than falling back.
       const thumb = getModel(this.#db, hash)?.thumb_path ?? null;
@@ -464,6 +477,7 @@ export class ImportInbox {
         raw: entry.raw ?? null,
         createdAt: base - index,
       });
+      written.add(created.id);
       if (wasThumb) {
         updateModelMeta(this.#db, hash, { thumb_path: created.path });
       }

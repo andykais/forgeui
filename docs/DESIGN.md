@@ -561,9 +561,13 @@ CREATE TABLE samples (
   model_hash TEXT NOT NULL,
   path TEXT NOT NULL UNIQUE, sidecar_path TEXT NOT NULL,
   kind TEXT NOT NULL, source_url TEXT,
-  params_json TEXT, created_at INTEGER NOT NULL
+  params_json TEXT, created_at INTEGER NOT NULL,
+  sha256 TEXT                     -- of the file; NULL until hashed (§8.3)
 );
 CREATE INDEX samples_model ON samples(model_hash);
+-- The same bytes are one sample of a model, however they arrived (§8.3).
+CREATE UNIQUE INDEX samples_content ON samples(model_hash, sha256)
+  WHERE sha256 IS NOT NULL;
 
 CREATE TABLE node_timings (       -- for progress estimation
   workflow_hash TEXT NOT NULL, node_id TEXT NOT NULL,
@@ -826,6 +830,19 @@ Import paths:
 - "Promote to sample" on any output: the models popover (§11.3) lists the
   models that output used, checkpoint then LoRAs, multi-select; one sample
   is created per checked model (hardlink + sidecar copy).
+
+**One file, one sample** (amended). A sample's file is hashed (sha256) when it
+is written, and a model never has two samples of the same bytes, whichever
+way they arrived: an imported batch listing an image the model already has —
+under the same link or another one, in this batch or an earlier — skips it
+(or, told to overwrite samples, replaces it; DESIGN-MODEL-IMPORT §7.2); a file
+dropped again answers `200` with the sample it already is; promoting an
+output again gives back the samples it already made. Different models may
+each have the same picture. Samples written before this (migration 12) are
+hashed in the background at boot and before each ingest; two that turn out to
+be the same file of one model are merged into the earlier, and a thumbnail
+that was the later moves to it. The checksum is derived from the file, so it
+is not in the sidecar, and it is not on the API.
 
 Imported generation data (A1111-style infotext or Civitai `meta`) is **not
 mapped in v1**. It is parsed only enough to be stored as `raw` in the sample's
@@ -1632,7 +1649,7 @@ GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insens
 GET  /api/models/:hash
 PATCH /api/models/:hash                 display_name, family, summary, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/rescan           re-read this one file's header and hash, past both caches (§8.1); returns the model
-POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
+POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only; 200 with the existing sample for a file the model already has (§8.3)
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}

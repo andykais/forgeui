@@ -38,8 +38,9 @@ async function modelFixtures(): Promise<Fixtures> {
   };
 }
 
-function samplePng(): Uint8Array {
-  return tinyPng({ width: 12, height: 8, color: [0x22, 0x88, 0xcc] });
+/** A distinct `n` is a distinct file: the same bytes are one sample (§8.3). */
+function samplePng(n = 0xcc): Uint8Array {
+  return tinyPng({ width: 12, height: 8, color: [0x22, 0x88, n] });
 }
 
 /** A batch as `forge models` would leave it, minus the fetching. */
@@ -333,7 +334,7 @@ Deno.test("a batch's samples keep the batch's order", async () => {
         })),
       },
       Object.fromEntries(
-        names.map((name) => [`samples/${name}.png`, samplePng()]),
+        names.map((name, i) => [`samples/${name}.png`, samplePng(i)]),
       ),
     );
     await app.models.rescan();
@@ -363,8 +364,8 @@ Deno.test("a batch told to overwrite samples replaces the ones from the same lin
     });
     const ingest = async (overrides: Partial<ImportBatch>) => {
       await writeBatch(app.paths.imports, hash, overrides, {
-        "samples/a.png": samplePng(),
-        "samples/b.png": samplePng(),
+        "samples/a.png": samplePng(1),
+        "samples/b.png": samplePng(2),
       });
       await app.models.rescan();
       await app.models.idle();
@@ -403,6 +404,57 @@ Deno.test("a batch told to overwrite samples replaces the ones from the same lin
       1,
     );
     assertEquals(replaced.thumb_path, newB.path);
+  });
+});
+
+Deno.test("the same file under another link, imported later, is not a second sample", async () => {
+  // Civitai lists one image under two ids now and then, and a model's page
+  // and its gallery overlap: two links, one file, one sample (§8.3).
+  await withImports(async ({ app, hash }) => {
+    const entry = (file: string, url: string, seed: number) => ({
+      file,
+      kind: "image",
+      source: { kind: "civitai", label: "Civitai", url },
+      raw: { format: "civitai-meta", source: { seed } },
+    });
+    const ingest = async (overrides: Partial<ImportBatch>) => {
+      await writeBatch(app.paths.imports, hash, overrides, {
+        "samples/0001.png": samplePng(1),
+        "samples/0002.png": samplePng(1),
+      });
+      await app.models.rescan();
+      await app.models.idle();
+      return (await app.json<ModelDetail>(`/api/models/${hash}`)).samples;
+    };
+
+    // Twice in one batch: once.
+    let samples = await ingest({
+      samples: [
+        entry("samples/0001.png", "https://civitai.red/images/1", 1),
+        entry("samples/0002.png", "https://civitai.red/images/2", 2),
+      ],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/1",
+    ]);
+
+    // Again later, under a third link: still once, and still the first.
+    samples = await ingest({
+      samples: [entry("samples/0001.png", "https://civitai.red/images/3", 3)],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/1",
+    ]);
+
+    // Told to overwrite samples, the newer copy takes the old one's place.
+    samples = await ingest({
+      overwrite_samples: true,
+      samples: [entry("samples/0001.png", "https://civitai.red/images/4", 4)],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/4",
+    ]);
+    assertEquals(samples[0]?.raw?.fields.seed, 4);
   });
 });
 
@@ -590,8 +642,8 @@ Deno.test("rescan-models says what it imported, for the toast", async () => {
     await writeBatch(app.paths.imports, hash, {
       samples: [sample(1), sample(2)],
     }, {
-      "samples/0001.png": samplePng(),
-      "samples/0002.png": samplePng(),
+      "samples/0001.png": samplePng(1),
+      "samples/0002.png": samplePng(2),
     });
     // A model this library has never seen: it waits, and is not counted.
     const stranger = "b".repeat(64);

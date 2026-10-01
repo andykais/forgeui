@@ -1215,11 +1215,20 @@ function toSample(record: SampleRecord): SampleRow {
   };
 }
 
-export function insertSample(db: Database, sample: SampleRow): void {
+/**
+ * `sha256` is of the file, and kept out of `SampleRow`: it is how the store
+ * tells one sample from another, not something the API shows (§8.3).
+ */
+export function insertSample(
+  db: Database,
+  sample: SampleRow,
+  sha256: string | null = null,
+): void {
   db.prepare(
     `INSERT INTO samples (id, model_hash, path, sidecar_path, kind,
-                          source_url, source_json, params_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          source_url, source_json, params_json, created_at,
+                          sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     sample.id,
     sample.model_hash,
@@ -1230,7 +1239,40 @@ export function insertSample(db: Database, sample: SampleRow): void {
     sample.source === null ? null : JSON.stringify(sample.source),
     sample.params === null ? null : JSON.stringify(sample.params),
     sample.created_at,
+    sha256,
   );
+}
+
+/** The model's sample with exactly these bytes, if it has one (§8.3). */
+export function sampleIdByContent(
+  db: Database,
+  modelHash: string,
+  sha256: string,
+): string | null {
+  return db.prepare(
+    `SELECT id FROM samples WHERE model_hash = ? AND sha256 = ?`,
+  ).value<[string]>(modelHash, sha256)?.[0] ?? null;
+}
+
+/** Samples written before their files were hashed, oldest first. */
+export function samplesWithoutSha256(
+  db: Database,
+): { id: string; model_hash: string; path: string }[] {
+  return db.prepare(
+    `SELECT id, model_hash, path FROM samples WHERE sha256 IS NULL ORDER BY id`,
+  ).values<[string, string, string]>().map(([id, model_hash, path]) => ({
+    id,
+    model_hash,
+    path,
+  }));
+}
+
+export function setSampleSha256(
+  db: Database,
+  id: string,
+  sha256: string,
+): void {
+  db.prepare(`UPDATE samples SET sha256 = ? WHERE id = ?`).run(sha256, id);
 }
 
 /**

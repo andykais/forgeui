@@ -173,6 +173,76 @@ Deno.test("a dropped picture that carries its settings brings them along", async
   });
 });
 
+Deno.test("the same file dropped twice is one sample", async () => {
+  await withSamples(async ({ app, hashes }) => {
+    const hash = hashes.get(LORA)!;
+    const first = await upload(app, hash, pngFile("one.png"));
+    assertEquals(first.status, 201);
+    const sample = await first.json() as SampleView;
+
+    // Under another name, the same bytes: the sample it already is.
+    const again = await upload(app, hash, pngFile("two.png"));
+    assertEquals(again.status, 200);
+    assertEquals((await again.json() as SampleView).id, sample.id);
+
+    // Another model may have the same picture as a sample of its own.
+    const other = await upload(
+      app,
+      hashes.get(CHECKPOINT)!,
+      pngFile("one.png"),
+    );
+    assertEquals(other.status, 201);
+    assert((await other.json() as SampleView).id !== sample.id);
+
+    assertEquals(
+      (await app.json<ModelDetail>(`/api/models/${hash}`)).samples.length,
+      1,
+    );
+  });
+});
+
+Deno.test("samples from before hashing are hashed, and twins merged", async () => {
+  // What a database migrated to version 12 holds: rows with no checksum,
+  // some of them the same file. The earliest is kept, and the thumbnail
+  // follows it if it was the copy removed.
+  await withSamples(async ({ app, hashes }) => {
+    const hash = hashes.get(LORA)!;
+    const unhash = () => app.db.exec("UPDATE samples SET sha256 = NULL");
+    const drop = async (file: File) =>
+      await (await upload(app, hash, file)).json() as SampleView;
+
+    const first = await drop(pngFile("a.png"));
+    unhash();
+    const twin = await drop(pngFile("a.png"));
+    const other = await drop(pngFile("b.png", 30, 20));
+    unhash();
+    assert(twin.id !== first.id, "unhashed, the twin got in");
+    await app.json(`/api/models/${hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ thumb_sample_id: twin.id }),
+    });
+
+    assertEquals(await app.samples.backfillContentHashes(), {
+      hashed: 2,
+      merged: 1,
+    });
+    const model = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(
+      model.samples.map((s) => s.id).sort(),
+      [first.id, other.id].sort(),
+    );
+    assertEquals(model.thumb_path, first.path);
+    await assertMissing(join(app.paths.root, twin.path));
+
+    // Hashed now, so the same file dropped again is the first one.
+    assertEquals((await drop(pngFile("a.png"))).id, first.id);
+    assertEquals(await app.samples.backfillContentHashes(), {
+      hashed: 0,
+      merged: 0,
+    });
+  });
+});
+
 Deno.test("what is not media, and what has no model, are refused", async () => {
   await withSamples(async ({ app, hashes }) => {
     const hash = hashes.get(LORA)!;
@@ -259,6 +329,19 @@ Deno.test("promoting an output hard-links one file to every model", async () => 
     assertEquals(
       promoted.models.find((model) => model.name === CHECKPOINT)?.hash,
       checkpoint,
+    );
+
+    // Promoted again: the same samples, not a second copy of each (§8.3).
+    const again = await app.json<{ samples: SampleView[] }>(
+      `/api/outputs/${outputId}/promote`,
+      {
+        method: "POST",
+        body: JSON.stringify({ model_hashes: [checkpoint, lora] }),
+      },
+    );
+    assertEquals(
+      again.samples.map((sample) => sample.id),
+      samples.map((sample) => sample.id),
     );
 
     // Both model pages show it.

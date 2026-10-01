@@ -57,6 +57,9 @@ export function sampleRoutes(ctx: AppContext): Route[] {
           throw new BodyError("expected a multipart upload");
         }
         const { bytes, filename } = await fileFrom(req);
+        // The same file again is the sample it already is (§8.3).
+        const existing = await ctx.samples.duplicateOf(model.hash, bytes);
+        if (existing !== null) return json(existing, { status: 200 });
         // A picture that carries its own settings — A1111's infotext, a
         // SwarmUI or ComfyUI PNG, one of ours — brings them along (§8.3).
         const raw = readInfotext(bytes);

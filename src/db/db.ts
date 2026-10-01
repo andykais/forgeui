@@ -261,6 +261,30 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 12,
+    name: "sample checksums",
+    // DESIGN.md §8.3: the same file is one sample of a model, whichever way
+    // it arrived — two links to one image, a file dropped twice, a promotion
+    // repeated. In schema.sql too, so this does nothing on a fresh database.
+    // Existing rows stay NULL, which the index ignores; the sample store
+    // hashes them in the background and merges what turns out to be the same
+    // file (`SampleStore.backfillContentHashes`).
+    apply: (db) => {
+      const columns = new Set(
+        db.prepare("PRAGMA table_info(samples)")
+          .values<[number, string]>()
+          .map(([, name]) => name),
+      );
+      if (!columns.has("sha256")) {
+        db.exec("ALTER TABLE samples ADD COLUMN sha256 TEXT");
+      }
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS samples_content
+           ON samples(model_hash, sha256) WHERE sha256 IS NOT NULL`,
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

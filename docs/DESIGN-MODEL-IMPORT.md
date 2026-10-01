@@ -1426,7 +1426,11 @@ are the readable batches on disk, which Phase B applies when it drains.
    `overwrite_samples: true`, when the old sample is removed once the new
    bytes are read and the new one imported in its place. A thumbnail that was
    the old sample moves to the new one. Samples the batch does not list are
-   left alone. A batch's samples keep the batch's
+   left alone. *Amended:* the same goes for the same **file** under another
+   link (DESIGN.md §8.3): a sample whose bytes the model already has is
+   skipped, or with `overwrite_samples` replaces that sample — except one
+   this batch has just written, so a batch listing an image twice imports it
+   once. A batch's samples keep the batch's
    order on the model page: each is dated a millisecond before the one
    listed ahead of it, so the strip (newest first) reads in the order
    `forge models` wrote them, the model page's own media first.
