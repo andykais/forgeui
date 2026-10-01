@@ -20,6 +20,7 @@ import {
   runModels,
   UsageError,
 } from "./cli/models.ts";
+import { DownloadError } from "./cli/download.ts";
 import { HuggingFaceUrlError } from "./models/huggingface.ts";
 import { TensorArtUrlError } from "./models/tensorart.ts";
 import { OverwriteError, parseOverwrite } from "./cli/overwrite.ts";
@@ -311,6 +312,12 @@ async function runModelsCommand(options: {
     if (cause instanceof LookupError) {
       console.error(`forge models: ${cause.message}`);
       return 1;
+    }
+    // A download that failed — refused, paid, cut off — is said, not thrown:
+    // it is an answer about the model, not a bug (exit 3, §3).
+    if (cause instanceof DownloadError) {
+      console.error(`forge models: ${cause.message}`);
+      return 3;
     }
     if (cause instanceof ConfigError) {
       console.error(`forge models: ${cause.message}`);

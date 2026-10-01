@@ -19,6 +19,7 @@
 import { basename, join } from "@std/path";
 import { crypto as stdCrypto } from "@std/crypto";
 import { encodeHex } from "@std/encoding/hex";
+import type { PaidAccess } from "../models/civitai.ts";
 
 export const CIVITAI_AUTH_HINT =
   "Put a key from civitai.com/user/account in config.yaml as " +
@@ -34,6 +35,7 @@ export class DownloadError extends Error {
   /** As `LookupError.kind`: what `fetched/failure/…/error.txt` records. */
   readonly kind:
     | "needs-login"
+    | "paid"
     | "rate-limited"
     | "server-error"
     | "unreachable"
@@ -63,6 +65,12 @@ export interface DownloadOptions {
   token?: string | null;
   /** What to do about a 401 or 403: where this site's key goes. */
   authHint?: string;
+  /**
+   * What the lookup said about paying for it (Civitai's `paidAccess`), and
+   * the page it is bought on: a refusal of a paid file is about Buzz, not
+   * about a missing key.
+   */
+  paid?: { access: PaidAccess | null; page: string | null };
   timeoutMs: number;
   say?: (line: string) => void;
   fetch?: typeof globalThis.fetch;
@@ -99,11 +107,26 @@ export async function downloadFile(
   }
 
   if (response.status === 401 || response.status === 403) {
-    await response.body?.cancel();
+    const refusal = await readRefusal(response);
+    const paid = paidRefusal(refusal, options.paid?.access ?? null);
+    if (paid !== null) {
+      throw new DownloadError(
+        describePaid({
+          paid,
+          status: response.status,
+          url: options.url,
+          name: basename(options.fallbackName),
+          page: options.paid?.page ?? null,
+          token: Boolean(options.token),
+          said: refusal.message,
+        }),
+        "paid",
+      );
+    }
     throw new DownloadError(
-      `${options.url} needs an account (${response.status}). ${
-        options.authHint ?? CIVITAI_AUTH_HINT
-      }${
+      `${options.url} needs an account (${response.status}${
+        refusal.message ? `: "${refusal.message}"` : ""
+      }). ${options.authHint ?? CIVITAI_AUTH_HINT}${
         options.token
           ? " A key was sent and refused, so check that it is current."
           : ""
@@ -164,6 +187,114 @@ export async function downloadFile(
   } finally {
     file.close();
   }
+}
+
+/** What a refusal said about itself: Civitai answers with a small JSON. */
+interface Refusal {
+  error: string | null;
+  message: string | null;
+  deadline: string | null;
+}
+
+async function readRefusal(response: Response): Promise<Refusal> {
+  const none = { error: null, message: null, deadline: null };
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    return none;
+  }
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const field = (key: string) =>
+      typeof parsed[key] === "string" && parsed[key].trim() !== ""
+        ? (parsed[key] as string).trim()
+        : null;
+    return {
+      error: field("error"),
+      message: field("message"),
+      deadline: field("deadline"),
+    };
+  } catch {
+    // Not JSON: a short plain-text answer is still worth repeating.
+    const text = body.trim();
+    return { ...none, message: text && text.length <= 300 ? text : null };
+  }
+}
+
+/**
+ * Whether a refusal is about paying rather than about a key. Civitai says so
+ * for early access — `{"error":"Early Access","deadline":…,"message":"…
+ * Buzz…"}` with a 403 — and the lookup knows it for any version whose
+ * creator charges for it, which is the only word there is for a permanently
+ * paid file refused to a key that has not bought it.
+ */
+function paidRefusal(
+  refusal: Refusal,
+  access: PaidAccess | null,
+): PaidAccess | null {
+  const said = `${refusal.error ?? ""} ${refusal.message ?? ""}`;
+  const early = /early access/i.test(said);
+  if (early || /\bbuzz\b|purchase|\bbuy\b/i.test(said)) {
+    return {
+      permanent: access?.permanent ?? !early,
+      ends_at: refusal.deadline ?? access?.ends_at ?? null,
+    };
+  }
+  return access;
+}
+
+/**
+ * The refusal of a paid download, as something to act on. The first line is
+ * the whole story, because it is the line a later skip repeats from
+ * `error.txt` (§3.2); the rest is what to do.
+ */
+function describePaid(input: {
+  paid: PaidAccess;
+  status: number;
+  url: string;
+  name: string;
+  page: string | null;
+  token: boolean;
+  said: string | null;
+}): string {
+  const { paid } = input;
+  const until = paid.ends_at === null ? null : readableDate(paid.ends_at);
+  const early = !paid.permanent && until !== null;
+  const where = input.page ?? "its page on Civitai";
+  return [
+    early
+      ? `${input.name} is in Early Access on Civitai until ${until}: its ` +
+        `creator charges Buzz to download it before then.`
+      : `${input.name} is paid on Civitai: its creator charges Buzz to ` +
+        `download it.`,
+    `  Civitai answered ${input.status} to ${input.url}${
+      input.said ? `: "${input.said}"` : ""
+    }`,
+    input.token
+      ? `  A key was sent and refused. A key alone does not unlock a paid ` +
+        `download: either its account has not bought this one, or the key is ` +
+        `not current.`
+      : `  No key was sent, and a key alone would not unlock it either.`,
+    `  To download it now: buy access with Buzz on ${where}, logged in as ` +
+    `the account your key belongs to, then run this again with --overwrite${
+      input.token ? "" : ` and that key (${CIVITAI_AUTH_HINT})`
+    }.`,
+    ...(early
+      ? [
+        `  Or wait until ${until}, when it is free, and run this again with ` +
+        `--overwrite.`,
+      ]
+      : []),
+    `  The metadata and samples import on their own: the same command ` +
+    `without --download-model, with --overwrite.`,
+  ].join("\n");
+}
+
+function readableDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
 /** Write each chunk, then hand it on to the digest. One read, two uses. */

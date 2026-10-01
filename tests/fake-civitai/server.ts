@@ -44,6 +44,11 @@ export interface FakeCivitaiOptions {
   /** Answer downloads with this status instead, for the gated-model path. */
   downloadStatus?: number;
   /**
+   * The JSON a refused download answers with — real Civitai's
+   * `{"error":"Early Access","deadline":…,"message":…}` — instead of "no".
+   */
+  downloadRefusal?: Record<string, unknown>;
+  /**
    * Hugging Face repos, by `owner/repo`: the Hub's `/api/models/<repo>` body
    * (`id`, `pipeline_tag`, `cardData`, `siblings`, …) and the files in it.
    * A file with `sha256` is an LFS file; `text` or `bytes` is what `resolve`
@@ -143,7 +148,11 @@ export function startFakeCivitai(
     // has already followed by the time this answers.
     if (parts[0] === "api" && parts[1] === "download") {
       if (options.downloadStatus !== undefined) {
-        return new Response("no", { status: options.downloadStatus });
+        return options.downloadRefusal === undefined
+          ? new Response("no", { status: options.downloadStatus })
+          : Response.json(options.downloadRefusal, {
+            status: options.downloadStatus,
+          });
       }
       const file = options.download;
       if (file === undefined) return notFound();

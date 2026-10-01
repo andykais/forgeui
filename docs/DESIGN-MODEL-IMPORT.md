@@ -309,7 +309,9 @@ Examples:
 AUTH
 
   Lookups, sample images and public model downloads all work anonymously.
-  A gated or paid model needs a key from civitai.com/user/account:
+  A gated model needs a key from civitai.com/user/account. A paid one (Buzz,
+  or Early Access until a date) needs buying on its page with that key's
+  account as well; forge models says which it is when a download is refused:
 
       import:
         civitai_token: "<key>"      in config.yaml, in plaintext — quoted,
@@ -613,6 +615,44 @@ by every public endpoint rather than rejected —
 
 — so sending a configured key on every Civitai request cannot break a lookup
 that would have worked without it.
+
+**Paid downloads are not a missing key** (added). A creator can charge Buzz
+for a version — for good, or as *Early Access* until a date, after which it
+is free. A key alone does not unlock one; buying it on the site with the
+key's account does. Measured against the live site:
+
+```
+early access, anon or key   403 {"error":"Early Access","deadline":"2026-10-06T15:32:52.699Z",
+                                 "message":"This asset is in Early Access. You can use Buzz access it now!"}
+permanently paid, anon      401 {"error":"Unauthorized",
+                                 "message":"The creator of this asset requires you to be logged in to download it"}
+```
+
+and the version itself says so in `paidAccess` — `{"permanent": true,
+"endsAt": null}` or `{"permanent": false, "endsAt": "<when>"}` — on
+`/api/v1/models/<id>` and `/api/v1/model-versions/by-hash/<sha256>` alike, on
+both hosts. So a 401 or 403 from a download is read before it is reported:
+a body that says Early Access or Buzz, or a version the lookup found
+`paidAccess` on, is **`failure: paid`**, said as what it is —
+
+```
+forge models: Scenery_Enhancer-Krea.safetensors is in Early Access on Civitai until 2026-10-06 15:32 UTC: its creator charges Buzz to download it before then.
+  Civitai answered 403 to https://civitai.com/api/download/models/3374747?fileId=3262986: "This asset is in Early Access. You can use Buzz access it now!"
+  A key was sent and refused. A key alone does not unlock a paid download: either its account has not bought this one, or the key is not current.
+  To download it now: buy access with Buzz on https://civitai.red/models/1646240?modelVersionId=3374747, logged in as the account your key belongs to, then run this again with --overwrite.
+  Or wait until 2026-10-06 15:32 UTC, when it is free, and run this again with --overwrite.
+  The metadata and samples import on their own: the same command without --download-model, with --overwrite.
+```
+
+— and anything else stays `needs-login`, with Civitai's own message quoted.
+The first line is the whole story, because it is the line a later skip
+repeats from `error.txt` (§3.2). The lookup's summary says it before any
+download is tried, as `access  Early Access until … UTC: Buzz to download
+before then` or `access  paid: its creator charges Buzz to download it`. A
+paid version that has been bought downloads like any other: nothing is
+refused up front on the strength of `paidAccess` alone. A failed download is
+printed as an error and exits 3, rather than escaping as an uncaught
+exception.
 
 Three rules, each with a test that fails when the rule is removed:
 
@@ -1031,7 +1071,8 @@ Chosen this way because:
   |---|---|---|
   | `not-found` | the sources answered no: nothing knows the hash, no model page, bytes that cannot match | rarely |
   | `rate-limited` | 429 | yes, later |
-  | `needs-login` | 401 / 403: gated, private, paid | with a token |
+  | `needs-login` | 401 / 403: gated or private | with a token |
+  | `paid` | 401 / 403 for a version whose creator charges Buzz (§4.0) | once bought, or after early access ends |
   | `server-error` | 5xx | yes |
   | `unreachable` | timeout, refused connection, DNS | yes |
   | `download-failed` | the weights started and did not finish | yes |

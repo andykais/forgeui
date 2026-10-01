@@ -1149,6 +1149,13 @@ async function fetchWeights(input: {
       authHint: via === "huggingface"
         ? HUGGINGFACE_AUTH_HINT
         : CIVITAI_AUTH_HINT,
+      // Only Civitai sells downloads, and only its own files.
+      paid: via === "civitai"
+        ? {
+          access: found.paid_access ?? null,
+          page: found.record.source.url || null,
+        }
+        : undefined,
       token,
       timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
       say,
@@ -1341,6 +1348,19 @@ export function summarize(found: LookupResult): string[] {
     ].join(" · "),
   ));
   if (record.creator) lines.push(row("by", record.creator.username));
+  if (found.paid_access) {
+    // Said before any download is tried: a paid file is refused to any key
+    // that has not bought it (§4).
+    const ends = found.paid_access.ends_at;
+    lines.push(row(
+      "access",
+      found.paid_access.permanent || ends === null
+        ? "paid: its creator charges Buzz to download it"
+        : `Early Access until ${
+          ends.slice(0, 16).replace("T", " ")
+        } UTC: Buzz to download before then`,
+    ));
+  }
   lines.push(row(
     "trigger words",
     found.trigger_words.length > 0 ? found.trigger_words.join(", ") : "none",

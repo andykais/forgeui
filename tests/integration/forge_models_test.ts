@@ -13,6 +13,7 @@ import { dataPaths, ensureDataDirs } from "../../src/config/paths.ts";
 import { sha256Hex } from "../../src/workflows/hash.ts";
 import { CivitaiClient } from "../../src/cli/civitai_client.ts";
 import { parseOverwrite } from "../../src/cli/overwrite.ts";
+import { DownloadError } from "../../src/cli/download.ts";
 import {
   civitaiToken,
   LookupError,
@@ -863,6 +864,109 @@ Deno.test("a download that cannot match its batch writes nothing", async () => {
       ),
       "could never be matched",
     );
+  }, { noLocalFile: true });
+});
+
+Deno.test("a download that needs Buzz says so, not that a key is missing", async () => {
+  // What civitai.com answers for an Early Access version (checked against
+  // the live site): a 403 whose body says what it is. A key would not help,
+  // and the message must not send anyone off to set one (§4).
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    h.fake.configure({
+      models: { 15003: model },
+      versionsByHash: { [h.hash]: model.modelVersions[0]! },
+      downloadStatus: 403,
+      downloadRefusal: {
+        error: "Early Access",
+        deadline: "2026-10-06T15:32:52.699Z",
+        message:
+          "This asset is in Early Access. You can use Buzz access it now!",
+      },
+    });
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          env: { get: () => "a-key" },
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      DownloadError,
+    );
+    assertEquals(error.kind, "paid");
+    const [headline, ...rest] = error.message.split("\n");
+    assertEquals(
+      headline,
+      `${FILENAME} is in Early Access on Civitai until 2026-10-06 15:32 UTC: ` +
+        "its creator charges Buzz to download it before then.",
+    );
+    const said = rest.join("\n");
+    assertStringIncludes(said, "You can use Buzz access it now!");
+    assertStringIncludes(said, "A key was sent and refused");
+    assertStringIncludes(said, "buy access with Buzz on ");
+    assertStringIncludes(said, "Or wait until 2026-10-06 15:32 UTC");
+    assert(!said.includes("needs an account"));
+    // Recorded as what it is, so the folder can be pruned by it.
+    assertStringIncludes(
+      await Deno.readTextFile(
+        join(h.paths.imports, "fetched", "failure", h.hash, "error.txt"),
+      ),
+      "failure: paid",
+    );
+  }, { noLocalFile: true });
+});
+
+Deno.test("a version the lookup says is paid is named paid, whatever the refusal says", async () => {
+  // A permanently paid version answers an anonymous GET with only "requires
+  // you to be logged in"; the version's `paidAccess` is what says why.
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    const version = {
+      ...model.modelVersions[0]!,
+      paidAccess: { permanent: true, endsAt: null },
+    };
+    h.fake.configure({
+      models: { 15003: { ...model, modelVersions: [version] } },
+      versionsByHash: { [h.hash]: version },
+      downloadStatus: 401,
+      downloadRefusal: {
+        error: "Unauthorized",
+        message:
+          "The creator of this asset requires you to be logged in to download it",
+      },
+    });
+    const lines: string[] = [];
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          paths: h.paths,
+          client: h.client,
+          log: (line) => lines.push(line),
+        }),
+      DownloadError,
+    );
+    assertEquals(error.kind, "paid");
+    assertStringIncludes(
+      error.message,
+      `${FILENAME} is paid on Civitai: its creator charges Buzz`,
+    );
+    assertStringIncludes(error.message, "No key was sent");
+    assert(!error.message.includes("Or wait until"));
   }, { noLocalFile: true });
 });
 

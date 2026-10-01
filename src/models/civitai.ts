@@ -281,6 +281,23 @@ export interface SourceRecord {
 }
 
 /** What ingest applies, next to the record it came from. */
+export interface PaidAccess {
+  /** Paid for good, rather than until early access ends. */
+  permanent: boolean;
+  /** When early access ends and the download becomes free; ISO 8601. */
+  ends_at: string | null;
+}
+
+/** Civitai's `paidAccess` on a model version, when it is set. */
+export function paidAccessOf(value: unknown): PaidAccess | null {
+  const paid = record(value);
+  if (paid === null) return null;
+  return {
+    permanent: paid.permanent === true,
+    ends_at: text(paid.endsAt),
+  };
+}
+
 export interface LookupResult {
   sha256: string | null;
   filename: string | null;
@@ -304,6 +321,13 @@ export interface LookupResult {
      */
     download_via?: "civitai" | "huggingface";
   }[];
+  /**
+   * Set when the creator charges Buzz to download the version: Civitai's
+   * `paidAccess`, permanently or as early access until `ends_at`. A paid
+   * download answers 401/403 whatever key is sent until it is bought, so
+   * this is what lets that failure be named for what it is (§4).
+   */
+  paid_access?: PaidAccess | null;
   /** The images posted with the version, newest first. */
   images: {
     id: number | null;
@@ -444,6 +468,7 @@ export function sourceRecordFromCivitai(options: {
     tags,
     trigger_words: triggerWords,
     files,
+    paid_access: paidAccessOf(version.paidAccess),
     images,
     record: {
       format: 1,
