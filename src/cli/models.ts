@@ -194,7 +194,7 @@ export async function runModels(
     const have = wanted === null
       ? null
       : await findExisting(options.paths, wanted);
-    if (have !== null) return alreadyDone(have, say);
+    if (have !== null) return alreadyDone(have, askedFor(options), say);
   }
 
   // What a "no" is recorded under: the checksum, when it is known before the
@@ -225,7 +225,7 @@ export async function runModels(
   // saved, but the samples, the weights and the batch can.
   if (!options.overwrite) {
     const have = await findExisting(options.paths, { hash: sha256 });
-    if (have !== null) return alreadyDone(have, say);
+    if (have !== null) return alreadyDone(have, askedFor(options), say);
   }
 
   const batch: ImportBatch = {
@@ -387,39 +387,72 @@ function huggingFace(client: CivitaiClient): HuggingFaceClient {
   return client.huggingface;
 }
 
-/** The run that fetches nothing, and says why and how to make it. */
+/**
+ * The run that fetches nothing, and says why and how to make it (§3.2).
+ *
+ * The decision comes first and the earlier run's result after it, dated and
+ * labelled as the earlier run's. Printed the other way round, an old failure
+ * read as this run's: "this model needs a Civitai login" from a download
+ * tried last week, shown to someone who has set a token since, when all that
+ * happened is that nothing was asked.
+ */
 function alreadyDone(
   have: Existing,
+  asked: { samples: number; model: boolean; command: string },
   say: (line: string) => void,
 ): ModelsCommandResult {
   const what = label(have) || have.hash;
+  const on = have.when
+    ? ` on ${have.when.replace("T", " ").replace(/Z$/, " UTC")}`
+    : "";
+  say(
+    `skipped ${what}: an earlier run${on} already has a result for it, and ` +
+      `without --overwrite it is not asked again.`,
+  );
   switch (have.state) {
     case "fetched":
-      say(`already fetched: ${what}`);
-      say(`  waiting for the app in ${have.dir}`);
+      say(`  earlier result: fetched, waiting for the app to import it`);
+      say(`    ${have.dir}`);
+      break;
+    case "imported":
+      say(`  earlier result: imported`);
+      say(`    ${join(have.dir, "model.json")}`);
       break;
     case "fetch-failed":
       say(
-        have.failure === null || have.failure === "not-found"
-          ? `looked up before, and not found: ${what}`
-          : `looked up before, and it failed (${have.failure}): ${what}`,
+        `  earlier result: ${
+          have.failure === null || have.failure === "not-found"
+            ? "the lookup found nothing"
+            : `it failed (${have.failure})`
+        }${have.command ? ` — ${have.command}` : ""}`,
       );
-      if (have.reason) say(`  ${have.reason}`);
-      say(`  recorded in ${join(have.dir, "error.txt")}`);
-      break;
-    case "imported":
-      say(`already imported: ${what}`);
-      say(`  its record is ${join(have.dir, "model.json")}`);
+      if (have.reason) say(`    its error: ${have.reason}`);
+      say(`    ${join(have.dir, "error.txt")}`);
+      // The one earlier result that may no longer be true: a login set since,
+      // a limit that has lifted, a server back up. Nothing here tried again.
+      if (have.failure !== null && have.failure !== "not-found") {
+        say(
+          `  this run did not contact anything, so a token or setting changed ` +
+            `since then has not been tried yet.`,
+        );
+      }
       break;
     case "import-failed":
-      say(`already fetched, and the app refused it: ${what}`);
-      if (have.reason) say(`  ${have.reason}`);
-      say(`  see ${join(have.dir, "error.txt")}`);
+      say(`  earlier result: fetched, and the app refused to import it`);
+      if (have.reason) say(`    its error: ${have.reason}`);
+      say(`    ${join(have.dir, "error.txt")}`);
       break;
   }
-  say(
-    `nothing was fetched; pass --overwrite, or delete ${have.dir}, to try again`,
-  );
+  // What this run asked for that it is not doing, said rather than dropped.
+  const skipped = [
+    ...(asked.samples > 0 ? [`up to ${asked.samples} samples`] : []),
+    ...(asked.model ? ["the model file"] : []),
+  ];
+  if (skipped.length > 0) {
+    say(`  not fetched this time: ${skipped.join(" and ")}.`);
+  }
+  say(`to try again: ${asked.command} --overwrite`);
+  say(`  (or delete ${have.dir})`);
   return {
     dir: have.dir,
     batch: null,
@@ -474,6 +507,20 @@ async function recordMiss(
   } catch {
     // Not being able to write the note must not hide the error it is about.
   }
+}
+
+/** What this run was asked to fetch, for a skip to say it is not. */
+function askedFor(options: ModelsCommandOptions) {
+  const command = [describeRun(options)];
+  if (options.downloadSamples > 0) {
+    command.push("--download-samples", String(options.downloadSamples));
+  }
+  if (options.downloadModel) command.push("--download-model");
+  return {
+    samples: options.downloadSamples,
+    model: options.downloadModel,
+    command: command.join(" "),
+  };
 }
 
 /** The command, as far as it says which model and where to ask. */

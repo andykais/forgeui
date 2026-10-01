@@ -411,17 +411,30 @@ request, so re-running a list of commands costs nothing for the ones already
 done.
 
 ```
-already fetched: TotK Zelda - Realistic · Zelda - ZIB - Version 1
-  waiting for the app in /workspace/import/fetched/success/72a47985…
-nothing was fetched; pass --overwrite, or delete /workspace/import/fetched/success/72a47985…, to try again
+skipped TotK Zelda - Realistic · Zelda - ZIB - Version 1: an earlier run on 2026-09-28 08:12:00 UTC already has a result for it, and without --overwrite it is not asked again.
+  earlier result: fetched, waiting for the app to import it
+    /workspace/import/fetched/success/72a47985…
+  not fetched this time: up to 4 samples.
+to try again: forge models --url https://civitai.red/models/… --download-samples 4 --overwrite
+  (or delete /workspace/import/fetched/success/72a47985…)
 ```
 
-| Where | Said as |
+*Amended:* the decision comes first and the earlier run's result after it,
+dated and labelled as the earlier run's. Printed the other way round, an old
+failure read as this run's — "this model needs a Civitai login", from a
+download tried last week, shown to someone who has set a token since, when
+nothing had been asked at all. What this run asked for and is not doing is
+named, and the retry is the run's own command with `--overwrite` added. A
+recorded failure other than not-found also says that nothing was retried, so
+a token or limit that has changed since has not been tried yet. A skip still
+exits 0: re-running a list of commands is the case it exists for.
+
+| Where | Said as the earlier result |
 |---|---|
-| `fetched/success/<sha256>/` | already fetched, waiting for the app |
-| `fetched/failure/<sha256>/` | looked up before, and not found — or, for any other kind of failure, "it failed (rate-limited)" and so on — with the reason |
-| `imported/success/<sha256>/` | already imported |
-| `imported/failure/<sha256>/` | already fetched, and the app refused it — with the reason |
+| `fetched/success/<sha256>/` | fetched, waiting for the app to import it |
+| `fetched/failure/<sha256>/` | the lookup found nothing — or, for any other kind of failure, "it failed (rate-limited)" and so on — with the command that met it and its error |
+| `imported/success/<sha256>/` | imported |
+| `imported/failure/<sha256>/` | fetched, and the app refused to import it — with the reason |
 
 Deleting a checksum's directory lets that model be fetched again;
 `--overwrite` does the same for one run.

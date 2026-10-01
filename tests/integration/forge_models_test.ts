@@ -1193,8 +1193,18 @@ Deno.test("a second run for the same model asks nothing and writes nothing", asy
       assertEquals(again.existing?.state, "fetched");
       assertEquals(again.existing?.hash, h.hash);
       const said = lines.join("\n");
-      assertStringIncludes(said, "already fetched: CyberRealistic · v9.0");
-      assertStringIncludes(said, "nothing was fetched; pass --overwrite");
+      // The decision first, the earlier run's result after it, and the way
+      // to change it last.
+      assertStringIncludes(
+        said,
+        "skipped CyberRealistic · v9.0: an earlier run",
+      );
+      assertStringIncludes(
+        said,
+        "earlier result: fetched, waiting for the app",
+      );
+      assertStringIncludes(said, "to try again: forge models ");
+      assertStringIncludes(said, "--overwrite");
     }
     // Untouched, not rewritten with the same content.
     assertEquals(
@@ -1232,7 +1242,10 @@ Deno.test("a hash nobody knows is recorded, and not asked about again", async ()
     );
     assertEquals(h.fake.requests.length, before);
     assertEquals(again.existing?.state, "fetch-failed");
-    assertStringIncludes(lines.join("\n"), "looked up before, and not found");
+    assertStringIncludes(
+      lines.join("\n"),
+      "earlier result: the lookup found nothing",
+    );
     assertStringIncludes(lines.join("\n"), "knows the hash");
 
     // --overwrite asks again, and is told no again.
@@ -1317,7 +1330,59 @@ Deno.test("a rate limit is recorded as one, and said as one next time", async ()
     assertEquals(again.existing?.failure, "rate-limited");
     assertStringIncludes(
       lines.join("\n"),
-      "looked up before, and it failed (rate-limited)",
+      "earlier result: it failed (rate-limited)",
+    );
+    // A limit lifts: the message says nothing was retried, not that it failed.
+    assertStringIncludes(lines.join("\n"), "has not been tried yet");
+  }, { noLocalFile: true });
+});
+
+/**
+ * The report this is about: a download that needed a Civitai login, then a
+ * re-run — token set, or only asking for samples — that printed the old
+ * login error as if it were this run's. It is the earlier run's, and the
+ * message has to say so before it says anything else.
+ */
+Deno.test("an earlier failure is reported as history, not as this run's error", async () => {
+  await withCli(async (h) => {
+    const dir = join(h.paths.imports, "fetched", "failure", h.hash);
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+      join(dir, "error.txt"),
+      "when: 2026-09-20T09:30:00Z\n" +
+        `command: forge models --sha256checksum ${h.hash}\n` +
+        "failure: needs-login\n\n" +
+        "this model needs a Civitai login to download. Put a key from " +
+        "civitai.com/user/account in config.yaml as import.civitai_token, or " +
+        "set CIVITAI_TOKEN.\n",
+    );
+
+    const before = h.fake.requests.length;
+    const lines: string[] = [];
+    const again = await runner(h)(
+      { sha256checksum: h.hash, downloadSamples: 3 },
+      (line) => lines.push(line),
+    );
+    assertEquals(h.fake.requests.length, before, "nothing was asked");
+    assertEquals(again.existing?.state, "fetch-failed");
+
+    const [first, ...rest] = lines;
+    // Leads with the decision, dated, and without the old error in it.
+    assertStringIncludes(first!, "skipped");
+    assertStringIncludes(first!, "an earlier run on 2026-09-20 09:30:00 UTC");
+    assertStringIncludes(first!, "without --overwrite");
+    assertEquals(first!.includes("login"), false, first);
+    const said = rest.join("\n");
+    assertStringIncludes(said, "earlier result: it failed (needs-login)");
+    assertStringIncludes(said, "its error: this model needs a Civitai login");
+    assertStringIncludes(said, "has not been tried yet");
+    // What this run asked for is named as not done, and the retry is the
+    // run's own command with --overwrite added.
+    assertStringIncludes(said, "not fetched this time: up to 3 samples");
+    assertStringIncludes(
+      said,
+      `to try again: forge models --sha256checksum ${h.hash} ` +
+        "--download-samples 3 --overwrite",
     );
   }, { noLocalFile: true });
 });
@@ -1370,7 +1435,7 @@ Deno.test("what the app imported, and what it refused, are left alone", async ()
     );
     assertEquals(h.fake.requests.length, before);
     assertEquals(refusedAgain.existing?.state, "import-failed");
-    assertStringIncludes(lines.join("\n"), "the app refused it");
+    assertStringIncludes(lines.join("\n"), "the app refused to import it");
     assertStringIncludes(lines.join("\n"), "but the batch says 11");
 
     // --overwrite fetches it again, into fetched/success, for another try.

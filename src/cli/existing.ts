@@ -43,6 +43,13 @@ export interface Existing {
   reason: string | null;
   /** For a failure: its kind — `not-found`, `rate-limited`, `refused`, … */
   failure: string | null;
+  /**
+   * When the earlier run happened: its `error.txt`'s `when`, or the batch's
+   * `created_at`. What tells a reader the message is history, not news.
+   */
+  when: string | null;
+  /** For a failure: the command that met it, from its `error.txt`. */
+  command: string | null;
 }
 
 /** What a run was asked for, reduced to what can be matched offline. */
@@ -60,6 +67,8 @@ interface Recorded {
   batch: Record<string, unknown> | null;
   reason: string | null;
   failure: string | null;
+  when: string | null;
+  command: string | null;
 }
 
 /**
@@ -193,6 +202,8 @@ function existing(recorded: Recorded): Existing {
     version: typeof version?.name === "string" ? version.name : null,
     reason: recorded.reason,
     failure: recorded.failure,
+    when: recorded.when,
+    command: recorded.command,
   };
 }
 
@@ -227,6 +238,10 @@ async function read(
   const batch = await readJson(join(dir, "model.json"));
   let reason: string | null = null;
   let failure: string | null = null;
+  let when: string | null = typeof batch?.created_at === "string"
+    ? batch.created_at
+    : null;
+  let command: string | null = null;
   if (state === "fetch-failed" || state === "import-failed") {
     try {
       const note = parseErrorNote(
@@ -234,11 +249,13 @@ async function read(
       );
       reason = note.message?.split("\n")[0]?.trim() || null;
       failure = note.failure ?? null;
+      when = note.when ?? when;
+      command = note.command ?? null;
     } catch {
       // A failure without its note is still a failure.
     }
   }
-  return { hash, state, dir, batch, reason, failure };
+  return { hash, state, dir, batch, reason, failure, when, command };
 }
 
 async function readJson(path: string): Promise<Record<string, unknown> | null> {
