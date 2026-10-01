@@ -21,9 +21,11 @@
    * the workflow by default; "Show all" is one click and does not persist,
    * and already-added LoRAs stay listed, marked "added".
    *
-   * A LoRA is named here by the path it has under its folder — `krea/glow`,
-   * not `glow` — because a folder tree is how people file these, and the
-   * search box takes a regular expression so `krea.*glow` finds it.
+   * A LoRA is shown by its title, as every model is (§8.1), and the picker
+   * puts the path it has under its folder — `krea/glow`, not `glow` — under
+   * the title in small grey, because a folder tree is how people file these
+   * and two can share a title. The search box matches both and takes a
+   * regular expression, so `krea.*glow` finds it.
    */
   interface Props {
     param: Param;
@@ -86,6 +88,15 @@
     const model = models.find((entry) => entry.name === name);
     if (!model || model.family === "unset") return null;
     return model.family;
+  }
+
+  /**
+   * What a row is called on screen: the model's title, as everywhere else a
+   * model appears (§8.1). The row still holds — and the graph still gets —
+   * the path; a LoRA that has left the library has only that to show.
+   */
+  function titleOf(name: string): string {
+    return models.find((entry) => entry.name === name)?.display_name || name;
   }
 
   /** What the sliders on a row reach, from the model it names (§8.1). */
@@ -197,10 +208,10 @@
               navigate(pageOf(row.name)!);
             }}
           >
-            {row.name}
+            {titleOf(row.name)}
           </a>
         {:else}
-          <span class="name" title={row.name}>{row.name}</span>
+          <span class="name" title={row.name}>{titleOf(row.name)}</span>
         {/if}
         {#if familyOf(row.name)}
           <span class="badge accent">{familyOf(row.name)}</span>
@@ -368,7 +379,12 @@
               {/if}
             </span>
             <span class="option-text">
-              <span class="option-name" title={model.name}>{model.name}</span>
+              <span class="option-name" title={model.name}
+                >{model.display_name || model.name}</span
+              >
+              <!-- The file it is, smaller and grey: what tells two LoRAs with one
+                   title apart, and what the search also matches. -->
+              <span class="option-file mono dim" title={model.name}>{model.name}</span>
               <span class="option-line mono dim">
                 {model.output_count > 0
                   ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
@@ -563,6 +579,13 @@
 
   .option-line {
     font-size: 10px;
+  }
+
+  .option-file {
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .added {

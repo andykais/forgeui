@@ -847,6 +847,47 @@ describe("the LoRA search box", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Search LoRAs"));
   });
 
+  test("a LoRA is shown by its title, with its file under it in the picker", async () => {
+    // §8.1: a model is named by its title everywhere. The picker also says
+    // which file — two LoRAs can share a title — smaller and grey.
+    mount([loraParam], { loras: [] });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+    const option = screen.getByRole("button", { name: /Film grain/ });
+    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe(
+      "Film grain",
+    );
+    expect(option.querySelector(".option-file")?.textContent?.trim()).toBe(
+      "krea/film-grain.safetensors",
+    );
+  });
+
+  test("a LoRA row reads the title; the file it binds is its tooltip", async () => {
+    mount([loraParam], {
+      loras: [
+        {
+          name: "krea/film-grain.safetensors",
+          strength_model: 1,
+          strength_clip: 1,
+        },
+      ],
+    });
+    await tick();
+    const row = document.querySelector(".lora-row .name") as HTMLElement;
+    expect(row.textContent?.trim()).toBe("Film grain");
+    expect(row.getAttribute("title")).toContain("krea/film-grain.safetensors");
+  });
+
+  test("a LoRA that has left the library still shows the file it names", async () => {
+    mount([loraParam], {
+      loras: [
+        { name: "gone/old.safetensors", strength_model: 1, strength_clip: 1 },
+      ],
+    });
+    await tick();
+    const row = document.querySelector(".lora-row .name") as HTMLElement;
+    expect(row.textContent?.trim()).toBe("gone/old.safetensors");
+  });
+
   test("adding one leaves the caret and the panel where they were", async () => {
     // Unlike picking a model, which is the start of writing a prompt. Adding
     // a LoRA is not: you are working in this list, usually about to add
