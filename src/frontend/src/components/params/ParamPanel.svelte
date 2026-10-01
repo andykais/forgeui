@@ -41,6 +41,11 @@
     onimage?: (media: { width: number; height: number }) => void;
     /** A clip was attached to `key`, so a length can follow it (§11.3). */
     onaudio?: (key: string, media: { duration_ms: number | null }) => void;
+    /**
+     * Show each LoRA's file in the picker. Generate does; the workflow page's
+     * preview names them by title alone.
+     */
+    loraFiles?: boolean;
   }
 
   let {
@@ -52,6 +57,7 @@
     checkpoints = [],
     modelsOfClass = () => checkpoints,
     warnings = [],
+    loraFiles = true,
     onchange,
     onreset,
     onedit,
@@ -381,6 +387,7 @@
           models={loras}
           onchange={(rows) => onchange(param.key, rows)}
           fill={pickerFill}
+          showFiles={loraFiles}
         />
       {:else if param.type === "model" || param.type === "text_encoder" || param.type === "vae"}
         <ModelParam

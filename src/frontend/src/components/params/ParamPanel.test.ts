@@ -146,6 +146,7 @@ function mount(
     warnings: string[];
     checkpoints: ModelEntry[];
     byClass: Record<string, ModelEntry[]>;
+    loraFiles: boolean;
   }> = {},
 ) {
   const handlers: Handlers = {
@@ -170,6 +171,7 @@ function mount(
           extra.checkpoints ??
           [],
       warnings: extra.warnings ?? [],
+      ...(extra.loraFiles === undefined ? {} : { loraFiles: extra.loraFiles }),
       ...handlers,
     },
   });
@@ -847,18 +849,34 @@ describe("the LoRA search box", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Search LoRAs"));
   });
 
-  test("a LoRA is shown by its title, with its file under it in the picker", async () => {
+  test("a LoRA is shown by its title, with its file on the grey line in the picker", async () => {
     // §8.1: a model is named by its title everywhere. The picker also says
-    // which file — two LoRAs can share a title — smaller and grey.
+    // which file — two LoRAs can share a title — on the small grey line
+    // under the title, after its outputs.
     mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
     const option = screen.getByRole("button", { name: /Film grain/ });
     expect(option.querySelector(".option-name")?.textContent?.trim()).toBe(
       "Film grain",
     );
-    expect(option.querySelector(".option-file")?.textContent?.trim()).toBe(
-      "krea/film-grain.safetensors",
+    const line = option.querySelector(".option-line")!;
+    expect(line.querySelector(".option-stats")?.textContent?.trim()).toBe(
+      "no outputs",
     );
+    expect(line.querySelector(".option-file")?.textContent?.trim()).toBe(
+      "· krea/film-grain.safetensors",
+    );
+  });
+
+  test("the workflow page's preview names a LoRA by its title alone", async () => {
+    mount([loraParam], { loras: [] }, { loraFiles: false });
+    await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
+    const option = screen.getByRole("button", { name: /Film grain/ });
+    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe(
+      "Film grain",
+    );
+    expect(option.querySelector(".option-file")).toBeNull();
+    expect(option.textContent).not.toContain("film-grain.safetensors");
   });
 
   test("a LoRA row reads the title; the file it binds is its tooltip", async () => {

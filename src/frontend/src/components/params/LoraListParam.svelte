@@ -21,11 +21,14 @@
    * the workflow by default; "Show all" is one click and does not persist,
    * and already-added LoRAs stay listed, marked "added".
    *
-   * A LoRA is shown by its title, as every model is (§8.1), and the picker
-   * puts the path it has under its folder — `krea/glow`, not `glow` — under
-   * the title in small grey, because a folder tree is how people file these
-   * and two can share a title. The search box matches both and takes a
-   * regular expression, so `krea.*glow` finds it.
+   * A LoRA is shown by its title, as every model is (§8.1). On Generate the
+   * picker also puts the path it has under its folder — `krea/glow`, not
+   * `glow` — on the grey line under the title, beside its outputs and when it
+   * was last used, because a folder tree is how people file these and two can
+   * share a title. The workflow page's preview leaves the file out
+   * (`showFiles`): there the list is only a picture of the panel. The search
+   * box matches both either way and takes a regular expression, so
+   * `krea.*glow` finds it.
    */
   interface Props {
     param: Param;
@@ -36,9 +39,19 @@
     onpicked?: () => void;
     /** The panel this picker's list covers, rather than hanging off the row. */
     fill?: HTMLElement | null;
+    /** Show each LoRA's file in the picker, beside its outputs (Generate). */
+    showFiles?: boolean;
   }
 
-  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
+  let {
+    param,
+    value,
+    models,
+    onchange,
+    onpicked,
+    fill = null,
+    showFiles = true,
+  }: Props = $props();
 
   let pickerOpen = $state(false);
   let showAll = $state(false);
@@ -382,15 +395,20 @@
               <span class="option-name" title={model.name}
                 >{model.display_name || model.name}</span
               >
-              <!-- The file it is, smaller and grey: what tells two LoRAs with one
-                   title apart, and what the search also matches. -->
-              <span class="option-file mono dim" title={model.name}>{model.name}</span>
               <span class="option-line mono dim">
-                {model.output_count > 0
-                  ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
-                  : "no outputs"}
-                {#if model.last_used_at}· used {relativeTime(model.last_used_at)}{/if}
-                {#if model.hashing}· hashing{/if}
+                <span class="option-stats">
+                  {model.output_count > 0
+                    ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
+                    : "no outputs"}
+                  {#if model.last_used_at}· used {relativeTime(model.last_used_at)}{/if}
+                  {#if model.hashing}· hashing{/if}
+                </span>
+                <!-- The file it is, beside the rest of the grey: what tells two
+                     LoRAs with one title apart, and what the search also
+                     matches. Last, so a long path is what gets cut. -->
+                {#if showFiles}
+                  <span class="option-file" title={model.name}>· {model.name}</span>
+                {/if}
               </span>
             </span>
             {#if added}
@@ -578,11 +596,19 @@
   }
 
   .option-line {
+    display: flex;
+    gap: 0.6ch;
+    min-width: 0;
     font-size: 10px;
   }
 
+  .option-stats {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
   .option-file {
-    font-size: 10px;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

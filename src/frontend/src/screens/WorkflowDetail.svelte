@@ -480,6 +480,7 @@
               seedLocked={false}
               lastSeed={null}
               loras={app.loras}
+              loraFiles={false}
               checkpoints={app.checkpoints}
               modelsOfClass={(c) => app.modelsOfClass(c)}
               onchange={(key, value) =>
