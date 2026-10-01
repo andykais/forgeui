@@ -3,15 +3,15 @@
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
-  import { bytes, relativeTime } from "../lib/format.ts";
+  import { bytes, relativeTime, vram } from "../lib/format.ts";
   import { rescanSummary } from "../lib/models.ts";
 
   /**
    * Settings (§11.2, frame 08), read-only in Phase 1: the connection, the
    * install path, the model folders, the data dir and the key bindings, all
-   * as they stand in `config.yaml`. The only maintenance action here is
-   * Reindex; model folders are launch-time only, so they are shown rather
-   * than edited.
+   * as they stand in `config.yaml`. The actions here are Reindex, Rescan,
+   * Unload VRAM and ComfyUI's restart; model folders are launch-time only,
+   * so they are shown rather than edited.
    */
   let log = $state<string[] | null>(null);
   let reindexing = $state(false);
@@ -38,6 +38,45 @@
   async function viewLog() {
     const body = await api.comfyLog();
     log = body.available ? body.lines : ["(the app does not own this process)"];
+  }
+
+  let freeing = $state(false);
+
+  /**
+   * Unload VRAM: ComfyUI drops every model it holds, so something else — an
+   * LLM being restarted — can have the card. The same call `forge mcp`
+   * makes after each round (DESIGN-AGENT-LOOP §6.3). It works in both modes:
+   * it asks ComfyUI to let go, it does not need to own the process.
+   *
+   * ComfyUI unloads on its own worker loop, after any job it is running, so
+   * the number is read again a moment later rather than taken from the
+   * answer, which can still be the one from before.
+   */
+  async function unloadVram() {
+    freeing = true;
+    try {
+      const result = await api.freeVram();
+      if (!result.freed) {
+        toasts.message(`Nothing to unload: ${result.reason ?? "ComfyUI is not running"}`);
+        return;
+      }
+      // One toast, once the number is worth reading.
+      const busy = app.activeJobs.some((job) => job.status === "running");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const { comfy: after } = await api.systemStatus();
+      const now = after.vram_free === null
+        ? ""
+        : ` — now ${vram(after.vram_free, after.vram_total)}`;
+      toasts.message(
+        busy
+          ? `ComfyUI will unload its models once the running job finishes${now}`
+          : `ComfyUI unloaded its models${now}`,
+      );
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not unload VRAM");
+    } finally {
+      freeing = false;
+    }
   }
 
   async function restart() {
@@ -150,6 +189,23 @@
         <p class="error-line mono">{comfy.error}</p>
       {/if}
 
+      <!--
+        Both modes: this asks ComfyUI to let go of its models, so the app does
+        not need to own the process. For freeing the card by hand — an LLM to
+        restart while ComfyUI still holds the weights of the last run.
+      -->
+      <div class="row card-actions">
+        <button
+          disabled={freeing || comfy?.state !== "running"}
+          title="Unload every model ComfyUI holds, so another program can use the GPU. The next generation loads them again."
+          onclick={unloadVram}
+        >
+          {freeing ? "Unloading…" : "Unload VRAM"}
+        </button>
+        <span class="dim">
+          {comfy?.vram_free ? vram(comfy.vram_free, comfy.vram_total) : ""}
+        </span>
+      </div>
       <div class="row card-actions">
         <button disabled={!managed} onclick={restart}>Restart ComfyUI</button>
         <button disabled={!managed} onclick={viewLog}>View log</button>

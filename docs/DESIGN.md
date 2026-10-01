@@ -1274,6 +1274,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   restart the app), data dir (read-only, set by `--data-dir` / env var at
   launch) with storage counts, maintenance (reindex, sweep staging, sweep
   orphan inputs).
+- **Unload VRAM**, on the connection card, in both modes: `POST
+  /api/system/free_vram`, the same verb `forge mcp` calls after each round
+  (DESIGN-AGENT-LOOP §6.3), for freeing the card by hand — restarting an
+  LLM while ComfyUI still holds the last run's weights. ComfyUI unloads
+  after any job it is running; the next generation loads the models again.
 - **No save button**: editable fields write `config.yaml` on blur.
   `model_folders` is not editable via the UI or `PATCH /api/config`; it is
   read at launch and `extra_model_paths.yaml` is generated from it then.
