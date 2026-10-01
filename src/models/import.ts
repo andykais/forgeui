@@ -29,6 +29,7 @@ import {
   type MediaSource,
   type ModelMetaPatch,
   normalizeModelHash,
+  sampleIdsBySource,
   sampleSourceExists,
   updateModelMeta,
 } from "../db/queries.ts";
@@ -48,6 +49,11 @@ export interface ImportBatch {
   created_at?: string;
   /** Replace fields the model already has, rather than only filling blanks. */
   overwrite?: boolean;
+  /**
+   * Replace a sample the model already has from the same source URL, rather
+   * than skipping it (`--overwrite` naming imported samples, §3.2).
+   */
+  overwrite_samples?: boolean;
   model: {
     sha256: string;
     filename?: string | null;
@@ -421,8 +427,13 @@ export class ImportInbox {
       const source = toMediaSource(entry.source, this.#now());
       const url = source?.url ?? null;
       // What makes re-running the CLI free: the same image is one sample,
-      // however many times it is fetched (§7.2).
-      if (url !== null && sampleSourceExists(this.#db, hash, url)) continue;
+      // however many times it is fetched (§7.2) — unless the batch was told
+      // to replace the model's samples, when the new copy takes its place.
+      let replaced: string[] = [];
+      if (url !== null && sampleSourceExists(this.#db, hash, url)) {
+        if (batch.overwrite_samples !== true) continue;
+        replaced = sampleIdsBySource(this.#db, hash, url);
+      }
 
       let bytes: Uint8Array;
       try {
@@ -437,7 +448,14 @@ export class ImportInbox {
         );
         continue;
       }
-      await this.#samples.import({
+      // Removed only once the new bytes are in hand. A thumbnail that was the
+      // old copy follows it to the new one rather than falling back.
+      const thumb = getModel(this.#db, hash)?.thumb_path ?? null;
+      let wasThumb = false;
+      for (const id of replaced) {
+        if ((await this.#samples.remove(id)).path === thumb) wasThumb = true;
+      }
+      const created = await this.#samples.import({
         modelHash: hash,
         bytes,
         filename: basename(entry.file),
@@ -446,6 +464,9 @@ export class ImportInbox {
         raw: entry.raw ?? null,
         createdAt: base - index,
       });
+      if (wasThumb) {
+        updateModelMeta(this.#db, hash, { thumb_path: created.path });
+      }
     }
   }
 

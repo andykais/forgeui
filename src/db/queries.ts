@@ -1248,6 +1248,17 @@ export function sampleSourceExists(
   ).value<[number]>(modelHash, sourceUrl) !== undefined;
 }
 
+/** The samples a model already has from one source URL (§7.2). */
+export function sampleIdsBySource(
+  db: Database,
+  modelHash: string,
+  sourceUrl: string,
+): string[] {
+  return db.prepare(
+    `SELECT id FROM samples WHERE model_hash = ? AND source_url = ? ORDER BY id`,
+  ).values<[string]>(modelHash, sourceUrl).map(([id]) => id);
+}
+
 export function getSample(db: Database, id: string): SampleRow | null {
   const record = db.prepare(
     `SELECT ${SAMPLE_COLUMNS} FROM samples WHERE id = ?`,

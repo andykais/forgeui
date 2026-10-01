@@ -12,6 +12,7 @@ import { effectiveConfig } from "../../src/config/config.ts";
 import { dataPaths, ensureDataDirs } from "../../src/config/paths.ts";
 import { sha256Hex } from "../../src/workflows/hash.ts";
 import { CivitaiClient } from "../../src/cli/civitai_client.ts";
+import { parseOverwrite } from "../../src/cli/overwrite.ts";
 import {
   civitaiToken,
   LookupError,
@@ -1529,6 +1530,125 @@ Deno.test("what the app imported, and what it refused, are left alone", async ()
     assertEquals(retried.existing, undefined);
     assertEquals((await readBatch(retried.dir)).overwrite, true);
   });
+});
+
+/** Move a waiting batch to where ingest leaves it: imported/success. */
+async function markImported(h: Harness, dir: string): Promise<string> {
+  const imported = join(h.paths.imports, "imported", "success", h.hash);
+  await Deno.mkdir(imported, { recursive: true });
+  await Deno.rename(join(dir, "model.json"), join(imported, "model.json"));
+  await Deno.remove(dir, { recursive: true });
+  return imported;
+}
+
+async function editBatch(
+  dir: string,
+  edit: (batch: ImportBatch) => void,
+): Promise<void> {
+  const batch = await readBatch(dir);
+  edit(batch);
+  await Deno.writeTextFile(join(dir, "model.json"), JSON.stringify(batch));
+}
+
+Deno.test("--overwrite naming one place leaves the other's results alone", async () => {
+  await withCli(async (h) => {
+    const run = runner(h);
+    const imported = await markImported(
+      h,
+      (await run({ sha256checksum: h.hash })).dir,
+    );
+    await editBatch(imported, (batch) => {
+      batch.model.display_name = "As imported";
+    });
+
+    // A scope reaching only fetched/ does not touch what the app imported,
+    // and asks nothing to find that out.
+    const lines: string[] = [];
+    const before = h.fake.requests.length;
+    const skipped = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("fetched,samples"),
+    }, (line) => lines.push(line));
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(skipped.existing?.state, "imported");
+    const said = lines.join("\n");
+    assertStringIncludes(
+      said,
+      "--overwrite=fetched,samples does not reach imported/, where it is.",
+    );
+    assertStringIncludes(said, "--download-samples 1 --overwrite=samples");
+
+    // Naming imported samples fetches the samples, marks them to replace
+    // what the app has, and keeps the metadata the app applied.
+    const result = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("imported,samples"),
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(batch.samples?.length, 1);
+    assertEquals(batch.overwrite_samples, true);
+    assertEquals(batch.overwrite, false);
+    assertEquals(batch.model.display_name, "As imported");
+    assertEquals(result.kept, ["metadata"]);
+  });
+});
+
+Deno.test("a waiting batch keeps the parts --overwrite does not name", async () => {
+  await withCli(async (h) => {
+    const run = runner(h);
+    const first = await run({ sha256checksum: h.hash, downloadSamples: 1 });
+    // The weights a --download-model run would have left, and a hand edit.
+    await Deno.mkdir(join(first.dir, "model"));
+    await Deno.writeTextFile(join(first.dir, "model", FILENAME), "weights");
+    await editBatch(first.dir, (batch) => {
+      batch.model.display_name = "Hand-written";
+      batch.files = [{ file: `model/${FILENAME}`, kind: "checkpoints" }];
+    });
+
+    // Samples only: three now, from the page and its gallery; the weights
+    // are not downloaded again and the edited metadata stays.
+    const lines: string[] = [];
+    const samples = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 3,
+      downloadModel: true,
+      overwrite: parseOverwrite("samples"),
+    }, (line) => lines.push(line));
+    assertEquals(h.fake.matching("/api/download/").length, 0);
+    let batch = await readBatch(samples.dir);
+    assertEquals(batch.samples?.length, 3);
+    assertEquals(batch.model.display_name, "Hand-written");
+    assertEquals(batch.files, [{
+      file: `model/${FILENAME}`,
+      kind: "checkpoints",
+    }]);
+    assertEquals(
+      await Deno.readTextFile(join(samples.dir, "model", FILENAME)),
+      "weights",
+    );
+    assertEquals(samples.kept, ["metadata", "models"]);
+    assertStringIncludes(
+      lines.join("\n"),
+      "not fetched: models, which --overwrite=samples does not name",
+    );
+
+    // Metadata only: the lookup's answer again, and the samples and weights
+    // carried over as they were.
+    const sampleFiles = await namesIn(join(samples.dir, "samples"));
+    const metadata = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("metadata"),
+    });
+    batch = await readBatch(metadata.dir);
+    assertEquals(batch.model.display_name, "CyberRealistic");
+    assertEquals(batch.samples?.length, 3);
+    assertEquals(await namesIn(join(metadata.dir, "samples")), sampleFiles);
+    assert(await exists(join(metadata.dir, "model", FILENAME)));
+    assertEquals(metadata.kept, ["samples", "models"]);
+  }, { gallery: galleryOf });
 });
 
 Deno.test("another version of the same model is another file", async () => {

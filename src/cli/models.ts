@@ -47,9 +47,18 @@ import {
   type Existing,
   findExisting,
   label,
+  recordsFor,
   type Wanted,
   wantedFromUrl,
 } from "./existing.ts";
+import {
+  allows,
+  type Overwrite,
+  overwriteFlag,
+  type OverwritePart,
+  placeOf,
+  toOverwrite,
+} from "./overwrite.ts";
 import {
   formatErrorNote,
   type ImportLayout,
@@ -73,7 +82,11 @@ export interface ModelsCommandOptions {
   source: LookupSource;
   downloadSamples: number;
   downloadModel: boolean;
-  overwrite: boolean;
+  /**
+   * What earlier results this run may replace (§3.2): `true` is a bare
+   * `--overwrite`, `false` or null none, and a scope names places and parts.
+   */
+  overwrite: boolean | Overwrite | null;
   dryRun: boolean;
   browsingLevel?: number;
   timeoutMs: number;
@@ -91,10 +104,16 @@ export interface ModelsCommandResult {
   files: number;
   /**
    * Set when nothing was fetched because this model already was: a batch
-   * waiting in the import folder, or one the app has ingested. Only without
-   * `--overwrite`.
+   * waiting in the import folder, or one the app has ingested — and
+   * `--overwrite` did not reach where it is.
    */
   existing?: Existing;
+  /**
+   * What was carried over from the batch already waiting, rather than
+   * fetched again, because `--overwrite` did not name it or the run did not
+   * ask for it.
+   */
+  kept?: OverwritePart[];
 }
 
 export class UsageError extends Error {
@@ -190,13 +209,20 @@ export async function runModels(
   // Without `--overwrite`, a checksum anywhere in the import folder is left
   // alone — fetched, not found, imported, refused — and found without asking
   // the network where that is possible: re-running a list of commands costs
-  // nothing for the ones already done (§3.2).
-  if (!options.overwrite) {
+  // nothing for the ones already done (§3.2). With a scope, it is left alone
+  // when any place it is recorded is one the scope does not name.
+  const overwrite = toOverwrite(options.overwrite ?? null);
+  {
     const wanted = wantedFor(options, localHash);
     const have = wanted === null
       ? null
       : await findExisting(options.paths, wanted);
-    if (have !== null) return alreadyDone(have, askedFor(options), say);
+    const blocked = have === null
+      ? null
+      : await blocking(options.paths, have.hash, overwrite);
+    if (blocked !== null) {
+      return alreadyDone(blocked, askedFor(options), say, overwrite);
+    }
   }
 
   // What a "no" is recorded under: the checksum, when it is known before the
@@ -225,16 +251,30 @@ export async function runModels(
   // A link nothing here had recorded, for a checksum the folder has anyway —
   // fetched on another machine sharing it, say. The lookup could not be
   // saved, but the samples, the weights and the batch can.
-  if (!options.overwrite) {
-    const have = await findExisting(options.paths, { hash: sha256 });
-    if (have !== null) return alreadyDone(have, askedFor(options), say);
+  const blocked = await blocking(options.paths, sha256, overwrite);
+  if (blocked !== null) {
+    return alreadyDone(blocked, askedFor(options), say, overwrite);
   }
+
+  // What this run replaces, and what it keeps of what is there (§3.2). A
+  // part is fetched again only where the scope names it and the run asks for
+  // it; otherwise the waiting batch's copy is carried into the new one, and
+  // an imported model's is left as the app has it.
+  const earlier = await carriedFrom(options.paths, sha256);
+  const may = (part: OverwritePart) =>
+    !earlier.any || overwrite === null || overwrite.parts.has(part);
+  const newMetadata = may("metadata");
+  const getSamples = options.downloadSamples > 0 && may("samples");
+  const getWeights = options.downloadModel && may("models");
 
   const batch: ImportBatch = {
     format: IMPORT_FORMAT,
     forgecli_version: "0.1.0",
     created_at: isoSeconds(new Date()),
-    overwrite: options.overwrite,
+    // Ingest replaces the fields you edited only when the scope reaches what
+    // the app has applied; `--overwrite=fetched` refreshes a waiting batch
+    // and still only fills blanks.
+    overwrite: allows(overwrite, "imported", "metadata"),
     model: {
       sha256: found.sha256,
       filename: found.filename,
@@ -254,6 +294,16 @@ export async function runModels(
     civitai: found.record as unknown as Record<string, unknown>,
     samples: [],
   };
+  const kept: OverwritePart[] = [];
+  // The metadata the scope does not name: the waiting batch's, or what the
+  // app applied — never the lookup's, however much newer.
+  if (!newMetadata && earlier.metadata !== null) {
+    batch.model = earlier.metadata.model;
+    batch.source = earlier.metadata.source ?? null;
+    batch.civitai = earlier.metadata.civitai ?? null;
+    batch.overwrite = earlier.waiting?.batch.overwrite === true;
+    kept.push("metadata");
+  }
 
   const dir = join(layout.fetched.success, sha256);
   const result: ModelsCommandResult = {
@@ -264,12 +314,26 @@ export async function runModels(
     files: 0,
   };
 
+  // Asked for, and not fetched because the scope leaves it as it is.
+  const held = [
+    ...(options.downloadSamples > 0 && !getSamples ? ["samples"] : []),
+    ...(options.downloadModel && !getWeights ? ["models"] : []),
+  ];
+  const heldNote = held.length > 0 && overwrite !== null
+    ? `not fetched: ${held.join(" and ")}, which ${
+      overwriteFlag(overwrite)
+    } does not name, so what ${
+      earlier.waiting !== null ? "the waiting batch" : "the app"
+    } has is kept`
+    : null;
+
   if (options.dryRun) {
     for (const line of summarize(found)) say(line);
-    if (options.downloadSamples > 0) {
+    if (getSamples) {
       say(`  samples       up to ${options.downloadSamples}`);
     }
-    if (options.downloadModel) say(`  weights       would be downloaded`);
+    if (getWeights) say(`  weights       would be downloaded`);
+    if (heldNote !== null) say(heldNote);
     say(`would write ${dir}`);
     return result;
   }
@@ -279,7 +343,7 @@ export async function runModels(
   const staging = join(layout.staging, ulid());
   await Deno.mkdir(staging, { recursive: true });
   try {
-    if (options.downloadSamples > 0) {
+    if (getSamples) {
       const { samples, skipped, showcase } = await fetchSamples({
         client,
         found,
@@ -292,9 +356,23 @@ export async function runModels(
       result.samples = samples.length;
       result.skipped = skipped;
       result.showcase = showcase;
+      // Replacing what the app imported from the same links is the scope's
+      // to say, not the fetch's (§7.2).
+      if (allows(overwrite, "imported", "samples")) {
+        batch.overwrite_samples = true;
+      }
+    } else if (earlier.waiting?.batch.samples?.length) {
+      const samples = earlier.waiting.batch.samples;
+      await carry(earlier.waiting.dir, staging, samples.map((s) => s.file));
+      batch.samples = samples;
+      if (earlier.waiting.batch.overwrite_samples === true) {
+        batch.overwrite_samples = true;
+      }
+      result.samples = samples.length;
+      kept.push("samples");
     }
 
-    if (options.downloadModel) {
+    if (getWeights) {
       const kind = found.record.source.kind;
       const files = await fetchWeights({
         found,
@@ -311,6 +389,18 @@ export async function runModels(
       });
       batch.files = files;
       result.files = files.length;
+    } else if (earlier.waiting?.batch.files?.length) {
+      // An entry already filed by the app has no file left to carry; its
+      // entry still says so.
+      const files = earlier.waiting.batch.files;
+      await carry(
+        earlier.waiting.dir,
+        staging,
+        files.filter((file) => file.filed !== true).map((file) => file.file),
+      );
+      batch.files = files;
+      result.files = files.length;
+      kept.push("models");
     }
 
     await Deno.writeTextFile(
@@ -332,8 +422,19 @@ export async function runModels(
   await Deno.remove(join(layout.fetched.failure, sha256), { recursive: true })
     .catch(() => {});
 
+  result.kept = kept;
   for (const line of summarize(found)) say(line);
-  if (options.downloadSamples > 0) {
+  if (kept.length > 0) {
+    say(
+      `  kept          ${kept.join(", ")} from ${
+        earlier.waiting !== null
+          ? "the batch already waiting"
+          : "what the app imported"
+      }`,
+    );
+  }
+  if (heldNote !== null) say(heldNote);
+  if (getSamples) {
     say(
       `  samples       ${result.samples}${
         result.samples > 0
@@ -409,14 +510,18 @@ function alreadyDone(
   have: Existing,
   asked: { samples: number; model: boolean; command: string },
   say: (line: string) => void,
+  overwrite: Overwrite | null,
 ): ModelsCommandResult {
   const what = label(have) || have.hash;
   const on = have.when
     ? ` on ${have.when.replace("T", " ").replace(/Z$/, " UTC")}`
     : "";
+  const place = placeOf(have.state);
   say(
     `skipped ${what}: an earlier run${on} already has a result for it, and ` +
-      `without --overwrite it is not asked again.`,
+      (overwrite === null
+        ? `without --overwrite it is not asked again.`
+        : `${overwriteFlag(overwrite)} does not reach ${place}/, where it is.`),
   );
   switch (have.state) {
     case "fetched":
@@ -460,7 +565,7 @@ function alreadyDone(
   if (skipped.length > 0) {
     say(`  not fetched this time: ${skipped.join(" and ")}.`);
   }
-  say(`to try again: ${asked.command} --overwrite`);
+  say(`to try again: ${asked.command} ${retryFlag(overwrite, place)}`);
   say(`  (or delete ${have.dir})`);
   return {
     dir: have.dir,
@@ -470,6 +575,88 @@ function alreadyDone(
     files: 0,
     existing: have,
   };
+}
+
+/**
+ * The earlier result that keeps this run from going ahead, if any: the first
+ * place the checksum is recorded that the scope does not name (§3.2). A
+ * model imported and with a newer batch waiting needs both places named.
+ */
+async function blocking(
+  paths: DataPaths,
+  hash: string,
+  overwrite: Overwrite | null,
+): Promise<Existing | null> {
+  for (const record of await recordsFor(paths, hash)) {
+    if (!allows(overwrite, placeOf(record.state))) return record;
+  }
+  return null;
+}
+
+interface Earlier {
+  /** Anything there is to keep: a batch waiting, or one applied. */
+  any: boolean;
+  /** The batch in `fetched/success/`, whose parts can be carried over. */
+  waiting: { dir: string; batch: ImportBatch } | null;
+  /** The metadata to keep: the waiting batch's, else the applied one's. */
+  metadata: ImportBatch | null;
+}
+
+/** What earlier runs left for this checksum that a new batch could keep. */
+async function carriedFrom(paths: DataPaths, hash: string): Promise<Earlier> {
+  const layout = importLayout(paths.imports);
+  const read = async (dir: string) => {
+    try {
+      const batch = JSON.parse(
+        await Deno.readTextFile(join(dir, "model.json")),
+      ) as ImportBatch;
+      return batch?.model ? { dir, batch } : null;
+    } catch {
+      return null;
+    }
+  };
+  const waiting = await read(join(layout.fetched.success, hash));
+  const applied = await read(join(layout.imported.success, hash));
+  return {
+    any: waiting !== null || applied !== null,
+    waiting,
+    metadata: (waiting ?? applied)?.batch ?? null,
+  };
+}
+
+/**
+ * Files of the batch being replaced, into the one replacing it. Linked, not
+ * moved: until the new batch is renamed into place the old one must stay
+ * whole, and a second name for a checkpoint costs nothing.
+ */
+async function carry(
+  from: string,
+  to: string,
+  files: string[],
+): Promise<void> {
+  for (const file of files) {
+    const source = join(from, file);
+    const target = join(to, file);
+    await Deno.mkdir(join(target, ".."), { recursive: true });
+    try {
+      await Deno.link(source, target);
+    } catch (cause) {
+      if (cause instanceof Deno.errors.NotFound) continue;
+      await Deno.copyFile(source, target);
+    }
+  }
+}
+
+/** The run's own scope, widened to the place that stopped it. */
+function retryFlag(
+  overwrite: Overwrite | null,
+  place: "fetched" | "imported",
+): string {
+  if (overwrite === null) return "--overwrite";
+  return overwriteFlag({
+    places: new Set([...overwrite.places, place]),
+    parts: overwrite.parts,
+  });
 }
 
 /** The checksum a run is about before it asks anything, when it says. */

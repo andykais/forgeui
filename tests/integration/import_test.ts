@@ -346,6 +346,66 @@ Deno.test("a batch's samples keep the batch's order", async () => {
   });
 });
 
+Deno.test("a batch told to overwrite samples replaces the ones from the same link", async () => {
+  // `--overwrite` naming imported samples (§3.2, §7.2): the same link is
+  // still one sample, but the new copy — new bytes, new generation data —
+  // takes the old one's place, and a thumbnail that was the old one follows.
+  await withImports(async ({ app, hash }) => {
+    const sample = (name: string, seed: number) => ({
+      file: `samples/${name}.png`,
+      kind: "image",
+      source: {
+        kind: "civitai",
+        label: "Civitai",
+        url: `https://civitai.red/images/${name}`,
+      },
+      raw: { format: "civitai-meta", source: { seed } },
+    });
+    const ingest = async (overrides: Partial<ImportBatch>) => {
+      await writeBatch(app.paths.imports, hash, overrides, {
+        "samples/a.png": samplePng(),
+        "samples/b.png": samplePng(),
+      });
+      await app.models.rescan();
+      await app.models.idle();
+      return await app.json<ModelDetail>(`/api/models/${hash}`);
+    };
+
+    const first = await ingest({ samples: [sample("a", 1), sample("b", 2)] });
+    const oldB = first.samples.find((s) => s.source?.url?.endsWith("/b"))!;
+    const patched = await app.fetch(`/api/models/${hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ thumb_sample_id: oldB.id }),
+    });
+    assertEquals(patched.status, 200);
+    await patched.body?.cancel();
+
+    // Without the flag, the same link is skipped: the seed stays 2.
+    const skipped = await ingest({ samples: [sample("b", 3)] });
+    assertEquals(skipped.samples.length, 2);
+    assertEquals(
+      skipped.samples.find((s) => s.id === oldB.id)?.raw?.fields.seed,
+      2,
+    );
+
+    const replaced = await ingest({
+      overwrite_samples: true,
+      samples: [sample("b", 9)],
+    });
+    assertEquals(replaced.samples.length, 2);
+    const newB = replaced.samples.find((s) => s.source?.url?.endsWith("/b"))!;
+    assert(newB.id !== oldB.id);
+    assertEquals(newB.raw?.fields.seed, 9);
+    // The untouched sample is untouched.
+    assertEquals(
+      replaced.samples.find((s) => s.source?.url?.endsWith("/a"))?.raw
+        ?.fields.seed,
+      1,
+    );
+    assertEquals(replaced.thumb_path, newB.path);
+  });
+});
+
 Deno.test("a batch for an unhashed model waits, then lands", async () => {
   const fixtures = await modelFixtures();
   try {

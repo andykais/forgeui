@@ -22,6 +22,7 @@ import {
 } from "./cli/models.ts";
 import { HuggingFaceUrlError } from "./models/huggingface.ts";
 import { TensorArtUrlError } from "./models/tensorart.ts";
+import { OverwriteError, parseOverwrite } from "./cli/overwrite.ts";
 import { ForgeUi } from "./mcp/forgeui.ts";
 import { LlamaSwap } from "./mcp/llama.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
@@ -142,10 +143,13 @@ const models = new Command()
       "gated one needs CIVITAI_TOKEN.",
   )
   .option(
-    "--overwrite",
+    "--overwrite [scope:string]",
     "Fetch again — without it, a model whose checksum is anywhere in the " +
       "import folder (fetched, not found, imported, refused) is left alone — " +
-      "and let the import replace fields you have edited.",
+      "and let the import replace fields you have edited. A comma-separated " +
+      "scope narrows it: fetched and imported say where (default both), " +
+      "metadata, samples and models say what (default all), so " +
+      "--overwrite=imported,samples replaces only an imported model's samples.",
   )
   .option(
     "--dry-run",
@@ -244,7 +248,7 @@ async function runModelsCommand(options: {
   importSource: string;
   downloadSamples?: number | boolean;
   downloadModel?: boolean;
-  overwrite?: boolean;
+  overwrite?: boolean | string;
   dryRun?: boolean;
   json?: boolean;
   browsingLevel?: number;
@@ -278,7 +282,7 @@ async function runModelsCommand(options: {
       source: chosen.source,
       downloadSamples: samples,
       downloadModel: options.downloadModel === true,
-      overwrite: options.overwrite === true,
+      overwrite: parseOverwrite(options.overwrite),
       dryRun: options.dryRun === true,
       browsingLevel: options.browsingLevel,
       timeoutMs: options.timeout,
@@ -294,7 +298,8 @@ async function runModelsCommand(options: {
     return 0;
   } catch (cause) {
     if (
-      cause instanceof UsageError || cause instanceof CivitaiUrlError ||
+      cause instanceof UsageError || cause instanceof OverwriteError ||
+      cause instanceof CivitaiUrlError ||
       cause instanceof HuggingFaceUrlError || cause instanceof TensorArtUrlError
     ) {
       console.error(`forge models: ${cause.message}`);

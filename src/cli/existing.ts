@@ -135,6 +135,25 @@ export async function findExisting(
   return null;
 }
 
+/**
+ * Every place the import folder has this checksum, in the order the states
+ * are listed: a model can be imported and have a newer batch waiting, or a
+ * failed retry recorded beside what was applied.
+ */
+export async function recordsFor(
+  paths: DataPaths,
+  hash: string,
+): Promise<Existing[]> {
+  const normal = normalizeHash(hash);
+  if (normal === null) return [];
+  const found: Existing[] = [];
+  for (const [state, dir] of stateDirs(importLayout(paths.imports))) {
+    const recorded = await read(state, join(dir, normal), normal);
+    if (recorded !== null) found.push(existing(recorded));
+  }
+  return found;
+}
+
 function matches(batch: Record<string, unknown>, wanted: Wanted): boolean {
   const source = object(batch.source) ??
     object(object(batch.civitai)?.source) ??

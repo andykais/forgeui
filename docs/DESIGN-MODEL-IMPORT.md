@@ -266,11 +266,13 @@ Options:
       --download-model        Download the model weights into the batch. The app
                               files them under <appdata>/models/<kind>/ on ingest.
                               Public models need no login; see AUTH for the rest.
-      --overwrite             Fetch again a model already fetched, and let the
+      --overwrite[=<scope>]   Fetch again a model already fetched, and let the
                               import replace fields you have edited. Without it, a
-                              model whose checksum is in
-                              checksum is anywhere in the import folder is left
-                              alone (§3.2).
+                              model whose checksum is anywhere in the import
+                              folder is left alone. A comma-separated scope
+                              narrows it: fetched, imported say where (default
+                              both); metadata, samples, models say what (default
+                              all) (§3.2).
 
       --dry-run               Print what would be fetched and written; touch nothing.
       --json                  Print the resulting model.json to stdout instead of a
@@ -462,6 +464,64 @@ none of this opens `app.db` (§3.1).
 `--overwrite` does two things, deliberately one flag: it fetches again, and
 it marks the batch so ingest replaces the fields you edited (§7.2). A re-fetch
 that then kept the old values would be fetching for nothing.
+
+#### Scoped: `--overwrite=<scope>`
+
+*Added after the rest of this document.* A bare `--overwrite` replaces
+everything; a comma-separated scope says what it may replace. Its words are of
+two kinds, and a run may replace a part only in a place the scope names:
+
+| Word | Kind | Means |
+|---|---|---|
+| `fetched` | place | a batch waiting in `fetched/success/`, or a failure in `fetched/failure/` |
+| `imported` | place | what the app applied (`imported/success/`) or refused (`imported/failure/`) |
+| `metadata` | part | `model.json`'s `model`, `source` and `civitai` |
+| `samples` | part | the sample images and their generation data |
+| `models` | part | the weights (`--download-model`) |
+
+No place named means both; no part named means all three.
+
+| Flag | Replaces |
+|---|---|
+| `--overwrite` | anything, in `fetched/` and `imported/` |
+| `--overwrite=imported` | anything of a model the app has imported |
+| `--overwrite=fetched` | anything of a batch still waiting |
+| `--overwrite=samples` | samples, in either place; never the weights or the metadata |
+| `--overwrite=metadata` | the metadata, in either place |
+| `--overwrite=imported,samples` | an imported model's samples, and nothing waiting in `fetched/` |
+| `--overwrite=models` | the weights, in either place |
+| `--overwrite=fetched,models,samples` | a waiting batch's weights and samples |
+
+**Whether the run goes ahead** is decided by the places: every place the
+checksum is recorded must be named. A model imported *and* with a newer batch
+waiting needs both, since the new batch replaces the waiting one and is then
+applied over the imported one. A run the scope does not reach is a skip like
+any other, said as `--overwrite=fetched does not reach imported/, where it
+is`, and the retry it suggests is the run's own scope with that place added.
+A failure in a named place has nothing to keep, and is simply tried again.
+
+**What it replaces** is decided by the parts. The lookup always runs — the
+samples and the weights cannot be found without it — and then:
+
+- **metadata** not named: the new batch carries the waiting batch's `model`,
+  `source`, `civitai` and `overwrite`, or, with nothing waiting, the ones the
+  app applied from `imported/success/`. The lookup's answer is used only for
+  finding samples and weights.
+- **samples** or **models** not named, or not asked for this run
+  (`--download-samples`, `--download-model`): nothing is downloaded. A
+  waiting batch's samples or weights are carried into the new batch —
+  hard-linked, so the old batch is whole until the new one is renamed into
+  place — and an imported model's stay as the app has them. *Amended:* a bare
+  `--overwrite` without `--download-samples` used to drop a waiting batch's
+  samples; they are now kept, since overwriting is leave to replace, not an
+  instruction to delete.
+
+The batch records what ingest may replace: `overwrite` (the fields you
+edited) is set when the scope names imported metadata, and
+`overwrite_samples` (§5.2) when it names imported samples and samples were
+fetched. `--overwrite=fetched` refreshes a waiting batch and still only fills
+blanks on ingest. The summary says what was kept (`kept metadata, models from
+the batch already waiting`) and what was asked for and not fetched.
 
 ## 4. Lookup
 
@@ -1068,7 +1128,10 @@ Chosen this way because:
 rejected with a sentence rather than misread. `overwrite` carries the CLI's
 `--overwrite` flag forward to ingest (§7.2) — the flag means "replace what is
 there" at both ends of the pipe, and it would be strange for it to mean it
-only at one.
+only at one. *Added with scoped overwrites (§3.2):* `overwrite_samples: true`
+says a sample the model already has from the same source URL is replaced by
+this batch's copy rather than skipped. Absent is false; it is written only
+when the scope names imported samples.
 
 `files` is absent without `--download-model` and is a list rather than a
 single entry because a version can ship more than one file worth having (a
@@ -1359,7 +1422,11 @@ are the readable batches on disk, which Phase B applies when it drains.
    which already takes `sourceUrl` and `raw` and has never been given either.
    The file is moved rather than copied where the filesystem allows it.
    A sample whose `(model_hash, source_url)` already exists is skipped, which
-   is what makes re-running the CLI free. A batch's samples keep the batch's
+   is what makes re-running the CLI free — unless the batch says
+   `overwrite_samples: true`, when the old sample is removed once the new
+   bytes are read and the new one imported in its place. A thumbnail that was
+   the old sample moves to the new one. Samples the batch does not list are
+   left alone. A batch's samples keep the batch's
    order on the model page: each is dated a millisecond before the one
    listed ahead of it, so the strip (newest first) reads in the order
    `forge models` wrote them, the model page's own media first.
@@ -1668,6 +1735,10 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   ingests.
 - `overwrite: false` does not clobber a hand-typed display name;
   `overwrite: true` does.
+- `overwrite_samples: true` replaces the sample from the same link, and its
+  thumbnail follows; without it the link is skipped.
+- `--overwrite=<scope>` skips a model recorded in a place it does not name,
+  and carries a waiting batch's unnamed parts into the new batch.
 - An imported sample's row, sidecar and `GET /api/models/:hash` all carry the
   source; the sidecar round-trips through `reindex` unchanged.
 - `GET /api/models/:hash` returns `trigger_words` and `description_text` and
