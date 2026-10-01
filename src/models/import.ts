@@ -411,7 +411,13 @@ export class ImportInbox {
     hash: string,
   ): Promise<void> {
     if (this.#samples === undefined) return;
-    for (const entry of batch.samples ?? []) {
+    // The batch's order is the order to show them in — the model's own
+    // showcase, then its gallery (§4.3) — and the strip lists newest first,
+    // so each one is dated a millisecond before the one ahead of it. The
+    // first is still imported first and so has the lowest id, which is what
+    // "its first sample" reads for the thumbnail.
+    const base = this.#now();
+    for (const [index, entry] of (batch.samples ?? []).entries()) {
       const source = toMediaSource(entry.source, this.#now());
       const url = source?.url ?? null;
       // What makes re-running the CLI free: the same image is one sample,
@@ -438,6 +444,7 @@ export class ImportInbox {
         sourceUrl: url,
         source,
         raw: entry.raw ?? null,
+        createdAt: base - index,
       });
     }
   }

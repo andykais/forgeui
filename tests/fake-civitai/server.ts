@@ -183,7 +183,14 @@ export function startFakeCivitai(
       }
       if (parts[2] === "images") {
         const versionId = Number(url.searchParams.get("modelVersionId"));
-        return ok({ items: options.images?.[versionId] ?? [] });
+        // `username` narrows to one account's posts, as the real one does:
+        // asked for the creator, it is the version's own showcase.
+        const username = url.searchParams.get("username");
+        const items = (options.images?.[versionId] ?? []).filter((item) =>
+          username === null ||
+          (item as { username?: string }).username === username
+        );
+        return ok({ items });
       }
     }
 

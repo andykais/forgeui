@@ -146,6 +146,12 @@ export interface ImportSampleInput {
   source?: MediaSource | null;
   /** Unmapped generation data, stored as `raw` and never interpreted (§8.3). */
   raw?: unknown;
+  /**
+   * When it was made, in ms; now unless said. The model page lists samples
+   * newest first, so an import that wants its own order says so with this
+   * (DESIGN-MODEL-IMPORT §7.2).
+   */
+  createdAt?: number;
 }
 
 export class SampleStore {
@@ -213,9 +219,10 @@ export class SampleStore {
         // A file we cannot measure is still a sample.
       }
     }
+    const createdAt = input.createdAt ?? this.#now();
     const sidecar = buildSidecar({
       job_id: id,
-      created_at: new Date(this.#now()),
+      created_at: new Date(createdAt),
       workflow: null,
       params: {},
       models: [{
@@ -239,6 +246,7 @@ export class SampleStore {
       params: null,
       sourceUrl: input.sourceUrl ?? null,
       source: input.source ?? null,
+      createdAt,
     });
   }
 
@@ -328,6 +336,7 @@ export class SampleStore {
     params: Record<string, unknown> | null;
     sourceUrl: string | null;
     source: MediaSource | null;
+    createdAt?: number;
   }): Promise<SampleView> {
     const sidecarName = `${input.id}.json`;
     await Deno.writeTextFile(
@@ -343,7 +352,7 @@ export class SampleStore {
       source_url: input.sourceUrl,
       source: input.source,
       params: input.params,
-      created_at: this.#now(),
+      created_at: input.createdAt ?? this.#now(),
     };
     insertSample(this.#db, row);
     return this.view(row);

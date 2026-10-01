@@ -63,17 +63,19 @@ function civitaiModel(hash: string, base: string) {
         downloadUrl: `${base}/api/download/models/501240`,
         hashes: { SHA256: hash.toUpperCase() },
       }],
+      // The version's own showcase, as the live API gives it: generation
+      // data, but no `id` — so no page to link to until the same images,
+      // asked for by their author, supply one.
       images: [
         {
-          id: 900001,
           url: `${base}/img/anim=false,width=450,optimized=true/900001.jpeg`,
           width: 768,
           height: 512,
           type: "image",
           nsfwLevel: 1,
+          meta: { prompt: "a fox", seed: 3, steps: 28, cfgScale: 4.5 },
         },
         {
-          id: 900002,
           url: `${base}/img/width=450/900002.jpeg`,
           width: 768,
           height: 512,
@@ -104,6 +106,8 @@ async function withCli(
     nsfwLevel?: number;
     /** Leave the configured model folder empty, as a fresh machine is. */
     noLocalFile?: boolean;
+    /** More of the version's gallery: other people's posts under it. */
+    gallery?: (url: string) => unknown[];
   } = {},
 ): Promise<void> {
   const { bytes, hash } = await fixture();
@@ -119,8 +123,8 @@ async function withCli(
   const fake = startFakeCivitai();
   const model = civitaiModel(hash, fake.url);
   // What `/api/v1/images` really answers with: ids, already-original URLs,
-  // dimensions and `meta`. The version object's own images carry no id, which
-  // is why this endpoint is what samples are built from (§4.3).
+  // dimensions, `meta` and who posted it. The creator's two are the showcase
+  // above; asked for by username, they are what supplies its ids (§4.3).
   const meta = {
     501240: [
       {
@@ -130,6 +134,7 @@ async function withCli(
         height: 512,
         type: "image",
         nsfwLevel: 1,
+        username: "Cyberdelia",
         meta: { prompt: "a fox", seed: 3, steps: 28, cfgScale: 4.5 },
       },
       {
@@ -141,8 +146,10 @@ async function withCli(
         // Above the default ceiling of 1: offered by the lookup, kept off the
         // disk by import.nsfw_level.
         nsfwLevel: 8,
+        username: "Cyberdelia",
         meta: {},
       },
+      ...(options.gallery?.(fake.url) ?? []),
     ],
   };
   const archive = {
@@ -253,7 +260,11 @@ Deno.test("a run says where it came from and what it holds", async () => {
     assertStringIncludes(said, "by            Cyberdelia");
     assertStringIncludes(said, "trigger words cyberrealistic, photo");
     assertStringIncludes(said, "their tags    photorealistic, base model");
-    assertStringIncludes(said, "samples       1 (1 over import.nsfw_level");
+    assertStringIncludes(
+      said,
+      "samples       1 (1 from the model page, 0 from its gallery) " +
+        "(1 over import.nsfw_level",
+    );
     assert(lines.at(-1) === `wrote ${result.dir}`, said);
     // The model is not in a model folder here, and nothing nags about it:
     // the machine running this usually has none (§2).
@@ -375,6 +386,80 @@ Deno.test("samples are fetched at full size, with their generation data", async 
       }`,
     );
   });
+});
+
+/** Two posts by somebody else under the version: its gallery. */
+function galleryOf(url: string) {
+  return [900003, 900004].map((id) => ({
+    id,
+    url: `${url}/img/original=true/${id}.jpeg`,
+    width: 512,
+    height: 512,
+    type: "image",
+    nsfwLevel: 1,
+    username: "someone",
+    meta: { prompt: `a gallery fox ${id}`, seed: id },
+  }));
+}
+
+Deno.test("samples start from the model's own media, and the gallery tops up", async () => {
+  // What the author put on the model page comes first, in their order; the
+  // gallery — everyone's posts under the version — only fills a count the
+  // showcase cannot reach (§4.3).
+  await withCli(async (h) => {
+    const lines: string[] = [];
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 3,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: (line) => lines.push(line),
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [
+        `${h.fake.url}/images/900001`,
+        `${h.fake.url}/images/900003`,
+        `${h.fake.url}/images/900004`,
+      ],
+    );
+    // The showcase image kept its own generation data and gained its page.
+    const raw = batch.samples![0]!.raw as { fields: { seed: number } };
+    assertEquals(raw.fields.seed, 3);
+    assertStringIncludes(
+      lines.join("\n"),
+      "samples       3 (1 from the model page, 2 from its gallery)",
+    );
+  }, { gallery: galleryOf });
+});
+
+Deno.test("the gallery is not asked when the model's own media are enough", async () => {
+  await withCli(async (h) => {
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 1,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [`${h.fake.url}/images/900001`],
+    );
+    // The images endpoint was asked only for the creator's own posts, for
+    // the showcase's links — never for the gallery.
+    const asked = h.fake.matching("/api/v1/images");
+    assert(asked.length > 0);
+    for (const request of asked) {
+      assertEquals(request.params.username, "Cyberdelia");
+    }
+  }, { gallery: galleryOf });
 });
 
 Deno.test("the batch is renamed into place, never written in halves", async () => {

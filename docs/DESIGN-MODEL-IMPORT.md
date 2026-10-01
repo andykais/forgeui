@@ -261,8 +261,8 @@ Options:
                               civitai.com | civitaiarchive | huggingface |
                               tensor.art asks that one only.
 
-      --download-samples <n>  Download up to <n> images from the model's page as
-                              samples, newest first. (Default: 0)
+      --download-samples <n>  Download up to <n> images as samples: the model
+                              page's own first, then its gallery. (Default: 0)
       --download-model        Download the model weights into the batch. The app
                               files them under <appdata>/models/<kind>/ on ingest.
                               Public models need no login; see AUTH for the rest.
@@ -719,8 +719,20 @@ hashing the bytes.
 
 ### 4.3 Samples
 
-`--download-samples=<n>` takes the version's images, newest first, and for
-each one:
+`--download-samples=<n>` starts from **the media on the model page** — the
+showcase the author put on the version, in the author's order — and only when
+`<n>` is more than the showcase can supply (after the NSFW ceiling below)
+tops up from **the version's gallery**, everyone's posts under it, newest
+first. An image in both is taken once. The summary says how many came from
+each: `samples 20 (6 from the model page, 14 from its gallery)`.
+
+The version's `images` carry `meta` but no image id, so the page link is found
+by asking `/api/v1/images?modelVersionId=<v>&username=<creator>` — the
+creator's own posts, which are the showcase — and matching on the UUID in the
+CDN path. That query is the only one made when the showcase is enough; the
+gallery query is made only to top up.
+
+For each image:
 
 1. **The bytes** come from the CDN URL with a plain `fetch` — they are public
    and the Civitai CLI has no image-download command. The URL's
@@ -1347,7 +1359,10 @@ are the readable batches on disk, which Phase B applies when it drains.
    which already takes `sourceUrl` and `raw` and has never been given either.
    The file is moved rather than copied where the filesystem allows it.
    A sample whose `(model_hash, source_url)` already exists is skipped, which
-   is what makes re-running the CLI free.
+   is what makes re-running the CLI free. A batch's samples keep the batch's
+   order on the model page: each is dated a millisecond before the one
+   listed ahead of it, so the strip (newest first) reads in the order
+   `forge models` wrote them, the model page's own media first.
 4. **Thumbnail.** If the model has no `thumb_path` and no samples before this
    batch, the first imported sample becomes the thumbnail. A model that had
    one keeps it.

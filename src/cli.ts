@@ -132,8 +132,8 @@ const models = new Command()
   )
   .option(
     "--download-samples [n:number]",
-    "Download up to <n> images from the model's page as samples, newest " +
-      "first. Without a number, config.yaml's import.samples.",
+    "Download up to <n> images as samples: the model page's own first, " +
+      "then its gallery. Without a number, config.yaml's import.samples.",
   )
   .option(
     "--download-model",

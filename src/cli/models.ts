@@ -85,6 +85,8 @@ export interface ModelsCommandResult {
   /** Null for `--search`, which looks things up and writes nothing. */
   batch: ImportBatch | null;
   samples: number;
+  /** Of `samples`, how many were the version's own showcase media. */
+  showcase?: number;
   skipped: number;
   files: number;
   /**
@@ -278,7 +280,7 @@ export async function runModels(
   await Deno.mkdir(staging, { recursive: true });
   try {
     if (options.downloadSamples > 0) {
-      const { samples, skipped } = await fetchSamples({
+      const { samples, skipped, showcase } = await fetchSamples({
         client,
         found,
         staging,
@@ -289,6 +291,7 @@ export async function runModels(
       batch.samples = samples;
       result.samples = samples.length;
       result.skipped = skipped;
+      result.showcase = showcase;
     }
 
     if (options.downloadModel) {
@@ -333,6 +336,12 @@ export async function runModels(
   if (options.downloadSamples > 0) {
     say(
       `  samples       ${result.samples}${
+        result.samples > 0
+          ? ` (${result.showcase ?? 0} from the model page, ${
+            result.samples - (result.showcase ?? 0)
+          } from its gallery)`
+          : ""
+      }${
         result.skipped > 0
           ? ` (${result.skipped} over import.nsfw_level, skipped)`
           : ""
@@ -706,56 +715,95 @@ async function fetchSamples(input: {
   limit: number;
   nsfwLevel: number;
   say: (line: string) => void;
-}): Promise<{ samples: ImportSample[]; skipped: number }> {
+}): Promise<{ samples: ImportSample[]; skipped: number; showcase: number }> {
   const { client, found, staging, limit, nsfwLevel, say } = input;
   const versionId = found.record.source.model_version_id;
   if (found.record.source.kind === "huggingface") {
     // Not a failure: a model card's pictures are decoration, not samples with
     // a prompt behind them, and there is nothing else to fetch.
     say("Hugging Face has no sample images; none were fetched");
-    return { samples: [], skipped: 0 };
+    return { samples: [], skipped: 0, showcase: 0 };
   }
 
-  // The lookup's own images carry dimensions and links; the images endpoint
-  // carries `meta`. Where both exist, they are joined on the image id.
-  let listed: Record<string, unknown>[] = [];
-  if (found.record.source.kind === "civitai" && versionId !== null) {
+  // The version's own media first — what its author chose to show on the
+  // model page, in their order — and the gallery (everyone's posts under the
+  // version) only to make up a count the showcase cannot reach (§4.3).
+  const showcase: Candidate[] = found.images.map((image) => ({
+    ...image,
+    from: "showcase" as const,
+  }));
+  const civitai = found.record.source.kind === "civitai" && versionId !== null;
+  const creator = found.record.creator?.username ?? null;
+  const fromApi = (image: Record<string, unknown>): Candidate => ({
+    id: typeof image.id === "number" ? image.id : null,
+    url: String(image.url ?? ""),
+    width: typeof image.width === "number" ? image.width : null,
+    height: typeof image.height === "number" ? image.height : null,
+    kind: image.type === "video" ? "video" as const : "image" as const,
+    nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
+    page_url: typeof image.id === "number"
+      ? `${client.civitaiUrl}/images/${image.id}`
+      : null,
+    meta: (image.meta ?? null) as Record<string, unknown> | null,
+    from: "gallery" as const,
+  });
+  const tried = async (
+    what: string,
+    ask: () => Promise<Record<string, unknown>[]>,
+  ): Promise<Candidate[]> => {
     try {
-      listed = await client.imagesFor(versionId, limit);
+      return (await ask()).map(fromApi);
     } catch (cause) {
-      // The archive path has no images endpoint at all, and a failure here
-      // costs metadata rather than the batch.
+      // A failure here costs links or extra samples, never the batch.
       say(
-        `could not read the generation data: ${
+        `could not read ${what}: ${
           cause instanceof Error ? cause.message : cause
         }`,
       );
+      return [];
+    }
+  };
+
+  /**
+   * The version object's images carry no `id` — checked against the live
+   * API — so no page to link a sample back to. The same images, asked for by
+   * their author, do; they are matched on the file's key in the CDN path,
+   * which both copies share. Any `meta` the version object lacked comes
+   * along too.
+   */
+  if (
+    civitai && creator !== null && showcase.some((image) => image.id === null)
+  ) {
+    const authored = new Map(
+      (await tried(
+        "the showcase's links",
+        () => client.imagesFor(versionId!, 100, creator),
+      )).map((image) => [mediaKey(image.url), image]),
+    );
+    for (const image of showcase) {
+      const match = authored.get(mediaKey(image.url));
+      if (!match || image.id !== null) continue;
+      image.id = match.id;
+      image.page_url = match.page_url;
+      image.meta ??= match.meta;
     }
   }
-  /**
-   * The images endpoint is preferred where it answered, because the version
-   * object's own images carry **no `id`** — checked against the live API —
-   * and without an id there is no page to link a sample back to. The embedded
-   * ones are the fallback, which is the archive's path and the path where the
-   * endpoint failed.
-   */
-  const candidates = listed.length > 0
-    ? listed.map((image) => ({
-      id: typeof image.id === "number" ? image.id : null,
-      url: String(image.url ?? ""),
-      width: typeof image.width === "number" ? image.width : null,
-      height: typeof image.height === "number" ? image.height : null,
-      kind: image.type === "video" ? "video" as const : "image" as const,
-      nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
-      page_url: typeof image.id === "number"
-        ? `${client.civitaiUrl}/images/${image.id}`
-        : null,
-      meta: (image.meta ?? null) as Record<string, unknown> | null,
-    }))
-    : found.images;
+
+  const usable = showcase.filter((image) => image.nsfw_level <= nsfwLevel);
+  let gallery: Candidate[] = [];
+  if (civitai && limit > usable.length) {
+    const taken = new Set(showcase.map((image) => mediaKey(image.url)));
+    gallery = (await tried(
+      "the gallery",
+      // Over-asked by what the showcase holds: those come back here too.
+      () => client.imagesFor(versionId!, limit + showcase.length),
+    )).filter((image) => !taken.has(mediaKey(image.url)));
+  }
+  const candidates = [...showcase, ...gallery];
 
   const samples: ImportSample[] = [];
   let skipped = 0;
+  let fromShowcase = 0;
   let index = 0;
   for (const image of candidates) {
     if (samples.length >= limit) break;
@@ -792,6 +840,7 @@ async function fetchSamples(input: {
       ? parseCivitaiMeta(image.meta)
       : readInfotext(bytes);
 
+    if (image.from === "showcase") fromShowcase++;
     samples.push({
       file: `samples/${name}`,
       kind: image.kind,
@@ -808,7 +857,24 @@ async function fetchSamples(input: {
   }
 
   // Counted in the summary rather than said here, next to what they are of.
-  return { samples, skipped };
+  return { samples, skipped, showcase: fromShowcase };
+}
+
+/** An image as `fetchSamples` weighs it, and which list it came from. */
+type Candidate = LookupResult["images"][number] & {
+  from: "showcase" | "gallery";
+};
+
+/**
+ * What identifies one image on Civitai's CDN whatever size or format the URL
+ * asks for: the UUID path segment, the same in a version's image list and in
+ * the images endpoint. The whole URL when there is none.
+ */
+function mediaKey(url: string): string {
+  return url.match(
+    /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i,
+  )
+    ?.[1]?.toLowerCase() ?? originalImageUrl(url);
 }
 
 function extensionFor(url: string, kind: "image" | "video"): string {

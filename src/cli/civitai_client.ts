@@ -821,9 +821,16 @@ export class CivitaiClient {
    * image endpoint at all, so a lookup through it brings whatever it already
    * carried and this is not called.
    */
+  /**
+   * Images posted under a version — its gallery — newest first; with
+   * `username`, only that account's, which for the model's creator is the
+   * version's own showcase with the ids and pages the version object leaves
+   * out.
+   */
   async imagesFor(
     versionId: number,
     limit: number,
+    username?: string,
   ): Promise<Record<string, unknown>[]> {
     const body = await this.#json(
       this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
@@ -831,6 +838,7 @@ export class CivitaiClient {
         limit: String(Math.min(Math.max(limit, 1), 200)),
         sort: "Newest",
         withMeta: "true",
+        ...(username ? { username } : {}),
       }),
     );
     const items = (body as { items?: unknown[] })?.items;

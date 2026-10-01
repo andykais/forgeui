@@ -313,6 +313,39 @@ Deno.test("re-ingesting the same batch imports no second sample", async () => {
   });
 });
 
+Deno.test("a batch's samples keep the batch's order", async () => {
+  // The CLI lists the model page's own media first, in the author's order;
+  // the model page shows them that way, and the first is its thumbnail.
+  await withImports(async ({ app, hash }) => {
+    const names = ["first", "second", "third"];
+    await writeBatch(
+      app.paths.imports,
+      hash,
+      {
+        samples: names.map((name) => ({
+          file: `samples/${name}.png`,
+          kind: "image",
+          source: {
+            kind: "civitai",
+            label: "Civitai",
+            url: `https://civitai.red/images/${name}`,
+          },
+        })),
+      },
+      Object.fromEntries(
+        names.map((name) => [`samples/${name}.png`, samplePng()]),
+      ),
+    );
+    await app.models.rescan();
+    await app.models.idle();
+    const model = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(
+      model.samples.map((sample) => sample.source?.url),
+      names.map((name) => `https://civitai.red/images/${name}`),
+    );
+  });
+});
+
 Deno.test("a batch for an unhashed model waits, then lands", async () => {
   const fixtures = await modelFixtures();
   try {
