@@ -182,6 +182,16 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
+**Where a default comes from.** A param bound to a literal in the graph
+takes that literal as its default when the manifest names none, so editing a
+loader in ComfyUI is what the panel starts from. A file pick — `model`,
+`text_encoder`, `vae` — takes the graph's literal **even when the manifest
+names one**: which file a loader opens is the machine's choice, a manifest's
+copy of it can only go stale, and every caller that does not name the file
+(the panel's first run, `POST /api/jobs`, every `forge mcp` round) gets
+whatever the default says. Any other explicit default is the author saying
+the two differ on purpose, and stands.
+
 #### `when`: a param that only sometimes applies
 
 Any param may carry `"when": { "param": "<key>", "is": <value> }`, and it

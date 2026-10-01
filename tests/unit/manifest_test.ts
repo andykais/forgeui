@@ -431,6 +431,46 @@ Deno.test("the graph supplies the defaults it already holds", () => {
   assertEquals(defaultOf("cfg"), 7);
 });
 
+Deno.test("a file pick follows the loader, whatever the manifest says", () => {
+  // The workflow page saves the manifest it was shown, which carries the
+  // loader's filename as a `default`. Edit the loader in ComfyUI afterwards
+  // and that copy is stale: the file is the graph's, so the graph wins.
+  const graph: ApiGraph = {
+    "1": {
+      class_type: "CLIPLoader",
+      inputs: { clip_name: "qwen_3_600m.safetensors" },
+    },
+    "3": { class_type: "KSampler", inputs: { cfg: 4 } },
+    "9": { class_type: "SaveImage", inputs: { filename_prefix: "out" } },
+  };
+  const manifest = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [
+      {
+        key: "clip",
+        type: "model",
+        default: "qwen_3_06b_base.safetensors",
+        filter: { class: "clip" },
+        bind: "1.clip_name",
+      },
+      // Not a file: an explicit default is still the author's choice.
+      { key: "cfg", type: "float", default: 5, bind: "3.cfg" },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph });
+
+  const resolved = resolveDefaults(manifest, graph);
+  const defaultOf = (key: string) =>
+    (resolved.params.find((param) => param.key === key) as {
+      default?: unknown;
+    }).default;
+  assertEquals(defaultOf("clip"), "qwen_3_600m.safetensors");
+  assertEquals(defaultOf("cfg"), 5);
+});
+
 Deno.test("a default the graph cannot supply is left alone", () => {
   const graph: ApiGraph = {
     "1": { class_type: "LoadImage", inputs: { image: "sample.png" } },

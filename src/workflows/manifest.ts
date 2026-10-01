@@ -770,6 +770,9 @@ export function serializeManifest(manifest: Manifest): string {
  *   bundled `LoadImage` is not a default anyone chose.
  * - `lora_list` has no scalar bind.
  */
+/** The params that pick a file off disk: the machine's choice, not the manifest's. */
+const FILE_TYPES: readonly ParamType[] = ["model", "text_encoder", "vae"];
+
 const GRAPH_BACKED_TYPES: readonly ParamType[] = [
   "text",
   "int",
@@ -820,7 +823,16 @@ export function resolveDefaults(manifest: Manifest, graph: ApiGraph): Manifest {
     const scalar = param as Extract<Param, { bind: string | string[] }> & {
       default?: unknown;
     };
-    if (scalar.default !== undefined) return param;
+    // A file pick is the graph's, always (§4.6). Its default in a manifest is
+    // only ever a copy of the loader's literal — the workflow page shows it
+    // and its "promote this input" writes it — so once saved it goes stale
+    // the moment the loader is edited in ComfyUI: a user copy whose graph
+    // says `qwen_3_600m` kept submitting the bundled `qwen_3_06b_base` for
+    // every caller that did not name the file, which is every MCP round.
+    // Any other default is the manifest's to set, and stays.
+    if (scalar.default !== undefined && !FILE_TYPES.includes(param.type)) {
+      return param;
+    }
     /**
      * A model pick may bind several inputs, and they hold the same filename —
      * that is the point of the list — so the first one is the default. Read

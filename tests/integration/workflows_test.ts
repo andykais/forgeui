@@ -438,6 +438,50 @@ Deno.test("a loader changed in the editor becomes the panel's default", async ()
   });
 });
 
+Deno.test("a user copy's text encoder is the one every caller gets", async () => {
+  // The bug: the workflow page saved its manifest with the bundled loader's
+  // filename baked in as a default, the loader was then edited in ComfyUI,
+  // and every job that did not name the file — every MCP round — still went
+  // out with the bundled one. The panel hid it by refilling from the last
+  // job. Both save orders, both through the route.
+  await withTestApp(async (app) => {
+    const before = await detail(app, "anima");
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ manifest: before.manifest }),
+    });
+    const graph = structuredClone(before.api_json);
+    graph["1"]!.inputs.clip_name = "qwen_3_600m.safetensors";
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+
+    const after = await detail(app, "anima");
+    assertEquals(after.source, "user");
+    assertEquals(
+      (after.manifest!.params.find((param) => param.key === "clip") as {
+        default?: unknown;
+      }).default,
+      "qwen_3_600m.safetensors",
+    );
+
+    // And a job that names no text encoder is sent with that one.
+    await app.json("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "anima",
+        params: { prompt: "a fox in snow" },
+      }),
+    });
+    await app.jobs.idle();
+    assertEquals(
+      app.fake!.prompts.at(-1)!.graph["1"]!.inputs.clip_name,
+      "qwen_3_600m.safetensors",
+    );
+  }, { comfy: true });
+});
+
 Deno.test("saving a bundled workflow creates a user copy that shadows it", async () => {
   await withTestApp(async (app) => {
     const before = await detail(app, "krea2");
