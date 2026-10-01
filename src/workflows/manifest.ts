@@ -770,9 +770,6 @@ export function serializeManifest(manifest: Manifest): string {
  *   bundled `LoadImage` is not a default anyone chose.
  * - `lora_list` has no scalar bind.
  */
-/** The params that pick a file off disk: the machine's choice, not the manifest's. */
-const FILE_TYPES: readonly ParamType[] = ["model", "text_encoder", "vae"];
-
 const GRAPH_BACKED_TYPES: readonly ParamType[] = [
   "text",
   "int",
@@ -823,16 +820,7 @@ export function resolveDefaults(manifest: Manifest, graph: ApiGraph): Manifest {
     const scalar = param as Extract<Param, { bind: string | string[] }> & {
       default?: unknown;
     };
-    // A file pick is the graph's, always (§4.6). Its default in a manifest is
-    // only ever a copy of the loader's literal — the workflow page shows it
-    // and its "promote this input" writes it — so once saved it goes stale
-    // the moment the loader is edited in ComfyUI: a user copy whose graph
-    // says `qwen_3_600m` kept submitting the bundled `qwen_3_06b_base` for
-    // every caller that did not name the file, which is every MCP round.
-    // Any other default is the manifest's to set, and stays.
-    if (scalar.default !== undefined && !FILE_TYPES.includes(param.type)) {
-      return param;
-    }
+    if (scalar.default !== undefined) return param;
     /**
      * A model pick may bind several inputs, and they hold the same filename —
      * that is the point of the list — so the first one is the default. Read
@@ -851,7 +839,81 @@ export function resolveDefaults(manifest: Manifest, graph: ApiGraph): Manifest {
     const value = graph[node]?.inputs?.[input];
     if (value === undefined || isLink(value)) return param;
     if (!matchesType(param.type, value)) return param;
-    return { ...param, default: value } as Param;
+    return { ...param, default: value, default_from: "graph" } as Param;
   });
   return { ...manifest, params };
+}
+
+/**
+ * The defaults in a raw manifest body that were the graph's rather than
+ * anybody's choice, taken back out (§4.6).
+ *
+ * `GET /api/workflows/:id` serves the resolved manifest, so a screen that
+ * edits a manifest and sends it back sends every graph-filled default with
+ * it. Written to disk, those would become explicit, and an explicit default
+ * outranks the graph: the next edit of a loader in ComfyUI would change
+ * nothing anybody submits without naming the file. Each one is marked
+ * `default_from: "graph"`, and a marked default is dropped here, before the
+ * body is validated and saved.
+ */
+export function withoutGraphDefaults(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const body = raw as { params?: unknown };
+  if (!Array.isArray(body.params)) return raw;
+  return {
+    ...body,
+    params: body.params.map((param) => {
+      if (typeof param !== "object" || param === null) return param;
+      const { default_from, ...rest } = param as Record<string, unknown>;
+      if (default_from !== "graph") return rest;
+      const { default: _derived, ...declared } = rest;
+      return declared;
+    }),
+  };
+}
+
+/**
+ * Defaults a user copy's manifest holds only because an older build saved
+ * the graph's values into it (§4.6), which this build would otherwise read
+ * as chosen.
+ *
+ * A default is taken to be one of those when the bundled manifest names
+ * none for that param, the value is exactly what the *bundled* graph's
+ * input holds — what the screen was showing when it saved — and the user
+ * copy's own graph has since been edited to hold something else. A default
+ * somebody set on purpose is never the bundled graph's own value with the
+ * graph then changed away from it; one written by the save is exactly that.
+ */
+export function staleCopiedDefaults(
+  user: Manifest,
+  userGraph: ApiGraph,
+  bundled: Manifest,
+  bundledGraph: ApiGraph,
+): string[] {
+  const stale: string[] = [];
+  const bundledParams = new Map(bundled.params.map((p) => [p.key, p]));
+  for (const param of user.params) {
+    if (!GRAPH_BACKED_TYPES.includes(param.type)) continue;
+    const scalar = param as Param & { default?: unknown; bind?: unknown };
+    if (scalar.default === undefined) continue;
+    const original = bundledParams.get(param.key) as
+      | (Param & { default?: unknown })
+      | undefined;
+    if (!original || original.default !== undefined) continue;
+    const first = Array.isArray(scalar.bind) ? scalar.bind[0] : scalar.bind;
+    if (typeof first !== "string") continue;
+    let node: string, input: string;
+    try {
+      ({ node, input } = parseBind(first, param.key));
+    } catch {
+      continue;
+    }
+    const was = bundledGraph[node]?.inputs?.[input];
+    const now = userGraph[node]?.inputs?.[input];
+    if (was === undefined || now === undefined || isLink(now)) continue;
+    const same = (a: unknown, b: unknown) =>
+      JSON.stringify(a) === JSON.stringify(b);
+    if (same(scalar.default, was) && !same(now, was)) stale.push(param.key);
+  }
+  return stale;
 }

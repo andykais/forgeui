@@ -182,15 +182,24 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
-**Where a default comes from.** A param bound to a literal in the graph
-takes that literal as its default when the manifest names none, so editing a
-loader in ComfyUI is what the panel starts from. A file pick — `model`,
-`text_encoder`, `vae` — takes the graph's literal **even when the manifest
-names one**: which file a loader opens is the machine's choice, a manifest's
-copy of it can only go stale, and every caller that does not name the file
-(the panel's first run, `POST /api/jobs`, every `forge mcp` round) gets
-whatever the default says. Any other explicit default is the author saying
-the two differ on purpose, and stands.
+**Where a param's value comes from**, first match wins:
+
+1. **The job** — a value the submitter names (the panel, `POST /api/jobs`,
+   a `forge mcp` round).
+2. **A default somebody set** in `manifest.json`.
+3. **The graph** — the literal the bound input holds, so a loader edited in
+   ComfyUI is what everything submits unless 1 or 2 says otherwise.
+
+Step 3 is filled in on load and never written back: the API serves each such
+default with `"default_from": "graph"`, and a save drops a default marked so.
+Without that, a screen that edits the manifest and sends it back would turn
+every graph value it was shown into an explicit default, and the next edit
+of a loader in ComfyUI would change nothing. An older build did exactly that,
+so a user copy is read with those defaults taken back out when it is plain
+they were copied rather than chosen: the bundled manifest names none, the
+value is exactly the bundled graph's, and the user copy's own graph has since
+been changed to something else. The file is not rewritten; its next save
+from the workflow page writes it without them.
 
 #### `when`: a param that only sometimes applies
 

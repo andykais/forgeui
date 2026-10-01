@@ -162,6 +162,8 @@
       type: typeFor(input.type_hint),
       bind: `${input.node_id}.${input.input}`,
       default: input.value as never,
+      // What the graph holds, so the graph's to keep deciding (§4.6).
+      default_from: "graph",
       advanced: true,
     };
     if (param.type === "enum") param.options = [String(input.value)];
@@ -215,6 +217,8 @@
         type: typeFor(input.type_hint),
         bind,
         default: input.value as never,
+        // What the graph holds, so the graph's to keep deciding (§4.6).
+        default_from: "graph",
         advanced: true,
       };
       if (param.type === "enum") param.options = [String(input.value)];
@@ -416,6 +420,12 @@
                     {#if param.step}<span class="dim">· step {param.step}</span>{/if}
                   {:else}
                     {String(param.default ?? "")}
+                    <!-- Where it comes from: edit the loader in ComfyUI and this follows. -->
+                    {#if param.default_from === "graph" && param.default !== ""}
+                      <span class="dim" title="Read from the ComfyUI graph; edit the node there to change it"
+                        >· from graph</span
+                      >
+                    {/if}
                     {#if param.min !== undefined}
                       <span class="dim">· min {param.min} · max {param.max}</span>
                     {/if}

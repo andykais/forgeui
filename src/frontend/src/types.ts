@@ -39,6 +39,13 @@ export interface Param {
   advanced?: boolean;
   when?: ParamWhen;
   default?: unknown;
+  /**
+   * The server read this default from the graph because the manifest names
+   * none (§4.6). Sent back as it came, it is dropped on save, so the graph
+   * keeps deciding it — order: the job's own value, a default somebody set,
+   * then the graph.
+   */
+  default_from?: "graph";
   min?: number;
   max?: number;
   step?: number;

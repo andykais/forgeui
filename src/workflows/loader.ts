@@ -7,9 +7,18 @@ import {
   ManifestError,
   resolveDefaults,
   serializeManifest,
+  staleCopiedDefaults,
   validateManifest,
+  withoutGraphDefaults,
 } from "./manifest.ts";
-import type { ApiGraph, Manifest, Workflow, WorkflowSource } from "./types.ts";
+import { log } from "../log.ts";
+import type {
+  ApiGraph,
+  Manifest,
+  Param,
+  Workflow,
+  WorkflowSource,
+} from "./types.ts";
 
 export const MANIFEST_FILE = "manifest.json";
 export const API_FILE = "workflow.api.json";
@@ -75,6 +84,7 @@ export async function loadWorkflowDir(
   let apiGraph: ApiGraph = {};
   let uiGraph: Record<string, unknown> | null = null;
   let manifest: Manifest | null = null;
+  let declared: Manifest | null = null;
   let error: string | null = null;
 
   try {
@@ -88,10 +98,8 @@ export async function loadWorkflowDir(
       // The graph supplies the defaults it already holds, so a loader edited
       // in ComfyUI shows up in the panel instead of being overwritten by a
       // stale copy in the manifest.
-      manifest = resolveDefaults(
-        validateManifest(raw, { id, graph: apiGraph }),
-        apiGraph,
-      );
+      declared = validateManifest(raw, { id, graph: apiGraph });
+      manifest = resolveDefaults(declared, apiGraph);
     }
   } catch (cause) {
     if (!(cause instanceof ManifestError)) throw cause;
@@ -106,6 +114,7 @@ export async function loadWorkflowDir(
     hasUserCopy: source === "user",
     hasBundled: source === "bundled",
     manifest,
+    declared,
     error,
     apiGraph,
     uiGraph,
@@ -194,6 +203,49 @@ function stubManifest(id: string, name: string): Manifest {
 }
 
 /**
+ * A user copy with the defaults an older build copied into it taken back
+ * out (§4.6, {@link staleCopiedDefaults}), so its graph decides them again.
+ *
+ * In memory only: the file on disk is the user's, and is not rewritten
+ * behind their back. The next save from the workflow page writes the
+ * manifest without them, since they come back marked as the graph's.
+ */
+async function withoutStaleDefaults(
+  user: Workflow,
+  bundled: Workflow,
+): Promise<Workflow> {
+  if (!user.declared || !bundled.declared) return user;
+  const stale = staleCopiedDefaults(
+    user.declared,
+    user.apiGraph,
+    bundled.declared,
+    bundled.apiGraph,
+  );
+  if (stale.length === 0) return user;
+  log(
+    `workflows: ${user.id}: ${stale.join(", ")} follow the edited graph ` +
+      `rather than the bundled values an earlier save copied into the manifest`,
+  );
+  const declared: Manifest = {
+    ...user.declared,
+    params: user.declared.params.map((param) => {
+      if (!stale.includes(param.key)) return param;
+      const { default: _copied, ...rest } = param as Param & {
+        default?: unknown;
+      };
+      return rest as Param;
+    }),
+  };
+  const manifest = resolveDefaults(declared, user.apiGraph);
+  return {
+    ...user,
+    declared,
+    manifest,
+    hash: await workflowHash(user.apiGraph, manifest),
+  };
+}
+
+/**
  * Every workflow the app knows about, with user copies shadowing bundled ones
  * of the same id (§4.6). Writes go to `workflows/user/` only.
  */
@@ -226,7 +278,9 @@ export class WorkflowStore {
     for (const workflow of user) {
       const shadowed = byId.get(workflow.id);
       byId.set(workflow.id, {
-        ...workflow,
+        ...(shadowed
+          ? await withoutStaleDefaults(workflow, shadowed)
+          : workflow),
         hasBundled: shadowed !== undefined,
       });
     }
@@ -312,9 +366,11 @@ export class WorkflowStore {
       : asGraph(body.api_json, "api_json");
     // Validate before touching the filesystem, so a rejected save leaves no
     // half-made user copy behind.
+    // Without the defaults the screen was only showing: the ones the graph
+    // filled in come back marked, and stay the graph's (§4.6).
     const manifest = body.manifest === undefined
       ? undefined
-      : validateManifest(body.manifest, { id, graph });
+      : validateManifest(withoutGraphDefaults(body.manifest), { id, graph });
     if (
       manifest === undefined && body.api_json !== undefined && workflow.manifest
     ) {
