@@ -211,18 +211,8 @@ function stringList(value: unknown, where: string): string[] {
   return out;
 }
 
-/**
- * Settings that existed and were dropped (DESIGN-MODEL-IMPORT §8): a
- * `config.yaml` that still names them loads, they do nothing, and the next
- * write of the file leaves them out. `nsfw_level` skipped samples by a rating
- * nobody could read off the media, and `browsing_level` narrowed lookups;
- * every lookup now asks for everything and every sample is kept.
- */
-const RETIRED_IMPORT_KEYS = ["nsfw_level", "browsing_level"];
-
 function validateImport(value: unknown, where: string): Partial<ImportConfig> {
-  const raw = { ...record(value, where) };
-  for (const key of RETIRED_IMPORT_KEYS) delete raw[key];
+  const raw = record(value, where);
   rejectUnknown(raw, where, [
     "dir",
     "model_dir",

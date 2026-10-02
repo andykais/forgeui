@@ -827,13 +827,19 @@ export class CivitaiClient {
   async imagesFor(
     versionId: number,
     limit: number,
-    username?: string,
+    options: {
+      /** One account's posts: the creator's are the version's showcase. */
+      username?: string;
+      /** Civitai's own sort names; "Most Reactions" is the gallery's. */
+      sort?: "Newest" | "Most Reactions";
+    } = {},
   ): Promise<Record<string, unknown>[]> {
+    const { username, sort = "Newest" } = options;
     const body = await this.#json(
       this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
         modelVersionId: String(versionId),
         limit: String(Math.min(Math.max(limit, 1), 200)),
-        sort: "Newest",
+        sort,
         withMeta: "true",
         ...(username ? { username } : {}),
       }),

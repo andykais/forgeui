@@ -388,8 +388,12 @@ Deno.test("samples are fetched at full size, with their generation data", async 
 });
 
 /** Two posts by somebody else under the version: its gallery. */
+/**
+ * Two posts by somebody else under the version: its gallery. The newer one
+ * is listed first and has fewer reactions, so "most reactions" reverses them.
+ */
 function galleryOf(url: string) {
-  return [900003, 900004].map((id) => ({
+  return ([[900003, 2], [900004, 40]] as const).map(([id, likes]) => ({
     id,
     url: `${url}/img/original=true/${id}.jpeg`,
     width: 512,
@@ -397,14 +401,16 @@ function galleryOf(url: string) {
     type: "image",
     nsfwLevel: 1,
     username: "someone",
+    stats: { likeCount: likes, heartCount: likes },
     meta: { prompt: `a gallery fox ${id}`, seed: id },
   }));
 }
 
 Deno.test("samples start from the model's own media, and the gallery tops up", async () => {
-  // What the author put on the model page comes first, in their order; the
-  // gallery — everyone's posts under the version — only fills a count the
-  // showcase cannot reach (§4.3).
+  // What the author put on the model page comes first, in their order, with
+  // no reactions to speak of; the gallery — everyone's posts under the
+  // version — only fills a count the showcase cannot reach, most reactions
+  // first (§4.3).
   await withCli(async (h) => {
     const lines: string[] = [];
     const result = await runModels({
@@ -422,9 +428,18 @@ Deno.test("samples start from the model's own media, and the gallery tops up", a
       [
         `${h.fake.url}/images/900001`,
         `${h.fake.url}/images/900002`,
-        `${h.fake.url}/images/900003`,
         `${h.fake.url}/images/900004`,
+        `${h.fake.url}/images/900003`,
       ],
+    );
+    // The gallery was asked by reactions; the creator's own posts, asked
+    // only for their links, were not.
+    const asked = h.fake.matching("/api/v1/images");
+    assertEquals(
+      asked.map((
+        request,
+      ) => [request.params.username ?? null, request.params.sort]),
+      [["Cyberdelia", "Newest"], [null, "Most Reactions"]],
     );
     // The showcase image kept its own generation data and gained its page.
     const raw = batch.samples![0]!.raw as { fields: { seed: number } };

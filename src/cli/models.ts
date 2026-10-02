@@ -957,7 +957,7 @@ async function fetchSamples(input: {
     const authored = new Map(
       (await tried(
         "the showcase's links",
-        () => client.imagesFor(versionId!, 100, creator),
+        () => client.imagesFor(versionId!, 100, { username: creator }),
       )).map((image) => [mediaKey(image.url), image]),
     );
     for (const image of showcase) {
@@ -974,8 +974,13 @@ async function fetchSamples(input: {
     const taken = new Set(showcase.map((image) => mediaKey(image.url)));
     gallery = (await tried(
       "the gallery",
+      // The most-reacted first: the gallery is everyone's posts, and what
+      // people responded to is the best guess at what shows the model off.
       // Over-asked by what the showcase holds: those come back here too.
-      () => client.imagesFor(versionId!, limit + showcase.length),
+      () =>
+        client.imagesFor(versionId!, limit + showcase.length, {
+          sort: "Most Reactions",
+        }),
     )).filter((image) => !taken.has(mediaKey(image.url)));
   }
   const candidates = [...showcase, ...gallery];

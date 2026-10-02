@@ -199,6 +199,15 @@ export function startFakeCivitai(
           username === null ||
           (item as { username?: string }).username === username
         );
+        // "Most Reactions" ranks by the reaction counts in `stats`, as the
+        // real one does; anything else keeps the listed order.
+        if (url.searchParams.get("sort") === "Most Reactions") {
+          const reactions = (item: unknown) =>
+            Object.values(
+              (item as { stats?: Record<string, number> }).stats ?? {},
+            ).reduce((sum, count) => sum + count, 0);
+          items.sort((a, b) => reactions(b) - reactions(a));
+        }
         return ok({ items });
       }
     }

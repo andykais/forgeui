@@ -238,24 +238,6 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
   );
 });
 
-/**
- * `nsfw_level` and `browsing_level` were dropped: every lookup asks for
- * everything and every sample is kept. A config.yaml that still names them
- * loads rather than refusing to start, and they are gone from what is kept.
- */
-Deno.test("the retired content levels load, and do nothing", () => {
-  const layer = validatePartialConfig({
-    import: { nsfw_level: 1, browsing_level: 31, samples: 6 },
-  });
-  assertEquals(layer.import, { samples: 6 });
-  const effective = effectiveConfig(layer).import as unknown as Record<
-    string,
-    unknown
-  >;
-  assertEquals("nsfw_level" in effective, false);
-  assertEquals("browsing_level" in effective, false);
-});
-
 /** DESIGN-MODEL-IMPORT §8. */
 Deno.test("the import block defaults, and what a layer may override", () => {
   const base = defaultConfig().import;

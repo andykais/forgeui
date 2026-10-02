@@ -820,8 +820,12 @@ hashing the bytes.
 
 `--download-samples=<n>` starts from **the media on the model page** — the
 showcase the author put on the version, in the author's order — and only when
-`<n>` is more than the showcase can supply tops up from **the version's gallery**, everyone's posts under it, newest
-first. An image in both is taken once. The summary says how many came from
+`<n>` is more than the showcase can supply tops up from **the version's
+gallery**, everyone's posts under it, **most reactions first** (*amended* from
+newest first: what people responded to is the better guess at what shows the
+model off, and checked against the live API, `sort=Most Reactions` ranks by
+the reaction counts). The model page's own media always come first, however
+few reactions they have. An image in both is taken once. The summary says how many came from
 each: `samples 20 (6 from the model page, 14 from its gallery)`.
 
 The version's `images` carry `meta` but no image id, so the page link is found
@@ -852,8 +856,8 @@ For each image:
    way to tell what to set it to. All three are gone: every lookup asks for
    everything, and every sample found is downloaded. An image that fails to
    download is still counted, as `N could not be downloaded`. A
-   `config.yaml` that still names either key loads, ignores it, and leaves it
-   out the next time the file is written.
+   `config.yaml` that still names either key is refused as an unknown key,
+   like any other; delete the line.
 
 The archive fallback carries image URLs, dimensions and a `has_metadata` flag
 but **not the metadata itself** — there is no image endpoint on it. A sample
