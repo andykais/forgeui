@@ -211,34 +211,40 @@ function stringList(value: unknown, where: string): string[] {
   return out;
 }
 
+/**
+ * Settings that existed and were dropped (DESIGN-MODEL-IMPORT §8): a
+ * `config.yaml` that still names them loads, they do nothing, and the next
+ * write of the file leaves them out. `nsfw_level` skipped samples by a rating
+ * nobody could read off the media, and `browsing_level` narrowed lookups;
+ * every lookup now asks for everything and every sample is kept.
+ */
+const RETIRED_IMPORT_KEYS = ["nsfw_level", "browsing_level"];
+
 function validateImport(value: unknown, where: string): Partial<ImportConfig> {
-  const raw = record(value, where);
+  const raw = { ...record(value, where) };
+  for (const key of RETIRED_IMPORT_KEYS) delete raw[key];
   rejectUnknown(raw, where, [
     "dir",
     "model_dir",
     "civitai_url",
-    "browsing_level",
     "archive_url",
     "civitai_token",
     "civitai_cli",
     "huggingface_url",
     "huggingface_token",
     "samples",
-    "nsfw_level",
     "ingest_on_boot",
   ]);
   const out: Partial<ImportConfig> = {};
   pick(raw, "dir", out, nullableStr, where);
   pick(raw, "model_dir", out, nullableStr, where);
   pick(raw, "civitai_url", out, str, where);
-  pick(raw, "browsing_level", out, count, where);
   pick(raw, "archive_url", out, str, where);
   pick(raw, "civitai_token", out, token, where);
   pick(raw, "civitai_cli", out, nullableStr, where);
   pick(raw, "huggingface_url", out, str, where);
   pick(raw, "huggingface_token", out, token, where);
   pick(raw, "samples", out, count, where);
-  pick(raw, "nsfw_level", out, count, where);
   pick(raw, "ingest_on_boot", out, bool, where);
   return out;
 }

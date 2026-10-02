@@ -232,11 +232,6 @@ export function sourceRecordFromTensorArt(options: {
         width: typeof image.width === "number" ? image.width : null,
         height: typeof image.height === "number" ? image.height : null,
         kind: image.type === "video" ? "video" as const : "image" as const,
-        nsfw_level: typeof image.nsfwLevel === "number"
-          ? image.nsfwLevel
-          : model.is_nsfw === true
-          ? 8
-          : 1,
         // Tensor.Art's showcase images have no page of their own; the model's
         // is the nearest thing to one.
         page_url: pageUrl,

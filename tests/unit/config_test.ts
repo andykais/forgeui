@@ -232,11 +232,6 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
     'unknown key "civitai"',
   );
   assertThrows(
-    () => validatePartialConfig({ import: { browsing_level: "31" } }),
-    ConfigError,
-    "config.import.browsing_level: expected a whole number",
-  );
-  assertThrows(
     () => validatePartialConfig({ import: { samples: -1 } }),
     ConfigError,
     "config.import.samples: expected a whole number",
@@ -244,20 +239,32 @@ Deno.test("validation rejects unknown keys and wrong types", () => {
 });
 
 /**
- * DESIGN-MODEL-IMPORT §8. Two levels rather than one because they answer two
- * questions: what a lookup may *see*, and what may be *kept*.
+ * `nsfw_level` and `browsing_level` were dropped: every lookup asks for
+ * everything and every sample is kept. A config.yaml that still names them
+ * loads rather than refusing to start, and they are gone from what is kept.
  */
+Deno.test("the retired content levels load, and do nothing", () => {
+  const layer = validatePartialConfig({
+    import: { nsfw_level: 1, browsing_level: 31, samples: 6 },
+  });
+  assertEquals(layer.import, { samples: 6 });
+  const effective = effectiveConfig(layer).import as unknown as Record<
+    string,
+    unknown
+  >;
+  assertEquals("nsfw_level" in effective, false);
+  assertEquals("browsing_level" in effective, false);
+});
+
+/** DESIGN-MODEL-IMPORT §8. */
 Deno.test("the import block defaults, and what a layer may override", () => {
   const base = defaultConfig().import;
   assertEquals(base.civitai_url, "https://civitai.red");
   assertEquals(base.archive_url, "https://civitaiarchive.com");
-  assertEquals(base.browsing_level, 31);
-  assertEquals(base.nsfw_level, 1);
   assertEquals(base.dir, null);
   assertEquals(base.model_dir, null);
 
-  const layered = effectiveConfig({ import: { nsfw_level: 31, samples: 8 } });
-  assertEquals(layered.import.nsfw_level, 31);
+  const layered = effectiveConfig({ import: { samples: 8 } });
   assertEquals(layered.import.samples, 8);
   // Everything the layer did not mention keeps its default.
   assertEquals(layered.import.civitai_url, "https://civitai.red");

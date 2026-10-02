@@ -278,8 +278,6 @@ Options:
       --json                  Print the resulting model.json to stdout instead of a
                               human summary.
       --anon                  Never send credentials, even if a token is configured.
-      --browsing-level <n>    Civitai's visibility bitmask, for what a lookup is
-                              allowed to return. (Default: config import.browsing_level)
       --timeout      <ms>     Per-request timeout. (Default: 30000)
 
 Each run says where the answer came from and what it holds, then where it
@@ -562,9 +560,10 @@ detail that costs an afternoon if it is not written down:
 | `/api/v1/model-versions/by-hash/…` | neither; a hash lookup answers for what it is given |
 
 So the client sends `nsfw` to `/models`, `browsingLevel` to `/images`, and
-nothing to `by-hash`. `import.browsing_level` is the one setting behind all
-three, translated per endpoint in `src/models/civitai.ts` — one place that
-knows this, rather than three call sites each getting it wrong differently.
+nothing to `by-hash`, each asking for everything (*amended*: there is no
+longer a setting behind it, see §4.3), translated per endpoint in
+`src/models/civitai.ts` — one place that knows this, rather than three call
+sites each getting it wrong differently.
 
 **That is what demotes the official CLI.** Its documented interface has no
 base-URL option and no `browsingLevel` or `nsfw` flag, so it asks with the
@@ -821,8 +820,7 @@ hashing the bytes.
 
 `--download-samples=<n>` starts from **the media on the model page** — the
 showcase the author put on the version, in the author's order — and only when
-`<n>` is more than the showcase can supply (after the NSFW ceiling below)
-tops up from **the version's gallery**, everyone's posts under it, newest
+`<n>` is more than the showcase can supply tops up from **the version's gallery**, everyone's posts under it, newest
 first. An image in both is taken once. The summary says how many came from
 each: `samples 20 (6 from the model page, 14 from its gallery)`.
 
@@ -845,11 +843,17 @@ For each image:
    `hashes`, `resources`, sometimes a `comfy` workflow). Where the API has no
    meta, the file itself is parsed (§6). `withMeta=true` is what keeps the
    list to images there is something to show for.
-3. Images above `import.nsfw_level` are skipped and counted in the summary.
-   This is ForgeUI's own ceiling and is separate from
-   `import.browsing_level`, which is what the *lookup* was allowed to see:
-   asking broadly and filing narrowly means the model is still found when its
-   only images are ones you did not want downloaded.
+3. **Every image is kept, whatever Civitai rates it** (*amended*). There was
+   a ceiling, `import.nsfw_level` (default 1, "safe"), and a lookup filter,
+   `import.browsing_level`, with a `--browsing-level` flag. In use the
+   ceiling skipped media with nothing mature about it — Civitai's rating is
+   per image and often not what the picture shows — and its number meant
+   nothing to the person reading `N over import.nsfw_level, skipped`, with no
+   way to tell what to set it to. All three are gone: every lookup asks for
+   everything, and every sample found is downloaded. An image that fails to
+   download is still counted, as `N could not be downloaded`. A
+   `config.yaml` that still names either key loads, ignores it, and leaves it
+   out the next time the file is written.
 
 The archive fallback carries image URLs, dimensions and a `has_metadata` flag
 but **not the metadata itself** — there is no image endpoint on it. A sample
@@ -1603,15 +1607,9 @@ import:
   model_dir: null
 
   # Looked up first. civitai.com is the same API with a narrower default
-  # filter (§4.0), so this is the .red host and browsing_level does the
-  # filtering rather than the hostname.
+  # filter (§4.0), so this is the .red host; every lookup asks for
+  # everything (§4.3).
   civitai_url: https://civitai.red
-
-  # Civitai's visibility bitmask. 1 is PG only; 31 is everything. This is
-  # what a *lookup* may return — nsfw_level below is what may be downloaded.
-  # Which query parameter carries it differs per endpoint (§4.0); one place
-  # translates it, and this is the only knob.
-  browsing_level: 31
 
   # The fallback, and the only source for models Civitai has deleted.
   archive_url: https://civitaiarchive.com
@@ -1638,20 +1636,13 @@ import:
   # What --download-samples means with no number after it.
   samples: 4
 
-  # Civitai's nsfwLevel scale: 1 is "safe". Images above this are skipped.
-  nsfw_level: 1
-
   # Slurp the import folder during the boot rescan as well as on demand.
   ingest_on_boot: true
 ```
 
-`browsing_level` and `nsfw_level` are two settings rather than one because
-they answer different questions — what a lookup may *see* versus what may be
-*kept*. Defaulting the first to 31 and the second to 1 means a mature model is
-still identified, named and filed correctly while none of its images land on
-your disk, which is the behaviour someone who has models they did not
-advertise actually wants. Setting both to 1 is the strict reading and is one
-edit away.
+*Amended:* `browsing_level` and `nsfw_level` were here — what a lookup may
+see, and what may be kept — and are dropped (§4.3). There is no content
+filter: every lookup asks for everything and every sample is kept.
 
 - `src/config/types.ts`: `ImportConfig`, added to `Config` and `PartialConfig`.
 - `src/config/defaults.ts`: the block above.
@@ -1749,8 +1740,8 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   a file with nothing, a file that is not an image.
 - `civitai.ts`: every URL form in §4.1 and a handful that are not;
   `baseModel` → family for each mapping and for an unknown one; model `type`
-  → kind; `import.browsing_level` translated to the right parameter per
-  endpoint (§4.0's table).
+  → kind; "everything" translated to the right parameter per endpoint
+  (§4.0's table).
 - `trainedWords` normalisation (§5.5): a clean list, the one-string
   comma-separated form with its trailing comma, `[]`, `null`, and duplicates
   differing only in case.
@@ -1800,8 +1791,9 @@ is the other reason those are config rather than constants — plus a stub
 would land. The same shape as `tests/fake-comfy/`, for the same reason.
 
 Two cases the fake exists to cover: the archive fallback fires when the
-primary 404s, and a lookup sends the configured `browsingLevel` (asserted on
-the request, since it is the one parameter the whole §4.0 argument rests on).
+primary 404s, and a lookup sends the parameter that asks for everything
+(asserted on the request, since it is the one parameter the whole §4.0
+argument rests on).
 
 The real Civitai is never called by the suite; a `tests/contract/` case behind
 an env var can be added when someone wants to check the fixtures are still

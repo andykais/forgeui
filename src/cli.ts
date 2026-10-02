@@ -157,10 +157,6 @@ const models = new Command()
     "Print what would be fetched and written; touch nothing.",
   )
   .option("--json", "Print the resulting model.json instead of a summary.")
-  .option(
-    "--browsing-level <n:number>",
-    "Civitai's visibility bitmask for what a lookup may return.",
-  )
   .option("--timeout <ms:number>", "Per-request timeout.", { default: 30_000 })
   .action(async (options) => {
     Deno.exit(await runModelsCommand(options));
@@ -252,7 +248,6 @@ async function runModelsCommand(options: {
   overwrite?: boolean | string;
   dryRun?: boolean;
   json?: boolean;
-  browsingLevel?: number;
   timeout: number;
 }): Promise<number> {
   try {
@@ -285,7 +280,6 @@ async function runModelsCommand(options: {
       downloadModel: options.downloadModel === true,
       overwrite: parseOverwrite(options.overwrite),
       dryRun: options.dryRun === true,
-      browsingLevel: options.browsingLevel,
       timeoutMs: options.timeout,
     };
     const result = await runModels({

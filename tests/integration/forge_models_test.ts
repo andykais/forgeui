@@ -82,8 +82,8 @@ function civitaiModel(hash: string, base: string) {
           width: 768,
           height: 512,
           type: "image",
-          // Above the default ceiling of 1: fetched by the lookup, kept off
-          // the disk by import.nsfw_level.
+          // Rated mature by Civitai. There is no content filter: it is a
+          // sample like any other (§4.3).
           nsfwLevel: 8,
         },
       ],
@@ -105,7 +105,6 @@ async function withCli(
   body: (h: Harness) => Promise<void>,
   options: {
     archiveOnly?: boolean;
-    nsfwLevel?: number;
     /** Leave the configured model folder empty, as a fresh machine is. */
     noLocalFile?: boolean;
     /** More of the version's gallery: other people's posts under it. */
@@ -145,8 +144,7 @@ async function withCli(
         width: 768,
         height: 512,
         type: "image",
-        // Above the default ceiling of 1: offered by the lookup, kept off the
-        // disk by import.nsfw_level.
+        // Rated mature by Civitai, and kept like any other (§4.3).
         nsfwLevel: 8,
         username: "Cyberdelia",
         meta: {},
@@ -202,7 +200,6 @@ async function withCli(
     import: {
       civitai_url: fake.url,
       archive_url: fake.url,
-      nsfw_level: options.nsfwLevel ?? 1,
     },
   });
   const paths = dataPaths(dataDir, config.import);
@@ -210,7 +207,6 @@ async function withCli(
   const client = new CivitaiClient({
     civitaiUrl: fake.url,
     archiveUrl: fake.url,
-    browsingLevel: config.import.browsing_level,
     timeoutMs: 5000,
     now: () => new Date("2026-09-25T10:00:00Z"),
   });
@@ -264,9 +260,10 @@ Deno.test("a run says where it came from and what it holds", async () => {
     assertStringIncludes(said, "their tags    photorealistic, base model");
     assertStringIncludes(
       said,
-      "samples       1 (1 from the model page, 0 from its gallery) " +
-        "(1 over import.nsfw_level",
+      "samples       2 (2 from the model page, 0 from its gallery)",
     );
+    // Nothing is held back for its rating, and nothing says it was.
+    assert(!said.includes("nsfw"), said);
     assert(lines.at(-1) === `wrote ${result.dir}`, said);
     // The model is not in a model folder here, and nothing nags about it:
     // the machine running this usually has none (§2).
@@ -363,9 +360,9 @@ Deno.test("samples are fetched at full size, with their generation data", async 
       log: () => {},
     });
 
-    // Two images were offered; one is above import.nsfw_level.
-    assertEquals(result.samples, 1);
-    assertEquals(result.skipped, 1);
+    // Two images were offered, one rated mature: both are kept (§4.3).
+    assertEquals(result.samples, 2);
+    assertEquals(result.skipped, 0);
 
     const batch = await readBatch(result.dir);
     const [sample] = batch.samples!;
@@ -413,7 +410,7 @@ Deno.test("samples start from the model's own media, and the gallery tops up", a
     const result = await runModels({
       ...base,
       localFile: FILENAME,
-      downloadSamples: 3,
+      downloadSamples: 4,
       config: h.config,
       paths: h.paths,
       client: h.client,
@@ -424,6 +421,7 @@ Deno.test("samples start from the model's own media, and the gallery tops up", a
       batch.samples!.map((sample) => sample.source?.url),
       [
         `${h.fake.url}/images/900001`,
+        `${h.fake.url}/images/900002`,
         `${h.fake.url}/images/900003`,
         `${h.fake.url}/images/900004`,
       ],
@@ -433,7 +431,7 @@ Deno.test("samples start from the model's own media, and the gallery tops up", a
     assertEquals(raw.fields.seed, 3);
     assertStringIncludes(
       lines.join("\n"),
-      "samples       3 (1 from the model page, 2 from its gallery)",
+      "samples       4 (2 from the model page, 2 from its gallery)",
     );
   }, { gallery: galleryOf });
 });
@@ -1169,7 +1167,6 @@ function withToken(
   const client = new CivitaiClient({
     civitaiUrl: h.fake.url,
     archiveUrl: h.fake.url,
-    browsingLevel: config.import.browsing_level,
     timeoutMs: 5000,
     token: civitaiToken(config, { get: () => undefined }),
     now: () => new Date("2026-09-25T10:00:00Z"),
@@ -1454,7 +1451,6 @@ Deno.test("a failure to get an answer is recorded too, as what it was", async ()
     const offline = new CivitaiClient({
       civitaiUrl: "http://127.0.0.1:9",
       archiveUrl: "http://127.0.0.1:9",
-      browsingLevel: 31,
       timeoutMs: 2000,
     });
     const error = await runModels({

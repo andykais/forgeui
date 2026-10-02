@@ -207,9 +207,10 @@ export function normalizeTriggerWords(value: unknown): string[] {
 }
 
 /**
- * Which query parameter widens a lookup is **not uniform across endpoints**
- * (§4.0), which is the kind of thing that costs an afternoon if it is not
- * written down:
+ * Every lookup asks for everything Civitai has — there is no content filter
+ * in ForgeUI (§4.3) — and which query parameter says so is **not uniform
+ * across endpoints** (§4.0), which is the kind of thing that costs an
+ * afternoon if it is not written down:
  *
  * | endpoint        | what widens it                                     |
  * | --------------- | -------------------------------------------------- |
@@ -217,21 +218,22 @@ export function normalizeTriggerWords(value: unknown): string[] {
  * | `/models`       | `nsfw` only — `browsingLevel` is a 400 (`ZodError`)|
  * | `/model-versions/by-hash` | neither                                  |
  *
- * One setting behind all three, translated here, so no call site gets to be
- * wrong about it on its own.
+ * Translated here, so no call site gets to be wrong about it on its own.
  */
 export type CivitaiEndpoint = "images" | "models" | "by-hash";
 
+/** Civitai's visibility bitmask with every level set: PG through XXX. */
+const EVERYTHING = 31;
+
 export function visibilityParams(
   endpoint: CivitaiEndpoint,
-  browsingLevel: number,
 ): Record<string, string> {
   switch (endpoint) {
     case "images":
-      return { browsingLevel: String(browsingLevel) };
+      return { browsingLevel: String(EVERYTHING) };
     case "models":
       // `browsingLevel=31` is rejected here; `nsfw=true` is what widens it.
-      return browsingLevel > 1 ? { nsfw: "true" } : {};
+      return { nsfw: "true" };
     case "by-hash":
       return {};
   }
@@ -335,7 +337,6 @@ export interface LookupResult {
     width: number | null;
     height: number | null;
     kind: "image" | "video";
-    nsfw_level: number;
     page_url: string | null;
     meta: Record<string, unknown> | null;
   }[];
@@ -450,7 +451,6 @@ export function sourceRecordFromCivitai(options: {
         width: typeof image.width === "number" ? image.width : null,
         height: typeof image.height === "number" ? image.height : null,
         kind: image.type === "video" ? "video" as const : "image" as const,
-        nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
         page_url: id === null ? null : `${options.baseUrl}/images/${id}`,
         meta: record(image.meta),
       };
@@ -556,7 +556,6 @@ export function sourceRecordFromArchive(options: {
         width: typeof image.width === "number" ? image.width : null,
         height: typeof image.height === "number" ? image.height : null,
         kind: image.type === "video" ? "video" as const : "image" as const,
-        nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
         page_url: text(image.link),
         meta: null,
       };

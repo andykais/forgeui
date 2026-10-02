@@ -125,7 +125,6 @@ function ambiguous(filename: string, matches: Candidate[]): string {
 export interface CivitaiClientOptions {
   civitaiUrl: string;
   archiveUrl: string;
-  browsingLevel: number;
   timeoutMs: number;
   /**
    * A Civitai API key. Sent to Civitai and to nothing else — not the archive,
@@ -160,7 +159,6 @@ function asks(source: LookupSource, site: Exclude<LookupSource, "auto">) {
 export class CivitaiClient {
   #civitai: string;
   #archive: string;
-  #browsingLevel: number;
   #timeoutMs: number;
   #fetch: typeof globalThis.fetch;
   #now: () => Date;
@@ -178,7 +176,6 @@ export class CivitaiClient {
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
     this.#archive = options.archiveUrl.replace(/\/+$/, "");
-    this.#browsingLevel = options.browsingLevel;
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
@@ -865,7 +862,7 @@ export class CivitaiClient {
     const url = new URL(path, `${base}/`);
     for (
       const [key, value] of Object.entries({
-        ...visibilityParams(endpoint, this.#browsingLevel),
+        ...visibilityParams(endpoint),
         ...extra,
       })
     ) {

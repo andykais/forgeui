@@ -88,7 +88,6 @@ export interface ModelsCommandOptions {
    */
   overwrite: boolean | Overwrite | null;
   dryRun: boolean;
-  browsingLevel?: number;
   timeoutMs: number;
 }
 
@@ -162,7 +161,6 @@ export async function runModels(
   const client = options.client ?? new CivitaiClient({
     civitaiUrl: settings.civitai_url,
     archiveUrl: settings.archive_url,
-    browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
     token,
     say,
@@ -349,7 +347,6 @@ export async function runModels(
         found,
         staging,
         limit: options.downloadSamples,
-        nsfwLevel: settings.nsfw_level,
         say,
       });
       batch.samples = samples;
@@ -443,9 +440,7 @@ export async function runModels(
           } from its gallery)`
           : ""
       }${
-        result.skipped > 0
-          ? ` (${result.skipped} over import.nsfw_level, skipped)`
-          : ""
+        result.skipped > 0 ? ` (${result.skipped} could not be downloaded)` : ""
       }`,
     );
   }
@@ -900,10 +895,9 @@ async function fetchSamples(input: {
   found: LookupResult;
   staging: string;
   limit: number;
-  nsfwLevel: number;
   say: (line: string) => void;
 }): Promise<{ samples: ImportSample[]; skipped: number; showcase: number }> {
-  const { client, found, staging, limit, nsfwLevel, say } = input;
+  const { client, found, staging, limit, say } = input;
   const versionId = found.record.source.model_version_id;
   if (found.record.source.kind === "huggingface") {
     // Not a failure: a model card's pictures are decoration, not samples with
@@ -927,7 +921,6 @@ async function fetchSamples(input: {
     width: typeof image.width === "number" ? image.width : null,
     height: typeof image.height === "number" ? image.height : null,
     kind: image.type === "video" ? "video" as const : "image" as const,
-    nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
     page_url: typeof image.id === "number"
       ? `${client.civitaiUrl}/images/${image.id}`
       : null,
@@ -976,9 +969,8 @@ async function fetchSamples(input: {
     }
   }
 
-  const usable = showcase.filter((image) => image.nsfw_level <= nsfwLevel);
   let gallery: Candidate[] = [];
-  if (civitai && limit > usable.length) {
+  if (civitai && limit > showcase.length) {
     const taken = new Set(showcase.map((image) => mediaKey(image.url)));
     gallery = (await tried(
       "the gallery",
@@ -995,13 +987,6 @@ async function fetchSamples(input: {
   for (const image of candidates) {
     if (samples.length >= limit) break;
     if (image.url.length === 0) continue;
-    // ForgeUI's own ceiling, separate from what the lookup was allowed to
-    // see: ask broadly, file narrowly (§4.3).
-    if (image.nsfw_level > nsfwLevel) {
-      skipped++;
-      continue;
-    }
-
     const url = originalImageUrl(image.url);
     let bytes: Uint8Array;
     try {

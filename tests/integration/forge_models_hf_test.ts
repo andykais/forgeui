@@ -114,7 +114,6 @@ async function withHub(
   const client = new CivitaiClient({
     civitaiUrl: fake.url,
     archiveUrl: fake.url,
-    browsingLevel: 31,
     timeoutMs: 5000,
     token: options.civitaiToken ?? null,
     now: () => new Date("2026-09-29T10:00:00Z"),
