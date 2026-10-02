@@ -92,20 +92,26 @@
    * then this page, and only this page, reloads. Nothing pushes model edits
    * to other tabs, so a second tab on the same model keeps what it showed,
    * which is what makes flipping between them a before-and-after.
+   *
+   * Offered on every model page, and on one that could not be loaded: a
+   * model the library does not know yet is the one a rescan is most for.
    */
   async function rescanAll() {
-    if (!model) return;
     rescanning = true;
     const before = model;
     try {
       await api.rescanModels({ wait: true });
       await load();
       await app.refreshModels();
-      const changed = model ? changedFields(before, model) : [];
+      const changed = before && model ? changedFields(before, model) : [];
       toasts.message(
-        changed.length > 0
-          ? `Rescanned: ${changed.join(", ")} changed`
-          : "Rescanned: nothing changed here",
+        !before
+          ? model
+            ? "Rescanned: found it"
+            : "Rescanned: still not in the library"
+          : changed.length > 0
+            ? `Rescanned: ${changed.join(", ")} changed`
+            : "Rescanned: nothing changed here",
       );
     } catch (cause) {
       toasts.message(cause instanceof Error ? cause.message : "the rescan failed");
@@ -442,6 +448,25 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+<!--
+  The Models page's Rescan, which is what picks up a `forge models` batch;
+  this tab reloads when it has finished, and no other tab does. In the page's
+  top row, full size, on every model page whatever state the model is in —
+  it has twice been lost from a row of small buttons that only some models
+  show, and a test now holds it here.
+-->
+{#snippet rescanButton()}
+  <button
+    class="rescan"
+    disabled={rescanning}
+    title="Rescan the model folders and the import folder, then reload this page"
+    onclick={rescanAll}
+  >
+    <RefreshCw size={13} />
+    {rescanning ? "Rescanning…" : "Rescan"}
+  </button>
+{/snippet}
+
 {#if selectedSample && model}
   <SampleViewer
     bind:this={sampleViewer}
@@ -470,7 +495,10 @@
 {:else if error}
   <div class="empty">
     <p class="error mono">{error}</p>
-    <button onclick={() => navigate("/models")}>Back to models</button>
+    <div class="empty-actions">
+      <button onclick={() => navigate("/models")}>Back to models</button>
+      {@render rescanButton()}
+    </div>
   </div>
 {:else if model}
   <section class="model">
@@ -482,6 +510,8 @@
       </button>
       <span>/</span>
       <span class="here">{model.display_name}</span>
+      <span class="spacer"></span>
+      {@render rescanButton()}
     </nav>
 
     <header class="head">
@@ -609,21 +639,6 @@
               {rereading ? "Re-reading…" : "Re-read this file"}
             </button>
           {/if}
-          <!--
-            The Models page's Rescan, which is what picks up a `forge models`
-            batch; this tab reloads when it has finished, and no other tab
-            does. Offered whether or not the file has a hash yet — a model
-            still being read is exactly one a rescan is for.
-          -->
-            <button
-              class="reread"
-              disabled={rescanning}
-              title="Rescan the model folders and the import folder, then reload this page"
-              onclick={rescanAll}
-            >
-              <RefreshCw size={11} />
-              {rescanning ? "Rescanning…" : "Rescan"}
-            </button>
           {#if model.hash}
             <!--
               Hidden is out of the Generate pickers, not gone: it is still
@@ -823,6 +838,35 @@
     gap: 6px;
     padding: 10px 12px 0;
     font-size: 11px;
+  }
+
+  .crumbs .spacer {
+    flex: 1;
+  }
+
+  /* As the Models page draws its own Rescan. */
+  .rescan {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .crumbs .rescan {
+    text-transform: none;
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--control);
+    color: var(--text-2);
+  }
+
+  .crumbs .rescan:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .empty-actions {
+    display: flex;
+    gap: 8px;
   }
 
   .crumbs button {

@@ -801,8 +801,10 @@ same keyset cursor the gallery uses.
   everywhere a model is named: model page header and breadcrumb, Models grid
   cards, LoRA/checkpoint pickers, Gallery table MODELS chips, and viewer
   metadata model links. Unset, it falls back to the filename minus extension.
-  The **filename is immutable** and appears only on the model page metadata
-  line. Sidecars keep recording filename + hash, so renames never affect
+  The **filename is immutable** and appears on the model page metadata line,
+  and (amended) in Generate's LoRA picker on the small grey line under the
+  title, beside the outputs and last use — two LoRAs can share a title. The
+  workflow page's panel preview names them by title alone. Sidecars keep recording filename + hash, so renames never affect
   reproduction. Display names may collide; the hash is the identity.
 - A LoRA carries the ends of its own strength sliders, `strength_min` and
   `strength_max`, typed on its model page — only whoever trained or
@@ -812,7 +814,12 @@ same keyset cursor the gallery uses.
 - Model page = header (thumb, display name, family, size, full sha256, tags,
   notes, Civitai link, filename + folder with Copy path) + **Samples** strip +
   the standard gallery filtered to `output_models.model_hash = ?`. Header
-  fields are edit-in-place (blur commits, esc reverts).
+  fields are edit-in-place (blur commits, esc reverts). **Rescan** (amended)
+  sits at the right of the breadcrumb row, full size, on every model page —
+  hashed or not, file missing or not — and on the page for a model that
+  could not be loaded; it reloads that page once the rescan and its imports
+  are done. A component test holds it there: it was lost twice from a row
+  of small buttons only some models show.
 
 ### 8.2 Model switching
 Solved by construction: a workflow bakes in its checkpoint and its defaults.
