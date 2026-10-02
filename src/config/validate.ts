@@ -217,28 +217,24 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
     "dir",
     "model_dir",
     "civitai_url",
-    "browsing_level",
     "archive_url",
     "civitai_token",
     "civitai_cli",
     "huggingface_url",
     "huggingface_token",
     "samples",
-    "nsfw_level",
     "ingest_on_boot",
   ]);
   const out: Partial<ImportConfig> = {};
   pick(raw, "dir", out, nullableStr, where);
   pick(raw, "model_dir", out, nullableStr, where);
   pick(raw, "civitai_url", out, str, where);
-  pick(raw, "browsing_level", out, count, where);
   pick(raw, "archive_url", out, str, where);
   pick(raw, "civitai_token", out, token, where);
   pick(raw, "civitai_cli", out, nullableStr, where);
   pick(raw, "huggingface_url", out, str, where);
   pick(raw, "huggingface_token", out, token, where);
   pick(raw, "samples", out, count, where);
-  pick(raw, "nsfw_level", out, count, where);
   pick(raw, "ingest_on_boot", out, bool, where);
   return out;
 }

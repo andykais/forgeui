@@ -29,6 +29,9 @@ function optionalString(
 
 const MODEL_SORTS = ["added", "oldest", "name"] as const;
 
+/** §8.1: one or two sentences, read beside a name in a listing. */
+export const SUMMARY_MAX = 300;
+
 /** §8.1's sort, as a URL param like every other filter on the screen. */
 function sortFrom(value: string | null): ModelSort | undefined {
   if (value === null) return undefined;
@@ -44,6 +47,19 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
   if (displayName !== undefined) patch.display_name = displayName;
   const notes = optionalString(body.notes, "notes");
   if (notes !== undefined) patch.notes = notes;
+  const summary = optionalString(body.summary, "summary");
+  if (summary !== undefined) {
+    // A summary is read in a listing beside the name; anything longer
+    // belongs in `notes` (§8.1).
+    if (summary !== null && summary.length > SUMMARY_MAX) {
+      throw new BodyError(
+        `summary: at most ${SUMMARY_MAX} characters — one or two sentences ` +
+          `saying what the model is (this one is ${summary.length}); longer ` +
+          `observations belong in notes`,
+      );
+    }
+    patch.summary = summary;
+  }
 
   if (body.family !== undefined) {
     const family = optionalString(body.family, "family");
@@ -112,7 +128,7 @@ function readMetaPatch(body: Record<string, unknown>): ModelPatch {
 
   if (Object.keys(patch).length === 0) {
     throw new BodyError(
-      "nothing to change: expected display_name, family, notes, tags, " +
+      "nothing to change: expected display_name, family, summary, notes, tags, " +
         "hidden, strength_min, strength_max or thumb_sample_id",
     );
   }

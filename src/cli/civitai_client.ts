@@ -125,7 +125,6 @@ function ambiguous(filename: string, matches: Candidate[]): string {
 export interface CivitaiClientOptions {
   civitaiUrl: string;
   archiveUrl: string;
-  browsingLevel: number;
   timeoutMs: number;
   /**
    * A Civitai API key. Sent to Civitai and to nothing else — not the archive,
@@ -160,7 +159,6 @@ function asks(source: LookupSource, site: Exclude<LookupSource, "auto">) {
 export class CivitaiClient {
   #civitai: string;
   #archive: string;
-  #browsingLevel: number;
   #timeoutMs: number;
   #fetch: typeof globalThis.fetch;
   #now: () => Date;
@@ -178,7 +176,6 @@ export class CivitaiClient {
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
     this.#archive = options.archiveUrl.replace(/\/+$/, "");
-    this.#browsingLevel = options.browsingLevel;
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
@@ -821,16 +818,30 @@ export class CivitaiClient {
    * image endpoint at all, so a lookup through it brings whatever it already
    * carried and this is not called.
    */
+  /**
+   * Images posted under a version — its gallery — newest first; with
+   * `username`, only that account's, which for the model's creator is the
+   * version's own showcase with the ids and pages the version object leaves
+   * out.
+   */
   async imagesFor(
     versionId: number,
     limit: number,
+    options: {
+      /** One account's posts: the creator's are the version's showcase. */
+      username?: string;
+      /** Civitai's own sort names; "Most Reactions" is the gallery's. */
+      sort?: "Newest" | "Most Reactions";
+    } = {},
   ): Promise<Record<string, unknown>[]> {
+    const { username, sort = "Newest" } = options;
     const body = await this.#json(
       this.#civitaiUrl(this.#civitai, "/api/v1/images", "images", {
         modelVersionId: String(versionId),
         limit: String(Math.min(Math.max(limit, 1), 200)),
-        sort: "Newest",
+        sort,
         withMeta: "true",
+        ...(username ? { username } : {}),
       }),
     );
     const items = (body as { items?: unknown[] })?.items;
@@ -857,7 +868,7 @@ export class CivitaiClient {
     const url = new URL(path, `${base}/`);
     for (
       const [key, value] of Object.entries({
-        ...visibilityParams(endpoint, this.#browsingLevel),
+        ...visibilityParams(endpoint),
         ...extra,
       })
     ) {

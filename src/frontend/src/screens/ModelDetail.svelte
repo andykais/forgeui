@@ -15,6 +15,7 @@
   import type { ModelDetail, Output, Sample } from "../types.ts";
   import FamilyPicker from "../components/FamilyPicker.svelte";
   import SamplesStrip from "../components/SamplesStrip.svelte";
+  import SampleViewer from "../components/SampleViewer.svelte";
   import SourcePanel from "../components/SourcePanel.svelte";
   import TagPicker from "../components/TagPicker.svelte";
   import Tile from "../components/Tile.svelte";
@@ -40,6 +41,9 @@
   let rereading = $state(false);
   let rescanning = $state(false);
   let viewer = $state<ReturnType<typeof Viewer> | null>(null);
+  /** The sample open at full size, if one is (§8.3). */
+  let sampleId = $state<string | null>(null);
+  let sampleViewer = $state<ReturnType<typeof SampleViewer> | null>(null);
   /**
    * The outputs grid, for the one thing the keys need from it: how many
    * tiles a row holds, since ↑ / ↓ move by a row and the grid is
@@ -88,20 +92,26 @@
    * then this page, and only this page, reloads. Nothing pushes model edits
    * to other tabs, so a second tab on the same model keeps what it showed,
    * which is what makes flipping between them a before-and-after.
+   *
+   * Offered on every model page, and on one that could not be loaded: a
+   * model the library does not know yet is the one a rescan is most for.
    */
   async function rescanAll() {
-    if (!model) return;
     rescanning = true;
     const before = model;
     try {
       await api.rescanModels({ wait: true });
       await load();
       await app.refreshModels();
-      const changed = model ? changedFields(before, model) : [];
+      const changed = before && model ? changedFields(before, model) : [];
       toasts.message(
-        changed.length > 0
-          ? `Rescanned: ${changed.join(", ")} changed`
-          : "Rescanned: nothing changed here",
+        !before
+          ? model
+            ? "Rescanned: found it"
+            : "Rescanned: still not in the library"
+          : changed.length > 0
+            ? `Rescanned: ${changed.join(", ")} changed`
+            : "Rescanned: nothing changed here",
       );
     } catch (cause) {
       toasts.message(cause instanceof Error ? cause.message : "the rescan failed");
@@ -118,6 +128,7 @@
       ["family", a.family, b.family],
       ["trigger words", a.trigger_words, b.trigger_words],
       ["tags", a.tags, b.tags],
+      ["summary", a.summary, b.summary],
       ["notes", a.notes, b.notes],
       ["source", a.source, b.source],
       ["samples", a.samples.map((s) => s.id), b.samples.map((s) => s.id)],
@@ -135,6 +146,7 @@
 
   let nameDraft = $state("");
   let notesDraft = $state("");
+  let summaryDraft = $state("");
   /**
    * Where a tag leads: the Models screen, filtered to it, on the tab this
    * model is on. The screen is tabbed by class and falls back to diffusion,
@@ -160,6 +172,9 @@
 
   const hashing = $derived(model?.hashing ?? false);
   const selected = $derived(outputs.find((output) => output.id === selectedId) ?? null);
+  const selectedSample = $derived(
+    model?.samples.find((sample) => sample.id === sampleId) ?? null,
+  );
 
   $effect(() => {
     id;
@@ -191,6 +206,7 @@
       }
       nameDraft = detail.display_name;
       notesDraft = detail.notes ?? "";
+      summaryDraft = detail.summary ?? "";
       error = null;
       outputs = detail.hash
         ? (await api.outputs({ models: [detail.hash], limit: 60 })).outputs
@@ -239,6 +255,7 @@
       model = await api.patchModel(model.id, body);
       if ("display_name" in body) nameDraft = model.display_name;
       if ("notes" in body) notesDraft = model.notes ?? "";
+      if ("summary" in body) summaryDraft = model.summary ?? "";
       await app.refreshModels();
     } catch (cause) {
       // A 409 means the hasher has not got here yet, which the badge says.
@@ -246,6 +263,7 @@
       if (model) {
         nameDraft = model.display_name;
         notesDraft = model.notes ?? "";
+        summaryDraft = model.summary ?? "";
       }
     }
   }
@@ -254,6 +272,12 @@
     if (!model || hashing) return;
     if (nameDraft.trim() === model.display_name) return;
     void patch({ display_name: nameDraft.trim() });
+  }
+
+  function commitSummary() {
+    if (!model || hashing) return;
+    if (summaryDraft.trim() === (model.summary ?? "")) return;
+    void patch({ summary: summaryDraft.trim() });
   }
 
   function commitNotes() {
@@ -286,6 +310,13 @@
   }
 
   async function deleteSample(sample: Sample) {
+    // Deleting from the viewer steps to the next one rather than closing it,
+    // as it does for outputs (§11.2); worked out before the row goes.
+    if (sampleId === sample.id && model) {
+      const at = model.samples.findIndex((entry) => entry.id === sample.id);
+      const next = model.samples[at + 1] ?? model.samples[at - 1] ?? null;
+      sampleId = next?.id ?? null;
+    }
     try {
       await api.deleteSample(sample.id);
       await load();
@@ -348,6 +379,10 @@
     ) {
       return;
     }
+    if (selectedSample) {
+      sampleKeys(event);
+      return;
+    }
     if (!selected) return;
     const action = app.keyAction(event);
     if (!action) return;
@@ -386,11 +421,65 @@
         break;
     }
   }
+
+  /** The same keys, for the samples: one row of them, so ↑ / ↓ do nothing. */
+  function sampleKeys(event: KeyboardEvent) {
+    const action = app.keyAction(event);
+    switch (action) {
+      case "select_prev":
+        event.preventDefault();
+        sampleViewer?.step(-1);
+        break;
+      case "select_next":
+        event.preventDefault();
+        sampleViewer?.step(1);
+        break;
+      case "fullscreen":
+        event.preventDefault();
+        sampleViewer?.toggleFullscreen();
+        break;
+      case "close":
+        event.preventDefault();
+        if (!sampleViewer?.exitFullscreen()) sampleId = null;
+        break;
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-{#if selected}
+<!--
+  The Models page's Rescan, which is what picks up a `forge models` batch;
+  this tab reloads when it has finished, and no other tab does. In the page's
+  top row, full size, on every model page whatever state the model is in —
+  it has twice been lost from a row of small buttons that only some models
+  show, and a test now holds it here.
+-->
+{#snippet rescanButton()}
+  <button
+    class="rescan"
+    disabled={rescanning}
+    title="Rescan the model folders and the import folder, then reload this page"
+    onclick={rescanAll}
+  >
+    <RefreshCw size={13} />
+    {rescanning ? "Rescanning…" : "Rescan"}
+  </button>
+{/snippet}
+
+{#if selectedSample && model}
+  <SampleViewer
+    bind:this={sampleViewer}
+    samples={model.samples}
+    selected={selectedSample}
+    thumbPath={model.thumb_path}
+    onselect={(sample) => (sampleId = sample.id)}
+    onclose={() => (sampleId = null)}
+    onthumb={(sample) => patch({ thumb_sample_id: sample.id })}
+    onedit={editSample}
+    ondelete={deleteSample}
+  />
+{:else if selected}
   <Viewer
     bind:this={viewer}
     screen="models"
@@ -406,7 +495,10 @@
 {:else if error}
   <div class="empty">
     <p class="error mono">{error}</p>
-    <button onclick={() => navigate("/models")}>Back to models</button>
+    <div class="empty-actions">
+      <button onclick={() => navigate("/models")}>Back to models</button>
+      {@render rescanButton()}
+    </div>
   </div>
 {:else if model}
   <section class="model">
@@ -418,6 +510,8 @@
       </button>
       <span>/</span>
       <span class="here">{model.display_name}</span>
+      <span class="spacer"></span>
+      {@render rescanButton()}
     </nav>
 
     <header class="head">
@@ -545,21 +639,6 @@
               {rereading ? "Re-reading…" : "Re-read this file"}
             </button>
           {/if}
-          <!--
-            The Models page's Rescan, which is what picks up a `forge models`
-            batch; this tab reloads when it has finished, and no other tab
-            does. Offered whether or not the file has a hash yet — a model
-            still being read is exactly one a rescan is for.
-          -->
-            <button
-              class="reread"
-              disabled={rescanning}
-              title="Rescan the model folders and the import folder, then reload this page"
-              onclick={rescanAll}
-            >
-              <RefreshCw size={11} />
-              {rescanning ? "Rescanning…" : "Rescan"}
-            </button>
           {#if model.hash}
             <!--
               Hidden is out of the Generate pickers, not gone: it is still
@@ -659,10 +738,34 @@
           {/if}
         </div>
 
+        <!--
+          Two fields that are easy to confuse, so each says what it is for
+          (§8.1): the summary is what the model is, read beside its name in
+          every listing; the notes are what was learned using it.
+        -->
+        <input
+          class="summary"
+          aria-label="Summary"
+          placeholder="Summary — one or two sentences: what this model is"
+          maxlength="300"
+          disabled={hashing}
+          value={summaryDraft}
+          oninput={(event) =>
+            (summaryDraft = (event.currentTarget as HTMLInputElement).value)}
+          onblur={commitSummary}
+          onkeydown={(event) => {
+            if (event.key === "Enter") (event.currentTarget as HTMLInputElement).blur();
+            if (event.key === "Escape") {
+              summaryDraft = model?.summary ?? "";
+              (event.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+        />
+
         <textarea
           class="notes"
           aria-label="Notes"
-          placeholder="Notes"
+          placeholder="Notes — what you have learned using it: strengths that work, what it breaks, what it pairs with"
           disabled={hashing}
           value={notesDraft}
           oninput={(event) =>
@@ -696,6 +799,7 @@
           onthumb={(sample) => patch({ thumb_sample_id: sample.id })}
           ondelete={deleteSample}
           onedit={editSample}
+          onopen={(sample) => (sampleId = sample.id)}
         />
       {/if}
 
@@ -734,6 +838,35 @@
     gap: 6px;
     padding: 10px 12px 0;
     font-size: 11px;
+  }
+
+  .crumbs .spacer {
+    flex: 1;
+  }
+
+  /* As the Models page draws its own Rescan. */
+  .rescan {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .crumbs .rescan {
+    text-transform: none;
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--control);
+    color: var(--text-2);
+  }
+
+  .crumbs .rescan:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .empty-actions {
+    display: flex;
+    gap: 8px;
   }
 
   .crumbs button {
@@ -962,6 +1095,20 @@
     color: var(--text);
   }
 
+
+  .summary {
+    background: var(--control);
+    border: 1px solid transparent;
+    border-radius: var(--radius-input);
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 8px;
+    max-width: 560px;
+  }
+
+  .summary:focus {
+    border-color: var(--edge);
+  }
 
   .notes {
     background: var(--control);

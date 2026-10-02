@@ -33,6 +33,8 @@ function model(overrides: Partial<ModelEntry> = {}): ModelEntry {
     thumb_path: null,
     thumb_url: null,
     output_count: 12,
+    sample_count: 0,
+    summary: null,
     last_used_at: null,
     hashing: false,
     hash_error: null,
@@ -151,6 +153,7 @@ function sample(overrides: Partial<Sample> = {}): Sample {
     created_at: 1_780_000_000_000,
     media_url: `/api/media/samples/${"a".repeat(64)}/01JSAMPLE.png`,
     reusable: false,
+    raw: null,
     ...overrides,
   };
 }

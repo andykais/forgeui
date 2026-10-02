@@ -245,6 +245,7 @@ export const api = {
     patch: {
       display_name?: string | null;
       family?: string | null;
+      summary?: string | null;
       notes?: string | null;
       tags?: string[];
       strength_min?: number | null;
@@ -375,6 +376,16 @@ export const api = {
     request<{ mode: string; lines: string[]; available: boolean }>(
       "/api/system/comfy/log",
     ),
+  /**
+   * Ask ComfyUI to drop its models (DESIGN-AGENT-LOOP §6.3): the same verb
+   * the MCP bridge calls after a round, here for a person to press.
+   */
+  freeVram: () =>
+    request<{
+      freed: boolean;
+      reason?: string;
+      comfy?: import("./types.ts").ComfyStatus;
+    }>("/api/system/free_vram", { method: "POST" }),
   restartComfy: () =>
     request<{ comfy: import("./types.ts").ComfyStatus }>(
       "/api/system/comfy/restart",

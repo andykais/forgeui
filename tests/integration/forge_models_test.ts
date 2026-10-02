@@ -12,6 +12,8 @@ import { effectiveConfig } from "../../src/config/config.ts";
 import { dataPaths, ensureDataDirs } from "../../src/config/paths.ts";
 import { sha256Hex } from "../../src/workflows/hash.ts";
 import { CivitaiClient } from "../../src/cli/civitai_client.ts";
+import { parseOverwrite } from "../../src/cli/overwrite.ts";
+import { DownloadError } from "../../src/cli/download.ts";
 import {
   civitaiToken,
   LookupError,
@@ -63,23 +65,25 @@ function civitaiModel(hash: string, base: string) {
         downloadUrl: `${base}/api/download/models/501240`,
         hashes: { SHA256: hash.toUpperCase() },
       }],
+      // The version's own showcase, as the live API gives it: generation
+      // data, but no `id` — so no page to link to until the same images,
+      // asked for by their author, supply one.
       images: [
         {
-          id: 900001,
           url: `${base}/img/anim=false,width=450,optimized=true/900001.jpeg`,
           width: 768,
           height: 512,
           type: "image",
           nsfwLevel: 1,
+          meta: { prompt: "a fox", seed: 3, steps: 28, cfgScale: 4.5 },
         },
         {
-          id: 900002,
           url: `${base}/img/width=450/900002.jpeg`,
           width: 768,
           height: 512,
           type: "image",
-          // Above the default ceiling of 1: fetched by the lookup, kept off
-          // the disk by import.nsfw_level.
+          // Rated mature by Civitai. There is no content filter: it is a
+          // sample like any other (§4.3).
           nsfwLevel: 8,
         },
       ],
@@ -101,9 +105,10 @@ async function withCli(
   body: (h: Harness) => Promise<void>,
   options: {
     archiveOnly?: boolean;
-    nsfwLevel?: number;
     /** Leave the configured model folder empty, as a fresh machine is. */
     noLocalFile?: boolean;
+    /** More of the version's gallery: other people's posts under it. */
+    gallery?: (url: string) => unknown[];
   } = {},
 ): Promise<void> {
   const { bytes, hash } = await fixture();
@@ -119,8 +124,8 @@ async function withCli(
   const fake = startFakeCivitai();
   const model = civitaiModel(hash, fake.url);
   // What `/api/v1/images` really answers with: ids, already-original URLs,
-  // dimensions and `meta`. The version object's own images carry no id, which
-  // is why this endpoint is what samples are built from (§4.3).
+  // dimensions, `meta` and who posted it. The creator's two are the showcase
+  // above; asked for by username, they are what supplies its ids (§4.3).
   const meta = {
     501240: [
       {
@@ -130,6 +135,7 @@ async function withCli(
         height: 512,
         type: "image",
         nsfwLevel: 1,
+        username: "Cyberdelia",
         meta: { prompt: "a fox", seed: 3, steps: 28, cfgScale: 4.5 },
       },
       {
@@ -138,11 +144,12 @@ async function withCli(
         width: 768,
         height: 512,
         type: "image",
-        // Above the default ceiling of 1: offered by the lookup, kept off the
-        // disk by import.nsfw_level.
+        // Rated mature by Civitai, and kept like any other (§4.3).
         nsfwLevel: 8,
+        username: "Cyberdelia",
         meta: {},
       },
+      ...(options.gallery?.(fake.url) ?? []),
     ],
   };
   const archive = {
@@ -193,7 +200,6 @@ async function withCli(
     import: {
       civitai_url: fake.url,
       archive_url: fake.url,
-      nsfw_level: options.nsfwLevel ?? 1,
     },
   });
   const paths = dataPaths(dataDir, config.import);
@@ -201,7 +207,6 @@ async function withCli(
   const client = new CivitaiClient({
     civitaiUrl: fake.url,
     archiveUrl: fake.url,
-    browsingLevel: config.import.browsing_level,
     timeoutMs: 5000,
     now: () => new Date("2026-09-25T10:00:00Z"),
   });
@@ -253,7 +258,12 @@ Deno.test("a run says where it came from and what it holds", async () => {
     assertStringIncludes(said, "by            Cyberdelia");
     assertStringIncludes(said, "trigger words cyberrealistic, photo");
     assertStringIncludes(said, "their tags    photorealistic, base model");
-    assertStringIncludes(said, "samples       1 (1 over import.nsfw_level");
+    assertStringIncludes(
+      said,
+      "samples       2 (2 from the model page, 0 from its gallery)",
+    );
+    // Nothing is held back for its rating, and nothing says it was.
+    assert(!said.includes("nsfw"), said);
     assert(lines.at(-1) === `wrote ${result.dir}`, said);
     // The model is not in a model folder here, and nothing nags about it:
     // the machine running this usually has none (§2).
@@ -350,9 +360,9 @@ Deno.test("samples are fetched at full size, with their generation data", async 
       log: () => {},
     });
 
-    // Two images were offered; one is above import.nsfw_level.
-    assertEquals(result.samples, 1);
-    assertEquals(result.skipped, 1);
+    // Two images were offered, one rated mature: both are kept (§4.3).
+    assertEquals(result.samples, 2);
+    assertEquals(result.skipped, 0);
 
     const batch = await readBatch(result.dir);
     const [sample] = batch.samples!;
@@ -375,6 +385,96 @@ Deno.test("samples are fetched at full size, with their generation data", async 
       }`,
     );
   });
+});
+
+/** Two posts by somebody else under the version: its gallery. */
+/**
+ * Two posts by somebody else under the version: its gallery. The newer one
+ * is listed first and has fewer reactions, so "most reactions" reverses them.
+ */
+function galleryOf(url: string) {
+  return ([[900003, 2], [900004, 40]] as const).map(([id, likes]) => ({
+    id,
+    url: `${url}/img/original=true/${id}.jpeg`,
+    width: 512,
+    height: 512,
+    type: "image",
+    nsfwLevel: 1,
+    username: "someone",
+    stats: { likeCount: likes, heartCount: likes },
+    meta: { prompt: `a gallery fox ${id}`, seed: id },
+  }));
+}
+
+Deno.test("samples start from the model's own media, and the gallery tops up", async () => {
+  // What the author put on the model page comes first, in their order, with
+  // no reactions to speak of; the gallery — everyone's posts under the
+  // version — only fills a count the showcase cannot reach, most reactions
+  // first (§4.3).
+  await withCli(async (h) => {
+    const lines: string[] = [];
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 4,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: (line) => lines.push(line),
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [
+        `${h.fake.url}/images/900001`,
+        `${h.fake.url}/images/900002`,
+        `${h.fake.url}/images/900004`,
+        `${h.fake.url}/images/900003`,
+      ],
+    );
+    // The gallery was asked by reactions; the creator's own posts, asked
+    // only for their links, were not.
+    const asked = h.fake.matching("/api/v1/images");
+    assertEquals(
+      asked.map((
+        request,
+      ) => [request.params.username ?? null, request.params.sort]),
+      [["Cyberdelia", "Newest"], [null, "Most Reactions"]],
+    );
+    // The showcase image kept its own generation data and gained its page.
+    const raw = batch.samples![0]!.raw as { fields: { seed: number } };
+    assertEquals(raw.fields.seed, 3);
+    assertStringIncludes(
+      lines.join("\n"),
+      "samples       4 (2 from the model page, 2 from its gallery)",
+    );
+  }, { gallery: galleryOf });
+});
+
+Deno.test("the gallery is not asked when the model's own media are enough", async () => {
+  await withCli(async (h) => {
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 1,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [`${h.fake.url}/images/900001`],
+    );
+    // The images endpoint was asked only for the creator's own posts, for
+    // the showcase's links — never for the gallery.
+    const asked = h.fake.matching("/api/v1/images");
+    assert(asked.length > 0);
+    for (const request of asked) {
+      assertEquals(request.params.username, "Cyberdelia");
+    }
+  }, { gallery: galleryOf });
 });
 
 Deno.test("the batch is renamed into place, never written in halves", async () => {
@@ -780,6 +880,109 @@ Deno.test("a download that cannot match its batch writes nothing", async () => {
   }, { noLocalFile: true });
 });
 
+Deno.test("a download that needs Buzz says so, not that a key is missing", async () => {
+  // What civitai.com answers for an Early Access version (checked against
+  // the live site): a 403 whose body says what it is. A key would not help,
+  // and the message must not send anyone off to set one (§4).
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    h.fake.configure({
+      models: { 15003: model },
+      versionsByHash: { [h.hash]: model.modelVersions[0]! },
+      downloadStatus: 403,
+      downloadRefusal: {
+        error: "Early Access",
+        deadline: "2026-10-06T15:32:52.699Z",
+        message:
+          "This asset is in Early Access. You can use Buzz access it now!",
+      },
+    });
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          env: { get: () => "a-key" },
+          paths: h.paths,
+          client: h.client,
+          log: () => {},
+        }),
+      DownloadError,
+    );
+    assertEquals(error.kind, "paid");
+    const [headline, ...rest] = error.message.split("\n");
+    assertEquals(
+      headline,
+      `${FILENAME} is in Early Access on Civitai until 2026-10-06 15:32 UTC: ` +
+        "its creator charges Buzz to download it before then.",
+    );
+    const said = rest.join("\n");
+    assertStringIncludes(said, "You can use Buzz access it now!");
+    assertStringIncludes(said, "A key was sent and refused");
+    assertStringIncludes(said, "buy access with Buzz on ");
+    assertStringIncludes(said, "Or wait until 2026-10-06 15:32 UTC");
+    assert(!said.includes("needs an account"));
+    // Recorded as what it is, so the folder can be pruned by it.
+    assertStringIncludes(
+      await Deno.readTextFile(
+        join(h.paths.imports, "fetched", "failure", h.hash, "error.txt"),
+      ),
+      "failure: paid",
+    );
+  }, { noLocalFile: true });
+});
+
+Deno.test("a version the lookup says is paid is named paid, whatever the refusal says", async () => {
+  // A permanently paid version answers an anonymous GET with only "requires
+  // you to be logged in"; the version's `paidAccess` is what says why.
+  await withCli(async (h) => {
+    const model = civitaiModel(h.hash, h.fake.url);
+    const version = {
+      ...model.modelVersions[0]!,
+      paidAccess: { permanent: true, endsAt: null },
+    };
+    h.fake.configure({
+      models: { 15003: { ...model, modelVersions: [version] } },
+      versionsByHash: { [h.hash]: version },
+      downloadStatus: 401,
+      downloadRefusal: {
+        error: "Unauthorized",
+        message:
+          "The creator of this asset requires you to be logged in to download it",
+      },
+    });
+    const lines: string[] = [];
+    const error = await assertRejects(
+      () =>
+        runModels({
+          ...base,
+          sha256checksum: h.hash,
+          downloadModel: true,
+          config: {
+            ...h.config,
+            import: { ...h.config.import, civitai_cli: null },
+          },
+          paths: h.paths,
+          client: h.client,
+          log: (line) => lines.push(line),
+        }),
+      DownloadError,
+    );
+    assertEquals(error.kind, "paid");
+    assertStringIncludes(
+      error.message,
+      `${FILENAME} is paid on Civitai: its creator charges Buzz`,
+    );
+    assertStringIncludes(error.message, "No key was sent");
+    assert(!error.message.includes("Or wait until"));
+  }, { noLocalFile: true });
+});
+
 Deno.test("a gated model says what to do rather than writing half a batch", async () => {
   await withCli(async (h) => {
     const model = civitaiModel(h.hash, h.fake.url);
@@ -979,7 +1182,6 @@ function withToken(
   const client = new CivitaiClient({
     civitaiUrl: h.fake.url,
     archiveUrl: h.fake.url,
-    browsingLevel: config.import.browsing_level,
     timeoutMs: 5000,
     token: civitaiToken(config, { get: () => undefined }),
     now: () => new Date("2026-09-25T10:00:00Z"),
@@ -1193,8 +1395,18 @@ Deno.test("a second run for the same model asks nothing and writes nothing", asy
       assertEquals(again.existing?.state, "fetched");
       assertEquals(again.existing?.hash, h.hash);
       const said = lines.join("\n");
-      assertStringIncludes(said, "already fetched: CyberRealistic · v9.0");
-      assertStringIncludes(said, "nothing was fetched; pass --overwrite");
+      // The decision first, the earlier run's result after it, and the way
+      // to change it last.
+      assertStringIncludes(
+        said,
+        "skipped CyberRealistic · v9.0: an earlier run",
+      );
+      assertStringIncludes(
+        said,
+        "earlier result: fetched, waiting for the app",
+      );
+      assertStringIncludes(said, "to try again: forge models ");
+      assertStringIncludes(said, "--overwrite");
     }
     // Untouched, not rewritten with the same content.
     assertEquals(
@@ -1232,7 +1444,10 @@ Deno.test("a hash nobody knows is recorded, and not asked about again", async ()
     );
     assertEquals(h.fake.requests.length, before);
     assertEquals(again.existing?.state, "fetch-failed");
-    assertStringIncludes(lines.join("\n"), "looked up before, and not found");
+    assertStringIncludes(
+      lines.join("\n"),
+      "earlier result: the lookup found nothing",
+    );
     assertStringIncludes(lines.join("\n"), "knows the hash");
 
     // --overwrite asks again, and is told no again.
@@ -1251,7 +1466,6 @@ Deno.test("a failure to get an answer is recorded too, as what it was", async ()
     const offline = new CivitaiClient({
       civitaiUrl: "http://127.0.0.1:9",
       archiveUrl: "http://127.0.0.1:9",
-      browsingLevel: 31,
       timeoutMs: 2000,
     });
     const error = await runModels({
@@ -1317,7 +1531,59 @@ Deno.test("a rate limit is recorded as one, and said as one next time", async ()
     assertEquals(again.existing?.failure, "rate-limited");
     assertStringIncludes(
       lines.join("\n"),
-      "looked up before, and it failed (rate-limited)",
+      "earlier result: it failed (rate-limited)",
+    );
+    // A limit lifts: the message says nothing was retried, not that it failed.
+    assertStringIncludes(lines.join("\n"), "has not been tried yet");
+  }, { noLocalFile: true });
+});
+
+/**
+ * The report this is about: a download that needed a Civitai login, then a
+ * re-run — token set, or only asking for samples — that printed the old
+ * login error as if it were this run's. It is the earlier run's, and the
+ * message has to say so before it says anything else.
+ */
+Deno.test("an earlier failure is reported as history, not as this run's error", async () => {
+  await withCli(async (h) => {
+    const dir = join(h.paths.imports, "fetched", "failure", h.hash);
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+      join(dir, "error.txt"),
+      "when: 2026-09-20T09:30:00Z\n" +
+        `command: forge models --sha256checksum ${h.hash}\n` +
+        "failure: needs-login\n\n" +
+        "this model needs a Civitai login to download. Put a key from " +
+        "civitai.com/user/account in config.yaml as import.civitai_token, or " +
+        "set CIVITAI_TOKEN.\n",
+    );
+
+    const before = h.fake.requests.length;
+    const lines: string[] = [];
+    const again = await runner(h)(
+      { sha256checksum: h.hash, downloadSamples: 3 },
+      (line) => lines.push(line),
+    );
+    assertEquals(h.fake.requests.length, before, "nothing was asked");
+    assertEquals(again.existing?.state, "fetch-failed");
+
+    const [first, ...rest] = lines;
+    // Leads with the decision, dated, and without the old error in it.
+    assertStringIncludes(first!, "skipped");
+    assertStringIncludes(first!, "an earlier run on 2026-09-20 09:30:00 UTC");
+    assertStringIncludes(first!, "without --overwrite");
+    assertEquals(first!.includes("login"), false, first);
+    const said = rest.join("\n");
+    assertStringIncludes(said, "earlier result: it failed (needs-login)");
+    assertStringIncludes(said, "its error: this model needs a Civitai login");
+    assertStringIncludes(said, "has not been tried yet");
+    // What this run asked for is named as not done, and the retry is the
+    // run's own command with --overwrite added.
+    assertStringIncludes(said, "not fetched this time: up to 3 samples");
+    assertStringIncludes(
+      said,
+      `to try again: forge models --sha256checksum ${h.hash} ` +
+        "--download-samples 3 --overwrite",
     );
   }, { noLocalFile: true });
 });
@@ -1370,7 +1636,7 @@ Deno.test("what the app imported, and what it refused, are left alone", async ()
     );
     assertEquals(h.fake.requests.length, before);
     assertEquals(refusedAgain.existing?.state, "import-failed");
-    assertStringIncludes(lines.join("\n"), "the app refused it");
+    assertStringIncludes(lines.join("\n"), "the app refused to import it");
     assertStringIncludes(lines.join("\n"), "but the batch says 11");
 
     // --overwrite fetches it again, into fetched/success, for another try.
@@ -1379,6 +1645,125 @@ Deno.test("what the app imported, and what it refused, are left alone", async ()
     assertEquals(retried.existing, undefined);
     assertEquals((await readBatch(retried.dir)).overwrite, true);
   });
+});
+
+/** Move a waiting batch to where ingest leaves it: imported/success. */
+async function markImported(h: Harness, dir: string): Promise<string> {
+  const imported = join(h.paths.imports, "imported", "success", h.hash);
+  await Deno.mkdir(imported, { recursive: true });
+  await Deno.rename(join(dir, "model.json"), join(imported, "model.json"));
+  await Deno.remove(dir, { recursive: true });
+  return imported;
+}
+
+async function editBatch(
+  dir: string,
+  edit: (batch: ImportBatch) => void,
+): Promise<void> {
+  const batch = await readBatch(dir);
+  edit(batch);
+  await Deno.writeTextFile(join(dir, "model.json"), JSON.stringify(batch));
+}
+
+Deno.test("--overwrite naming one place leaves the other's results alone", async () => {
+  await withCli(async (h) => {
+    const run = runner(h);
+    const imported = await markImported(
+      h,
+      (await run({ sha256checksum: h.hash })).dir,
+    );
+    await editBatch(imported, (batch) => {
+      batch.model.display_name = "As imported";
+    });
+
+    // A scope reaching only fetched/ does not touch what the app imported,
+    // and asks nothing to find that out.
+    const lines: string[] = [];
+    const before = h.fake.requests.length;
+    const skipped = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("fetched,samples"),
+    }, (line) => lines.push(line));
+    assertEquals(h.fake.requests.length, before);
+    assertEquals(skipped.existing?.state, "imported");
+    const said = lines.join("\n");
+    assertStringIncludes(
+      said,
+      "--overwrite=fetched,samples does not reach imported/, where it is.",
+    );
+    assertStringIncludes(said, "--download-samples 1 --overwrite=samples");
+
+    // Naming imported samples fetches the samples, marks them to replace
+    // what the app has, and keeps the metadata the app applied.
+    const result = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("imported,samples"),
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(batch.samples?.length, 1);
+    assertEquals(batch.overwrite_samples, true);
+    assertEquals(batch.overwrite, false);
+    assertEquals(batch.model.display_name, "As imported");
+    assertEquals(result.kept, ["metadata"]);
+  });
+});
+
+Deno.test("a waiting batch keeps the parts --overwrite does not name", async () => {
+  await withCli(async (h) => {
+    const run = runner(h);
+    const first = await run({ sha256checksum: h.hash, downloadSamples: 1 });
+    // The weights a --download-model run would have left, and a hand edit.
+    await Deno.mkdir(join(first.dir, "model"));
+    await Deno.writeTextFile(join(first.dir, "model", FILENAME), "weights");
+    await editBatch(first.dir, (batch) => {
+      batch.model.display_name = "Hand-written";
+      batch.files = [{ file: `model/${FILENAME}`, kind: "checkpoints" }];
+    });
+
+    // Samples only: three now, from the page and its gallery; the weights
+    // are not downloaded again and the edited metadata stays.
+    const lines: string[] = [];
+    const samples = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 3,
+      downloadModel: true,
+      overwrite: parseOverwrite("samples"),
+    }, (line) => lines.push(line));
+    assertEquals(h.fake.matching("/api/download/").length, 0);
+    let batch = await readBatch(samples.dir);
+    assertEquals(batch.samples?.length, 3);
+    assertEquals(batch.model.display_name, "Hand-written");
+    assertEquals(batch.files, [{
+      file: `model/${FILENAME}`,
+      kind: "checkpoints",
+    }]);
+    assertEquals(
+      await Deno.readTextFile(join(samples.dir, "model", FILENAME)),
+      "weights",
+    );
+    assertEquals(samples.kept, ["metadata", "models"]);
+    assertStringIncludes(
+      lines.join("\n"),
+      "not fetched: models, which --overwrite=samples does not name",
+    );
+
+    // Metadata only: the lookup's answer again, and the samples and weights
+    // carried over as they were.
+    const sampleFiles = await namesIn(join(samples.dir, "samples"));
+    const metadata = await run({
+      sha256checksum: h.hash,
+      downloadSamples: 1,
+      overwrite: parseOverwrite("metadata"),
+    });
+    batch = await readBatch(metadata.dir);
+    assertEquals(batch.model.display_name, "CyberRealistic");
+    assertEquals(batch.samples?.length, 3);
+    assertEquals(await namesIn(join(metadata.dir, "samples")), sampleFiles);
+    assert(await exists(join(metadata.dir, "model", FILENAME)));
+    assertEquals(metadata.kept, ["samples", "models"]);
+  }, { gallery: galleryOf });
 });
 
 Deno.test("another version of the same model is another file", async () => {

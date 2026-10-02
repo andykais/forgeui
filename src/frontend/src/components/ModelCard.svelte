@@ -66,6 +66,10 @@
     >
       {model.display_name}
     </a>
+    <!-- What it is, in the owner's words (§8.1); the whole of it on hover. -->
+    {#if model.summary}
+      <p class="summary" title={model.summary}>{model.summary}</p>
+    {/if}
 
     <div class="meta">
       {#if model.hashing}
@@ -172,6 +176,19 @@
 
   .name:hover {
     color: var(--accent);
+  }
+
+  /* Two lines at most, so a row of cards keeps one rhythm. */
+  .summary {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-3);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .meta {

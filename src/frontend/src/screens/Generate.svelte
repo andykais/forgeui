@@ -66,6 +66,11 @@
           : b.created_at - a.created_at,
       ),
   );
+  /** The header's counts, whole — its tooltip when the pane is too narrow. */
+  const sessionSummary = $derived(
+    `${app.sessionJobs.length} jobs · ${app.activeJobs.length} active` +
+      (app.startedAt > 0 ? ` · since ${clockTime(app.startedAt)}` : ""),
+  );
   const queuedJobs = $derived(app.activeJobs.filter((job) => job.status === "queued"));
   /** The running job and the queue behind it, as the filmstrip shows them. */
   const activeJobs = $derived(app.activeJobs);
@@ -82,9 +87,7 @@
    * that keeps a metadata pane would keep an empty one.
    */
   const chosenLayout = $derived(app.layout("generate"));
-  const layout = $derived(
-    isFocused ? chosenLayout : withoutMetadata(chosenLayout),
-  );
+  const layout = $derived(isFocused ? chosenLayout : withoutMetadata(chosenLayout));
 
   /** The workflow is chosen in the URL, so a refresh keeps the panel (§11.2). */
   $effect(() => {
@@ -495,17 +498,17 @@
   {:else}
     <section class="results">
       <header class="results-head">
-        <span class="label">This session</span>
+        <span class="label" title={sessionSummary}>This session</span>
         <!--
           What "this session" is, spelled out. The heading was already there;
           what was missing was any way to tell which jobs it meant, and a
           restart that left the last run's pictures on screen made it look
           like it meant nothing at all.
         -->
-        <span class="mono dim">
+        <span class="mono dim summary">
           {app.sessionJobs.length} jobs · {app.activeJobs.length} active
           {#if app.startedAt > 0}
-            <span title="Everything queued since the app started">
+            <span class="since" title="Everything queued since the app started">
               · since {clockTime(app.startedAt)}
             </span>
           {/if}
@@ -820,6 +823,8 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    /* For the header's "since", which is the first thing to go (below). */
+    container-type: inline-size;
   }
 
   .results-head {
@@ -831,6 +836,44 @@
     /* After the shorthand, or the shorthand puts it back. The corner is
        spoken for (§11.3). */
     padding-right: var(--corner-reserve);
+    /* One line at any width. Half a 16:9 screen left the heading and the
+       counts a column each, wrapped over four lines beside controls that
+       did not wrap at all. */
+    white-space: nowrap;
+  }
+
+  /*
+   * The label's size, not the body's: the counts are the heading's second
+   * half, and at 13px beside 11px they read as a different thing. Last to
+   * give way — the filters and sizes are what you click — and when it has
+   * to, the "since" goes before the counts do.
+   */
+  .summary {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+  }
+
+  .results-head .label,
+  .results-head .filters,
+  .results-head .sizes {
+    flex: none;
+  }
+
+  @container (max-width: 660px) {
+    .since {
+      display: none;
+    }
+  }
+
+  /* Half a 16:9 screen: no room for the counts at all, so they are the
+     heading's tooltip rather than an ellipsis that says "204 …". */
+  @container (max-width: 550px) {
+    .summary {
+      display: none;
+    }
   }
 
   .filters button,

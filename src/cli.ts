@@ -20,8 +20,10 @@ import {
   runModels,
   UsageError,
 } from "./cli/models.ts";
+import { DownloadError } from "./cli/download.ts";
 import { HuggingFaceUrlError } from "./models/huggingface.ts";
 import { TensorArtUrlError } from "./models/tensorart.ts";
+import { OverwriteError, parseOverwrite } from "./cli/overwrite.ts";
 import { ForgeUi } from "./mcp/forgeui.ts";
 import { LlamaSwap } from "./mcp/llama.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
@@ -56,7 +58,10 @@ function passthrough(
 
 const serve = new Command()
   .description("Serve the UI and manage ComfyUI.")
-  .option("--data-dir <path:string>", "Data directory.")
+  .option(
+    "--data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .option("--host <host:string>", "Interface for the app's server.")
   .option("--port <port:number>", "Port for the app's server.")
   .option("--comfy-mode <mode:string>", "managed | local_url.")
@@ -71,7 +76,10 @@ const serve = new Command()
 
 const reindex = new Command()
   .description("Rebuild app.db from the sidecars on disk.")
-  .option("--data-dir <path:string>", "Data directory.")
+  .option(
+    "--data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .action(async (options) => {
     Deno.exit(await runServer(passthrough(options, ["reindex"])));
   });
@@ -87,7 +95,10 @@ const models = new Command()
     "Fetch model metadata, samples and weights into ForgeUI's import " +
       "folder, for the app to ingest on its next rescan.",
   )
-  .option("-d, --data-dir <path:string>", "Data directory.")
+  .option(
+    "-d, --data-dir <path:string>",
+    "Data directory. Default: $FORGEUI_DATA_DIR, else ~/.forgeui.",
+  )
   .option(
     "--url <url:string>",
     "civitai.red, civitai.com or civitaiarchive.com link to a model, a " +
@@ -123,8 +134,8 @@ const models = new Command()
   )
   .option(
     "--download-samples [n:number]",
-    "Download up to <n> images from the model's page as samples, newest " +
-      "first. Without a number, config.yaml's import.samples.",
+    "Download up to <n> images as samples: the model page's own first, " +
+      "then its gallery. Without a number, config.yaml's import.samples.",
   )
   .option(
     "--download-model",
@@ -133,20 +144,19 @@ const models = new Command()
       "gated one needs CIVITAI_TOKEN.",
   )
   .option(
-    "--overwrite",
+    "--overwrite [scope:string]",
     "Fetch again — without it, a model whose checksum is anywhere in the " +
       "import folder (fetched, not found, imported, refused) is left alone — " +
-      "and let the import replace fields you have edited.",
+      "and let the import replace fields you have edited. A comma-separated " +
+      "scope narrows it: fetched and imported say where (default both), " +
+      "metadata, samples and models say what (default all), so " +
+      "--overwrite=imported,samples replaces only an imported model's samples.",
   )
   .option(
     "--dry-run",
     "Print what would be fetched and written; touch nothing.",
   )
   .option("--json", "Print the resulting model.json instead of a summary.")
-  .option(
-    "--browsing-level <n:number>",
-    "Civitai's visibility bitmask for what a lookup may return.",
-  )
   .option("--timeout <ms:number>", "Per-request timeout.", { default: 30_000 })
   .action(async (options) => {
     Deno.exit(await runModelsCommand(options));
@@ -235,10 +245,9 @@ async function runModelsCommand(options: {
   importSource: string;
   downloadSamples?: number | boolean;
   downloadModel?: boolean;
-  overwrite?: boolean;
+  overwrite?: boolean | string;
   dryRun?: boolean;
   json?: boolean;
-  browsingLevel?: number;
   timeout: number;
 }): Promise<number> {
   try {
@@ -269,9 +278,8 @@ async function runModelsCommand(options: {
       source: chosen.source,
       downloadSamples: samples,
       downloadModel: options.downloadModel === true,
-      overwrite: options.overwrite === true,
+      overwrite: parseOverwrite(options.overwrite),
       dryRun: options.dryRun === true,
-      browsingLevel: options.browsingLevel,
       timeoutMs: options.timeout,
     };
     const result = await runModels({
@@ -285,7 +293,8 @@ async function runModelsCommand(options: {
     return 0;
   } catch (cause) {
     if (
-      cause instanceof UsageError || cause instanceof CivitaiUrlError ||
+      cause instanceof UsageError || cause instanceof OverwriteError ||
+      cause instanceof CivitaiUrlError ||
       cause instanceof HuggingFaceUrlError || cause instanceof TensorArtUrlError
     ) {
       console.error(`forge models: ${cause.message}`);
@@ -297,6 +306,12 @@ async function runModelsCommand(options: {
     if (cause instanceof LookupError) {
       console.error(`forge models: ${cause.message}`);
       return 1;
+    }
+    // A download that failed — refused, paid, cut off — is said, not thrown:
+    // it is an answer about the model, not a bug (exit 3, §3).
+    if (cause instanceof DownloadError) {
+      console.error(`forge models: ${cause.message}`);
+      return 3;
     }
     if (cause instanceof ConfigError) {
       console.error(`forge models: ${cause.message}`);

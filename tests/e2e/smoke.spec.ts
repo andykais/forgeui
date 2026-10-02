@@ -134,6 +134,20 @@ test("settings shows the connection, the folders and the bindings", async ({ pag
  * take effect at once *and* survive a reload. Nothing asserted either until
  * the tiles / table toggle turned out to be silently doing nothing.
  */
+/**
+ * Unload VRAM (§11.2): the bridge's `free_vram`, as a button, for restarting
+ * an LLM while ComfyUI still holds the last run's weights.
+ */
+test("settings can ask ComfyUI to unload its models", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByText("ComfyUI connected")).toBeVisible();
+  const button = page.getByRole("button", { name: "Unload VRAM" });
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(page.getByText(/ComfyUI unloaded its models/)).toBeVisible();
+  await expect(button).toBeEnabled();
+});
+
 test("ui preferences take effect and persist", async ({ page }) => {
   await page.goto("/gallery");
   await expect(page.getByPlaceholder("Search prompts…")).toBeVisible();

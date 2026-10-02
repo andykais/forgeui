@@ -438,6 +438,145 @@ Deno.test("a loader changed in the editor becomes the panel's default", async ()
   });
 });
 
+Deno.test("a user copy's text encoder is the one every caller gets", async () => {
+  // The bug: the workflow page saved its manifest with the bundled loader's
+  // filename baked in as a default, the loader was then edited in ComfyUI,
+  // and every job that did not name the file — every MCP round — still went
+  // out with the bundled one. The panel hid it by refilling from the last
+  // job. Both save orders, both through the route.
+  await withTestApp(async (app) => {
+    const before = await detail(app, "anima");
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ manifest: before.manifest }),
+    });
+    const graph = structuredClone(before.api_json);
+    graph["1"]!.inputs.clip_name = "qwen_3_600m.safetensors";
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+
+    const after = await detail(app, "anima");
+    assertEquals(after.source, "user");
+    assertEquals(
+      (after.manifest!.params.find((param) => param.key === "clip") as {
+        default?: unknown;
+      }).default,
+      "qwen_3_600m.safetensors",
+    );
+
+    // And a job that names no text encoder is sent with that one.
+    await app.json("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "anima",
+        params: { prompt: "a fox in snow" },
+      }),
+    });
+    await app.jobs.idle();
+    assertEquals(
+      app.fake!.prompts.at(-1)!.graph["1"]!.inputs.clip_name,
+      "qwen_3_600m.safetensors",
+    );
+  }, { comfy: true });
+});
+
+/** Which text encoder the last job went to ComfyUI with. */
+async function clipOfJob(
+  app: import("../fixtures/app.ts").TestApp,
+  params: Record<string, unknown>,
+): Promise<unknown> {
+  await app.json("/api/jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      workflow_id: "anima",
+      params: { prompt: "a fox in snow", ...params },
+    }),
+  });
+  await app.jobs.idle();
+  return app.fake!.prompts.at(-1)!.graph["1"]!.inputs.clip_name;
+}
+
+Deno.test("a job's value, then a default somebody set, then the graph", async () => {
+  // §4.6's order, through the routes: the graph is the fallback, a default
+  // written into the manifest on purpose outranks it, and a value the job
+  // names outranks both.
+  await withTestApp(async (app) => {
+    const before = await detail(app, "anima");
+    const graph = structuredClone(before.api_json);
+    graph["1"]!.inputs.clip_name = "qwen_3_600m.safetensors";
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+    assertEquals(await clipOfJob(app, {}), "qwen_3_600m.safetensors");
+
+    // A default chosen in the manifest: what the screen sends with no
+    // `default_from` on it.
+    const manifest = structuredClone((await detail(app, "anima")).manifest!);
+    const clip = manifest.params.find((param) => param.key === "clip") as {
+      default?: unknown;
+      default_from?: string;
+    };
+    clip.default = "chosen-encoder.safetensors";
+    delete clip.default_from;
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ manifest }),
+    });
+    assertEquals(await clipOfJob(app, {}), "chosen-encoder.safetensors");
+
+    assertEquals(
+      await clipOfJob(app, { clip: "named-by-the-job.safetensors" }),
+      "named-by-the-job.safetensors",
+    );
+  }, { comfy: true });
+});
+
+Deno.test("a user copy an older build saved defaults into is read right", async () => {
+  // What is on disk after the old workflow page saved Anima's manifest and
+  // the encoder was then changed in ComfyUI: the bundled filename written
+  // into the manifest, the graph holding another.
+  const manifest = JSON.parse(
+    await Deno.readTextFile("workflows/bundled/anima/manifest.json"),
+  );
+  const clip = manifest.params.find((param: { key: string }) =>
+    param.key === "clip"
+  );
+  clip.default = "qwen_3_06b_base.safetensors";
+  const graph = JSON.parse(
+    await Deno.readTextFile("workflows/bundled/anima/workflow.api.json"),
+  );
+  graph["1"].inputs.clip_name = "qwen_3_600m.safetensors";
+  const written = JSON.stringify(manifest, null, 2);
+
+  await withTestApp(async (app) => {
+    const loaded = await detail(app, "anima");
+    assertEquals(loaded.source, "user");
+    const resolved = loaded.manifest!.params.find((param) =>
+      param.key === "clip"
+    ) as { default?: unknown; default_from?: string };
+    assertEquals(resolved.default, "qwen_3_600m.safetensors");
+    assertEquals(resolved.default_from, "graph");
+    assertEquals(await clipOfJob(app, {}), "qwen_3_600m.safetensors");
+
+    // Read right, not rewritten: the file is the user's.
+    assertEquals(
+      await Deno.readTextFile(
+        join(app.dataDir, "workflows", "user", "anima", "manifest.json"),
+      ),
+      written,
+    );
+  }, {
+    comfy: true,
+    files: {
+      "workflows/user/anima/manifest.json": written,
+      "workflows/user/anima/workflow.api.json": JSON.stringify(graph),
+    },
+  });
+});
+
 Deno.test("saving a bundled workflow creates a user copy that shadows it", async () => {
   await withTestApp(async (app) => {
     const before = await detail(app, "krea2");

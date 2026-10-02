@@ -47,9 +47,18 @@ import {
   type Existing,
   findExisting,
   label,
+  recordsFor,
   type Wanted,
   wantedFromUrl,
 } from "./existing.ts";
+import {
+  allows,
+  type Overwrite,
+  overwriteFlag,
+  type OverwritePart,
+  placeOf,
+  toOverwrite,
+} from "./overwrite.ts";
 import {
   formatErrorNote,
   type ImportLayout,
@@ -73,9 +82,12 @@ export interface ModelsCommandOptions {
   source: LookupSource;
   downloadSamples: number;
   downloadModel: boolean;
-  overwrite: boolean;
+  /**
+   * What earlier results this run may replace (§3.2): `true` is a bare
+   * `--overwrite`, `false` or null none, and a scope names places and parts.
+   */
+  overwrite: boolean | Overwrite | null;
   dryRun: boolean;
-  browsingLevel?: number;
   timeoutMs: number;
 }
 
@@ -85,14 +97,22 @@ export interface ModelsCommandResult {
   /** Null for `--search`, which looks things up and writes nothing. */
   batch: ImportBatch | null;
   samples: number;
+  /** Of `samples`, how many were the version's own showcase media. */
+  showcase?: number;
   skipped: number;
   files: number;
   /**
    * Set when nothing was fetched because this model already was: a batch
-   * waiting in the import folder, or one the app has ingested. Only without
-   * `--overwrite`.
+   * waiting in the import folder, or one the app has ingested — and
+   * `--overwrite` did not reach where it is.
    */
   existing?: Existing;
+  /**
+   * What was carried over from the batch already waiting, rather than
+   * fetched again, because `--overwrite` did not name it or the run did not
+   * ask for it.
+   */
+  kept?: OverwritePart[];
 }
 
 export class UsageError extends Error {
@@ -141,7 +161,6 @@ export async function runModels(
   const client = options.client ?? new CivitaiClient({
     civitaiUrl: settings.civitai_url,
     archiveUrl: settings.archive_url,
-    browsingLevel: options.browsingLevel ?? settings.browsing_level,
     timeoutMs: options.timeoutMs,
     token,
     say,
@@ -188,13 +207,20 @@ export async function runModels(
   // Without `--overwrite`, a checksum anywhere in the import folder is left
   // alone — fetched, not found, imported, refused — and found without asking
   // the network where that is possible: re-running a list of commands costs
-  // nothing for the ones already done (§3.2).
-  if (!options.overwrite) {
+  // nothing for the ones already done (§3.2). With a scope, it is left alone
+  // when any place it is recorded is one the scope does not name.
+  const overwrite = toOverwrite(options.overwrite ?? null);
+  {
     const wanted = wantedFor(options, localHash);
     const have = wanted === null
       ? null
       : await findExisting(options.paths, wanted);
-    if (have !== null) return alreadyDone(have, say);
+    const blocked = have === null
+      ? null
+      : await blocking(options.paths, have.hash, overwrite);
+    if (blocked !== null) {
+      return alreadyDone(blocked, askedFor(options), say, overwrite);
+    }
   }
 
   // What a "no" is recorded under: the checksum, when it is known before the
@@ -223,16 +249,30 @@ export async function runModels(
   // A link nothing here had recorded, for a checksum the folder has anyway —
   // fetched on another machine sharing it, say. The lookup could not be
   // saved, but the samples, the weights and the batch can.
-  if (!options.overwrite) {
-    const have = await findExisting(options.paths, { hash: sha256 });
-    if (have !== null) return alreadyDone(have, say);
+  const blocked = await blocking(options.paths, sha256, overwrite);
+  if (blocked !== null) {
+    return alreadyDone(blocked, askedFor(options), say, overwrite);
   }
+
+  // What this run replaces, and what it keeps of what is there (§3.2). A
+  // part is fetched again only where the scope names it and the run asks for
+  // it; otherwise the waiting batch's copy is carried into the new one, and
+  // an imported model's is left as the app has it.
+  const earlier = await carriedFrom(options.paths, sha256);
+  const may = (part: OverwritePart) =>
+    !earlier.any || overwrite === null || overwrite.parts.has(part);
+  const newMetadata = may("metadata");
+  const getSamples = options.downloadSamples > 0 && may("samples");
+  const getWeights = options.downloadModel && may("models");
 
   const batch: ImportBatch = {
     format: IMPORT_FORMAT,
     forgecli_version: "0.1.0",
     created_at: isoSeconds(new Date()),
-    overwrite: options.overwrite,
+    // Ingest replaces the fields you edited only when the scope reaches what
+    // the app has applied; `--overwrite=fetched` refreshes a waiting batch
+    // and still only fills blanks.
+    overwrite: allows(overwrite, "imported", "metadata"),
     model: {
       sha256: found.sha256,
       filename: found.filename,
@@ -252,6 +292,16 @@ export async function runModels(
     civitai: found.record as unknown as Record<string, unknown>,
     samples: [],
   };
+  const kept: OverwritePart[] = [];
+  // The metadata the scope does not name: the waiting batch's, or what the
+  // app applied — never the lookup's, however much newer.
+  if (!newMetadata && earlier.metadata !== null) {
+    batch.model = earlier.metadata.model;
+    batch.source = earlier.metadata.source ?? null;
+    batch.civitai = earlier.metadata.civitai ?? null;
+    batch.overwrite = earlier.waiting?.batch.overwrite === true;
+    kept.push("metadata");
+  }
 
   const dir = join(layout.fetched.success, sha256);
   const result: ModelsCommandResult = {
@@ -262,12 +312,26 @@ export async function runModels(
     files: 0,
   };
 
+  // Asked for, and not fetched because the scope leaves it as it is.
+  const held = [
+    ...(options.downloadSamples > 0 && !getSamples ? ["samples"] : []),
+    ...(options.downloadModel && !getWeights ? ["models"] : []),
+  ];
+  const heldNote = held.length > 0 && overwrite !== null
+    ? `not fetched: ${held.join(" and ")}, which ${
+      overwriteFlag(overwrite)
+    } does not name, so what ${
+      earlier.waiting !== null ? "the waiting batch" : "the app"
+    } has is kept`
+    : null;
+
   if (options.dryRun) {
     for (const line of summarize(found)) say(line);
-    if (options.downloadSamples > 0) {
+    if (getSamples) {
       say(`  samples       up to ${options.downloadSamples}`);
     }
-    if (options.downloadModel) say(`  weights       would be downloaded`);
+    if (getWeights) say(`  weights       would be downloaded`);
+    if (heldNote !== null) say(heldNote);
     say(`would write ${dir}`);
     return result;
   }
@@ -277,21 +341,35 @@ export async function runModels(
   const staging = join(layout.staging, ulid());
   await Deno.mkdir(staging, { recursive: true });
   try {
-    if (options.downloadSamples > 0) {
-      const { samples, skipped } = await fetchSamples({
+    if (getSamples) {
+      const { samples, skipped, showcase } = await fetchSamples({
         client,
         found,
         staging,
         limit: options.downloadSamples,
-        nsfwLevel: settings.nsfw_level,
         say,
       });
       batch.samples = samples;
       result.samples = samples.length;
       result.skipped = skipped;
+      result.showcase = showcase;
+      // Replacing what the app imported from the same links is the scope's
+      // to say, not the fetch's (§7.2).
+      if (allows(overwrite, "imported", "samples")) {
+        batch.overwrite_samples = true;
+      }
+    } else if (earlier.waiting?.batch.samples?.length) {
+      const samples = earlier.waiting.batch.samples;
+      await carry(earlier.waiting.dir, staging, samples.map((s) => s.file));
+      batch.samples = samples;
+      if (earlier.waiting.batch.overwrite_samples === true) {
+        batch.overwrite_samples = true;
+      }
+      result.samples = samples.length;
+      kept.push("samples");
     }
 
-    if (options.downloadModel) {
+    if (getWeights) {
       const kind = found.record.source.kind;
       const files = await fetchWeights({
         found,
@@ -308,6 +386,18 @@ export async function runModels(
       });
       batch.files = files;
       result.files = files.length;
+    } else if (earlier.waiting?.batch.files?.length) {
+      // An entry already filed by the app has no file left to carry; its
+      // entry still says so.
+      const files = earlier.waiting.batch.files;
+      await carry(
+        earlier.waiting.dir,
+        staging,
+        files.filter((file) => file.filed !== true).map((file) => file.file),
+      );
+      batch.files = files;
+      result.files = files.length;
+      kept.push("models");
     }
 
     await Deno.writeTextFile(
@@ -329,13 +419,28 @@ export async function runModels(
   await Deno.remove(join(layout.fetched.failure, sha256), { recursive: true })
     .catch(() => {});
 
+  result.kept = kept;
   for (const line of summarize(found)) say(line);
-  if (options.downloadSamples > 0) {
+  if (kept.length > 0) {
+    say(
+      `  kept          ${kept.join(", ")} from ${
+        earlier.waiting !== null
+          ? "the batch already waiting"
+          : "what the app imported"
+      }`,
+    );
+  }
+  if (heldNote !== null) say(heldNote);
+  if (getSamples) {
     say(
       `  samples       ${result.samples}${
-        result.skipped > 0
-          ? ` (${result.skipped} over import.nsfw_level, skipped)`
+        result.samples > 0
+          ? ` (${result.showcase ?? 0} from the model page, ${
+            result.samples - (result.showcase ?? 0)
+          } from its gallery)`
           : ""
+      }${
+        result.skipped > 0 ? ` (${result.skipped} could not be downloaded)` : ""
       }`,
     );
   }
@@ -387,39 +492,76 @@ function huggingFace(client: CivitaiClient): HuggingFaceClient {
   return client.huggingface;
 }
 
-/** The run that fetches nothing, and says why and how to make it. */
+/**
+ * The run that fetches nothing, and says why and how to make it (§3.2).
+ *
+ * The decision comes first and the earlier run's result after it, dated and
+ * labelled as the earlier run's. Printed the other way round, an old failure
+ * read as this run's: "this model needs a Civitai login" from a download
+ * tried last week, shown to someone who has set a token since, when all that
+ * happened is that nothing was asked.
+ */
 function alreadyDone(
   have: Existing,
+  asked: { samples: number; model: boolean; command: string },
   say: (line: string) => void,
+  overwrite: Overwrite | null,
 ): ModelsCommandResult {
   const what = label(have) || have.hash;
+  const on = have.when
+    ? ` on ${have.when.replace("T", " ").replace(/Z$/, " UTC")}`
+    : "";
+  const place = placeOf(have.state);
+  say(
+    `skipped ${what}: an earlier run${on} already has a result for it, and ` +
+      (overwrite === null
+        ? `without --overwrite it is not asked again.`
+        : `${overwriteFlag(overwrite)} does not reach ${place}/, where it is.`),
+  );
   switch (have.state) {
     case "fetched":
-      say(`already fetched: ${what}`);
-      say(`  waiting for the app in ${have.dir}`);
+      say(`  earlier result: fetched, waiting for the app to import it`);
+      say(`    ${have.dir}`);
+      break;
+    case "imported":
+      say(`  earlier result: imported`);
+      say(`    ${join(have.dir, "model.json")}`);
       break;
     case "fetch-failed":
       say(
-        have.failure === null || have.failure === "not-found"
-          ? `looked up before, and not found: ${what}`
-          : `looked up before, and it failed (${have.failure}): ${what}`,
+        `  earlier result: ${
+          have.failure === null || have.failure === "not-found"
+            ? "the lookup found nothing"
+            : `it failed (${have.failure})`
+        }${have.command ? ` — ${have.command}` : ""}`,
       );
-      if (have.reason) say(`  ${have.reason}`);
-      say(`  recorded in ${join(have.dir, "error.txt")}`);
-      break;
-    case "imported":
-      say(`already imported: ${what}`);
-      say(`  its record is ${join(have.dir, "model.json")}`);
+      if (have.reason) say(`    its error: ${have.reason}`);
+      say(`    ${join(have.dir, "error.txt")}`);
+      // The one earlier result that may no longer be true: a login set since,
+      // a limit that has lifted, a server back up. Nothing here tried again.
+      if (have.failure !== null && have.failure !== "not-found") {
+        say(
+          `  this run did not contact anything, so a token or setting changed ` +
+            `since then has not been tried yet.`,
+        );
+      }
       break;
     case "import-failed":
-      say(`already fetched, and the app refused it: ${what}`);
-      if (have.reason) say(`  ${have.reason}`);
-      say(`  see ${join(have.dir, "error.txt")}`);
+      say(`  earlier result: fetched, and the app refused to import it`);
+      if (have.reason) say(`    its error: ${have.reason}`);
+      say(`    ${join(have.dir, "error.txt")}`);
       break;
   }
-  say(
-    `nothing was fetched; pass --overwrite, or delete ${have.dir}, to try again`,
-  );
+  // What this run asked for that it is not doing, said rather than dropped.
+  const skipped = [
+    ...(asked.samples > 0 ? [`up to ${asked.samples} samples`] : []),
+    ...(asked.model ? ["the model file"] : []),
+  ];
+  if (skipped.length > 0) {
+    say(`  not fetched this time: ${skipped.join(" and ")}.`);
+  }
+  say(`to try again: ${asked.command} ${retryFlag(overwrite, place)}`);
+  say(`  (or delete ${have.dir})`);
   return {
     dir: have.dir,
     batch: null,
@@ -428,6 +570,88 @@ function alreadyDone(
     files: 0,
     existing: have,
   };
+}
+
+/**
+ * The earlier result that keeps this run from going ahead, if any: the first
+ * place the checksum is recorded that the scope does not name (§3.2). A
+ * model imported and with a newer batch waiting needs both places named.
+ */
+async function blocking(
+  paths: DataPaths,
+  hash: string,
+  overwrite: Overwrite | null,
+): Promise<Existing | null> {
+  for (const record of await recordsFor(paths, hash)) {
+    if (!allows(overwrite, placeOf(record.state))) return record;
+  }
+  return null;
+}
+
+interface Earlier {
+  /** Anything there is to keep: a batch waiting, or one applied. */
+  any: boolean;
+  /** The batch in `fetched/success/`, whose parts can be carried over. */
+  waiting: { dir: string; batch: ImportBatch } | null;
+  /** The metadata to keep: the waiting batch's, else the applied one's. */
+  metadata: ImportBatch | null;
+}
+
+/** What earlier runs left for this checksum that a new batch could keep. */
+async function carriedFrom(paths: DataPaths, hash: string): Promise<Earlier> {
+  const layout = importLayout(paths.imports);
+  const read = async (dir: string) => {
+    try {
+      const batch = JSON.parse(
+        await Deno.readTextFile(join(dir, "model.json")),
+      ) as ImportBatch;
+      return batch?.model ? { dir, batch } : null;
+    } catch {
+      return null;
+    }
+  };
+  const waiting = await read(join(layout.fetched.success, hash));
+  const applied = await read(join(layout.imported.success, hash));
+  return {
+    any: waiting !== null || applied !== null,
+    waiting,
+    metadata: (waiting ?? applied)?.batch ?? null,
+  };
+}
+
+/**
+ * Files of the batch being replaced, into the one replacing it. Linked, not
+ * moved: until the new batch is renamed into place the old one must stay
+ * whole, and a second name for a checkpoint costs nothing.
+ */
+async function carry(
+  from: string,
+  to: string,
+  files: string[],
+): Promise<void> {
+  for (const file of files) {
+    const source = join(from, file);
+    const target = join(to, file);
+    await Deno.mkdir(join(target, ".."), { recursive: true });
+    try {
+      await Deno.link(source, target);
+    } catch (cause) {
+      if (cause instanceof Deno.errors.NotFound) continue;
+      await Deno.copyFile(source, target);
+    }
+  }
+}
+
+/** The run's own scope, widened to the place that stopped it. */
+function retryFlag(
+  overwrite: Overwrite | null,
+  place: "fetched" | "imported",
+): string {
+  if (overwrite === null) return "--overwrite";
+  return overwriteFlag({
+    places: new Set([...overwrite.places, place]),
+    parts: overwrite.parts,
+  });
 }
 
 /** The checksum a run is about before it asks anything, when it says. */
@@ -474,6 +698,20 @@ async function recordMiss(
   } catch {
     // Not being able to write the note must not hide the error it is about.
   }
+}
+
+/** What this run was asked to fetch, for a skip to say it is not. */
+function askedFor(options: ModelsCommandOptions) {
+  const command = [describeRun(options)];
+  if (options.downloadSamples > 0) {
+    command.push("--download-samples", String(options.downloadSamples));
+  }
+  if (options.downloadModel) command.push("--download-model");
+  return {
+    samples: options.downloadSamples,
+    model: options.downloadModel,
+    command: command.join(" "),
+  };
 }
 
 /** The command, as far as it says which model and where to ask. */
@@ -657,69 +895,103 @@ async function fetchSamples(input: {
   found: LookupResult;
   staging: string;
   limit: number;
-  nsfwLevel: number;
   say: (line: string) => void;
-}): Promise<{ samples: ImportSample[]; skipped: number }> {
-  const { client, found, staging, limit, nsfwLevel, say } = input;
+}): Promise<{ samples: ImportSample[]; skipped: number; showcase: number }> {
+  const { client, found, staging, limit, say } = input;
   const versionId = found.record.source.model_version_id;
   if (found.record.source.kind === "huggingface") {
     // Not a failure: a model card's pictures are decoration, not samples with
     // a prompt behind them, and there is nothing else to fetch.
     say("Hugging Face has no sample images; none were fetched");
-    return { samples: [], skipped: 0 };
+    return { samples: [], skipped: 0, showcase: 0 };
   }
 
-  // The lookup's own images carry dimensions and links; the images endpoint
-  // carries `meta`. Where both exist, they are joined on the image id.
-  let listed: Record<string, unknown>[] = [];
-  if (found.record.source.kind === "civitai" && versionId !== null) {
+  // The version's own media first — what its author chose to show on the
+  // model page, in their order — and the gallery (everyone's posts under the
+  // version) only to make up a count the showcase cannot reach (§4.3).
+  const showcase: Candidate[] = found.images.map((image) => ({
+    ...image,
+    from: "showcase" as const,
+  }));
+  const civitai = found.record.source.kind === "civitai" && versionId !== null;
+  const creator = found.record.creator?.username ?? null;
+  const fromApi = (image: Record<string, unknown>): Candidate => ({
+    id: typeof image.id === "number" ? image.id : null,
+    url: String(image.url ?? ""),
+    width: typeof image.width === "number" ? image.width : null,
+    height: typeof image.height === "number" ? image.height : null,
+    kind: image.type === "video" ? "video" as const : "image" as const,
+    page_url: typeof image.id === "number"
+      ? `${client.civitaiUrl}/images/${image.id}`
+      : null,
+    meta: (image.meta ?? null) as Record<string, unknown> | null,
+    from: "gallery" as const,
+  });
+  const tried = async (
+    what: string,
+    ask: () => Promise<Record<string, unknown>[]>,
+  ): Promise<Candidate[]> => {
     try {
-      listed = await client.imagesFor(versionId, limit);
+      return (await ask()).map(fromApi);
     } catch (cause) {
-      // The archive path has no images endpoint at all, and a failure here
-      // costs metadata rather than the batch.
+      // A failure here costs links or extra samples, never the batch.
       say(
-        `could not read the generation data: ${
+        `could not read ${what}: ${
           cause instanceof Error ? cause.message : cause
         }`,
       );
+      return [];
+    }
+  };
+
+  /**
+   * The version object's images carry no `id` — checked against the live
+   * API — so no page to link a sample back to. The same images, asked for by
+   * their author, do; they are matched on the file's key in the CDN path,
+   * which both copies share. Any `meta` the version object lacked comes
+   * along too.
+   */
+  if (
+    civitai && creator !== null && showcase.some((image) => image.id === null)
+  ) {
+    const authored = new Map(
+      (await tried(
+        "the showcase's links",
+        () => client.imagesFor(versionId!, 100, { username: creator }),
+      )).map((image) => [mediaKey(image.url), image]),
+    );
+    for (const image of showcase) {
+      const match = authored.get(mediaKey(image.url));
+      if (!match || image.id !== null) continue;
+      image.id = match.id;
+      image.page_url = match.page_url;
+      image.meta ??= match.meta;
     }
   }
-  /**
-   * The images endpoint is preferred where it answered, because the version
-   * object's own images carry **no `id`** — checked against the live API —
-   * and without an id there is no page to link a sample back to. The embedded
-   * ones are the fallback, which is the archive's path and the path where the
-   * endpoint failed.
-   */
-  const candidates = listed.length > 0
-    ? listed.map((image) => ({
-      id: typeof image.id === "number" ? image.id : null,
-      url: String(image.url ?? ""),
-      width: typeof image.width === "number" ? image.width : null,
-      height: typeof image.height === "number" ? image.height : null,
-      kind: image.type === "video" ? "video" as const : "image" as const,
-      nsfw_level: typeof image.nsfwLevel === "number" ? image.nsfwLevel : 1,
-      page_url: typeof image.id === "number"
-        ? `${client.civitaiUrl}/images/${image.id}`
-        : null,
-      meta: (image.meta ?? null) as Record<string, unknown> | null,
-    }))
-    : found.images;
+
+  let gallery: Candidate[] = [];
+  if (civitai && limit > showcase.length) {
+    const taken = new Set(showcase.map((image) => mediaKey(image.url)));
+    gallery = (await tried(
+      "the gallery",
+      // The most-reacted first: the gallery is everyone's posts, and what
+      // people responded to is the best guess at what shows the model off.
+      // Over-asked by what the showcase holds: those come back here too.
+      () =>
+        client.imagesFor(versionId!, limit + showcase.length, {
+          sort: "Most Reactions",
+        }),
+    )).filter((image) => !taken.has(mediaKey(image.url)));
+  }
+  const candidates = [...showcase, ...gallery];
 
   const samples: ImportSample[] = [];
   let skipped = 0;
+  let fromShowcase = 0;
   let index = 0;
   for (const image of candidates) {
     if (samples.length >= limit) break;
     if (image.url.length === 0) continue;
-    // ForgeUI's own ceiling, separate from what the lookup was allowed to
-    // see: ask broadly, file narrowly (§4.3).
-    if (image.nsfw_level > nsfwLevel) {
-      skipped++;
-      continue;
-    }
-
     const url = originalImageUrl(image.url);
     let bytes: Uint8Array;
     try {
@@ -745,6 +1017,7 @@ async function fetchSamples(input: {
       ? parseCivitaiMeta(image.meta)
       : readInfotext(bytes);
 
+    if (image.from === "showcase") fromShowcase++;
     samples.push({
       file: `samples/${name}`,
       kind: image.kind,
@@ -761,7 +1034,24 @@ async function fetchSamples(input: {
   }
 
   // Counted in the summary rather than said here, next to what they are of.
-  return { samples, skipped };
+  return { samples, skipped, showcase: fromShowcase };
+}
+
+/** An image as `fetchSamples` weighs it, and which list it came from. */
+type Candidate = LookupResult["images"][number] & {
+  from: "showcase" | "gallery";
+};
+
+/**
+ * What identifies one image on Civitai's CDN whatever size or format the URL
+ * asks for: the UUID path segment, the same in a version's image list and in
+ * the images endpoint. The whole URL when there is none.
+ */
+function mediaKey(url: string): string {
+  return url.match(
+    /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i,
+  )
+    ?.[1]?.toLowerCase() ?? originalImageUrl(url);
 }
 
 function extensionFor(url: string, kind: "image" | "video"): string {
@@ -849,6 +1139,13 @@ async function fetchWeights(input: {
       authHint: via === "huggingface"
         ? HUGGINGFACE_AUTH_HINT
         : CIVITAI_AUTH_HINT,
+      // Only Civitai sells downloads, and only its own files.
+      paid: via === "civitai"
+        ? {
+          access: found.paid_access ?? null,
+          page: found.record.source.url || null,
+        }
+        : undefined,
       token,
       timeoutMs: Math.max(input.timeoutMs, 30 * 60_000),
       say,
@@ -1041,6 +1338,19 @@ export function summarize(found: LookupResult): string[] {
     ].join(" · "),
   ));
   if (record.creator) lines.push(row("by", record.creator.username));
+  if (found.paid_access) {
+    // Said before any download is tried: a paid file is refused to any key
+    // that has not bought it (§4).
+    const ends = found.paid_access.ends_at;
+    lines.push(row(
+      "access",
+      found.paid_access.permanent || ends === null
+        ? "paid: its creator charges Buzz to download it"
+        : `Early Access until ${
+          ends.slice(0, 16).replace("T", " ")
+        } UTC: Buzz to download before then`,
+    ));
+  }
   lines.push(row(
     "trigger words",
     found.trigger_words.length > 0 ? found.trigger_words.join(", ") : "none",

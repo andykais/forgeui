@@ -23,23 +23,59 @@ export interface JobRow {
 
 /** A model as `GET /api/models` lists it, narrowed to what a picker reads. */
 export interface ModelRow {
+  /** The hash, or `path:…` while it has none (§8.1). */
+  id: string;
+  hash: string | null;
+  filename: string;
   name: string;
   display_name: string;
   family: string;
   kind: string;
   tags: string[];
+  /** One or two sentences: what it is (DESIGN.md §8.1). */
+  summary?: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   strength_min: number;
   strength_max: number;
   output_count: number;
+  sample_count: number;
   /** False once the file is gone; the row survives for its outputs (§8.1). */
   present: boolean;
+  /** What it wants in a prompt (DESIGN-MODEL-IMPORT §5.5). */
+  trigger_words?: string[];
+  /**
+   * The source record `forge models` brought back (§5.5), HTML stripped:
+   * both descriptions are Markdown by the time they get here.
+   */
+  source?: {
+    source?: { label?: string; url?: string | null } | null;
+    model?: { name?: string | null; description_text?: string | null };
+    version?: {
+      name?: string | null;
+      base_model?: string | null;
+      description_text?: string | null;
+    };
+  } | null;
 }
 
 export interface ModelListing {
   models: ModelRow[];
   /** Every configured folder kind and the class it is filed under (§8.2). */
   classes?: Record<string, string>;
+}
+
+/** A sample on a model's page (§8.3), as `GET /api/models/:hash` lists it. */
+export interface SampleRow {
+  id: string;
+  kind: string;
+  media_url: string;
+  params: Record<string, unknown> | null;
+  source: { label: string; url: string | null } | null;
+  reusable: boolean;
+  /** Civitai's `meta` or the file's own settings, normalised (§8.3). */
+  raw: { format: string; fields: Record<string, unknown> } | null;
+  created_at: number;
 }
 
 /** One finished file, as `generate` reports it and `attach_input` takes it. */
@@ -52,6 +88,24 @@ export interface OutputRef {
   width?: number | null;
   height?: number | null;
   duration_ms?: number | null;
+}
+
+/** An output's bytes, and the row they belong to. */
+export interface MediaBytes {
+  bytes: Uint8Array;
+  mimeType: string;
+  /** False when this is the file itself, including when a preview was asked
+   * for and ForgeUI could not make one. */
+  resized: boolean;
+  output: {
+    id?: string;
+    kind?: string;
+    path?: string;
+    media_url?: string;
+    width?: number | null;
+    height?: number | null;
+    duration_ms?: number | null;
+  };
 }
 
 /** What `POST /api/inputs` gives back: media in the store, ready to bind. */
@@ -143,6 +197,13 @@ export class ForgeUi {
     return this.request(path) as Promise<T>;
   }
 
+  patch(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
   post(path: string, body?: unknown): Promise<unknown> {
     return this.request(path, {
       method: "POST",
@@ -217,30 +278,66 @@ export class ForgeUi {
   }
 
   /**
-   * The media bytes for an output, for `get_output_image` (§5.1).
+   * The media bytes for an output (§5.1): the file itself for
+   * `get_output_file`, or with `maxEdge` the smaller copy `get_output_preview`
+   * shows (§6.3).
    *
    * Via the output's own `media_url` rather than a path built here: §12 serves
    * everything from `/api/media/<path>`, and the row is what knows the path.
    * Guessing a URL shape worked until it did not, which is what the
    * integration test now pins.
+   *
+   * A ForgeUI with no ffmpeg cannot make the smaller copy and says so with a
+   * 503; that comes back as the full file with `resized: false`, so the
+   * caller can say what it is handing over rather than fail.
    */
-  async media(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  async media(
+    id: string,
+    options: { maxEdge?: number } = {},
+  ): Promise<MediaBytes> {
     const output = await this.get(
       `/api/outputs/${encodeURIComponent(id)}`,
-    ) as { media_url?: string };
+    ) as MediaBytes["output"];
     if (!output.media_url) {
       throw new ForgeUiError(`output ${id} has no media`);
     }
-    const response = await this.#fetch(`${this.#url}${output.media_url}`);
+    return { ...await this.mediaAt(output.media_url, options), output };
+  }
+
+  /**
+   * Any media URL ForgeUI hands out — an output's, a sample's — with or
+   * without `?max_edge=`. The one place the 503 fallback lives, so a sample
+   * preview degrades exactly the way an output preview does.
+   */
+  async mediaAt(
+    mediaUrl: string,
+    options: { maxEdge?: number } = {},
+  ): Promise<Omit<MediaBytes, "output">> {
+    const fetchOnce = (maxEdge?: number) =>
+      this.#fetch(
+        `${this.#url}${mediaUrl}` +
+          (maxEdge === undefined ? "" : `?max_edge=${maxEdge}`),
+      );
+    let response = await fetchOnce(options.maxEdge);
+    let resized = options.maxEdge !== undefined;
+    if (resized && response.status === 503) {
+      await response.body?.cancel();
+      response = await fetchOnce();
+      resized = false;
+    }
     if (!response.ok) {
       throw new ForgeUiError(
-        `GET ${output.media_url}: ${response.status} ${response.statusText}`,
+        `GET ${mediaUrl}: ${response.status} ${response.statusText}`,
       );
     }
+    const mimeType = response.headers.get("content-type") ??
+      "application/octet-stream";
     return {
       bytes: new Uint8Array(await response.arrayBuffer()),
-      mimeType: response.headers.get("content-type") ??
-        "application/octet-stream",
+      mimeType,
+      // Audio is served as it is whatever was asked (§12), so only a picture
+      // or a clip that came back a different type was actually made smaller.
+      resized: resized && !mimeType.startsWith("audio/"),
     };
   }
 

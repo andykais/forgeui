@@ -105,6 +105,111 @@ Deno.test("civitai meta: camelCase keys, hashes and lora resources", () => {
   ]);
 });
 
+/*
+ * The next three are cut down from real answers of Civitai's images endpoint
+ * (September 2026), one per way an image says what it was made with.
+ */
+
+Deno.test("civitai meta: A1111's resources carry each LoRA's short hash", () => {
+  const { fields } = parseCivitaiMeta({
+    prompt: "a lighthouse",
+    Model: "dreamshaper_8",
+    "Model hash": "879db523c3",
+    hashes: { model: "879db523c3", "lora:more_details": "3b8aa1d351ef" },
+    clipSkip: 2,
+    resources: [
+      {
+        hash: "d1131f7207d6",
+        name: "epi_noiseoffset2",
+        type: "lora",
+        weight: 0.65,
+      },
+      { hash: "3b8aa1d351ef", name: "more_details", type: "lora", weight: 0.4 },
+      { hash: "879db523c3", name: "dreamshaper_8", type: "model" },
+    ],
+  });
+  assertEquals(fields.model, "dreamshaper_8");
+  assertEquals(fields.model_hash, "879db523c3");
+  assertEquals(fields.clip_skip, 2);
+  assertEquals(fields.loras, [
+    { name: "epi_noiseoffset2", weight: 0.65, hash: "d1131f7207d6" },
+    { name: "more_details", weight: 0.4, hash: "3b8aa1d351ef" },
+  ]);
+});
+
+Deno.test("civitai meta: the site's generator names LoRAs by version", () => {
+  const { fields } = parseCivitaiMeta({
+    prompt: "an abstract painting",
+    cfgScale: 7,
+    clipSkip: 2,
+    resources: [],
+    civitaiResources: [
+      { type: "checkpoint", modelVersionId: 290640, modelVersionName: "V6" },
+      {
+        type: "lora",
+        weight: 1,
+        modelVersionId: 1467389,
+        modelVersionName: "Pony v2",
+      },
+      {
+        type: "lora",
+        weight: 0.8,
+        modelVersionId: 1558543,
+        modelVersionName: "Abstract Painting",
+      },
+      { type: "embed", modelVersionId: 106916, modelVersionName: "v1.0" },
+    ],
+  });
+  assertEquals(fields.model, "V6");
+  assertEquals(fields.model_version_id, 290640);
+  assertEquals(fields.loras, [
+    { name: "Pony v2", model_version_id: 1467389, weight: 1 },
+    { name: "Abstract Painting", model_version_id: 1558543, weight: 0.8 },
+  ]);
+});
+
+Deno.test("civitai meta: AIR URNs and version ids, one LoRA each", () => {
+  const { fields } = parseCivitaiMeta({
+    Model: "urn:air:sd1:checkpoint:civitai:4384@128713",
+    // The same two LoRAs twice over: once untyped, once typed, and again
+    // as URNs. Each is listed once.
+    civitaiResources: [
+      { weight: 1, modelVersionId: 646924 },
+      { type: "checkpoint", modelVersionId: 128713 },
+      { type: "lora", weight: 1, modelVersionId: 646924 },
+      { type: "lora", weight: 0.5, modelVersionId: 87153 },
+    ],
+    additionalResources: [
+      {
+        name: "urn:air:sd1:lora:civitai:580018@646924",
+        type: "lora",
+        strength: 1,
+      },
+      {
+        name: "urn:air:sd1:lora:civitai:82098@87153",
+        type: "lora",
+        strength: 0.5,
+      },
+    ],
+  });
+  assertEquals(fields.model_version_id, 128713);
+  assertEquals(fields.loras, [
+    { name: "Civitai version 646924", model_version_id: 646924, weight: 1 },
+    { name: "Civitai version 87153", model_version_id: 87153, weight: 0.5 },
+  ]);
+});
+
+Deno.test("A1111: LoRAs are read from the prompt's <lora:…> tags", () => {
+  const { fields } = parseA1111(
+    "a fox <lora:add_detail:0.7>, <lora:film grain:1>\nSteps: 20, Clip skip: 2",
+  );
+  assertEquals(fields.loras, [
+    { name: "add_detail", weight: 0.7 },
+    { name: "film grain", weight: 1 },
+  ]);
+  assertEquals(fields.clip_skip, 2);
+});
+
 Deno.test("civitai meta: an empty object is not an error", () => {
   const { format, fields } = parseCivitaiMeta({});
   assertEquals(format, "civitai-meta");

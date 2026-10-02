@@ -261,23 +261,23 @@ Options:
                               civitai.com | civitaiarchive | huggingface |
                               tensor.art asks that one only.
 
-      --download-samples <n>  Download up to <n> images from the model's page as
-                              samples, newest first. (Default: 0)
+      --download-samples <n>  Download up to <n> images as samples: the model
+                              page's own first, then its gallery. (Default: 0)
       --download-model        Download the model weights into the batch. The app
                               files them under <appdata>/models/<kind>/ on ingest.
                               Public models need no login; see AUTH for the rest.
-      --overwrite             Fetch again a model already fetched, and let the
+      --overwrite[=<scope>]   Fetch again a model already fetched, and let the
                               import replace fields you have edited. Without it, a
-                              model whose checksum is in
-                              checksum is anywhere in the import folder is left
-                              alone (§3.2).
+                              model whose checksum is anywhere in the import
+                              folder is left alone. A comma-separated scope
+                              narrows it: fetched, imported say where (default
+                              both); metadata, samples, models say what (default
+                              all) (§3.2).
 
       --dry-run               Print what would be fetched and written; touch nothing.
       --json                  Print the resulting model.json to stdout instead of a
                               human summary.
       --anon                  Never send credentials, even if a token is configured.
-      --browsing-level <n>    Civitai's visibility bitmask, for what a lookup is
-                              allowed to return. (Default: config import.browsing_level)
       --timeout      <ms>     Per-request timeout. (Default: 30000)
 
 Each run says where the answer came from and what it holds, then where it
@@ -307,7 +307,9 @@ Examples:
 AUTH
 
   Lookups, sample images and public model downloads all work anonymously.
-  A gated or paid model needs a key from civitai.com/user/account:
+  A gated model needs a key from civitai.com/user/account. A paid one (Buzz,
+  or Early Access until a date) needs buying on its page with that key's
+  account as well; forge models says which it is when a download is refused:
 
       import:
         civitai_token: "<key>"      in config.yaml, in plaintext — quoted,
@@ -411,17 +413,30 @@ request, so re-running a list of commands costs nothing for the ones already
 done.
 
 ```
-already fetched: TotK Zelda - Realistic · Zelda - ZIB - Version 1
-  waiting for the app in /workspace/import/fetched/success/72a47985…
-nothing was fetched; pass --overwrite, or delete /workspace/import/fetched/success/72a47985…, to try again
+skipped TotK Zelda - Realistic · Zelda - ZIB - Version 1: an earlier run on 2026-09-28 08:12:00 UTC already has a result for it, and without --overwrite it is not asked again.
+  earlier result: fetched, waiting for the app to import it
+    /workspace/import/fetched/success/72a47985…
+  not fetched this time: up to 4 samples.
+to try again: forge models --url https://civitai.red/models/… --download-samples 4 --overwrite
+  (or delete /workspace/import/fetched/success/72a47985…)
 ```
 
-| Where | Said as |
+*Amended:* the decision comes first and the earlier run's result after it,
+dated and labelled as the earlier run's. Printed the other way round, an old
+failure read as this run's — "this model needs a Civitai login", from a
+download tried last week, shown to someone who has set a token since, when
+nothing had been asked at all. What this run asked for and is not doing is
+named, and the retry is the run's own command with `--overwrite` added. A
+recorded failure other than not-found also says that nothing was retried, so
+a token or limit that has changed since has not been tried yet. A skip still
+exits 0: re-running a list of commands is the case it exists for.
+
+| Where | Said as the earlier result |
 |---|---|
-| `fetched/success/<sha256>/` | already fetched, waiting for the app |
-| `fetched/failure/<sha256>/` | looked up before, and not found — or, for any other kind of failure, "it failed (rate-limited)" and so on — with the reason |
-| `imported/success/<sha256>/` | already imported |
-| `imported/failure/<sha256>/` | already fetched, and the app refused it — with the reason |
+| `fetched/success/<sha256>/` | fetched, waiting for the app to import it |
+| `fetched/failure/<sha256>/` | the lookup found nothing — or, for any other kind of failure, "it failed (rate-limited)" and so on — with the command that met it and its error |
+| `imported/success/<sha256>/` | imported |
+| `imported/failure/<sha256>/` | fetched, and the app refused to import it — with the reason |
 
 Deleting a checksum's directory lets that model be fetched again;
 `--overwrite` does the same for one run.
@@ -449,6 +464,64 @@ none of this opens `app.db` (§3.1).
 `--overwrite` does two things, deliberately one flag: it fetches again, and
 it marks the batch so ingest replaces the fields you edited (§7.2). A re-fetch
 that then kept the old values would be fetching for nothing.
+
+#### Scoped: `--overwrite=<scope>`
+
+*Added after the rest of this document.* A bare `--overwrite` replaces
+everything; a comma-separated scope says what it may replace. Its words are of
+two kinds, and a run may replace a part only in a place the scope names:
+
+| Word | Kind | Means |
+|---|---|---|
+| `fetched` | place | a batch waiting in `fetched/success/`, or a failure in `fetched/failure/` |
+| `imported` | place | what the app applied (`imported/success/`) or refused (`imported/failure/`) |
+| `metadata` | part | `model.json`'s `model`, `source` and `civitai` |
+| `samples` | part | the sample images and their generation data |
+| `models` | part | the weights (`--download-model`) |
+
+No place named means both; no part named means all three.
+
+| Flag | Replaces |
+|---|---|
+| `--overwrite` | anything, in `fetched/` and `imported/` |
+| `--overwrite=imported` | anything of a model the app has imported |
+| `--overwrite=fetched` | anything of a batch still waiting |
+| `--overwrite=samples` | samples, in either place; never the weights or the metadata |
+| `--overwrite=metadata` | the metadata, in either place |
+| `--overwrite=imported,samples` | an imported model's samples, and nothing waiting in `fetched/` |
+| `--overwrite=models` | the weights, in either place |
+| `--overwrite=fetched,models,samples` | a waiting batch's weights and samples |
+
+**Whether the run goes ahead** is decided by the places: every place the
+checksum is recorded must be named. A model imported *and* with a newer batch
+waiting needs both, since the new batch replaces the waiting one and is then
+applied over the imported one. A run the scope does not reach is a skip like
+any other, said as `--overwrite=fetched does not reach imported/, where it
+is`, and the retry it suggests is the run's own scope with that place added.
+A failure in a named place has nothing to keep, and is simply tried again.
+
+**What it replaces** is decided by the parts. The lookup always runs — the
+samples and the weights cannot be found without it — and then:
+
+- **metadata** not named: the new batch carries the waiting batch's `model`,
+  `source`, `civitai` and `overwrite`, or, with nothing waiting, the ones the
+  app applied from `imported/success/`. The lookup's answer is used only for
+  finding samples and weights.
+- **samples** or **models** not named, or not asked for this run
+  (`--download-samples`, `--download-model`): nothing is downloaded. A
+  waiting batch's samples or weights are carried into the new batch —
+  hard-linked, so the old batch is whole until the new one is renamed into
+  place — and an imported model's stay as the app has them. *Amended:* a bare
+  `--overwrite` without `--download-samples` used to drop a waiting batch's
+  samples; they are now kept, since overwriting is leave to replace, not an
+  instruction to delete.
+
+The batch records what ingest may replace: `overwrite` (the fields you
+edited) is set when the scope names imported metadata, and
+`overwrite_samples` (§5.2) when it names imported samples and samples were
+fetched. `--overwrite=fetched` refreshes a waiting batch and still only fills
+blanks on ingest. The summary says what was kept (`kept metadata, models from
+the batch already waiting`) and what was asked for and not fetched.
 
 ## 4. Lookup
 
@@ -487,9 +560,10 @@ detail that costs an afternoon if it is not written down:
 | `/api/v1/model-versions/by-hash/…` | neither; a hash lookup answers for what it is given |
 
 So the client sends `nsfw` to `/models`, `browsingLevel` to `/images`, and
-nothing to `by-hash`. `import.browsing_level` is the one setting behind all
-three, translated per endpoint in `src/models/civitai.ts` — one place that
-knows this, rather than three call sites each getting it wrong differently.
+nothing to `by-hash`, each asking for everything (*amended*: there is no
+longer a setting behind it, see §4.3), translated per endpoint in
+`src/models/civitai.ts` — one place that knows this, rather than three call
+sites each getting it wrong differently.
 
 **That is what demotes the official CLI.** Its documented interface has no
 base-URL option and no `browsingLevel` or `nsfw` flag, so it asks with the
@@ -540,6 +614,44 @@ by every public endpoint rather than rejected —
 
 — so sending a configured key on every Civitai request cannot break a lookup
 that would have worked without it.
+
+**Paid downloads are not a missing key** (added). A creator can charge Buzz
+for a version — for good, or as *Early Access* until a date, after which it
+is free. A key alone does not unlock one; buying it on the site with the
+key's account does. Measured against the live site:
+
+```
+early access, anon or key   403 {"error":"Early Access","deadline":"2026-10-06T15:32:52.699Z",
+                                 "message":"This asset is in Early Access. You can use Buzz access it now!"}
+permanently paid, anon      401 {"error":"Unauthorized",
+                                 "message":"The creator of this asset requires you to be logged in to download it"}
+```
+
+and the version itself says so in `paidAccess` — `{"permanent": true,
+"endsAt": null}` or `{"permanent": false, "endsAt": "<when>"}` — on
+`/api/v1/models/<id>` and `/api/v1/model-versions/by-hash/<sha256>` alike, on
+both hosts. So a 401 or 403 from a download is read before it is reported:
+a body that says Early Access or Buzz, or a version the lookup found
+`paidAccess` on, is **`failure: paid`**, said as what it is —
+
+```
+forge models: Scenery_Enhancer-Krea.safetensors is in Early Access on Civitai until 2026-10-06 15:32 UTC: its creator charges Buzz to download it before then.
+  Civitai answered 403 to https://civitai.com/api/download/models/3374747?fileId=3262986: "This asset is in Early Access. You can use Buzz access it now!"
+  A key was sent and refused. A key alone does not unlock a paid download: either its account has not bought this one, or the key is not current.
+  To download it now: buy access with Buzz on https://civitai.red/models/1646240?modelVersionId=3374747, logged in as the account your key belongs to, then run this again with --overwrite.
+  Or wait until 2026-10-06 15:32 UTC, when it is free, and run this again with --overwrite.
+  The metadata and samples import on their own: the same command without --download-model, with --overwrite.
+```
+
+— and anything else stays `needs-login`, with Civitai's own message quoted.
+The first line is the whole story, because it is the line a later skip
+repeats from `error.txt` (§3.2). The lookup's summary says it before any
+download is tried, as `access  Early Access until … UTC: Buzz to download
+before then` or `access  paid: its creator charges Buzz to download it`. A
+paid version that has been bought downloads like any other: nothing is
+refused up front on the strength of `paidAccess` alone. A failed download is
+printed as an error and exits 3, rather than escaping as an uncaught
+exception.
 
 Three rules, each with a test that fails when the rule is removed:
 
@@ -706,8 +818,23 @@ hashing the bytes.
 
 ### 4.3 Samples
 
-`--download-samples=<n>` takes the version's images, newest first, and for
-each one:
+`--download-samples=<n>` starts from **the media on the model page** — the
+showcase the author put on the version, in the author's order — and only when
+`<n>` is more than the showcase can supply tops up from **the version's
+gallery**, everyone's posts under it, **most reactions first** (*amended* from
+newest first: what people responded to is the better guess at what shows the
+model off, and checked against the live API, `sort=Most Reactions` ranks by
+the reaction counts). The model page's own media always come first, however
+few reactions they have. An image in both is taken once. The summary says how many came from
+each: `samples 20 (6 from the model page, 14 from its gallery)`.
+
+The version's `images` carry `meta` but no image id, so the page link is found
+by asking `/api/v1/images?modelVersionId=<v>&username=<creator>` — the
+creator's own posts, which are the showcase — and matching on the UUID in the
+CDN path. That query is the only one made when the showcase is enough; the
+gallery query is made only to top up.
+
+For each image:
 
 1. **The bytes** come from the CDN URL with a plain `fetch` — they are public
    and the Civitai CLI has no image-download command. The URL's
@@ -720,11 +847,17 @@ each one:
    `hashes`, `resources`, sometimes a `comfy` workflow). Where the API has no
    meta, the file itself is parsed (§6). `withMeta=true` is what keeps the
    list to images there is something to show for.
-3. Images above `import.nsfw_level` are skipped and counted in the summary.
-   This is ForgeUI's own ceiling and is separate from
-   `import.browsing_level`, which is what the *lookup* was allowed to see:
-   asking broadly and filing narrowly means the model is still found when its
-   only images are ones you did not want downloaded.
+3. **Every image is kept, whatever Civitai rates it** (*amended*). There was
+   a ceiling, `import.nsfw_level` (default 1, "safe"), and a lookup filter,
+   `import.browsing_level`, with a `--browsing-level` flag. In use the
+   ceiling skipped media with nothing mature about it — Civitai's rating is
+   per image and often not what the picture shows — and its number meant
+   nothing to the person reading `N over import.nsfw_level, skipped`, with no
+   way to tell what to set it to. All three are gone: every lookup asks for
+   everything, and every sample found is downloaded. An image that fails to
+   download is still counted, as `N could not be downloaded`. A
+   `config.yaml` that still names either key is refused as an unknown key,
+   like any other; delete the line.
 
 The archive fallback carries image URLs, dimensions and a `has_metadata` flag
 but **not the metadata itself** — there is no image endpoint on it. A sample
@@ -946,7 +1079,8 @@ Chosen this way because:
   |---|---|---|
   | `not-found` | the sources answered no: nothing knows the hash, no model page, bytes that cannot match | rarely |
   | `rate-limited` | 429 | yes, later |
-  | `needs-login` | 401 / 403: gated, private, paid | with a token |
+  | `needs-login` | 401 / 403: gated or private | with a token |
+  | `paid` | 401 / 403 for a version whose creator charges Buzz (§4.0) | once bought, or after early access ends |
   | `server-error` | 5xx | yes |
   | `unreachable` | timeout, refused connection, DNS | yes |
   | `download-failed` | the weights started and did not finish | yes |
@@ -1043,7 +1177,10 @@ Chosen this way because:
 rejected with a sentence rather than misread. `overwrite` carries the CLI's
 `--overwrite` flag forward to ingest (§7.2) — the flag means "replace what is
 there" at both ends of the pipe, and it would be strange for it to mean it
-only at one.
+only at one. *Added with scoped overwrites (§3.2):* `overwrite_samples: true`
+says a sample the model already has from the same source URL is replaced by
+this batch's copy rather than skipped. Absent is false; it is written only
+when the scope names imported samples.
 
 `files` is absent without `--download-model` and is a list rather than a
 single entry because a version can ship more than one file worth having (a
@@ -1065,8 +1202,21 @@ raw = { format, fields, source }
 ```
 
 `fields` is a closed list — prompt, negative_prompt, seed, steps, cfg,
-sampler, scheduler, denoise, width, height, model, model_hash, loras[] — and
-anything outside it stays in `source` only. The sample's sidecar keeps
+sampler, scheduler, denoise, width, height, model, model_hash,
+model_version_id, clip_skip, loras[] — and anything outside it stays in
+`source` only. A LoRA is `{name, weight?, hash?, model_version_id?}`,
+because Civitai images name them three ways, depending on what made the
+picture: A1111's `resources` (file name, short hash, weight), the site's own
+generator's `civitaiResources` (version id, sometimes the version's name) and
+its `additionalResources` (AIR URNs, `urn:air:sd1:lora:civitai:580018@646924`).
+All three are read and merged on the version id; a `Model` given as an AIR
+URN yields the checkpoint's `model_version_id`.
+
+*Amended, built:* the API serves `raw` as `{format, fields}` on every sample
+view, read from the sidecar. `fields` is re-read from `source` when the
+format is one this build parses, so improving the parser improves every
+sample already imported — the blob is the record, `fields` only a reading of
+it. The blob itself is not served: it can be a whole ComfyUI graph. The sample's sidecar keeps
 `params: {}` and `workflow: null`, so "reusable" stays false and §8.3's rule
 holds by construction rather than by care.
 
@@ -1321,7 +1471,18 @@ are the readable batches on disk, which Phase B applies when it drains.
    which already takes `sourceUrl` and `raw` and has never been given either.
    The file is moved rather than copied where the filesystem allows it.
    A sample whose `(model_hash, source_url)` already exists is skipped, which
-   is what makes re-running the CLI free.
+   is what makes re-running the CLI free — unless the batch says
+   `overwrite_samples: true`, when the old sample is removed once the new
+   bytes are read and the new one imported in its place. A thumbnail that was
+   the old sample moves to the new one. Samples the batch does not list are
+   left alone. *Amended:* the same goes for the same **file** under another
+   link (DESIGN.md §8.3): a sample whose bytes the model already has is
+   skipped, or with `overwrite_samples` replaces that sample — except one
+   this batch has just written, so a batch listing an image twice imports it
+   once. A batch's samples keep the batch's
+   order on the model page: each is dated a millisecond before the one
+   listed ahead of it, so the strip (newest first) reads in the order
+   `forge models` wrote them, the model page's own media first.
 4. **Thumbnail.** If the model has no `thumb_path` and no samples before this
    batch, the first imported sample becomes the thumbnail. A model that had
    one keeps it.
@@ -1450,15 +1611,9 @@ import:
   model_dir: null
 
   # Looked up first. civitai.com is the same API with a narrower default
-  # filter (§4.0), so this is the .red host and browsing_level does the
-  # filtering rather than the hostname.
+  # filter (§4.0), so this is the .red host; every lookup asks for
+  # everything (§4.3).
   civitai_url: https://civitai.red
-
-  # Civitai's visibility bitmask. 1 is PG only; 31 is everything. This is
-  # what a *lookup* may return — nsfw_level below is what may be downloaded.
-  # Which query parameter carries it differs per endpoint (§4.0); one place
-  # translates it, and this is the only knob.
-  browsing_level: 31
 
   # The fallback, and the only source for models Civitai has deleted.
   archive_url: https://civitaiarchive.com
@@ -1485,20 +1640,13 @@ import:
   # What --download-samples means with no number after it.
   samples: 4
 
-  # Civitai's nsfwLevel scale: 1 is "safe". Images above this are skipped.
-  nsfw_level: 1
-
   # Slurp the import folder during the boot rescan as well as on demand.
   ingest_on_boot: true
 ```
 
-`browsing_level` and `nsfw_level` are two settings rather than one because
-they answer different questions — what a lookup may *see* versus what may be
-*kept*. Defaulting the first to 31 and the second to 1 means a mature model is
-still identified, named and filed correctly while none of its images land on
-your disk, which is the behaviour someone who has models they did not
-advertise actually wants. Setting both to 1 is the strict reading and is one
-edit away.
+*Amended:* `browsing_level` and `nsfw_level` were here — what a lookup may
+see, and what may be kept — and are dropped (§4.3). There is no content
+filter: every lookup asks for everything and every sample is kept.
 
 - `src/config/types.ts`: `ImportConfig`, added to `Config` and `PartialConfig`.
 - `src/config/defaults.ts`: the block above.
@@ -1596,8 +1744,8 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   a file with nothing, a file that is not an image.
 - `civitai.ts`: every URL form in §4.1 and a handful that are not;
   `baseModel` → family for each mapping and for an unknown one; model `type`
-  → kind; `import.browsing_level` translated to the right parameter per
-  endpoint (§4.0's table).
+  → kind; "everything" translated to the right parameter per endpoint
+  (§4.0's table).
 - `trainedWords` normalisation (§5.5): a clean list, the one-string
   comma-separated form with its trailing comma, `[]`, `null`, and duplicates
   differing only in case.
@@ -1627,6 +1775,10 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   ingests.
 - `overwrite: false` does not clobber a hand-typed display name;
   `overwrite: true` does.
+- `overwrite_samples: true` replaces the sample from the same link, and its
+  thumbnail follows; without it the link is skipped.
+- `--overwrite=<scope>` skips a model recorded in a place it does not name,
+  and carries a waiting batch's unnamed parts into the new batch.
 - An imported sample's row, sidecar and `GET /api/models/:hash` all carry the
   source; the sidecar round-trips through `reindex` unchanged.
 - `GET /api/models/:hash` returns `trigger_words` and `description_text` and
@@ -1643,8 +1795,9 @@ is the other reason those are config rather than constants — plus a stub
 would land. The same shape as `tests/fake-comfy/`, for the same reason.
 
 Two cases the fake exists to cover: the archive fallback fires when the
-primary 404s, and a lookup sends the configured `browsingLevel` (asserted on
-the request, since it is the one parameter the whole §4.0 argument rests on).
+primary 404s, and a lookup sends the parameter that asks for everything
+(asserted on the request, since it is the one parameter the whole §4.0
+argument rests on).
 
 The real Civitai is never called by the suite; a `tests/contract/` case behind
 an env var can be added when someone wants to check the fixtures are still

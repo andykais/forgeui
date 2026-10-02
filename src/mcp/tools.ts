@@ -13,11 +13,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
-import { basename } from "@std/path";
+import { basename, join } from "@std/path";
 import type {
   ForgeUi,
+  MediaBytes,
   ModelListing,
   ModelRow,
+  SampleRow,
   StoredInputView,
 } from "./forgeui.ts";
 import type { LlamaSwap } from "./llama.ts";
@@ -51,6 +53,113 @@ const failure = (cause: unknown) => ({
   }],
   isError: true,
 });
+
+/** A sample strip is a handful of pictures to compare, so smaller still. */
+const DEFAULT_SAMPLE_EDGE = 512;
+const DEFAULT_SAMPLE_PREVIEWS = 4;
+
+const textBlock = (value: string) => ({ type: "text" as const, text: value });
+
+/**
+ * A model by any name a caller might have for it: the `name` the listings
+ * hand out, the file's own name, its display name or its hash. Hidden
+ * models are looked through too — hiding a model tidies the screen, it does
+ * not make its samples someone else's business.
+ */
+async function findModel(
+  forge: ForgeUi,
+  wanted: string,
+): Promise<ModelRow | null> {
+  const hash = wanted.replace(/^sha256:/, "").toLowerCase();
+  const [visible, hidden] = await Promise.all([
+    forge.get<ModelListing>("/api/models"),
+    forge.get<ModelListing>("/api/models?hidden=1"),
+  ]);
+  const all = [...visible.models, ...hidden.models];
+  return all.find((model) => model.name === wanted) ??
+    all.find((model) => model.filename === wanted) ??
+    all.find((model) =>
+      model.hash !== null && model.hash.replace(/^sha256:/, "") === hash
+    ) ??
+    all.find((model) => model.display_name === wanted) ??
+    null;
+}
+
+/** An import's generation data minus the prompt, which is listed beside it. */
+function generationOf(sample: SampleRow): Record<string, unknown> | undefined {
+  if (!sample.raw) return undefined;
+  const { prompt: _listed, ...rest } = sample.raw.fields;
+  return Object.keys(rest).length > 0
+    ? { from: sample.raw.format, ...rest }
+    : undefined;
+}
+
+/** What a preview is sized to when the model does not say (§6.3). */
+const DEFAULT_PREVIEW_EDGE = 768;
+
+/**
+ * The most `get_output_file` returns inline. Base64 in a JSON-RPC message
+ * grows a file by a third, and a harness holds the whole message in memory;
+ * a longer clip goes to disk through `save_to` instead.
+ */
+const INLINE_LIMIT_MB = 32;
+
+const seconds = (ms: number | null | undefined) =>
+  ms === null || ms === undefined ? undefined : Number((ms / 1000).toFixed(3));
+
+function sizeOf(bytes: Uint8Array): string {
+  const kb = bytes.length / 1024;
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
+/** `video · 1280×720 · 6.04s`: what the original is, in one line. */
+function describeOutput(output: MediaBytes["output"]): string {
+  const parts = [output.kind ?? "output"];
+  if (output.width && output.height) {
+    parts.push(`${output.width}×${output.height}`);
+  }
+  const duration = seconds(output.duration_ms);
+  if (duration !== undefined) parts.push(`${duration}s`);
+  return parts.join(" · ");
+}
+
+/**
+ * The content block for some media: the image and audio types MCP has, and
+ * for video — which it has no type for — the clip as an embedded resource,
+ * the bytes with their MIME type and the URL they came from.
+ */
+function mediaBlock(media: MediaBytes, forgeUrl: string) {
+  const data = encodeBase64(media.bytes);
+  if (media.mimeType.startsWith("image/")) {
+    return { type: "image" as const, data, mimeType: media.mimeType };
+  }
+  if (media.mimeType.startsWith("audio/")) {
+    return { type: "audio" as const, data, mimeType: media.mimeType };
+  }
+  return {
+    type: "resource" as const,
+    resource: {
+      uri: `${forgeUrl}${media.output.media_url ?? ""}`,
+      mimeType: media.mimeType,
+      blob: data,
+    },
+  };
+}
+
+/**
+ * Where `save_to` means: a directory gets the file under the name it has in
+ * ForgeUI, anything else is the file's own path.
+ */
+async function saveTarget(
+  saveTo: string,
+  outputPath: string | undefined,
+  outputId: string,
+): Promise<string> {
+  const isDir = await Deno.stat(saveTo).then((s) => s.isDirectory)
+    .catch(() => false);
+  if (!isDir) return saveTo;
+  return join(saveTo, outputPath ? basename(outputPath) : outputId);
+}
 
 export function createBridgeServer(options: BridgeOptions): McpServer {
   const { forge, llama } = options;
@@ -112,7 +221,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "feeds the next: make a picture, make a take, then attach both and " +
       "run ltx2-ia2v on them. Takes either `output_id` — anything `generate` " +
       "returned, attached whole, at full quality, never the downscaled copy " +
-      "`get_output_image` shows you — or `file`, a path on the machine " +
+      "`get_output_preview` shows you — or `file`, a path on the machine " +
       "running this bridge, for media you did not make here.",
     inputSchema: z.object({
       output_id: z.string().optional().describe(
@@ -170,7 +279,13 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "Checkpoints — the base models a workflow generates with, across every " +
       "folder that holds one. Filter by family to see only the ones a " +
       "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
-      "else. Pass the `name` back, not the display name.",
+      "else. Each carries its trigger words and base model where they are " +
+      "known; `descriptions: true` adds the author's Markdown description " +
+      "and overview. Each carries `sample_count` (pictures of what it does, which " +
+      "get_model_samples shows) and `output_count` (what it has made here). " +
+      "`summary` says what a model is and `notes` what was learned using " +
+      "it; set_model_summary and set_model_notes write them. " +
+      "Pass the `name` back, not the display name.",
   });
 
   registerLibraryTool(server, forge, {
@@ -181,9 +296,166 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "LoRAs in the library. Filter by family — a LoRA trained for one base " +
       "model does nothing for another, and mixing families is the usual " +
       "cause of a result that ignores the prompt. Each one carries the " +
-      "strength range its owner set, which is the range worth exploring. " +
+      "strength range its owner set, which is the range worth exploring, " +
+      "its trigger words — the words a prompt needs for it to do anything — " +
+      "and with `descriptions: true` the author's Markdown description and " +
+      "overview, which is where the recommended strength and prompting " +
+      "advice usually are. Also " +
+      "`sample_count` and `output_count`: how many example pictures it " +
+      "has (get_model_samples shows them) and how many outputs it has made. " +
+      "`summary` says what a model is and `notes` what was learned using " +
+      "it; set_model_summary and set_model_notes write them. " +
       "Pass the `name` back in a workflow's lora list, not the display name.",
     strengths: true,
+  });
+
+  server.registerTool("get_model_samples", {
+    description:
+      "The samples on a model's page: pictures or clips of what that " +
+      "checkpoint or LoRA does — imported from where it was published, " +
+      "dropped in by the owner, or promoted from one of its outputs. Look " +
+      "before choosing a LoRA or its strength: the samples say what it is " +
+      "for far better than its name. Returns each sample's origin and, " +
+      "where the source recorded it, how it was made — prompt, negative, " +
+      "seed, steps, cfg, sampler, the checkpoint, and the LoRAs with their " +
+      "weights, which is the best guide to a LoRA's useful strength — " +
+      "followed by a small " +
+      "preview of the first `limit` of them. Name the model as the listings " +
+      "do (`name`), or by its hash.",
+    inputSchema: z.object({
+      model: z.string().describe(
+        "the `name` from list_checkpoints or list_loras, or the model's hash",
+      ),
+      limit: z.number().int().min(0).max(24).optional().describe(
+        "how many previews to include, default 4; 0 for the list alone",
+      ),
+      max_edge: z.number().int().min(128).max(2048).optional().describe(
+        "longest edge of each preview in pixels, default 512",
+      ),
+    }),
+  }, async ({ model, limit, max_edge }) => {
+    try {
+      const row = await findModel(forge, model);
+      if (!row) {
+        return failure(
+          `no model is named "${model}"; list_checkpoints and list_loras ` +
+            `give the names to use`,
+        );
+      }
+      const detail = await forge.get<{ samples?: SampleRow[] }>(
+        `/api/models/${encodeURIComponent(row.id)}`,
+      );
+      const samples = detail.samples ?? [];
+      const listing = {
+        model: row.name,
+        display_name: row.display_name,
+        sample_count: samples.length,
+        output_count: row.output_count,
+        summary: row.summary ?? undefined,
+        notes: row.notes ?? undefined,
+        trigger_words: row.trigger_words?.length
+          ? row.trigger_words
+          : undefined,
+        // One model, so its whole write-up: the Markdown the model page
+        // shows under Description and Overview.
+        description: row.source?.version?.description_text?.trim() ||
+          undefined,
+        overview: row.source?.model?.description_text?.trim() &&
+            row.source.model.description_text.trim() !==
+              row.source?.version?.description_text?.trim()
+          ? row.source.model.description_text.trim()
+          : undefined,
+        note: samples.length === 0
+          ? row.hash === null
+            ? "this model is still being hashed; samples belong to a hash"
+            : "no samples yet — search_gallery by this model's name finds " +
+              "what it has made here instead"
+          : undefined,
+        samples: samples.map((sample) => ({
+          id: sample.id,
+          kind: sample.kind,
+          origin: sample.source
+            ? `${sample.source.label}${
+              sample.source.url ? ` (${sample.source.url})` : ""
+            }`
+            : sample.reusable
+            ? "promoted from an output"
+            : "dropped in by hand",
+          // What made it: the params of a promotion, or what the source said
+          // for an import — prompt, negative, seed, steps, cfg, sampler, the
+          // model and the LoRAs with their weights. The settings a sample was
+          // made with are the best evidence of what a LoRA wants.
+          prompt: typeof sample.params?.prompt === "string"
+            ? sample.params.prompt
+            : typeof sample.raw?.fields.prompt === "string"
+            ? sample.raw.fields.prompt
+            : undefined,
+          generation: generationOf(sample),
+        })),
+      };
+      const shown = samples.slice(0, limit ?? DEFAULT_SAMPLE_PREVIEWS);
+      const content: ReturnType<typeof mediaBlock | typeof textBlock>[] = [
+        textBlock(JSON.stringify(listing, null, 2)),
+      ];
+      for (const sample of shown) {
+        const media = await forge.mediaAt(sample.media_url, {
+          maxEdge: max_edge ?? DEFAULT_SAMPLE_EDGE,
+        });
+        content.push(textBlock(
+          `sample ${sample.id}${
+            media.resized ? "" : " (full size: ForgeUI has no ffmpeg)"
+          }`,
+        ));
+        content.push(
+          mediaBlock(
+            { ...media, output: { media_url: sample.media_url } },
+            forge.url,
+          ),
+        );
+      }
+      return { content };
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  registerModelTextTool(server, forge, {
+    name: "set_model_summary",
+    field: "summary",
+    description:
+      "Write a checkpoint's or LoRA's SUMMARY: one or two sentences saying " +
+      "what the model IS — its style or subject, the base model it is for, " +
+      'what it is best at. e.g. "Painterly watercolour washes for SDXL; ' +
+      'strongest on landscapes, weak on faces." It is shown beside the ' +
+      "name in list_checkpoints and list_loras, on the Models screen, and " +
+      "is searched by their `q`, so it is how you and the owner find the " +
+      "right model later. At most 300 characters. It REPLACES the current " +
+      "summary; pass an empty string to clear it. Not for observations " +
+      "from using it — those are notes (set_model_notes). Write one from " +
+      "the model's description, its samples and what it actually did, " +
+      "rather than copying the author's marketing.",
+    text: z.string().max(300).describe(
+      "the whole new summary, one or two sentences; empty clears it",
+    ),
+  });
+
+  registerModelTextTool(server, forge, {
+    name: "set_model_notes",
+    field: "notes",
+    description:
+      "Write a checkpoint's or LoRA's NOTES: annotations — what has been " +
+      "learned by using it, for whoever uses it next, you included. " +
+      "Working strengths, what it breaks, what it pairs well or badly " +
+      'with, prompts that work, a CFG it needs. e.g. "Above 0.9 it bleeds ' +
+      "into faces. 0.6 with a low CFG is the sweet spot. Fights the " +
+      'film-grain LoRA." Not a description of what the model is — that ' +
+      "is the summary (set_model_summary). Notes REPLACE what is there and " +
+      "may hold a person's own words: read them first (list_loras or " +
+      "get_model_samples show them) and pass back the old text with yours " +
+      "added, unless asked to rewrite them. Empty clears them.",
+    text: z.string().max(20_000).describe(
+      "the whole new notes text, existing notes included; empty clears them",
+    ),
   });
 
   server.registerTool("search_gallery", {
@@ -221,7 +493,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "Everything recorded about one output: the exact params, seed, models " +
       "and timings that produced it, the origin saying who asked for it and " +
       "why, and `notes` — what a person said about it afterwards. Read the " +
-      "notes on what you made last time before deciding what to make next.",
+      "notes on what you made last time before deciding what to make next. " +
+      "Metadata only: to see the output use get_output_preview, and for the " +
+      "file itself get_output_file.",
     inputSchema: z.object({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
@@ -233,46 +507,113 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
-  server.registerTool("get_output_image", {
+  server.registerTool("get_output_preview", {
     description:
-      "Look at an output. Returns the picture itself, so you can judge it — " +
-      "composition, anatomy, whether it matches what was asked for.",
+      "Look at an output — the convenient way, and the one to reach for " +
+      "first. Returns a small copy sized for judging and sharing: a picture " +
+      "as a JPEG whose longest edge is `max_edge` (768 unless you say), a " +
+      "video as a small, low-bitrate MP4 of the whole clip at that size. " +
+      "Enough to critique composition, anatomy, motion and whether it " +
+      "matches what was asked, at a fraction of the tokens. Never for " +
+      "chaining or keeping: attach_input and get_output_file work from the " +
+      "full-quality original. Audio has no smaller copy; use get_output_file.",
     inputSchema: z.object({
       output_id: z.string(),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
-        "longest edge in pixels; smaller is cheaper and enough to critique",
+        "longest edge in pixels, default 768; smaller is cheaper and enough " +
+          "to critique",
       ),
     }),
   }, async ({ output_id, max_edge }) => {
+    const edge = max_edge ?? DEFAULT_PREVIEW_EDGE;
     try {
-      const { bytes, mimeType } = await forge.media(output_id);
-      if (!mimeType.startsWith("image/")) {
+      const media = await forge.media(output_id, { maxEdge: edge });
+      const { mimeType, output } = media;
+      if (mimeType.startsWith("audio/")) {
         return failure(
-          `output ${output_id} is ${mimeType}, which cannot be looked at; ` +
+          `output ${output_id} is audio, which has no preview; ` +
+            `get_output_file returns the take itself`,
+        );
+      }
+      if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+        return failure(
+          `output ${output_id} is ${mimeType}, which cannot be previewed; ` +
             `use get_output for its metadata`,
         );
       }
-      if (max_edge !== undefined) {
-        // §6.3 puts the resize in ForgeUI, where ffmpeg already is. Until
-        // that route exists the full frame is returned rather than a wrong
-        // one, and the size is said out loud so the cost is not a surprise.
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `(full size — ForgeUI cannot resize yet, so max_edge=${max_edge} was not applied)`,
-            },
-            { type: "image" as const, data: encodeBase64(bytes), mimeType },
-          ],
-        };
+      if (
+        !media.resized && media.bytes.length > INLINE_LIMIT_MB * 1024 * 1024
+      ) {
+        return failure(
+          `ForgeUI has no ffmpeg, so there is no smaller copy of ${output_id}, ` +
+            `and the file itself is ${sizeOf(media.bytes)}; ` +
+            `get_output_file with save_to writes it to disk`,
+        );
+      }
+      const note = media.resized
+        ? `preview, longest edge at most ${edge}px, ${sizeOf(media.bytes)} — ` +
+          `the original is ${describeOutput(output)}`
+        : `full size (${describeOutput(output)}, ${sizeOf(media.bytes)}): ` +
+          `ForgeUI has no ffmpeg, so max_edge=${edge} was not applied`;
+      return {
+        content: [
+          { type: "text" as const, text: note },
+          mediaBlock(media, forge.url),
+        ],
+      };
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("get_output_file", {
+    description:
+      "The output itself, byte for byte — the full-resolution picture, the " +
+      "whole video, the audio take — exactly as ComfyUI wrote it. Large: a " +
+      "video can be hundreds of megabytes, so to only look at something use " +
+      "get_output_preview. Returned inline as an image, audio or video " +
+      "block, or with `save_to` written to a path on the machine running " +
+      "this bridge and the path handed back instead of the bytes — the way " +
+      "to pass a result to another program. Inline stops at " +
+      `${INLINE_LIMIT_MB} MB; past that, save_to is the way.`,
+    inputSchema: z.object({
+      output_id: z.string(),
+      save_to: z.string().optional().describe(
+        "absolute path of a file to write, or of an existing directory to " +
+          "write it into under its own name",
+      ),
+    }),
+  }, async ({ output_id, save_to }) => {
+    try {
+      const media = await forge.media(output_id);
+      if (save_to !== undefined) {
+        const path = await saveTarget(save_to, media.output.path, output_id);
+        await Deno.writeFile(path, media.bytes);
+        return text({
+          saved: path,
+          kind: media.output.kind,
+          mime_type: media.mimeType,
+          bytes: media.bytes.length,
+          width: media.output.width ?? undefined,
+          height: media.output.height ?? undefined,
+          duration_s: seconds(media.output.duration_ms),
+        });
+      }
+      if (media.bytes.length > INLINE_LIMIT_MB * 1024 * 1024) {
+        return failure(
+          `output ${output_id} is ${sizeOf(media.bytes)}, too big to return ` +
+            `inline; pass save_to to write it to disk, or look at it with ` +
+            `get_output_preview`,
+        );
       }
       return {
-        content: [{
-          type: "image" as const,
-          data: encodeBase64(bytes),
-          mimeType,
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: `${describeOutput(media.output)}, ${sizeOf(media.bytes)}`,
+          },
+          mediaBlock(media, forge.url),
+        ],
       };
     } catch (cause) {
       return failure(cause);
@@ -389,8 +730,14 @@ function registerLibraryTool(
       ),
       q: z.string().optional().describe("substring of the name or a tag"),
       tags: z.string().optional().describe("comma-separated; all must match"),
+      descriptions: z.boolean().optional().describe(
+        "include each model's full Markdown `description` (its version's " +
+          "notes) and `overview` (the model's page) as its author wrote " +
+          "them — how to prompt it, what strength, what it is for. Long: " +
+          "narrow with q or family first",
+      ),
     }),
-  }, async ({ family, q, tags }) => {
+  }, async ({ family, q, tags, descriptions }) => {
     try {
       // The family is filtered here rather than by the server, so that an
       // answer of "none" can carry the families this class *does* have. A
@@ -421,7 +768,66 @@ function registerLibraryTool(
         // a page of it is worse than useless here: the model cannot tell a
         // truncated list from the whole shelf, so it picks from the first
         // sixty and never learns the rest exist.
-        models: matched.map((model) => entry(model, tool.strengths ?? false)),
+        models: matched.map((model) =>
+          entry(model, tool.strengths ?? false, descriptions ?? false)
+        ),
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+}
+
+interface ModelTextTool {
+  name: string;
+  field: "summary" | "notes";
+  description: string;
+  text: z.ZodString;
+}
+
+/**
+ * One of the two per-model text fields (DESIGN.md §8.1), written through
+ * `PATCH /api/models/:hash` exactly as the model page writes it. The answer
+ * is the field as stored next to the other one, so a model that has just
+ * written its summary sees the notes it should not have put there.
+ */
+function registerModelTextTool(
+  server: McpServer,
+  forge: ForgeUi,
+  tool: ModelTextTool,
+): void {
+  server.registerTool(tool.name, {
+    description: tool.description,
+    inputSchema: z.object({
+      model: z.string().describe(
+        "the `name` from list_checkpoints or list_loras, or the model's hash",
+      ),
+      text: tool.text,
+    }),
+  }, async ({ model, text: value }) => {
+    try {
+      const row = await findModel(forge, model);
+      if (!row) {
+        return failure(
+          `no model is named "${model}"; list_checkpoints and list_loras ` +
+            `give the names to use`,
+        );
+      }
+      if (row.hash === null) {
+        return failure(
+          `"${row.name}" is still being hashed, and a model is edited by its ` +
+            `hash; try again in a moment`,
+        );
+      }
+      const updated = await forge.patch(
+        `/api/models/${encodeURIComponent(row.hash)}`,
+        { [tool.field]: value.trim() === "" ? null : value },
+      ) as ModelRow;
+      return text({
+        model: updated.name,
+        display_name: updated.display_name,
+        summary: updated.summary ?? null,
+        notes: updated.notes ?? null,
       });
     } catch (cause) {
       return failure(cause);
@@ -477,17 +883,43 @@ function supplyHint(param: ManifestParam): string | undefined {
 }
 
 /** What a picker shows: enough to choose with, and nothing the screen needs. */
-function entry(model: ModelRow, strengths: boolean) {
+function entry(model: ModelRow, strengths: boolean, descriptions: boolean) {
+  const source = model.source ?? null;
+  const description = source?.version?.description_text?.trim() || undefined;
+  const overview = source?.model?.description_text?.trim() || undefined;
   return {
     name: model.name,
     display_name: model.display_name,
     family: model.family,
     kind: model.kind,
     tags: model.tags.length > 0 ? model.tags : undefined,
+    // What it is (one or two sentences), then what was learned using it.
+    summary: model.summary ?? undefined,
     notes: model.notes ?? undefined,
     strength_min: strengths ? model.strength_min : undefined,
     strength_max: strengths ? model.strength_max : undefined,
-    outputs: model.output_count,
+    // Both, because they answer different questions: samples are what the
+    // model's author (or the owner) says it does, outputs are what it has
+    // actually made here. get_model_samples shows the first; search_gallery
+    // with its name finds the second.
+    sample_count: model.sample_count ?? 0,
+    output_count: model.output_count,
+    // Short, and what decides whether a LoRA does anything at all.
+    trigger_words: model.trigger_words?.length
+      ? model.trigger_words
+      : undefined,
+    base_model: source?.version?.base_model ?? undefined,
+    source_url: source?.source?.url ?? undefined,
+    // The Markdown the model page shows under Description and Overview —
+    // the same two names. Each is kilobytes, so only when asked; without
+    // asking, `has_description` says whether asking would get anything.
+    ...(descriptions
+      ? {
+        description,
+        // Authors often paste the same text in both; once is enough.
+        overview: overview !== description ? overview : undefined,
+      }
+      : { has_description: description || overview ? true : undefined }),
   };
 }
 

@@ -125,7 +125,6 @@ async function withTensor(
   const client = new CivitaiClient({
     civitaiUrl: fake.url,
     archiveUrl: fake.url,
-    browsingLevel: 31,
     timeoutMs: 5000,
     token: options.civitaiToken ?? null,
     now: () => new Date("2026-09-30T10:00:00Z"),
@@ -480,7 +479,6 @@ Deno.test("of several Tensor.Art copies of a file, the most downloaded is used",
       client: new CivitaiClient({
         civitaiUrl: h.fake.url,
         archiveUrl: h.fake.url,
-        browsingLevel: 31,
         timeoutMs: 5000,
         say: (line) => lines.push(line),
       }),

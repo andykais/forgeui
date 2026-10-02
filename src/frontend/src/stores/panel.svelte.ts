@@ -1,5 +1,6 @@
 import { api } from "../api.ts";
 import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
+import { withInputs } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
 import { applicableParams } from "../lib/applies.ts";
@@ -154,8 +155,18 @@ class PanelState {
     }
   }
 
-  /** `Edit in Generate →`: fill by key, warn on keys that are gone (§6.4). */
+  /**
+   * `Edit in Generate →`: fill by key, warn on keys that are gone (§6.4).
+   *
+   * And make sure the panel being filled is on screen: every way in — Reuse
+   * parameters from any screen, a failed job's card, an upscale — is asking
+   * to edit before generating, which a media layout gives no room to do.
+   */
   async editWith(id: string, params: Record<string, unknown>): Promise<void> {
+    const layout = app.layout("generate");
+    if (withInputs(layout) !== layout) {
+      app.setLayout("generate", withInputs(layout));
+    }
     this.workflowId = id;
     this.loading = true;
     this.#touched.clear();

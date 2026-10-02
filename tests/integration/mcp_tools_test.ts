@@ -309,7 +309,7 @@ Deno.test("a round names its files, and one of them feeds the next round", async
     assert(output.path?.endsWith(".png"), `no file path: ${output.path}`);
     assert(output.media_url?.startsWith("/api/media/"), output.media_url);
 
-    // The whole output, not the downscaled copy `get_output_image` returns.
+    // The whole output, not the downscaled copy `get_output_preview` returns.
     const attached = await callTool<Attached>(app, "attach_input", {
       output_id: output.id,
     });
@@ -402,4 +402,49 @@ Deno.test("describe_workflow says how to supply media, and leaves the graph out"
     assertStringIncludes(duration.supply ?? "", "`audio`");
     assertStringIncludes(duration.supply ?? "", "0.5");
   });
+});
+
+/**
+ * A user copy is the workflow (§4.6), for the bridge as for the screen. The
+ * case that broke: Anima's text encoder edited in ComfyUI on a machine that
+ * holds `qwen_3_600m`, after the workflow page had saved its manifest with
+ * the bundled filename baked in. A `generate` that names no encoder — which
+ * is how a model calls it — still loaded the bundled one and failed.
+ */
+Deno.test("generate runs the user copy's graph, text encoder included", async () => {
+  await withTestApp(async (app) => {
+    const before = await app.json<{
+      manifest: unknown;
+      api_json: Record<string, { inputs: Record<string, unknown> }>;
+    }>("/api/workflows/anima");
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ manifest: before.manifest }),
+    });
+    const graph = structuredClone(before.api_json);
+    graph["1"]!.inputs.clip_name = "qwen_3_600m.safetensors";
+    await app.json("/api/workflows/anima", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+
+    // What describe_workflow tells the model to expect…
+    const described = await callTool<{
+      params: { key: string; default?: unknown }[];
+    }>(app, "describe_workflow", { workflow_id: "anima" });
+    assertEquals(
+      described.params.find((param) => param.key === "clip")?.default,
+      "qwen_3_600m.safetensors",
+    );
+
+    // …and what the round actually sends to ComfyUI.
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{ workflow_id: "anima", params: { prompt: "a fox in snow" } }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+    assertEquals(
+      app.fake!.prompts.at(-1)!.graph["1"]!.inputs.clip_name,
+      "qwen_3_600m.safetensors",
+    );
+  }, { comfy: true });
 });

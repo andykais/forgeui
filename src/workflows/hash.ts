@@ -39,7 +39,13 @@ export async function workflowHash(
   graph: ApiGraph,
   manifest: Manifest | null,
 ): Promise<string> {
+  // `default_from` says where a default was read from, not what the
+  // workflow is: the same files hash the same whether or not it is set.
+  const content = manifest === null ? null : {
+    ...manifest,
+    params: manifest.params.map(({ default_from: _where, ...param }) => param),
+  };
   return `sha256:${await sha256Hex(
-    canonicalJson(graph) + canonicalJson(manifest),
+    canonicalJson(graph) + canonicalJson(content),
   )}`;
 }

@@ -26,7 +26,7 @@ import { openTelemetryDatabase } from "./telemetry/db.ts";
 import { TelemetryStore } from "./telemetry/store.ts";
 import { MemoryMonitor } from "./telemetry/memory.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
-import { logError } from "./log.ts";
+import { log, logError } from "./log.ts";
 import { APP_VERSION } from "./version.ts";
 
 export interface StartAppOptions {
@@ -186,6 +186,20 @@ async function startAppWith(
   backfillOutputSizes({ db, telemetry, paths }).catch((error) => {
     logError(
       `could not backfill the output sizes: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  });
+
+  // Samples from before they were hashed (migration 12): hashed once, and
+  // the same file twice for one model merged into one (§8.3).
+  samples.backfillContentHashes().then(({ merged }) => {
+    if (merged > 0) {
+      log(`samples: merged ${merged} duplicate${merged === 1 ? "" : "s"}`);
+    }
+  }).catch((error) => {
+    logError(
+      `could not hash the samples: ${
         error instanceof Error ? error.message : error
       }`,
     );

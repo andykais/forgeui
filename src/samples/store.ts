@@ -12,8 +12,15 @@ import {
   type MediaSource,
   normalizeModelHash,
   type OutputRow,
+  sampleIdByContent,
   type SampleRow,
+  samplesWithoutSha256,
+  setSampleSha256,
+  updateModelMeta,
 } from "../db/queries.ts";
+import { hashFileStreaming } from "../models/hasher.ts";
+import { sha256Hex } from "../workflows/hash.ts";
+import { logError } from "../log.ts";
 import { readPngSize } from "../jobs/png.ts";
 import {
   buildSidecar,
@@ -23,6 +30,12 @@ import {
   type SidecarOutput,
 } from "../jobs/sidecar.ts";
 import { mediaUrl } from "../outputs/store.ts";
+import {
+  type InfotextFields,
+  type InfotextFormat,
+  parseA1111,
+  parseCivitaiMeta,
+} from "../media/infotext.ts";
 
 /**
  * Samples (§8.3): media that shows what a model does, whether or not this app
@@ -43,13 +56,52 @@ export class SampleNotFoundError extends Error {
   }
 }
 
+/** `{format, fields, source}` as a sidecar stores it, or null. */
+function readRaw(value: unknown): SampleRaw | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { format, fields, source } = value as {
+    format?: unknown;
+    fields?: unknown;
+    source?: unknown;
+  };
+  if (typeof format !== "string" || format === "unknown") return null;
+  if (format === "civitai-meta" && typeof source === "object" && source) {
+    return {
+      format,
+      fields: parseCivitaiMeta(source as Record<string, unknown>).fields,
+    };
+  }
+  if (format === "a1111-infotext" && typeof source === "string") {
+    return { format, fields: parseA1111(source).fields };
+  }
+  return {
+    format: format as InfotextFormat,
+    fields: typeof fields === "object" && fields !== null
+      ? fields as InfotextFields
+      : {},
+  };
+}
+
 /** Civitai import arrives in Phase 3; the route says so rather than pretending. */
 export class NotImplementedError extends Error {
   override readonly name = "NotImplementedError";
 }
 
+/**
+ * A sample's generation data as the API hands it out (§8.3,
+ * DESIGN-MODEL-IMPORT §5.3): the format and the normalised fields. The
+ * untouched blob they were read from stays in the sidecar — it can be a whole
+ * ComfyUI graph, and nothing on screen reads it.
+ */
+export interface SampleRaw {
+  format: InfotextFormat;
+  fields: InfotextFields;
+}
+
 export interface SampleView extends SampleRow {
   media_url: string;
+  /** What made it, when the sample came with that; null otherwise. */
+  raw: SampleRaw | null;
   /**
    * True when the sample carries a generation to reuse — a promotion. A
    * dropped file has empty params and offers no Edit in Generate (§8.3).
@@ -101,12 +153,23 @@ export interface ImportSampleInput {
   source?: MediaSource | null;
   /** Unmapped generation data, stored as `raw` and never interpreted (§8.3). */
   raw?: unknown;
+  /**
+   * When it was made, in ms; now unless said. The model page lists samples
+   * newest first, so an import that wants its own order says so with this
+   * (DESIGN-MODEL-IMPORT §7.2).
+   */
+  createdAt?: number;
 }
 
 export class SampleStore {
   #db: Database;
   #paths: DataPaths;
   #now: () => number;
+  /**
+   * `raw` by sample id. A sample's sidecar is written once and never edited,
+   * so what was read from it once is what it says for good.
+   */
+  #raws = new Map<string, SampleRaw | null>();
 
   constructor(options: {
     db: Database;
@@ -139,13 +202,36 @@ export class SampleStore {
     return {
       ...row,
       media_url: mediaUrl(row.path),
+      raw: this.#rawOf(row),
       reusable: row.params !== null && Object.keys(row.params).length > 0,
     };
   }
 
-  /** Drop a file onto the model page: bytes in, sample out (§8.3). */
+  /**
+   * The model's sample with exactly these bytes, if it has one. The same
+   * file is one sample, however many ways it arrived (§8.3).
+   */
+  async duplicateOf(
+    modelHash: string,
+    bytes: Uint8Array,
+  ): Promise<SampleView | null> {
+    const id = sampleIdByContent(
+      this.#db,
+      normalizeModelHash(modelHash),
+      await sha256Hex(bytes),
+    );
+    return id === null ? null : this.get(id);
+  }
+
+  /**
+   * Drop a file onto the model page: bytes in, sample out (§8.3). Bytes the
+   * model already has a sample of give back that sample, and write nothing.
+   */
   async import(input: ImportSampleInput): Promise<SampleView> {
     const modelHash = this.#requireModel(input.modelHash);
+    const sha256 = await sha256Hex(input.bytes);
+    const existing = sampleIdByContent(this.#db, modelHash, sha256);
+    if (existing !== null) return this.require(existing);
     const { kind, ext } = sniffMedia(input.bytes, input.filename);
     const id = ulid();
     const { dir, relativeDir } = await this.#folder(modelHash);
@@ -162,9 +248,10 @@ export class SampleStore {
         // A file we cannot measure is still a sample.
       }
     }
+    const createdAt = input.createdAt ?? this.#now();
     const sidecar = buildSidecar({
       job_id: id,
-      created_at: new Date(this.#now()),
+      created_at: new Date(createdAt),
       workflow: null,
       params: {},
       models: [{
@@ -188,6 +275,8 @@ export class SampleStore {
       params: null,
       sourceUrl: input.sourceUrl ?? null,
       source: input.source ?? null,
+      createdAt,
+      sha256,
     });
   }
 
@@ -207,9 +296,16 @@ export class SampleStore {
     const sidecarText = await Deno.readTextFile(
       join(this.#paths.root, output.sidecar_path),
     );
+    const sha256 = await hashFileStreaming(source);
     const created: SampleView[] = [];
     for (const raw of modelHashes) {
       const modelHash = this.#requireModel(raw);
+      // Promoted to this model already: that sample, not a second one.
+      const existing = sampleIdByContent(this.#db, modelHash, sha256);
+      if (existing !== null) {
+        created.push(this.require(existing));
+        continue;
+      }
       const id = ulid();
       const ext = extname(output.path) || ".png";
       const { dir, relativeDir } = await this.#folder(modelHash);
@@ -246,6 +342,7 @@ export class SampleStore {
           sourceUrl: null,
           // A promotion came out of this app; only an import has a source.
           source: null,
+          sha256,
         }),
       );
     }
@@ -277,6 +374,8 @@ export class SampleStore {
     params: Record<string, unknown> | null;
     sourceUrl: string | null;
     source: MediaSource | null;
+    createdAt?: number;
+    sha256: string;
   }): Promise<SampleView> {
     const sidecarName = `${input.id}.json`;
     await Deno.writeTextFile(
@@ -292,10 +391,94 @@ export class SampleStore {
       source_url: input.sourceUrl,
       source: input.source,
       params: input.params,
-      created_at: this.#now(),
+      created_at: input.createdAt ?? this.#now(),
     };
-    insertSample(this.#db, row);
+    insertSample(this.#db, row, input.sha256);
     return this.view(row);
+  }
+
+  #backfill: Promise<{ hashed: number; merged: number }> | null = null;
+
+  /**
+   * Hash the samples written before samples were hashed (migration 12), and
+   * merge the ones that turn out to be the same file of the same model: the
+   * earliest is kept, the later copy removed, and a thumbnail that was the
+   * later copy moves to the one kept. Callers share the pass in flight;
+   * with nothing left unhashed a pass is one query. Ingest waits for it, so
+   * a new batch is checked against every sample there is.
+   */
+  backfillContentHashes(): Promise<{ hashed: number; merged: number }> {
+    this.#backfill ??= this.#runBackfill().finally(() => {
+      this.#backfill = null;
+    });
+    return this.#backfill;
+  }
+
+  async #runBackfill(): Promise<{ hashed: number; merged: number }> {
+    let hashed = 0;
+    let merged = 0;
+    for (const row of samplesWithoutSha256(this.#db)) {
+      let sha256: string;
+      try {
+        sha256 = await hashFileStreaming(join(this.#paths.root, row.path));
+      } catch (cause) {
+        // A sample whose file is gone stays unhashed; it duplicates nothing.
+        if (!(cause instanceof Deno.errors.NotFound)) {
+          logError(
+            `samples: could not hash ${row.path} (${
+              cause instanceof Error ? cause.message : cause
+            })`,
+          );
+        }
+        continue;
+      }
+      const kept = sampleIdByContent(this.#db, row.model_hash, sha256);
+      if (kept !== null && kept !== row.id) {
+        await this.#mergeInto(row.id, kept, row.model_hash);
+        merged++;
+        continue;
+      }
+      setSampleSha256(this.#db, row.id, sha256);
+      hashed++;
+    }
+    return { hashed, merged };
+  }
+
+  /** Remove a duplicate, keeping the model's thumbnail on the copy kept. */
+  async #mergeInto(
+    duplicate: string,
+    kept: string,
+    modelHash: string,
+  ): Promise<void> {
+    const thumb = getModel(this.#db, modelHash)?.thumb_path ?? null;
+    const removed = await this.remove(duplicate);
+    if (thumb !== null && removed.path === thumb) {
+      updateModelMeta(this.#db, modelHash, {
+        thumb_path: this.require(kept).path,
+      });
+    }
+  }
+
+  /**
+   * The sidecar's `raw`, with its fields read again from the blob they came
+   * from when this build knows the format. A sample imported before the
+   * parser learned Civitai's `civitaiResources` then shows its LoRAs too,
+   * rather than whatever the parser of the day managed — the blob is the
+   * record, and `fields` only ever a reading of it.
+   */
+  #rawOf(row: SampleRow): SampleRaw | null {
+    if (this.#raws.has(row.id)) return this.#raws.get(row.id)!;
+    let raw: SampleRaw | null = null;
+    try {
+      const sidecar = JSON.parse(
+        Deno.readTextFileSync(join(this.#paths.root, row.sidecar_path)),
+      ) as { raw?: unknown };
+      raw = readRaw(sidecar.raw);
+    } catch {
+      // A sample whose sidecar is gone or unreadable still shows its picture.
+    }
+    this.#raws.set(row.id, raw);
+    return raw;
   }
 
   async #folder(

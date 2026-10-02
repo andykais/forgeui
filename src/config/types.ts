@@ -174,17 +174,10 @@ export interface ImportConfig {
   model_dir: string | null;
   /**
    * Looked up first. `civitai.com` is the same API with a narrower default
-   * filter (§4.0), so this is the `.red` host and `browsing_level` does the
-   * filtering rather than the hostname.
+   * filter (§4.0), so this is the `.red` host, and every lookup asks for
+   * everything Civitai has: there is no content filter (§4.3).
    */
   civitai_url: string;
-  /**
-   * Civitai's visibility bitmask: 1 is PG only, 31 is everything. What a
-   * *lookup* may return — `nsfw_level` is what may be kept. Which query
-   * parameter carries it differs per endpoint (§4.0); one place translates
-   * it, and this is the only knob.
-   */
-  browsing_level: number;
   /** The fallback, and the only source for models Civitai has deleted. */
   archive_url: string;
   /**
@@ -218,8 +211,6 @@ export interface ImportConfig {
   huggingface_token: string | null;
   /** What `--download-samples` means with no number after it. */
   samples: number;
-  /** Civitai's nsfwLevel scale: 1 is safe. Images above this are skipped. */
-  nsfw_level: number;
   /** Slurp the import folder during the boot rescan as well as on demand. */
   ingest_on_boot: boolean;
 }

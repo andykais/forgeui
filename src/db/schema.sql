@@ -48,7 +48,8 @@ CREATE TABLE models (
   family TEXT,                    -- user- or civitai-derived
   civitai_json TEXT,              -- the normalised source record (DESIGN-MODEL-IMPORT §5.5); raw copy in models-meta/<hash>/
   trigger_words_json TEXT,        -- what this model wants in a prompt; NULL = nobody has told us (§5.5)
-  notes TEXT, tags_json TEXT,
+  notes TEXT, tags_json TEXT,     -- notes: annotations, what was learned using it (§8.1)
+  summary TEXT,                   -- one or two sentences: what this model is (§8.1)
   strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default (§8.1)
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
@@ -104,12 +105,16 @@ CREATE TABLE samples (
   path TEXT NOT NULL UNIQUE, sidecar_path TEXT NOT NULL,
   kind TEXT NOT NULL, source_url TEXT,
   source_json TEXT,               -- the §5.4 provenance block; NULL = this app made it
-  params_json TEXT, created_at INTEGER NOT NULL
+  params_json TEXT, created_at INTEGER NOT NULL,
+  sha256 TEXT                     -- of the file; NULL until hashed (§8.3)
 );
 CREATE INDEX samples_model ON samples(model_hash);
 -- Re-importing the same image is a no-op rather than a duplicate (§7.2).
 CREATE UNIQUE INDEX samples_source ON samples(model_hash, source_url)
   WHERE source_url IS NOT NULL;
+-- The same bytes are one sample of a model, however they arrived (§8.3).
+CREATE UNIQUE INDEX samples_content ON samples(model_hash, sha256)
+  WHERE sha256 IS NOT NULL;
 
 CREATE TABLE node_timings (       -- for progress estimation
   workflow_hash TEXT NOT NULL, node_id TEXT NOT NULL,

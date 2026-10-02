@@ -182,6 +182,25 @@ Field notes:
 | `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
+**Where a param's value comes from**, first match wins:
+
+1. **The job** — a value the submitter names (the panel, `POST /api/jobs`,
+   a `forge mcp` round).
+2. **A default somebody set** in `manifest.json`.
+3. **The graph** — the literal the bound input holds, so a loader edited in
+   ComfyUI is what everything submits unless 1 or 2 says otherwise.
+
+Step 3 is filled in on load and never written back: the API serves each such
+default with `"default_from": "graph"`, and a save drops a default marked so.
+Without that, a screen that edits the manifest and sends it back would turn
+every graph value it was shown into an explicit default, and the next edit
+of a loader in ComfyUI would change nothing. An older build did exactly that,
+so a user copy is read with those defaults taken back out when it is plain
+they were copied rather than chosen: the bundled manifest names none, the
+value is exactly the bundled graph's, and the user copy's own graph has since
+been changed to something else. The file is not rewritten; its next save
+from the workflow page writes it without them.
+
 #### `when`: a param that only sometimes applies
 
 Any param may carry `"when": { "param": "<key>", "is": <value> }`, and it
@@ -508,7 +527,9 @@ CREATE TABLE models (
   size INTEGER NOT NULL, mtime INTEGER NOT NULL,
   display_name TEXT,              -- editable; NULL → basename(path) minus extension
   family TEXT,                    -- user- or civitai-derived
-  civitai_json TEXT, notes TEXT, tags_json TEXT,
+  civitai_json TEXT, tags_json TEXT,
+  summary TEXT,                   -- one or two sentences: what this model is (§8.1)
+  notes TEXT,                     -- annotations: what was learned using it (§8.1)
   strength_min REAL, strength_max REAL,  -- what a LoRA's sliders span; NULL → the -2..2 default
   thumb_path TEXT,                -- chosen sample's media, or NULL → most recent output → empty plate
   output_count INTEGER NOT NULL DEFAULT 0,  -- derived from output_models; maintained on insert/delete and by reindex
@@ -540,9 +561,13 @@ CREATE TABLE samples (
   model_hash TEXT NOT NULL,
   path TEXT NOT NULL UNIQUE, sidecar_path TEXT NOT NULL,
   kind TEXT NOT NULL, source_url TEXT,
-  params_json TEXT, created_at INTEGER NOT NULL
+  params_json TEXT, created_at INTEGER NOT NULL,
+  sha256 TEXT                     -- of the file; NULL until hashed (§8.3)
 );
 CREATE INDEX samples_model ON samples(model_hash);
+-- The same bytes are one sample of a model, however they arrived (§8.3).
+CREATE UNIQUE INDEX samples_content ON samples(model_hash, sha256)
+  WHERE sha256 IS NOT NULL;
 
 CREATE TABLE node_timings (       -- for progress estimation
   workflow_hash TEXT NOT NULL, node_id TEXT NOT NULL,
@@ -706,7 +731,17 @@ same keyset cursor the gallery uses.
   with only one of the two is still not an empty plate. The setting is in
   `config.yaml` and on the Settings page, and it applies everywhere a model
   is pictured.
-- Each model has: thumbnail (as above), family, notes,
+- **Summary and notes are two different things.** The **summary** is one
+  or two sentences saying what the model *is* — "Painterly watercolour
+  washes for SDXL; strongest on landscapes" — short enough to read in a
+  listing, where it is shown beside the name, and capped at 300 characters
+  so it stays that way. The **notes** are annotations:
+  what was learned by using it — "above 0.9 it bleeds into faces; pair with
+  a low CFG" — open-ended and kept for whoever picks it up next. Both are
+  the owner's alone: an import never writes either, and both can be written
+  over the MCP bridge (`set_model_summary`, `set_model_notes`,
+  DESIGN-AGENT-LOOP §5.1) as well as on the model page.
+- Each model has: thumbnail (as above), family, summary, notes,
   tags, optional Civitai metadata (fetched by hash **only when the user
   clicks "Fetch info"**; never automatic). All of this lives in
   `models-meta/<hash>/` and the DB — nothing beside the safetensors.
@@ -766,8 +801,10 @@ same keyset cursor the gallery uses.
   everywhere a model is named: model page header and breadcrumb, Models grid
   cards, LoRA/checkpoint pickers, Gallery table MODELS chips, and viewer
   metadata model links. Unset, it falls back to the filename minus extension.
-  The **filename is immutable** and appears only on the model page metadata
-  line. Sidecars keep recording filename + hash, so renames never affect
+  The **filename is immutable** and appears on the model page metadata line,
+  and (amended) in Generate's LoRA picker on the small grey line under the
+  title, beside the outputs and last use — two LoRAs can share a title. The
+  workflow page's panel preview names them by title alone. Sidecars keep recording filename + hash, so renames never affect
   reproduction. Display names may collide; the hash is the identity.
 - A LoRA carries the ends of its own strength sliders, `strength_min` and
   `strength_max`, typed on its model page — only whoever trained or
@@ -777,7 +814,12 @@ same keyset cursor the gallery uses.
 - Model page = header (thumb, display name, family, size, full sha256, tags,
   notes, Civitai link, filename + folder with Copy path) + **Samples** strip +
   the standard gallery filtered to `output_models.model_hash = ?`. Header
-  fields are edit-in-place (blur commits, esc reverts).
+  fields are edit-in-place (blur commits, esc reverts). **Rescan** (amended)
+  sits at the right of the breadcrumb row, full size, on every model page —
+  hashed or not, file missing or not — and on the page for a model that
+  could not be loaded; it reloads that page once the rescan and its imports
+  are done. A component test holds it there: it was lost twice from a row
+  of small buttons only some models show.
 
 ### 8.2 Model switching
 Solved by construction: a workflow bakes in its checkpoint and its defaults.
@@ -796,6 +838,19 @@ Import paths:
   models that output used, checkpoint then LoRAs, multi-select; one sample
   is created per checked model (hardlink + sidecar copy).
 
+**One file, one sample** (amended). A sample's file is hashed (sha256) when it
+is written, and a model never has two samples of the same bytes, whichever
+way they arrived: an imported batch listing an image the model already has —
+under the same link or another one, in this batch or an earlier — skips it
+(or, told to overwrite samples, replaces it; DESIGN-MODEL-IMPORT §7.2); a file
+dropped again answers `200` with the sample it already is; promoting an
+output again gives back the samples it already made. Different models may
+each have the same picture. Samples written before this (migration 12) are
+hashed in the background at boot and before each ingest; two that turn out to
+be the same file of one model are merged into the earlier, and a thumbnail
+that was the later moves to it. The checksum is derived from the file, so it
+is not in the sidecar, and it is not on the API.
+
 Imported generation data (A1111-style infotext or Civitai `meta`) is **not
 mapped in v1**. It is parsed only enough to be stored as `raw` in the sample's
 sidecar (`params` empty, `workflow` null) and shown read-only on the sample so
@@ -803,6 +858,16 @@ the prompt/seed/settings are visible next to the image. Samples imported this
 way do not offer Edit in Generate; samples promoted from the app's own
 outputs carry a full sidecar and behave like any output. Mapping `raw` onto
 a workflow's params is a later phase.
+
+Where `raw` comes from: `forge models --download-samples` (Civitai's `meta`
+for each image, DESIGN-MODEL-IMPORT §5.3), and a file dropped on the model
+page whose own bytes carry settings (A1111 infotext, SwarmUI, ComfyUI, or one
+of this app's PNGs). The sample view on the API carries `raw: {format,
+fields}` — read from the sidecar, never from a column, so a sample imported
+before the parser improved is read with today's parser — and the sample
+viewer shows it beside the picture: prompt and negative with a copy button,
+the checkpoint and LoRAs (linked to their page here when the library has
+them, to Civitai otherwise), and the settings.
 
 ---
 
@@ -1252,6 +1317,11 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   restart the app), data dir (read-only, set by `--data-dir` / env var at
   launch) with storage counts, maintenance (reindex, sweep staging, sweep
   orphan inputs).
+- **Unload VRAM**, on the connection card, in both modes: `POST
+  /api/system/free_vram`, the same verb `forge mcp` calls after each round
+  (DESIGN-AGENT-LOOP §6.3), for freeing the card by hand — restarting an
+  LLM while ComfyUI still holds the last run's weights. ComfyUI unloads
+  after any job it is running; the next generation loads the models again.
 - **No save button**: editable fields write `config.yaml` on blur.
   `model_folders` is not editable via the UI or `PATCH /api/config`; it is
   read at launch and `extra_model_paths.yaml` is generated from it then.
@@ -1572,18 +1642,21 @@ DELETE /api/outputs/:id                 soft delete (sets deleted_at); file remo
 POST /api/outputs/:id/restore           undo within the window (clears deleted_at)
 POST /api/system/free_vram              ask ComfyUI to unload its models (`/free`); a verb, the caller decides when
 GET  /api/media/*                       serves outputs/inputs/samples
+GET  /api/media/*?max_edge=N             a smaller copy, whole frame, never enlarged (64 ≤ N ≤ 4096): a picture as JPEG,
+                                        a video as low-bitrate H.264 MP4 with its sound; audio is served as-is.
+                                        Made by ffmpeg per request, not cached; 503 when there is no ffmpeg (DESIGN-AGENT-LOOP §6.3)
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, last_used_at, added_at
+GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, sample_count, last_used_at, added_at
                                         tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
                                         sort: added (newest first, default) | oldest | name; added_at is the file's creation time, else its mtime
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by
                                         hashed and unhashed models together; an unhashed one has hash: null and is addressed by `path:<base64url of its path>`
 GET  /api/models/:hash
-PATCH /api/models/:hash                 display_name, family, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
+PATCH /api/models/:hash                 display_name, family, summary, notes, tags, hidden, strength_min, strength_max, thumb_sample_id ("Set as thumbnail"); 409 while the model is still unhashed
 POST /api/models/:hash/rescan           re-read this one file's header and hash, past both caches (§8.1); returns the model
-POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only
+POST /api/models/:hash/samples          upload or {civitai_url}; generation data stored as raw only; 200 with the existing sample for a file the model already has (§8.3)
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}

@@ -137,12 +137,11 @@ Deno.test("trigger words: the three shapes seen in the wild", () => {
   assertEquals(normalizeTriggerWords(["Cat", "cat", " CAT "]), ["Cat"]);
 });
 
-Deno.test("visibility: the parameter differs per endpoint (§4.0)", () => {
+Deno.test("visibility: everything, said differently per endpoint (§4.0)", () => {
   // /models rejects browsingLevel with a ZodError; nsfw is what widens it.
-  assertEquals(visibilityParams("models", 31), { nsfw: "true" });
-  assertEquals(visibilityParams("models", 1), {});
-  assertEquals(visibilityParams("images", 31), { browsingLevel: "31" });
-  assertEquals(visibilityParams("by-hash", 31), {});
+  assertEquals(visibilityParams("models"), { nsfw: "true" });
+  assertEquals(visibilityParams("images"), { browsingLevel: "31" });
+  assertEquals(visibilityParams("by-hash"), {});
 });
 
 Deno.test("cdn: the card transform becomes the original", () => {

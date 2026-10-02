@@ -827,6 +827,9 @@ export interface ModelRow {
   mtime: number;
   display_name: string | null;
   family: string | null;
+  /** One or two sentences: what this model is (§8.1). */
+  summary: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   tags: string[];
   thumb_path: string | null;
@@ -851,7 +854,7 @@ export interface ModelRow {
 const MODEL_COLUMNS = `hash, path, kind, size, mtime, display_name, family,
   notes, tags_json, thumb_path, strength_min, strength_max,
   trigger_words_json, civitai_json,
-  output_count, last_used_at, hidden, last_seen_at`;
+  output_count, last_used_at, hidden, last_seen_at, summary`;
 
 type ModelRecord = [
   string,
@@ -872,6 +875,7 @@ type ModelRecord = [
   number | null,
   number,
   number,
+  string | null,
 ];
 
 function toModel(record: ModelRecord): ModelRow {
@@ -894,6 +898,7 @@ function toModel(record: ModelRecord): ModelRow {
     last_used_at: record[15],
     hidden: record[16] !== 0,
     last_seen_at: record[17],
+    summary: record[18],
   };
 }
 
@@ -1032,6 +1037,7 @@ export function markModelSeen(db: Database, hash: string, at: number): void {
 export interface ModelMetaPatch {
   display_name?: string | null;
   family?: string | null;
+  summary?: string | null;
   notes?: string | null;
   tags?: string[];
   thumb_path?: string | null;
@@ -1059,6 +1065,10 @@ export function updateModelMeta(
   if (patch.family !== undefined) {
     sets.push("family = ?");
     values.push(patch.family);
+  }
+  if (patch.summary !== undefined) {
+    sets.push("summary = ?");
+    values.push(patch.summary);
   }
   if (patch.notes !== undefined) {
     sets.push("notes = ?");
@@ -1205,11 +1215,20 @@ function toSample(record: SampleRecord): SampleRow {
   };
 }
 
-export function insertSample(db: Database, sample: SampleRow): void {
+/**
+ * `sha256` is of the file, and kept out of `SampleRow`: it is how the store
+ * tells one sample from another, not something the API shows (§8.3).
+ */
+export function insertSample(
+  db: Database,
+  sample: SampleRow,
+  sha256: string | null = null,
+): void {
   db.prepare(
     `INSERT INTO samples (id, model_hash, path, sidecar_path, kind,
-                          source_url, source_json, params_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          source_url, source_json, params_json, created_at,
+                          sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     sample.id,
     sample.model_hash,
@@ -1220,7 +1239,40 @@ export function insertSample(db: Database, sample: SampleRow): void {
     sample.source === null ? null : JSON.stringify(sample.source),
     sample.params === null ? null : JSON.stringify(sample.params),
     sample.created_at,
+    sha256,
   );
+}
+
+/** The model's sample with exactly these bytes, if it has one (§8.3). */
+export function sampleIdByContent(
+  db: Database,
+  modelHash: string,
+  sha256: string,
+): string | null {
+  return db.prepare(
+    `SELECT id FROM samples WHERE model_hash = ? AND sha256 = ?`,
+  ).value<[string]>(modelHash, sha256)?.[0] ?? null;
+}
+
+/** Samples written before their files were hashed, oldest first. */
+export function samplesWithoutSha256(
+  db: Database,
+): { id: string; model_hash: string; path: string }[] {
+  return db.prepare(
+    `SELECT id, model_hash, path FROM samples WHERE sha256 IS NULL ORDER BY id`,
+  ).values<[string, string, string]>().map(([id, model_hash, path]) => ({
+    id,
+    model_hash,
+    path,
+  }));
+}
+
+export function setSampleSha256(
+  db: Database,
+  id: string,
+  sha256: string,
+): void {
+  db.prepare(`UPDATE samples SET sha256 = ? WHERE id = ?`).run(sha256, id);
 }
 
 /**
@@ -1236,6 +1288,17 @@ export function sampleSourceExists(
   return db.prepare(
     `SELECT 1 FROM samples WHERE model_hash = ? AND source_url = ?`,
   ).value<[number]>(modelHash, sourceUrl) !== undefined;
+}
+
+/** The samples a model already has from one source URL (§7.2). */
+export function sampleIdsBySource(
+  db: Database,
+  modelHash: string,
+  sourceUrl: string,
+): string[] {
+  return db.prepare(
+    `SELECT id FROM samples WHERE model_hash = ? AND source_url = ? ORDER BY id`,
+  ).values<[string]>(modelHash, sourceUrl).map(([id]) => id);
 }
 
 export function getSample(db: Database, id: string): SampleRow | null {
@@ -1275,6 +1338,14 @@ export function firstSamplePathByModel(db: Database): Map<string, string> {
     `SELECT model_hash, path FROM samples s
       WHERE s.id = (SELECT min(id) FROM samples WHERE model_hash = s.model_hash)`,
   ).values<[string, string]>();
+  return new Map(rows);
+}
+
+/** How many samples each model has, for the listings (§12). */
+export function sampleCountByModel(db: Database): Map<string, number> {
+  const rows = db.prepare(
+    `SELECT model_hash, count(*) FROM samples GROUP BY model_hash`,
+  ).values<[string, number]>();
   return new Map(rows);
 }
 

@@ -21,9 +21,14 @@
    * the workflow by default; "Show all" is one click and does not persist,
    * and already-added LoRAs stay listed, marked "added".
    *
-   * A LoRA is named here by the path it has under its folder — `krea/glow`,
-   * not `glow` — because a folder tree is how people file these, and the
-   * search box takes a regular expression so `krea.*glow` finds it.
+   * A LoRA is shown by its title, as every model is (§8.1). On Generate the
+   * picker also puts the path it has under its folder — `krea/glow`, not
+   * `glow` — on the grey line under the title, beside its outputs and when it
+   * was last used, because a folder tree is how people file these and two can
+   * share a title. The workflow page's preview leaves the file out
+   * (`showFiles`): there the list is only a picture of the panel. The search
+   * box matches both either way and takes a regular expression, so
+   * `krea.*glow` finds it.
    */
   interface Props {
     param: Param;
@@ -34,9 +39,19 @@
     onpicked?: () => void;
     /** The panel this picker's list covers, rather than hanging off the row. */
     fill?: HTMLElement | null;
+    /** Show each LoRA's file in the picker, beside its outputs (Generate). */
+    showFiles?: boolean;
   }
 
-  let { param, value, models, onchange, onpicked, fill = null }: Props = $props();
+  let {
+    param,
+    value,
+    models,
+    onchange,
+    onpicked,
+    fill = null,
+    showFiles = true,
+  }: Props = $props();
 
   let pickerOpen = $state(false);
   let showAll = $state(false);
@@ -86,6 +101,15 @@
     const model = models.find((entry) => entry.name === name);
     if (!model || model.family === "unset") return null;
     return model.family;
+  }
+
+  /**
+   * What a row is called on screen: the model's title, as everywhere else a
+   * model appears (§8.1). The row still holds — and the graph still gets —
+   * the path; a LoRA that has left the library has only that to show.
+   */
+  function titleOf(name: string): string {
+    return models.find((entry) => entry.name === name)?.display_name || name;
   }
 
   /** What the sliders on a row reach, from the model it names (§8.1). */
@@ -197,10 +221,10 @@
               navigate(pageOf(row.name)!);
             }}
           >
-            {row.name}
+            {titleOf(row.name)}
           </a>
         {:else}
-          <span class="name" title={row.name}>{row.name}</span>
+          <span class="name" title={row.name}>{titleOf(row.name)}</span>
         {/if}
         {#if familyOf(row.name)}
           <span class="badge accent">{familyOf(row.name)}</span>
@@ -368,13 +392,23 @@
               {/if}
             </span>
             <span class="option-text">
-              <span class="option-name" title={model.name}>{model.name}</span>
+              <span class="option-name" title={model.name}
+                >{model.display_name || model.name}</span
+              >
               <span class="option-line mono dim">
-                {model.output_count > 0
-                  ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
-                  : "no outputs"}
-                {#if model.last_used_at}· used {relativeTime(model.last_used_at)}{/if}
-                {#if model.hashing}· hashing{/if}
+                <span class="option-stats">
+                  {model.output_count > 0
+                    ? `${model.output_count} output${model.output_count === 1 ? "" : "s"}`
+                    : "no outputs"}
+                  {#if model.last_used_at}· used {relativeTime(model.last_used_at)}{/if}
+                  {#if model.hashing}· hashing{/if}
+                </span>
+                <!-- The file it is, beside the rest of the grey: what tells two
+                     LoRAs with one title apart, and what the search also
+                     matches. Last, so a long path is what gets cut. -->
+                {#if showFiles}
+                  <span class="option-file" title={model.name}>· {model.name}</span>
+                {/if}
               </span>
             </span>
             {#if added}
@@ -562,7 +596,22 @@
   }
 
   .option-line {
+    display: flex;
+    gap: 0.6ch;
+    min-width: 0;
     font-size: 10px;
+  }
+
+  .option-stats {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .option-file {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .added {

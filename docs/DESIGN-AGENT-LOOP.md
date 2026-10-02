@@ -3,8 +3,9 @@
 **Status:** part built. §5 — the bridge, `forge mcp` — is implemented and
 tested; the runbook is `MCP-BRIDGE.md`. §6.2 (`origin`) and §6.3's
 `free_vram` are built, and the gallery *filters* of §7 exist on the API
-though no screen offers them yet. Still proposals: §6.1 (the batch API),
-§6.3's `max_edge`, §6.4 (the manifest field) and the rest of §7. Until the
+though no screen offers them yet, and §6.3's `max_edge` is built for
+pictures and video both. Still proposals: §6.1 (the batch API), §6.4 (the
+manifest field) and the rest of §7. Until the
 batch API lands the bridge submits one job per call and watches `job` events
 rather than a `batch` event.
 **Touches:** DESIGN.md §4.6 (manifest), §6.2 (sidecar), §7 (schema), §11.2
@@ -124,7 +125,7 @@ described one drifts. This has one.
    │◀─ tool result: batch_id, counts, ids ──────┤                      │
    │  ── harness posts next completion ──       │                      │
    │                    │   llama-swap loads on demand ─▶ (resident)    │
-   ├─ get_output_image ▶│─ GET …/media?max_edge=768 ──────────────────▶│
+   ├─ get_output_preview▶│─ GET …/media?max_edge=768 ─────────────────▶│
    │◀─ image block ─────┤                       │                      │
    │  …critique, next generate()                │                      │
 ```
@@ -157,9 +158,13 @@ bindings; the protocol is identical either way.
 | `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
 | `list_checkpoints` | the diffusion class across every folder holding one, filterable by family | fast |
 | `list_loras` | LoRAs, filterable by family, each with its strength range (§8.1) | fast |
+| `set_model_summary` | writes a model's **summary** (DESIGN.md §8.1): one or two sentences, what it *is*; replaces | fast |
+| `set_model_notes` | writes a model's **notes** (§8.1): annotations, what was learned *using* it; read first, then add | fast |
+| `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first few | fast |
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
 | `get_output` | the sidecar: params, seed, models, timings, origin | fast |
-| `get_output_image` | an **image content block**, downscaled | fast |
+| `get_output_preview` | the convenient look: a picture as an **image block** or a video as a small MP4, downscaled to `max_edge` (768) | fast |
+| `get_output_file` | the file itself, byte for byte — image, audio or video block, or written to a path on the bridge's disk (`save_to`) | size of the file |
 | `attach_input` | an output, or a file on the bridge's disk, into the input store (§9) | fast |
 | `gpu_status` | what is resident, and how much VRAM is free | fast |
 | **`generate`** | the round: evict, submit the batch, wait, free, report | **minutes** |
@@ -172,7 +177,16 @@ ignores the prompt: a LoRA trained on SDXL does nothing to a Flux checkpoint,
 and the model has no way to see that from a name. Each returns a projection
 rather than the API's rows — `name` (what a param binds to; a display name
 passed to `generate` reaches ComfyUI and fails there), the display name, the
-family, the kind, tags, notes and the LoRA's strength range — because the
+family, the kind, tags, notes, the LoRA's strength range, and two counts —
+`sample_count`, pictures of what it does that `get_model_samples` will show,
+and `output_count`, what it has made here — plus, where `forge models` has
+fetched them, the trigger words and base model. The author's two write-ups,
+the Markdown the model page shows as **Description** (the version's notes)
+and **Overview** (the model's page), come back with `descriptions: true`
+and on `get_model_samples`, which is about one model anyway. They are where
+the recommended strength and the prompting advice usually are, and they are
+kilobytes each, so a listing of the whole shelf leaves them out and says
+`has_description` instead. All of this because the
 Models screen needs two dozen fields per model, this needs six, and the
 difference is the whole context window when a library holds three hundred
 LoRAs. Both also name the families the library knows, so a filter that
@@ -193,7 +207,7 @@ size beside it.
 
 Two things this deliberately is not. It is not a resize: the adopted file is
 hardlinked, so what the next graph loads is bit-for-bit what came out of the
-last one — `get_output_image`'s downscaled copy is for *looking*, never for
+last one — `get_output_preview`'s downscaled copy is for *looking*, never for
 chaining. And it is not implicit: `generate` does not adopt ids it finds in
 params, because a param that silently means two different things depending on
 what the string looks like is a worse trade than one extra call the model
@@ -262,7 +276,7 @@ In order, the bridge:
    it to — the model is unloaded until this call returns (§5.3).
 6. `POST /api/system/free_vram`.
 7. Returns ids, statuses and errors — **not images**. The model asks for the
-   pictures it wants with `get_output_image` once it is resident again, which
+   pictures it wants with `get_output_preview` once it is resident again, which
    keeps the context small and lets it choose.
 
 ### 5.3 Long calls: two different timeouts, and who is watching
@@ -479,12 +493,25 @@ one client.
   404, swallowed it, ComfyUI kept the weights, and the only symptom was
   llama-swap failing to start the model afterwards. The call is no longer
   silent about failing.
-- **`?max_edge=` on the media route** — serves a resized frame. Not a nicety:
+- **`?max_edge=` on the media route** — *built.* Serves a resized frame, and
+  for a video a resized clip. Not a nicety:
   vision tokens land in the same VRAM budget as the model, and a 1024² image
   costs several times a 768px one for no critique value. The existing
   `thumb_url` is not a substitute — tile thumbnails are square-cropped, and
   cropping out the composition is exactly wrong for a model being asked about
   composition. ffmpeg is already a dependency.
+
+  Video gets the same treatment because MCP has no video content type: a
+  clip travels as an embedded resource, base64 in a JSON-RPC message, and an
+  LTX take at full size is tens of megabytes of it. At 768px and CRF 30 the
+  same clip is a few hundred kilobytes — enough to judge motion and framing.
+  Audio has no edge and is served as it is. Pictures come back as JPEG, which
+  every vision runtime reads (llama.cpp's loader has no WebP).
+
+  Two tools rather than one, so the cheap one is the obvious one:
+  `get_output_preview` is the downscaled look, and `get_output_file` is the
+  output byte for byte — for a harness that wants to keep or forward a
+  result, with `save_to` for anything too big to inline.
 
 ### 6.4 `prompting` on the manifest — DESIGN.md §4.6 first
 

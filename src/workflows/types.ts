@@ -131,6 +131,14 @@ export interface ParamCommon {
   advanced?: boolean;
   /** Only applies while another param holds a given value (§4.3). */
   when?: ParamWhen;
+  /**
+   * Set on load and never written to disk: this param's `default` was read
+   * from the graph, because the manifest names none (§4.6). A save drops a
+   * default marked so, which is what keeps it the graph's — a manifest
+   * that came back with the graph's value written into it would win over
+   * every later edit of the loader.
+   */
+  default_from?: "graph";
 }
 
 export interface TextParam extends ParamCommon {
@@ -356,6 +364,12 @@ export interface Workflow {
   hasUserCopy: boolean;
   hasBundled: boolean;
   manifest: Manifest | null;
+  /**
+   * The manifest as written on disk, before the graph fills in the defaults
+   * it names none for (§4.6). What a user copy is compared with its bundled
+   * original by.
+   */
+  declared?: Manifest | null;
   /** Why the manifest was rejected; the workflow still lists, but cannot run. */
   error: string | null;
   apiGraph: ApiGraph;

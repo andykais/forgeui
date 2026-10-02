@@ -3,7 +3,9 @@ import {
   ManifestError,
   resolveDefaults,
   serializeManifest,
+  staleCopiedDefaults,
   validateManifest,
+  withoutGraphDefaults,
 } from "../../src/workflows/manifest.ts";
 import { canonicalJson, workflowHash } from "../../src/workflows/hash.ts";
 import type { ApiGraph } from "../../src/workflows/types.ts";
@@ -429,6 +431,123 @@ Deno.test("the graph supplies the defaults it already holds", () => {
   assertEquals(defaultOf("seed"), undefined);
   // An explicit default is the author saying the two differ on purpose.
   assertEquals(defaultOf("cfg"), 7);
+});
+
+/**
+ * §4.6's order: a value the job names, then a default somebody set in the
+ * manifest, then what the graph holds. Defaults the graph supplies are
+ * marked as the graph's, which is what lets a save tell them apart from
+ * chosen ones.
+ */
+Deno.test("a default set in the manifest outranks the graph, and is not marked", () => {
+  const graph: ApiGraph = {
+    "1": {
+      class_type: "CLIPLoader",
+      inputs: { clip_name: "qwen_3_600m.safetensors" },
+    },
+    "3": { class_type: "KSampler", inputs: { cfg: 4, steps: 20 } },
+    "9": { class_type: "SaveImage", inputs: { filename_prefix: "out" } },
+  };
+  const manifest = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [
+      // Chosen: wins over the graph, file or not.
+      {
+        key: "clip",
+        type: "model",
+        default: "qwen_3_06b_base.safetensors",
+        bind: "1.clip_name",
+      },
+      { key: "cfg", type: "float", default: 5, bind: "3.cfg" },
+      // Not chosen: the graph's, and says so.
+      { key: "steps", type: "int", bind: "3.steps" },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph });
+
+  const resolved = resolveDefaults(manifest, graph);
+  const of = (key: string) =>
+    resolved.params.find((param) => param.key === key) as {
+      default?: unknown;
+      default_from?: string;
+    };
+  assertEquals(of("clip").default, "qwen_3_06b_base.safetensors");
+  assertEquals(of("clip").default_from, undefined);
+  assertEquals(of("cfg").default, 5);
+  assertEquals(of("steps").default, 20);
+  assertEquals(of("steps").default_from, "graph");
+});
+
+Deno.test("a save drops the defaults the graph supplied, and keeps chosen ones", () => {
+  const body = withoutGraphDefaults({
+    id: "w",
+    params: [
+      {
+        key: "clip",
+        type: "model",
+        default: "a.safetensors",
+        default_from: "graph",
+      },
+      { key: "cfg", type: "float", default: 5 },
+      { key: "steps", type: "int" },
+    ],
+  }) as { params: Record<string, unknown>[] };
+  assertEquals(body.params, [
+    { key: "clip", type: "model" },
+    { key: "cfg", type: "float", default: 5 },
+    { key: "steps", type: "int" },
+  ]);
+});
+
+Deno.test("defaults an older save copied from the bundled graph are found", () => {
+  const bundledGraph: ApiGraph = {
+    "1": {
+      class_type: "CLIPLoader",
+      inputs: { clip_name: "qwen_3_06b_base.safetensors" },
+    },
+    "3": { class_type: "KSampler", inputs: { cfg: 4, steps: 20 } },
+    "9": { class_type: "SaveImage", inputs: { filename_prefix: "out" } },
+  };
+  const params = [
+    { key: "clip", type: "model", bind: "1.clip_name" },
+    { key: "cfg", type: "float", bind: "3.cfg" },
+    { key: "steps", type: "int", bind: "3.steps" },
+  ];
+  const bundled = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params,
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph: bundledGraph });
+
+  // The user copy: the encoder edited in ComfyUI, cfg chosen on purpose,
+  // steps copied by the save and never changed in the graph since.
+  const userGraph = structuredClone(bundledGraph);
+  userGraph["1"]!.inputs.clip_name = "qwen_3_600m.safetensors";
+  const user = validateManifest({
+    id: "w",
+    name: "W",
+    family: null,
+    kind: "image",
+    params: [
+      { ...params[0], default: "qwen_3_06b_base.safetensors" },
+      { ...params[1], default: 6 },
+      { ...params[2], default: 20 },
+    ],
+    outputs: [{ node: "9", kind: "image" }],
+  }, { graph: userGraph });
+
+  // Only the encoder: the bundled graph's value, with the graph since moved
+  // away from it. cfg was never the bundled graph's; steps still agrees.
+  assertEquals(
+    staleCopiedDefaults(user, userGraph, bundled, bundledGraph),
+    ["clip"],
+  );
 });
 
 Deno.test("a default the graph cannot supply is left alone", () => {

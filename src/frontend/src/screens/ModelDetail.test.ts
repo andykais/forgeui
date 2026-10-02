@@ -59,6 +59,8 @@ function detail(overrides: Partial<ModelDetailType> = {}): ModelDetailType {
     thumb_path: null,
     thumb_url: null,
     output_count: 0,
+    sample_count: 0,
+    summary: null,
     last_used_at: null,
     hashing: false,
     hash_error: null,
@@ -217,6 +219,48 @@ describe("the model page header", () => {
     expect(patchModel.mock.calls[1]?.[1]).toEqual({
       notes: "typed while the tag was saving",
     });
+  });
+
+  test("Rescan is in the page's top row whatever state the model is in", async () => {
+    // It has been lost twice from a row of small buttons that only some
+    // models show; this holds it where it is always drawn.
+    for (
+      const state of [
+        detail(),
+        detail({ hash: null, hashing: true }),
+        detail({ present: false }),
+        detail({ hidden: true }),
+      ]
+    ) {
+      model.mockResolvedValue(state);
+      const page = render(ModelDetail, { id: "a".repeat(64) });
+      await within(page.container).findByLabelText("Display name");
+      const rescan = within(page.container).getByRole("button", {
+        name: "Rescan",
+      });
+      expect(rescan.closest("nav.crumbs")).not.toBeNull();
+      page.unmount();
+    }
+  });
+
+  test("a model page that could not be loaded offers Rescan, and loads it once found", async () => {
+    model.mockRejectedValue(new Error("no model with that id"));
+    rescanModels.mockReset();
+    rescanModels.mockResolvedValue({ models: 1, queued: 0 });
+    const page = render(ModelDetail, { id: "a".repeat(64) });
+    await within(page.container).findByText("no model with that id");
+
+    // The import lands it: the rescan, then the page it was looking for.
+    model.mockResolvedValue(detail());
+    await fireEvent.click(
+      within(page.container).getByRole("button", { name: "Rescan" }),
+    );
+    expect(rescanModels).toHaveBeenCalledWith({ wait: true });
+    expect(
+      ((await within(page.container).findByLabelText(
+        "Display name",
+      )) as HTMLInputElement).value,
+    ).toBe("Film grain 35mm");
   });
 
   test("Rescan waits for the import, then reloads this page and no other", async () => {

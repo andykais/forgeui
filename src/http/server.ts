@@ -19,7 +19,8 @@ import {
   JobSubmitError,
 } from "../jobs/pipeline.ts";
 import { CursorError } from "../outputs/cursor.ts";
-import { MediaPathError } from "./media.ts";
+import { MediaParamError, MediaPathError } from "./media.ts";
+import { ResizeUnavailableError } from "../media/resize.ts";
 import { InputError, type InputStore } from "../inputs/store.ts";
 import { ImageProbeError } from "../inputs/probe.ts";
 import {
@@ -247,6 +248,10 @@ function handlerError(cause: unknown, req: Request): Response {
   if (cause instanceof WorkflowConflictError || cause instanceof LaunchError) {
     return error(409, "conflict", cause.message);
   }
+  if (cause instanceof ResizeUnavailableError) {
+    // The full-size file is still there; only the smaller copy is not.
+    return error(503, "unavailable", cause.message);
+  }
   if (cause instanceof ComfyOfflineError) {
     return error(503, "comfy_offline", cause.message);
   }
@@ -270,6 +275,7 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof ManifestError || cause instanceof ParamError ||
     cause instanceof RewriteError || cause instanceof JobRequestError ||
     cause instanceof CursorError || cause instanceof MediaPathError ||
+    cause instanceof MediaParamError ||
     cause instanceof SampleError || cause instanceof InputError ||
     cause instanceof ImageProbeError
   ) {

@@ -131,17 +131,12 @@ export function defaultConfig(): Config {
       dir: null,
       model_dir: null,
       civitai_url: DEFAULT_CIVITAI_URL,
-      // Ask broadly and file narrowly: a mature model is still identified,
-      // named and filed correctly while `nsfw_level` keeps its images off
-      // the disk (DESIGN-MODEL-IMPORT §8).
-      browsing_level: 31,
       archive_url: DEFAULT_ARCHIVE_URL,
       civitai_token: null,
       civitai_cli: "civitai",
       huggingface_url: "https://huggingface.co",
       huggingface_token: null,
       samples: 4,
-      nsfw_level: 1,
       ingest_on_boot: true,
     },
   };

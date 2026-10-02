@@ -29,6 +29,7 @@ import {
   type MediaSource,
   type ModelMetaPatch,
   normalizeModelHash,
+  sampleIdsBySource,
   sampleSourceExists,
   updateModelMeta,
 } from "../db/queries.ts";
@@ -48,6 +49,11 @@ export interface ImportBatch {
   created_at?: string;
   /** Replace fields the model already has, rather than only filling blanks. */
   overwrite?: boolean;
+  /**
+   * Replace a sample the model already has from the same source URL, rather
+   * than skipping it (`--overwrite` naming imported samples, §3.2).
+   */
+  overwrite_samples?: boolean;
   model: {
     sha256: string;
     filename?: string | null;
@@ -194,6 +200,9 @@ export class ImportInbox {
    */
   async apply(): Promise<IngestCounts> {
     const counts = emptyCounts();
+    // A sample from before samples were hashed must be hashed before a batch
+    // is checked against it, or its twin would get in (§8.3).
+    await this.#samples?.backfillContentHashes();
     const waiting: {
       hash: string;
       name: string;
@@ -411,12 +420,24 @@ export class ImportInbox {
     hash: string,
   ): Promise<void> {
     if (this.#samples === undefined) return;
-    for (const entry of batch.samples ?? []) {
+    // The batch's order is the order to show them in — the model's own
+    // showcase, then its gallery (§4.3) — and the strip lists newest first,
+    // so each one is dated a millisecond before the one ahead of it. The
+    // first is still imported first and so has the lowest id, which is what
+    // "its first sample" reads for the thumbnail.
+    const base = this.#now();
+    const written = new Set<string>();
+    for (const [index, entry] of (batch.samples ?? []).entries()) {
       const source = toMediaSource(entry.source, this.#now());
       const url = source?.url ?? null;
       // What makes re-running the CLI free: the same image is one sample,
-      // however many times it is fetched (§7.2).
-      if (url !== null && sampleSourceExists(this.#db, hash, url)) continue;
+      // however many times it is fetched (§7.2) — unless the batch was told
+      // to replace the model's samples, when the new copy takes its place.
+      let replaced: string[] = [];
+      if (url !== null && sampleSourceExists(this.#db, hash, url)) {
+        if (batch.overwrite_samples !== true) continue;
+        replaced = sampleIdsBySource(this.#db, hash, url);
+      }
 
       let bytes: Uint8Array;
       try {
@@ -431,14 +452,35 @@ export class ImportInbox {
         );
         continue;
       }
-      await this.#samples.import({
+      // The same file under another link — reposted, or listed twice — is
+      // still one sample (§8.3): skipped, or replaced like a link would be.
+      // Never one this batch has just written: that would only swap a
+      // batch's own copies.
+      const same = await this.#samples.duplicateOf(hash, bytes);
+      if (same !== null && !replaced.includes(same.id)) {
+        if (batch.overwrite_samples !== true || written.has(same.id)) continue;
+        replaced.push(same.id);
+      }
+      // Removed only once the new bytes are in hand. A thumbnail that was the
+      // old copy follows it to the new one rather than falling back.
+      const thumb = getModel(this.#db, hash)?.thumb_path ?? null;
+      let wasThumb = false;
+      for (const id of replaced) {
+        if ((await this.#samples.remove(id)).path === thumb) wasThumb = true;
+      }
+      const created = await this.#samples.import({
         modelHash: hash,
         bytes,
         filename: basename(entry.file),
         sourceUrl: url,
         source,
         raw: entry.raw ?? null,
+        createdAt: base - index,
       });
+      written.add(created.id);
+      if (wasThumb) {
+        updateModelMeta(this.#db, hash, { thumb_path: created.path });
+      }
     }
   }
 

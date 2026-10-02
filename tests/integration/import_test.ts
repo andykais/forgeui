@@ -38,8 +38,9 @@ async function modelFixtures(): Promise<Fixtures> {
   };
 }
 
-function samplePng(): Uint8Array {
-  return tinyPng({ width: 12, height: 8, color: [0x22, 0x88, 0xcc] });
+/** A distinct `n` is a distinct file: the same bytes are one sample (§8.3). */
+function samplePng(n = 0xcc): Uint8Array {
+  return tinyPng({ width: 12, height: 8, color: [0x22, 0x88, n] });
 }
 
 /** A batch as `forge models` would leave it, minus the fetching. */
@@ -201,6 +202,65 @@ Deno.test("a batch is applied to its model and kept as history", async () => {
   });
 });
 
+Deno.test("an imported sample's generation data is on the API", async () => {
+  // Saved by `forge models` as the sidecar's `raw`; served from there. The
+  // fields are read again from the blob they came from, so a sample fetched
+  // before the parser learned `civitaiResources` shows its LoRAs anyway.
+  await withImports(async ({ app, hash }) => {
+    await writeBatch(app.paths.imports, hash, {
+      samples: [{
+        file: "samples/0001.png",
+        kind: "image",
+        source: {
+          kind: "civitai",
+          label: "Civitai",
+          url: "https://civitai.com/images/94080991",
+        },
+        raw: {
+          format: "civitai-meta",
+          // What an older parser made of it: the prompt, and no LoRAs.
+          fields: { prompt: "a hiker" },
+          source: {
+            prompt: "a hiker",
+            seed: 746810293,
+            steps: 25,
+            cfgScale: 7,
+            clipSkip: 2,
+            sampler: "DPM++ 2M Karras",
+            civitaiResources: [
+              {
+                type: "checkpoint",
+                modelVersionId: 128713,
+                modelVersionName: "8",
+              },
+              {
+                type: "lora",
+                weight: 0.8,
+                modelVersionId: 1558543,
+                modelVersionName: "Abstract Painting",
+              },
+            ],
+          },
+        },
+      }],
+    }, { "samples/0001.png": samplePng() });
+    await app.models.rescan();
+    await app.models.idle();
+
+    const [sample] = (await app.json<ModelDetail>(`/api/models/${hash}`))
+      .samples;
+    assertEquals(sample!.raw?.format, "civitai-meta");
+    assertEquals(sample!.raw?.fields.seed, 746810293);
+    assertEquals(sample!.raw?.fields.clip_skip, 2);
+    assertEquals(sample!.raw?.fields.model_version_id, 128713);
+    assertEquals(sample!.raw?.fields.loras, [
+      { name: "Abstract Painting", model_version_id: 1558543, weight: 0.8 },
+    ]);
+    // The untouched blob stays in the sidecar; the API hands out the reading.
+    assertEquals("source" in sample!.raw!, false);
+  });
+});
+
 Deno.test("the API serves the text, and the HTML only when asked", async () => {
   await withImports(async ({ app, hash }) => {
     await writeBatch(app.paths.imports, hash);
@@ -251,6 +311,150 @@ Deno.test("re-ingesting the same batch imports no second sample", async () => {
       samples: (await app.json<ModelDetail>(`/api/models/${hash}`)).samples,
     }));
     assertEquals(samples.length, 1);
+  });
+});
+
+Deno.test("a batch's samples keep the batch's order", async () => {
+  // The CLI lists the model page's own media first, in the author's order;
+  // the model page shows them that way, and the first is its thumbnail.
+  await withImports(async ({ app, hash }) => {
+    const names = ["first", "second", "third"];
+    await writeBatch(
+      app.paths.imports,
+      hash,
+      {
+        samples: names.map((name) => ({
+          file: `samples/${name}.png`,
+          kind: "image",
+          source: {
+            kind: "civitai",
+            label: "Civitai",
+            url: `https://civitai.red/images/${name}`,
+          },
+        })),
+      },
+      Object.fromEntries(
+        names.map((name, i) => [`samples/${name}.png`, samplePng(i)]),
+      ),
+    );
+    await app.models.rescan();
+    await app.models.idle();
+    const model = await app.json<ModelDetail>(`/api/models/${hash}`);
+    assertEquals(
+      model.samples.map((sample) => sample.source?.url),
+      names.map((name) => `https://civitai.red/images/${name}`),
+    );
+  });
+});
+
+Deno.test("a batch told to overwrite samples replaces the ones from the same link", async () => {
+  // `--overwrite` naming imported samples (§3.2, §7.2): the same link is
+  // still one sample, but the new copy — new bytes, new generation data —
+  // takes the old one's place, and a thumbnail that was the old one follows.
+  await withImports(async ({ app, hash }) => {
+    const sample = (name: string, seed: number) => ({
+      file: `samples/${name}.png`,
+      kind: "image",
+      source: {
+        kind: "civitai",
+        label: "Civitai",
+        url: `https://civitai.red/images/${name}`,
+      },
+      raw: { format: "civitai-meta", source: { seed } },
+    });
+    const ingest = async (overrides: Partial<ImportBatch>) => {
+      await writeBatch(app.paths.imports, hash, overrides, {
+        "samples/a.png": samplePng(1),
+        "samples/b.png": samplePng(2),
+      });
+      await app.models.rescan();
+      await app.models.idle();
+      return await app.json<ModelDetail>(`/api/models/${hash}`);
+    };
+
+    const first = await ingest({ samples: [sample("a", 1), sample("b", 2)] });
+    const oldB = first.samples.find((s) => s.source?.url?.endsWith("/b"))!;
+    const patched = await app.fetch(`/api/models/${hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ thumb_sample_id: oldB.id }),
+    });
+    assertEquals(patched.status, 200);
+    await patched.body?.cancel();
+
+    // Without the flag, the same link is skipped: the seed stays 2.
+    const skipped = await ingest({ samples: [sample("b", 3)] });
+    assertEquals(skipped.samples.length, 2);
+    assertEquals(
+      skipped.samples.find((s) => s.id === oldB.id)?.raw?.fields.seed,
+      2,
+    );
+
+    const replaced = await ingest({
+      overwrite_samples: true,
+      samples: [sample("b", 9)],
+    });
+    assertEquals(replaced.samples.length, 2);
+    const newB = replaced.samples.find((s) => s.source?.url?.endsWith("/b"))!;
+    assert(newB.id !== oldB.id);
+    assertEquals(newB.raw?.fields.seed, 9);
+    // The untouched sample is untouched.
+    assertEquals(
+      replaced.samples.find((s) => s.source?.url?.endsWith("/a"))?.raw
+        ?.fields.seed,
+      1,
+    );
+    assertEquals(replaced.thumb_path, newB.path);
+  });
+});
+
+Deno.test("the same file under another link, imported later, is not a second sample", async () => {
+  // Civitai lists one image under two ids now and then, and a model's page
+  // and its gallery overlap: two links, one file, one sample (§8.3).
+  await withImports(async ({ app, hash }) => {
+    const entry = (file: string, url: string, seed: number) => ({
+      file,
+      kind: "image",
+      source: { kind: "civitai", label: "Civitai", url },
+      raw: { format: "civitai-meta", source: { seed } },
+    });
+    const ingest = async (overrides: Partial<ImportBatch>) => {
+      await writeBatch(app.paths.imports, hash, overrides, {
+        "samples/0001.png": samplePng(1),
+        "samples/0002.png": samplePng(1),
+      });
+      await app.models.rescan();
+      await app.models.idle();
+      return (await app.json<ModelDetail>(`/api/models/${hash}`)).samples;
+    };
+
+    // Twice in one batch: once.
+    let samples = await ingest({
+      samples: [
+        entry("samples/0001.png", "https://civitai.red/images/1", 1),
+        entry("samples/0002.png", "https://civitai.red/images/2", 2),
+      ],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/1",
+    ]);
+
+    // Again later, under a third link: still once, and still the first.
+    samples = await ingest({
+      samples: [entry("samples/0001.png", "https://civitai.red/images/3", 3)],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/1",
+    ]);
+
+    // Told to overwrite samples, the newer copy takes the old one's place.
+    samples = await ingest({
+      overwrite_samples: true,
+      samples: [entry("samples/0001.png", "https://civitai.red/images/4", 4)],
+    });
+    assertEquals(samples.map((s) => s.source?.url), [
+      "https://civitai.red/images/4",
+    ]);
+    assertEquals(samples[0]?.raw?.fields.seed, 4);
   });
 });
 
@@ -438,8 +642,8 @@ Deno.test("rescan-models says what it imported, for the toast", async () => {
     await writeBatch(app.paths.imports, hash, {
       samples: [sample(1), sample(2)],
     }, {
-      "samples/0001.png": samplePng(),
-      "samples/0002.png": samplePng(),
+      "samples/0001.png": samplePng(1),
+      "samples/0002.png": samplePng(2),
     });
     // A model this library has never seen: it waits, and is not counted.
     const stranger = "b".repeat(64);

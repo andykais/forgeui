@@ -39,6 +39,13 @@ export interface Param {
   advanced?: boolean;
   when?: ParamWhen;
   default?: unknown;
+  /**
+   * The server read this default from the graph because the manifest names
+   * none (§4.6). Sent back as it came, it is dropped on save, so the graph
+   * keeps deciding it — order: the job's own value, a default somebody set,
+   * then the graph.
+   */
+  default_from?: "graph";
   min?: number;
   max?: number;
   step?: number;
@@ -306,6 +313,20 @@ export function withoutMetadata(layout: Layout): Layout {
   return "wide";
 }
 
+/**
+ * The nearest arrangement that shows the inputs panel.
+ *
+ * The two media layouts are for watching, and Reuse parameters is the end
+ * of watching: it fills a panel that those two hide, so without this the
+ * button changed something off screen and appeared to do nothing. Each one
+ * keeps what it had — the metadata pane stays for `media-split`.
+ */
+export function withInputs(layout: Layout): Layout {
+  if (layout === "media-split") return "split";
+  if (layout === "media") return "wide";
+  return layout;
+}
+
 export interface Config {
   server: { host: string; port: number };
   comfy: {
@@ -350,6 +371,9 @@ export interface ModelEntry {
   mtime: number | null;
   /** When the file appeared here: what the newest-first sort reads (§8.1). */
   added_at: number | null;
+  /** One or two sentences: what this model is (§8.1). */
+  summary: string | null;
+  /** Annotations: what was learned using it (§8.1). */
   notes: string | null;
   tags: string[];
   /** The ends of this model's strength sliders; always a number (§8.1). */
@@ -369,6 +393,8 @@ export interface ModelEntry {
   thumb_path: string | null;
   thumb_url: string | null;
   output_count: number;
+  /** Samples on its page (§8.3). */
+  sample_count: number;
   last_used_at: number | null;
   /** True until the background hasher has read the file (§8.1). */
   hashing: boolean;
@@ -434,6 +460,38 @@ export interface Sample {
   media_url: string;
   /** Promoted from an output, so Reuse Parameters works on it (§8.3). */
   reusable: boolean;
+  /**
+   * What made it, when it came with that — Civitai's `meta` or the file's
+   * own settings, read-only (§8.3, DESIGN-MODEL-IMPORT §5.3).
+   */
+  raw: SampleRaw | null;
+}
+
+/** `src/media/infotext.ts`'s reading of a sample's generation data. */
+export interface SampleRaw {
+  format: string;
+  fields: {
+    prompt?: string;
+    negative_prompt?: string;
+    seed?: number;
+    steps?: number;
+    cfg?: number;
+    sampler?: string;
+    scheduler?: string;
+    denoise?: number;
+    width?: number;
+    height?: number;
+    model?: string;
+    model_hash?: string;
+    model_version_id?: number;
+    clip_skip?: number;
+    loras?: {
+      name: string;
+      weight?: number;
+      hash?: string;
+      model_version_id?: number;
+    }[];
+  };
 }
 
 /**

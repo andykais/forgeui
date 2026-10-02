@@ -44,6 +44,11 @@ export interface FakeCivitaiOptions {
   /** Answer downloads with this status instead, for the gated-model path. */
   downloadStatus?: number;
   /**
+   * The JSON a refused download answers with — real Civitai's
+   * `{"error":"Early Access","deadline":…,"message":…}` — instead of "no".
+   */
+  downloadRefusal?: Record<string, unknown>;
+  /**
    * Hugging Face repos, by `owner/repo`: the Hub's `/api/models/<repo>` body
    * (`id`, `pipeline_tag`, `cardData`, `siblings`, …) and the files in it.
    * A file with `sha256` is an LFS file; `text` or `bytes` is what `resolve`
@@ -143,7 +148,11 @@ export function startFakeCivitai(
     // has already followed by the time this answers.
     if (parts[0] === "api" && parts[1] === "download") {
       if (options.downloadStatus !== undefined) {
-        return new Response("no", { status: options.downloadStatus });
+        return options.downloadRefusal === undefined
+          ? new Response("no", { status: options.downloadStatus })
+          : Response.json(options.downloadRefusal, {
+            status: options.downloadStatus,
+          });
       }
       const file = options.download;
       if (file === undefined) return notFound();
@@ -183,7 +192,23 @@ export function startFakeCivitai(
       }
       if (parts[2] === "images") {
         const versionId = Number(url.searchParams.get("modelVersionId"));
-        return ok({ items: options.images?.[versionId] ?? [] });
+        // `username` narrows to one account's posts, as the real one does:
+        // asked for the creator, it is the version's own showcase.
+        const username = url.searchParams.get("username");
+        const items = (options.images?.[versionId] ?? []).filter((item) =>
+          username === null ||
+          (item as { username?: string }).username === username
+        );
+        // "Most Reactions" ranks by the reaction counts in `stats`, as the
+        // real one does; anything else keeps the listed order.
+        if (url.searchParams.get("sort") === "Most Reactions") {
+          const reactions = (item: unknown) =>
+            Object.values(
+              (item as { stats?: Record<string, number> }).stats ?? {},
+            ).reduce((sum, count) => sum + count, 0);
+          items.sort((a, b) => reactions(b) - reactions(a));
+        }
+        return ok({ items });
       }
     }
 
