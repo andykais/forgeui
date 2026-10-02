@@ -122,9 +122,20 @@ function ambiguous(filename: string, matches: Candidate[]): string {
     `or --sha256checksum:\n${matches.map(describeCandidate).join("\n")}`;
 }
 
+/**
+ * How far into the archive's gallery a top-up reads: fifty a page, so a
+ * `--download-samples` past 250 stops here rather than walking thousands.
+ */
+const ARCHIVE_GALLERY_PAGES = 5;
+
 export interface CivitaiClientOptions {
   civitaiUrl: string;
   archiveUrl: string;
+  /**
+   * The archive's galleries (§4.3): genur.art, its sister site, unless the
+   * tests point it at the fake. Absent, nothing is topped up from them.
+   */
+  archiveGalleryUrl?: string | null;
   timeoutMs: number;
   /**
    * A Civitai API key. Sent to Civitai and to nothing else — not the archive,
@@ -159,6 +170,7 @@ function asks(source: LookupSource, site: Exclude<LookupSource, "auto">) {
 export class CivitaiClient {
   #civitai: string;
   #archive: string;
+  #gallery: string | null;
   #timeoutMs: number;
   #fetch: typeof globalThis.fetch;
   #now: () => Date;
@@ -176,6 +188,7 @@ export class CivitaiClient {
   constructor(options: CivitaiClientOptions) {
     this.#civitai = options.civitaiUrl.replace(/\/+$/, "");
     this.#archive = options.archiveUrl.replace(/\/+$/, "");
+    this.#gallery = options.archiveGalleryUrl?.replace(/\/+$/, "") ?? null;
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
@@ -194,6 +207,10 @@ export class CivitaiClient {
 
   get archiveUrl(): string {
     return this.#archive;
+  }
+
+  get archiveGalleryUrl(): string | null {
+    return this.#gallery;
   }
 
   // ------------------------------------------------------------- lookups
@@ -846,6 +863,55 @@ export class CivitaiClient {
     );
     const items = (body as { items?: unknown[] })?.items;
     return Array.isArray(items) ? items as Record<string, unknown>[] : [];
+  }
+
+  /**
+   * Everyone's posts under a version, as the archive keeps them — what its
+   * model page shows as the "Model Gallery", from its sister site — best
+   * first: `sort=top` is the site's ranking by reactions. A page is fifty
+   * results whatever is asked, so pages are read until `limit` is reached.
+   * Mature posts are asked for like everything else (§4.3). Each row has an
+   * id, a card-sized URL and its type; the post itself has the rest.
+   */
+  async archiveGallery(
+    versionId: number,
+    limit: number,
+  ): Promise<Record<string, unknown>[]> {
+    if (this.#gallery === null) return [];
+    const out: Record<string, unknown>[] = [];
+    for (let page = 1; page <= ARCHIVE_GALLERY_PAGES; page++) {
+      const url = new URL("/api/search", `${this.#gallery}/`);
+      url.searchParams.set("model_version_id", String(versionId));
+      url.searchParams.set("sort", "top");
+      url.searchParams.set("is_nsfw", "true");
+      url.searchParams.set("page", String(page));
+      const body = await this.#json(url.toString()) as {
+        results?: unknown;
+        totalPages?: unknown;
+      } | null;
+      const rows = Array.isArray(body?.results)
+        ? body.results.filter((row): row is Record<string, unknown> =>
+          typeof row === "object" && row !== null
+        )
+        : [];
+      out.push(...rows);
+      const pages = typeof body?.totalPages === "number" ? body.totalPages : 1;
+      if (rows.length === 0 || out.length >= limit || page >= pages) break;
+    }
+    return out.slice(0, limit);
+  }
+
+  /**
+   * One post from the archive's gallery: the full-size URL, its dimensions,
+   * and the generation data as Civitai's `meta` had it. Null when the
+   * archive has no such post.
+   */
+  async archivePost(id: number): Promise<Record<string, unknown> | null> {
+    if (this.#gallery === null) return null;
+    const body = await this.#json(`${this.#gallery}/api/posts/${id}`);
+    return typeof body === "object" && body !== null && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
   }
 
   /** Sample bytes, straight off the CDN — public, and not the CLI's job. */

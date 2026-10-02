@@ -218,6 +218,7 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
     "model_dir",
     "civitai_url",
     "archive_url",
+    "archive_gallery_url",
     "civitai_token",
     "civitai_cli",
     "huggingface_url",
@@ -230,6 +231,7 @@ function validateImport(value: unknown, where: string): Partial<ImportConfig> {
   pick(raw, "model_dir", out, nullableStr, where);
   pick(raw, "civitai_url", out, str, where);
   pick(raw, "archive_url", out, str, where);
+  pick(raw, "archive_gallery_url", out, str, where);
   pick(raw, "civitai_token", out, token, where);
   pick(raw, "civitai_cli", out, nullableStr, where);
   pick(raw, "huggingface_url", out, str, where);

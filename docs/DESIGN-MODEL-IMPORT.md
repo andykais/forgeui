@@ -859,11 +859,30 @@ For each image:
    `config.yaml` that still names either key is refused as an unknown key,
    like any other; delete the line.
 
-The archive fallback carries image URLs, dimensions and a `has_metadata` flag
-but **not the metadata itself** — there is no image endpoint on it. A sample
-imported through the archive therefore arrives with its source link, its
-dimensions and whatever the file itself carries, and that is honest: the
-fields it cannot fill are absent rather than empty.
+**Through the archive** (*amended*), samples work the same way: the
+version's own images first, then its gallery to make up the count. The
+archive's version object carries image URLs, dimensions, a `has_metadata`
+flag and a link per image, but not the metadata itself. Its gallery and the
+metadata live on its sister site, `import.archive_gallery_url`
+(`https://genur.art`). The archive's own model page reads its "Model Gallery"
+from there, and so does this:
+
+- `GET /api/search?model_version_id=<v>&sort=top&is_nsfw=true&page=<p>` is
+  the gallery, best first by the site's own reaction ranking. A page is fifty
+  rows whatever is asked, so pages are read until the count is covered, five
+  at most. Each row has an id, a card-sized URL and a type.
+- `GET /api/posts/<id>` is one image: the full-size URL, the dimensions, and
+  `meta` in Civitai's format, which §6 parses as it does Civitai's.
+
+Every image the version object lists is a post there too (its `link` says
+so). So for each image actually downloaded, the showcase's included, its post
+is read for the full-size URL and the generation data. The archive's CDN
+names its sizes: `<uuid>_small.webp` is the card and `<uuid>_large.webp` the
+full-resolution image. Where a post is gone, the card's URL is upsized by name
+and the sample arrives with its link, its dimensions and whatever the file
+itself carries. The sample's link is the post's page on that site, which is
+where the archive's own gallery links. A version from Tensor.Art (§4.6) has
+no gallery there, so it gets only its showcase.
 
 `--download-samples` with no value is `import.samples` from `config.yaml`;
 absent entirely it is 0. Samples are *always* accompanied by the metadata
@@ -1618,6 +1637,11 @@ import:
   # The fallback, and the only source for models Civitai has deleted.
   archive_url: https://civitaiarchive.com
 
+  # The archive's galleries and per-image generation data, from its sister
+  # site: where --download-samples tops up a version found through the
+  # archive (§4.3). No token is ever sent here.
+  archive_gallery_url: https://genur.art
+
   # A Civitai API key from civitai.com/user/account. Needed only for gated,
   # early-access or paid models; everything public works without it. Sent as
   # a Bearer header to Civitai and nothing else — never the archive, never the
@@ -1788,9 +1812,10 @@ Everything the test suite already promises — no network, no GPU, hermetic.
   is the one test that keeps the two halves honest now they share a binary.
 
 **The CLI end to end** runs against a fake Civitai: a local HTTP server
-serving canned `model-versions/by-hash`, `models/<id>`, `images` and archive
-responses — `import.civitai_url` and `import.archive_url` point at it, which
-is the other reason those are config rather than constants — plus a stub
+serving canned `model-versions/by-hash`, `models/<id>`, `images`, the
+archive's gallery and posts, and archive responses — `import.civitai_url`,
+`import.archive_url` and `import.archive_gallery_url` point at it, which is
+the other reason those are config rather than constants — plus a stub
 `civitai` executable on `PATH` that writes a fixture file where a download
 would land. The same shape as `tests/fake-comfy/`, for the same reason.
 
