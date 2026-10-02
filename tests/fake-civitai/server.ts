@@ -27,6 +27,15 @@ export interface FakeCivitaiOptions {
   /** Query → the archive's `/api/search?q=` rows. */
   archiveSearch?: Record<string, unknown[]>;
   /**
+   * Version id → the archive gallery's `/api/search?model_version_id=` rows,
+   * best first, as genur.art answers: an id, a card-sized URL and a type.
+   */
+  archiveGallery?: Record<number, unknown[]>;
+  /** Rows per gallery page; the real one serves fifty, whatever is asked. */
+  archiveGalleryPageSize?: number;
+  /** Post id → the archive gallery's `/api/posts/<id>` body. */
+  archivePosts?: Record<number, unknown>;
+  /**
    * Tensor.Art model id → the model the archive's
    * `/tensorart/models/<id>/versions/<vid>` page embeds in `__NEXT_DATA__`.
    * A link without the version redirects to the model's own, as the real
@@ -246,6 +255,27 @@ export function startFakeCivitai(
     }
     if (parts[0] === "api" && parts[1] === "models" && parts[2] !== undefined) {
       const found = options.archiveModels?.[Number(parts[2])];
+      return found === undefined ? notFound() : ok(found);
+    }
+    // The archive's galleries, from its sister site: one fake plays it too.
+    if (
+      parts[0] === "api" && parts[1] === "search" &&
+      url.searchParams.has("model_version_id")
+    ) {
+      const rows = options.archiveGallery?.[
+        Number(url.searchParams.get("model_version_id"))
+      ] ?? [];
+      const size = options.archiveGalleryPageSize ?? 50;
+      const page = Math.max(Number(url.searchParams.get("page") ?? "1"), 1);
+      return ok({
+        results: rows.slice((page - 1) * size, page * size),
+        hits: rows.length,
+        page,
+        totalPages: Math.ceil(rows.length / size),
+      });
+    }
+    if (parts[0] === "api" && parts[1] === "posts" && parts[2] !== undefined) {
+      const found = options.archivePosts?.[Number(parts[2])];
       return found === undefined ? notFound() : ok(found);
     }
     if (parts[0] === "api" && parts[1] === "search") {
