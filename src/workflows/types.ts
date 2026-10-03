@@ -77,11 +77,11 @@ export const WORKFLOW_KINDS = ["image", "video", "audio"] as const;
 export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 
 /**
- * Known `category` values (§4.2). Both are routed on: `img2img` answers
- * "use this image in a workflow", and `upscale` is what the Upscale action
- * looks for in the output's own family (§10).
+ * Known `category` values (§4.2). `img2img` answers "use this image in a
+ * workflow", and is what the bundled Upscale templates fill (§4.8, §10);
+ * there is no `upscale` category any more.
  */
-export const WORKFLOW_CATEGORIES = ["img2img", "upscale"] as const;
+export const WORKFLOW_CATEGORIES = ["img2img"] as const;
 export type WorkflowCategory = typeof WORKFLOW_CATEGORIES[number];
 
 /**
