@@ -2,6 +2,10 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import X from "@lucide/svelte/icons/x";
+  import Popover from "../Popover.svelte";
+  import SaveTemplate from "../SaveTemplate.svelte";
   import { tick, untrack } from "svelte";
   import SeedParam from "./SeedParam.svelte";
   import SizeParam from "./SizeParam.svelte";
@@ -9,7 +13,7 @@
   import ModelParam from "./ModelParam.svelte";
   import AudioParam from "./AudioParam.svelte";
   import ImageParam from "./ImageParam.svelte";
-  import type { LoraRow, Manifest, ModelEntry, Param } from "../../types.ts";
+  import type { LoraRow, Manifest, ModelEntry, Param, Template } from "../../types.ts";
   import { applicableParams } from "../../lib/applies.ts";
 
   /**
@@ -46,6 +50,23 @@
      * preview names them by title alone.
      */
     loraFiles?: boolean;
+    /**
+     * The template the panel was filled from (§4.8): named above the inputs,
+     * with what it asks for. `ontemplateclear` lets it go.
+     */
+    template?: Template | null;
+    ontemplateclear?: () => void;
+    /**
+     * Save as template, offered when given: the workflow and its own
+     * manifest (not one a template has marked up), and where a saved one
+     * goes. Absent hides it — the workflow page's preview has no run to save.
+     */
+    saveTemplate?: {
+      workflow: string;
+      workflowName: string;
+      manifest: Manifest;
+      onsaved: (template: Template, how: "created" | "updated") => void;
+    } | null;
   }
 
   let {
@@ -58,6 +79,9 @@
     modelsOfClass = () => checkpoints,
     warnings = [],
     loraFiles = true,
+    template = null,
+    ontemplateclear,
+    saveTemplate = null,
     onchange,
     onreset,
     onedit,
@@ -70,6 +94,7 @@
   }: Props = $props();
 
   let advancedOpen = $state(false);
+  let savingTemplate = $state(false);
   let paramsEl = $state<HTMLDivElement | undefined>(undefined);
 
   /**
@@ -276,8 +301,70 @@
       Edit
     </button>
   {/if}
+  {#if saveTemplate}
+    <button
+      class="link"
+      title="Save these inputs as a template: which to keep, and which to ask for"
+      onclick={() => (savingTemplate = !savingTemplate)}
+    >
+      Save as template
+    </button>
+  {/if}
   <button class="link" onclick={onreset}>Reset to defaults</button>
 </div>
+
+{#if template}
+  <!--
+    Which template filled the panel, and what it still wants: those inputs
+    are marked required until filled (§4.8).
+  -->
+  <div class="from-template row">
+    <LayoutTemplate size={12} />
+    <span class="template-name">{template.name}</span>
+    {#if template.ask.length > 0}
+      <span class="dim">
+        asks for {template.ask
+          .map((key) => manifest.params.find((param) => param.key === key)?.label ?? key)
+          .join(", ")}
+      </span>
+    {/if}
+    <span class="spacer"></span>
+    {#if ontemplateclear}
+      <button
+        class="icon"
+        title="Stop using this template; the inputs stay as they are"
+        aria-label="Stop using the template"
+        onclick={ontemplateclear}
+      >
+        <X size={12} />
+      </button>
+    {/if}
+  </div>
+{/if}
+
+{#if saveTemplate}
+  <Popover
+    open={savingTemplate}
+    fill={pickerFill}
+    title="Save as template"
+    onclose={() => (savingTemplate = false)}
+  >
+    <SaveTemplate
+      workflow={saveTemplate.workflow}
+      workflowName={saveTemplate.workflowName}
+      manifest={saveTemplate.manifest}
+      {values}
+      {seedLocked}
+      from={template}
+      {loras}
+      onclose={() => (savingTemplate = false)}
+      onsaved={(saved, how) => {
+        savingTemplate = false;
+        saveTemplate?.onsaved(saved, how);
+      }}
+    />
+  </Popover>
+{/if}
 
 {#if warnings.length > 0}
   <p class="warning mono">
@@ -624,5 +711,30 @@
     background: var(--raised);
     color: var(--text-4);
     font-size: 11px;
+  }
+
+  .from-template {
+    gap: 6px;
+    font-size: 11px;
+    margin: 0 0 8px;
+    padding: 4px 8px;
+    border-radius: var(--radius-control);
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+
+  .from-template .template-name {
+    color: var(--text);
+  }
+
+  .from-template .icon {
+    display: flex;
+    background: transparent;
+    color: var(--text-4);
+    padding: 2px;
+  }
+
+  .from-template .icon:hover {
+    color: var(--text);
   }
 </style>

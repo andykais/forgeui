@@ -60,6 +60,13 @@ import { serveFrontend } from "./static.ts";
 import { systemRoutes } from "./routes/system.ts";
 import { telemetryRoutes } from "./routes/telemetry.ts";
 import { workflowRoutes } from "./routes/workflows.ts";
+import { templateRoutes } from "./routes/templates.ts";
+import {
+  TemplateConflictError,
+  TemplateError,
+  TemplateNotFoundError,
+  type TemplateStore,
+} from "../templates/store.ts";
 import type { WsHub } from "./ws.ts";
 
 export interface AppContext {
@@ -67,6 +74,7 @@ export interface AppContext {
   db: Database;
   paths: DataPaths;
   workflows: WorkflowStore;
+  templates: TemplateStore;
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
@@ -103,6 +111,7 @@ export function routeTable(ctx: AppContext): Route[] {
   return [
     ...configRoutes(ctx),
     ...workflowRoutes(ctx),
+    ...templateRoutes(ctx),
     ...jobRoutes(ctx),
     ...outputRoutes(ctx),
     ...modelRoutes(ctx),
@@ -230,7 +239,8 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof JobNotFoundError ||
     cause instanceof OutputNotFoundError ||
     cause instanceof ModelNotFoundError ||
-    cause instanceof SampleNotFoundError
+    cause instanceof SampleNotFoundError ||
+    cause instanceof TemplateNotFoundError
   ) {
     return error(404, "not_found", cause.message);
   }
@@ -245,7 +255,10 @@ function handlerError(cause: unknown, req: Request): Response {
     // The undo window closed and the bytes are gone (§11.2).
     return error(410, "gone", cause.message);
   }
-  if (cause instanceof WorkflowConflictError || cause instanceof LaunchError) {
+  if (
+    cause instanceof WorkflowConflictError || cause instanceof LaunchError ||
+    cause instanceof TemplateConflictError
+  ) {
     return error(409, "conflict", cause.message);
   }
   if (cause instanceof ResizeUnavailableError) {
@@ -277,7 +290,7 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof CursorError || cause instanceof MediaPathError ||
     cause instanceof MediaParamError ||
     cause instanceof SampleError || cause instanceof InputError ||
-    cause instanceof ImageProbeError
+    cause instanceof ImageProbeError || cause instanceof TemplateError
   ) {
     return error(400, "bad_request", cause.message);
   }

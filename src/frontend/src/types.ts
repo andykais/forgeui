@@ -95,6 +95,38 @@ export interface WorkflowSummary {
   has_ui_json: boolean;
 }
 
+/**
+ * A saved way to fill one workflow's panel (§4.8): the params it sets, the
+ * ones it asks for, and — by omission — the ones it leaves open.
+ */
+export interface Template {
+  id: string;
+  name: string;
+  description: string | null;
+  workflow: string;
+  workflow_name: string | null;
+  family: string | null;
+  /** What an action on an output finds it by; `upscale` is the only one. */
+  action: "upscale" | null;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: "bundled" | "user";
+  /** A user copy that shadows a bundled template of the same id. */
+  has_bundled: boolean;
+  /** What no longer fits: its workflow gone, a key it no longer has. */
+  problems: string[];
+}
+
+/** What a save sends; the server checks it against the workflow. */
+export interface TemplateBody {
+  name: string;
+  description?: string | null;
+  workflow?: string;
+  action?: Template["action"];
+  values: Record<string, unknown>;
+  ask: string[];
+}
+
 export interface ApiNode {
   class_type: string;
   inputs: Record<string, unknown>;

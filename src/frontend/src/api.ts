@@ -18,6 +18,8 @@ import type {
   TelemetryEntryPage,
   TelemetryReport,
   TelemetrySeries,
+  Template,
+  TemplateBody,
   WorkflowDetail,
   WorkflowSummary,
 } from "./types.ts";
@@ -92,6 +94,27 @@ export const api = {
       (body) => body.workflows,
     ),
   workflow: (id: string) => request<WorkflowDetail>(`/api/workflows/${id}`),
+
+  templates: () =>
+    request<{ templates: Template[] }>("/api/templates").then(
+      (body) => body.templates,
+    ),
+  template: (id: string) =>
+    request<Template>(`/api/templates/${encodeURIComponent(id)}`),
+  createTemplate: (body: TemplateBody) =>
+    request<Template>("/api/templates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  saveTemplate: (id: string, body: Partial<TemplateBody>) =>
+    request<Template>(`/api/templates/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteTemplate: (id: string) =>
+    request<null>(`/api/templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   workflowInputs: (id: string) =>
     request<{ inputs: LiteralInput[] }>(`/api/workflows/${id}/inputs`).then(
       (body) => body.inputs,

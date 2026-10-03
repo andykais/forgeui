@@ -4,6 +4,7 @@
   import Images from "@lucide/svelte/icons/images";
   import Brain from "@lucide/svelte/icons/brain";
   import Workflow from "@lucide/svelte/icons/workflow";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import Server from "@lucide/svelte/icons/server";
   import Activity from "@lucide/svelte/icons/activity";
   import Settings from "@lucide/svelte/icons/settings";
@@ -27,6 +28,12 @@
     { screen: "gallery", label: "Gallery", icon: Images, href: "/gallery" },
     { screen: "models", label: "Models", icon: Brain, href: "/models" },
     { screen: "workflows", label: "Workflows", icon: Workflow, href: "/workflows" },
+    {
+      screen: "templates",
+      label: "Templates",
+      icon: LayoutTemplate,
+      href: "/templates",
+    },
     { screen: "comfy", label: "ComfyUI", icon: Server, href: "/comfy" },
     { screen: "telemetry", label: "Telemetry", icon: Activity, href: "/telemetry" },
     { screen: "settings", label: "Settings", icon: Settings, href: "/settings" },
@@ -46,6 +53,7 @@
     if (current === item.screen) return true;
     if (item.screen === "models") return current === "model";
     if (item.screen === "workflows") return current === "workflow";
+    if (item.screen === "templates") return current === "template";
     return false;
   }
 </script>

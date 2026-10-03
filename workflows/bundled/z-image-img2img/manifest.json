@@ -1,17 +1,17 @@
 {
-  "id": "krea2-upscale",
-  "name": "Krea 2 Turbo (upscale)",
-  "family": "krea2",
+  "id": "z-image-img2img",
+  "name": "Z-Image Turbo (img2img)",
+  "family": "z-image",
   "kind": "image",
-  "category": "upscale",
-  "description": "Upscale an image with Krea 2 Turbo: the image is scaled up, then the last part of the model's own sampling schedule is re-run so it puts detail into what the scaler could only interpolate. Creativity is how much of that schedule to re-run.",
+  "category": "img2img",
+  "description": "Image to image with Z-Image Turbo: the image is scaled by Scale, then the last part of the model's own sampling schedule is re-run over it. Creativity is how much of that schedule to re-run — low keeps the picture and sharpens it, high redraws it. Upscale is a template on this workflow (scale 2, creativity 0.2).",
   "params": [
     {
       "key": "image",
       "label": "Image",
       "type": "image",
       "required": true,
-      "bind": "6.image"
+      "bind": "25.image"
     },
     {
       "key": "creativity",
@@ -20,9 +20,9 @@
       "min": 0,
       "max": 1,
       "step": 0.05,
-      "default": 0.2,
-      "description": "How much of the model's schedule to re-run, and so how far it may stray from the original. 0.2 sharpens; higher redraws, and starts inventing detail that was never there.",
-      "bind": "13.denoise"
+      "default": 0.5,
+      "description": "How much of the model's schedule to re-run, and so how far it may stray from the original. Around 0.2 keeps the picture and sharpens it, as an upscale wants; 0.5 reworks it; near 1 barely looks at it.",
+      "bind": "31.denoise"
     },
     {
       "key": "scale",
@@ -31,40 +31,41 @@
       "min": 1,
       "max": 4,
       "step": 0.25,
-      "default": 2,
-      "description": "How many times larger than the source.",
-      "bind": "7.scale_by"
+      "default": 1,
+      "description": "How many times larger than the source: 1 keeps its size, 2 is an upscale.",
+      "bind": "26.scale_by"
     },
     {
       "key": "prompt",
       "label": "Prompt",
       "type": "text",
       "description": "What the picture is. Leave it empty to let the image speak for itself.",
-      "bind": "4.text"
+      "bind": "20.text"
     },
     {
       "key": "seed",
       "label": "Seed",
       "type": "seed",
       "default": -1,
-      "bind": "15.noise_seed"
+      "bind": "33.noise_seed"
     },
     {
       "key": "loras",
       "label": "LoRAs",
       "type": "lora_list",
       "filter": {
-        "family": "krea2"
+        "family": "z-image"
       },
       "bind": {
         "chain": {
           "model_from": "1.MODEL",
-          "clip_from": null,
+          "clip_from": "2.CLIP",
           "model_to": [
-            "16.model",
-            "12.model"
+            "4.model"
           ],
-          "clip_to": null
+          "clip_to": [
+            "20.clip"
+          ]
         }
       }
     },
@@ -77,9 +78,9 @@
       "description": "Scale with a trained upscale model (ESRGAN and friends) instead of a pixel filter. It hands the sampler real edges to work from rather than a blur, so less of the result is invented.",
       "bind": {
         "switch": {
-          "input": "11.pixels",
-          "on": "10.IMAGE",
-          "off": "7.IMAGE"
+          "input": "22.pixels",
+          "on": "29.IMAGE",
+          "off": "26.IMAGE"
         }
       }
     },
@@ -91,8 +92,8 @@
         "class": "upscale"
       },
       "advanced": true,
-      "bind": "8.model_name",
-      "description": "Which upscale model to scale with. Pick one before turning \"Use an upscale model\" on; it needs a file in `upscale_models/`."
+      "description": "Which upscale model to scale with. Pick one before turning \"Use an upscale model\" on; it needs a file in `upscale_models/`.",
+      "bind": "27.model_name"
     },
     {
       "key": "model_scale",
@@ -104,17 +105,17 @@
       "default": 0.5,
       "advanced": true,
       "description": "An upscale model scales by the factor it was trained at, usually 4×. This brings that back to the Scale you asked for: 0.5 turns a 4× model into a 2× upscale.",
-      "bind": "10.scale_by"
+      "bind": "29.scale_by"
     },
     {
       "key": "steps",
       "label": "Steps",
       "type": "int",
       "min": 1,
-      "max": 50,
+      "max": 100,
       "advanced": true,
       "description": "The model's full schedule, of which Creativity re-runs the tail. Raise it to give a low creativity more real steps to work in.",
-      "bind": "12.steps"
+      "bind": "30.steps"
     },
     {
       "key": "cfg",
@@ -124,7 +125,7 @@
       "max": 20,
       "step": 0.1,
       "advanced": true,
-      "bind": "16.cfg"
+      "bind": "34.cfg"
     },
     {
       "key": "sampler",
@@ -139,7 +140,7 @@
         "res_multistep"
       ],
       "advanced": true,
-      "bind": "14.sampler_name"
+      "bind": "32.sampler_name"
     },
     {
       "key": "scheduler",
@@ -154,7 +155,17 @@
         "beta"
       ],
       "advanced": true,
-      "bind": "12.scheduler"
+      "bind": "30.scheduler"
+    },
+    {
+      "key": "shift",
+      "label": "Shift",
+      "type": "float",
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "4.shift"
     },
     {
       "key": "upscale_method",
@@ -168,7 +179,7 @@
         "lanczos"
       ],
       "advanced": true,
-      "bind": "7.upscale_method"
+      "bind": "26.upscale_method"
     },
     {
       "key": "clip",
@@ -190,7 +201,7 @@
       "type": "model",
       "filter": {
         "class": "diffusion",
-        "family": "krea2"
+        "family": "z-image"
       },
       "advanced": true,
       "bind": "1.unet_name"
@@ -198,7 +209,7 @@
   ],
   "outputs": [
     {
-      "node": "19",
+      "node": "37",
       "kind": "image"
     }
   ]
