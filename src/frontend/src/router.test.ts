@@ -24,6 +24,14 @@ describe("the router", () => {
       screen: "workflow",
       id: "krea2",
     });
+    expect(parseRoute("/templates", "")).toMatchObject({
+      screen: "templates",
+      id: null,
+    });
+    expect(parseRoute("/templates/krea2-upscale", "")).toMatchObject({
+      screen: "template",
+      id: "krea2-upscale",
+    });
     expect(parseRoute("/", "")).toMatchObject({ screen: "generate" });
   });
 

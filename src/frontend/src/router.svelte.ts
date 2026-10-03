@@ -9,6 +9,8 @@ export type ScreenName =
   | "model"
   | "workflows"
   | "workflow"
+  | "templates"
+  | "template"
   | "comfy"
   | "telemetry"
   | "settings";
@@ -49,6 +51,11 @@ export function parseRoute(path: string, search: string): Route {
     return second
       ? { screen: "workflow", id: second, path, query }
       : { screen: "workflows", id: null, path, query };
+  }
+  if (first === "templates") {
+    return second
+      ? { screen: "template", id: second, path, query }
+      : { screen: "templates", id: null, path, query };
   }
   if (first === "comfy") return { screen: "comfy", id: null, path, query };
   if (first === "telemetry") {

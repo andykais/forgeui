@@ -11,7 +11,7 @@
   import { dayLabel, localDate } from "../lib/format.ts";
   import { byModel } from "../lib/models.ts";
   import { afterRemoval } from "../lib/neighbour.ts";
-  import type { Output, TileSize } from "../types.ts";
+  import type { Output, Template, TileSize } from "../types.ts";
   import Tile from "../components/Tile.svelte";
   import MediaTable from "../components/MediaTable.svelte";
   import { untrack } from "svelte";
@@ -196,22 +196,25 @@
   }
 
   /**
-   * One click to an upscale (§10): the output becomes the workflow's image
-   * and the run that made it fills the rest. The numbers that make it an
-   * upscale — creativity 0.4, scale 2 — are the workflow's own defaults, so
-   * there is nothing to preset and everything to adjust before generating.
+   * One click to an upscale (§4.8, §10): the template's workflow, the output
+   * as its image, the run that made it under the rest, and the template's
+   * own numbers — scale 2, creativity 0.2 for the bundled one — on top,
+   * there to be adjusted before generating.
    */
-  async function upscale(output: Output, workflowId: string) {
+  async function upscale(output: Output, template: Template) {
     const detail = await api.output(output.id);
     try {
-      await panel.upscale(workflowId, output, detail.sidecar?.params ?? output.params);
+      await panel.applyTemplate(template, {
+        output,
+        sourceParams: detail.sidecar?.params ?? output.params,
+      });
     } catch (cause) {
       toasts.message(
         `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
       );
       return;
     }
-    navigate(`/generate?workflow=${workflowId}`);
+    navigate(`/generate?workflow=${template.workflow}`);
   }
 
   async function rerun(output: Output) {

@@ -9,6 +9,7 @@ import {
   type ModelEntry,
   type Output,
   type RescanProgress,
+  type Template,
   type TileSize,
   type UiScreen,
   type WorkflowSummary,
@@ -38,6 +39,8 @@ class AppState {
    */
   startedAt = $state<number>(0);
   workflows = $state<WorkflowSummary[]>([]);
+  /** Every template (§4.8); the Upscale action reads it. */
+  templates = $state<Template[]>([]);
   loras = $state<ModelEntry[]>([]);
   /** Everything that can drive a generation, from every diffusion folder. */
   checkpoints = $state<ModelEntry[]>([]);
@@ -108,23 +111,27 @@ class AppState {
   }
 
   /**
-   * The upscale workflows that could take this output (§10): same family,
-   * `category: upscale`, and images only — an upscale of a video is not what
-   * any of these graphs do.
+   * The Upscale templates that could take this output (§4.8, §10): an
+   * `action: "upscale"` template whose workflow is in the output's own
+   * family, can run, and still fits it — and images only, since none of
+   * these graphs take a video.
    *
    * A list rather than one answer, because a user may keep several: the
-   * caller runs the only match outright and offers a choice when there are
-   * more.
+   * caller applies the only match outright and offers a choice when there
+   * are more.
    */
-  upscalersFor(
+  upscaleTemplatesFor(
     output: { family: string | null; kind: string } | null,
-  ): WorkflowSummary[] {
-    if (!output || output.kind !== "image") return [];
-    return this.workflows.filter(
-      (workflow) =>
-        workflow.category === "upscale" &&
-        workflow.family === output.family &&
-        workflow.runnable,
+  ): Template[] {
+    if (!output || output.kind !== "image" || output.family === null) {
+      return [];
+    }
+    return this.templates.filter(
+      (template) =>
+        template.action === "upscale" &&
+        template.family === output.family &&
+        template.problems.length === 0 &&
+        this.workflow(template.workflow)?.runnable === true,
     );
   }
 
@@ -139,10 +146,13 @@ class AppState {
 
   async load(): Promise<void> {
     try {
-      const [config, status, workflows, jobs, outputs] = await Promise.all([
+      const [config, status, workflows, templates, jobs, outputs] = await Promise
+        .all([
         api.config(),
         api.systemStatus(),
         api.workflows(),
+        // A failure here costs the Upscale button, not the app.
+        api.templates().catch(() => []),
         // A session's worth, because the results grid is now scoped to the
         // session and its count is shown beside the time it began (§11.2):
         // forty would have made a busy session read as forty jobs for ever.
@@ -154,6 +164,7 @@ class AppState {
       this.dataDir = status.data_dir;
       this.startedAt = status.started_at ?? 0;
       this.workflows = workflows;
+      this.templates = templates;
       this.jobs = jobs;
       this.outputs = Object.fromEntries(
         outputs.outputs.map((output) => [output.id, output]),
@@ -296,6 +307,11 @@ class AppState {
     const model = this.model(hash);
     if (model) return model.display_name;
     return hash ? `${hash.slice(0, 8)}…` : "unknown";
+  }
+
+  /** After a template is saved or deleted anywhere in this tab (§4.8). */
+  async refreshTemplates(): Promise<void> {
+    this.templates = await api.templates();
   }
 
   async refreshWorkflows(): Promise<void> {

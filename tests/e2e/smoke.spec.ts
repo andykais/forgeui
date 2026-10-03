@@ -91,7 +91,7 @@ test("the workflows screen lists the bundled workflows", async ({ page }) => {
   for (
     const name of [
       "Krea 2 Turbo",
-      "Krea 2 Turbo (upscale)",
+      "Krea 2 Turbo (img2img)",
       "Illustrious XL",
       "Anima",
       "Flux.2 Klein",

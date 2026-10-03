@@ -11,7 +11,7 @@
   import { clockTime, relativeTime } from "../lib/format.ts";
   import { afterRemoval } from "../lib/neighbour.ts";
   import { queuePosition } from "../lib/queue.ts";
-  import type { Output, TileSize } from "../types.ts";
+  import type { Output, Template, TileSize } from "../types.ts";
   import { withoutMetadata } from "../types.ts";
   import LayoutPicker from "../components/LayoutPicker.svelte";
   import ParamPanel from "../components/params/ParamPanel.svelte";
@@ -189,22 +189,37 @@
   }
 
   /**
-   * One click to an upscale (§10): the output becomes the workflow's image
-   * and the run that made it fills the rest. The numbers that make it an
-   * upscale — creativity 0.4, scale 2 — are the workflow's own defaults, so
-   * there is nothing to preset and everything to adjust before generating.
+   * One click to an upscale (§4.8, §10): the template's workflow, the output
+   * as its image, the run that made it under the rest, and the template's
+   * own numbers — scale 2, creativity 0.2 for the bundled one — on top,
+   * there to be adjusted before generating.
    */
-  async function upscale(output: Output, workflowId: string) {
+  async function upscale(output: Output, template: Template) {
     const detail = await api.output(output.id);
     try {
-      await panel.upscale(workflowId, output, detail.sidecar?.params ?? output.params);
+      await panel.applyTemplate(template, {
+        output,
+        sourceParams: detail.sidecar?.params ?? output.params,
+      });
     } catch (cause) {
       toasts.message(
         `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
       );
       return;
     }
-    setQuery({ workflow: workflowId });
+    setQuery({ workflow: template.workflow });
+  }
+
+  /**
+   * A template saved from the panel (§4.8) is the one the panel now follows:
+   * what it asks for is required from here on, as if it had been applied.
+   */
+  async function templateSaved(template: Template, how: "created" | "updated") {
+    panel.template = template;
+    toasts.message(
+      `${how === "created" ? "Saved" : "Updated"} template “${template.name}”`,
+    );
+    await app.refreshTemplates().catch(() => {});
   }
 
   async function rerun(output: Output) {
@@ -419,6 +434,16 @@
         checkpoints={app.checkpoints}
         modelsOfClass={(c) => app.modelsOfClass(c)}
         warnings={panel.warnings}
+        template={panel.template}
+        ontemplateclear={() => (panel.template = null)}
+        saveTemplate={panel.workflowId && panel.workflowManifest
+          ? {
+              workflow: panel.workflowId,
+              workflowName: selectedWorkflow?.name ?? panel.workflowId,
+              manifest: panel.workflowManifest,
+              onsaved: templateSaved,
+            }
+          : null}
         onedit={selectedWorkflow ? editWorkflow : undefined}
         onsubmit={generate}
         onchange={(key, value) => panel.set(key, value)}
