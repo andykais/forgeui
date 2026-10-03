@@ -12,6 +12,9 @@ export interface DataPaths {
   workflows: string;
   bundledWorkflows: string;
   userWorkflows: string;
+  /** Saved ways to fill a workflow's panel (§4.8), as workflows are kept. */
+  bundledTemplates: string;
+  userTemplates: string;
   outputs: string;
   inputs: string;
   samples: string;
@@ -56,6 +59,8 @@ export function dataPaths(
     workflows: join(abs, "workflows"),
     bundledWorkflows: join(abs, "workflows", "bundled"),
     userWorkflows: join(abs, "workflows", "user"),
+    bundledTemplates: join(abs, "templates", "bundled"),
+    userTemplates: join(abs, "templates", "user"),
     outputs: join(abs, "outputs"),
     inputs: join(abs, "inputs"),
     samples: join(abs, "samples"),
@@ -73,6 +78,8 @@ export async function ensureDataDirs(paths: DataPaths): Promise<void> {
       paths.root,
       paths.bundledWorkflows,
       paths.userWorkflows,
+      paths.bundledTemplates,
+      paths.userTemplates,
       paths.outputs,
       paths.inputs,
       paths.samples,

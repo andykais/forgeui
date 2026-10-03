@@ -97,6 +97,8 @@ Deno.test("first run creates the whole data directory layout", async () => {
       const path of [
         paths.bundledWorkflows,
         paths.userWorkflows,
+        paths.bundledTemplates,
+        paths.userTemplates,
         paths.outputs,
         paths.inputs,
         paths.samples,

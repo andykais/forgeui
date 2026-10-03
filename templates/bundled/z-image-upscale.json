@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "z-image-upscale",
+  "name": "Upscale 2×",
+  "description": "Twice the size, with a light pass of new detail: scale 2, creativity 0.2. Prompt, seed and LoRAs come from the picture being upscaled.",
+  "workflow": "z-image-img2img",
+  "action": "upscale",
+  "values": {
+    "scale": 2,
+    "creativity": 0.2
+  },
+  "ask": [
+    "image"
+  ]
+}
