@@ -1,7 +1,14 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import type { Job, Layout, Output, OutputDetail, UiScreen } from "../types.ts";
+  import type {
+    Job,
+    Layout,
+    Output,
+    OutputDetail,
+    Template,
+    UiScreen,
+  } from "../types.ts";
   import { hasMetadata } from "../types.ts";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
@@ -38,8 +45,8 @@
     onedit: (output: Output) => void;
     onrerun: (output: Output) => void;
     ondelete: (output: Output) => void;
-    /** Upscale this output with the named workflow (§10). */
-    onupscale?: (output: Output, workflowId: string) => void;
+    /** Upscale this output with the named template (§4.8, §10). */
+    onupscale?: (output: Output, template: Template) => void;
     /** Open another output by id — a lineage node (§11.2). */
     onopenoutput?: (id: string) => void;
     onfollow?: () => void;
@@ -293,7 +300,7 @@
         onrerun={() => onrerun(selected)}
         ondelete={() => ondelete(selected)}
         onupscale={onupscale
-          ? (workflowId) => onupscale(selected, workflowId)
+          ? (template) => onupscale(selected, template)
           : undefined}
         onopen={onopenoutput}
       />

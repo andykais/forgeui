@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { Layout, LoraRow, Manifest, WorkflowDetail } from "../types.ts";
+import type {
+  Layout,
+  LoraRow,
+  Manifest,
+  Template,
+  WorkflowDetail,
+} from "../types.ts";
 
 /**
  * Putting a LoRA from a finished run into the panel (§11.2). The number that
@@ -127,50 +133,74 @@ describe("adding a LoRA to the panel", () => {
 });
 
 /**
- * Upscale (§10) is `editWith` with the picture attached, so what it has to
- * get right is which values come across and which do not.
+ * Upscale (§4.8, §10) is a template applied with the picture attached, so
+ * what it has to get right is which values come from where: the template's
+ * own over the source run's, over the workflow's defaults.
  */
 const upscaleManifest = {
   id: "up",
-  name: "Krea 2 Turbo (upscale)",
+  name: "Krea 2 Turbo (img2img)",
   family: "krea2",
   kind: "image",
-  category: "upscale",
+  category: "img2img",
   description: null,
   params: [
     { key: "image", type: "image", required: true, bind: "6.image" },
-    { key: "creativity", type: "float", default: 0.4, bind: "9.denoise" },
-    { key: "scale", type: "float", default: 2, bind: "7.scale_by" },
+    { key: "creativity", type: "float", default: 0.5, bind: "9.denoise" },
+    { key: "scale", type: "float", default: 1, bind: "7.scale_by" },
     { key: "prompt", type: "text", bind: "4.text" },
     { key: "seed", type: "seed", default: -1, bind: "9.seed" },
   ],
   outputs: [{ node: "11", kind: "image" }],
 } as unknown as Manifest;
 
+function template(patch: Partial<Template> = {}): Template {
+  return {
+    id: "krea2-upscale",
+    name: "Upscale 2×",
+    description: null,
+    workflow: "up",
+    workflow_name: "Krea 2 Turbo (img2img)",
+    family: "krea2",
+    action: "upscale",
+    values: { scale: 2, creativity: 0.2 },
+    ask: ["image"],
+    source: "bundled",
+    has_bundled: false,
+    problems: [],
+    ...patch,
+  };
+}
+
 describe("upscaling an output", () => {
-  test("the picture is attached and the run that made it fills the rest", async () => {
-    await panel.upscale("up", { id: "01JOUT" }, {
-      prompt: "a granite bowl of figs",
-      seed: 42,
-      // The source's own knobs, which this workflow does not have: an
-      // upscale takes its size from the picture (§10).
-      size: [1024, 1024],
-      enhance: true,
+  test("the picture is attached, the run fills the rest, the template's numbers win", async () => {
+    await panel.applyTemplate(template(), {
+      output: { id: "01JOUT" },
+      sourceParams: {
+        prompt: "a granite bowl of figs",
+        seed: 42,
+        // The source's own creativity, if it had one, is not the upscale's.
+        creativity: 0.9,
+        // The source's own knobs, which this workflow does not have: it
+        // takes its size from the picture (§10).
+        size: [1024, 1024],
+        enhance: true,
+      },
     });
 
     expect(fakeApi.adoptOutput).toHaveBeenCalledWith("01JOUT");
     expect(panel.values.image).toBe(`${"a".repeat(64)}.png`);
     expect(panel.values.prompt).toBe("a granite bowl of figs");
     expect(panel.values.seed).toBe(42);
-    // From the workflow, not from the source: this is what makes it one
-    // click rather than a preset applied on the way in.
-    expect(panel.values.creativity).toBe(0.4);
+    // From the template: what makes an img2img run an upscale.
+    expect(panel.values.creativity).toBe(0.2);
     expect(panel.values.scale).toBe(2);
     // And nothing is said about the keys this workflow never had. That
     // warning is for a workflow that changed under a saved run; here it
     // would fire on every single upscale.
     expect(panel.values.size).toBeUndefined();
     expect(panel.warnings).toEqual([]);
+    expect(panel.template?.id).toBe("krea2-upscale");
   });
 
   test("a workflow with no image param refuses rather than half-filling", async () => {
@@ -179,9 +209,33 @@ describe("upscaling an output", () => {
       name: "Up",
       manifest: { ...upscaleManifest, params: [] } as unknown as Manifest,
     });
-    await expect(panel.upscale("up", { id: "01JOUT" }, {})).rejects.toThrow(
-      /no image param/,
+    await expect(
+      panel.applyTemplate(template(), { output: { id: "01JOUT" } }),
+    ).rejects.toThrow(/no image/);
+  });
+});
+
+/**
+ * What a template asks for is required while it is applied (§4.8): a saved
+ * set of LoRAs whose prompt still has to be written.
+ */
+describe("a template's asks", () => {
+  test("are required while it applies, and stop being when it does not", async () => {
+    await panel.applyTemplate(
+      template({ values: { scale: 2 }, ask: ["prompt"] }),
     );
+    const prompt = panel.manifest!.params.find((p) => p.key === "prompt")!;
+    expect(prompt.required).toBe(true);
+    expect(panel.missingRequired).toContain("prompt");
+    // The workflow's own manifest is untouched by it.
+    expect(
+      panel.workflowManifest!.params.find((p) => p.key === "prompt")!.required,
+    ).toBeUndefined();
+
+    // Filling the panel any other way drops the template, and its asks.
+    await panel.editWith("up", { prompt: "" });
+    expect(panel.template).toBeNull();
+    expect(panel.missingRequired).not.toContain("prompt");
   });
 });
 

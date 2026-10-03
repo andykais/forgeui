@@ -1,5 +1,11 @@
 import { api } from "../api.ts";
-import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
+import type {
+  LoraRow,
+  Manifest,
+  Param,
+  Template,
+  WorkflowDetail,
+} from "../types.ts";
 import { withInputs } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
@@ -79,6 +85,12 @@ class PanelState {
   seedLocked = $state(false);
   /** The seed the last run actually used, shown greyed while unlocked. */
   lastSeed = $state<number | null>(null);
+  /**
+   * The template this panel was filled from (§4.8), while it still applies:
+   * what it asks for is required here. Choosing a workflow, or filling the
+   * panel any other way, drops it.
+   */
+  template = $state<Template | null>(null);
   submitting = $state(false);
   submitError = $state<string | null>(null);
   loading = $state(false);
@@ -89,7 +101,26 @@ class PanelState {
    */
   #touched = new Set<string>();
 
+  /**
+   * The workflow's manifest, with what the applied template asks for marked
+   * required (§4.8) — so the panel badges it and Generate waits for it, by
+   * the same rule as any required field. The server checks the workflow's
+   * own manifest: asking is the panel's rule, not the job's.
+   */
   get manifest(): Manifest | null {
+    const manifest = this.detail?.manifest ?? null;
+    const ask = this.template?.ask ?? [];
+    if (!manifest || ask.length === 0) return manifest;
+    return {
+      ...manifest,
+      params: manifest.params.map((param) =>
+        ask.includes(param.key) ? { ...param, required: true } as Param : param
+      ),
+    };
+  }
+
+  /** The workflow's own manifest, whatever a template asks for. */
+  get workflowManifest(): Manifest | null {
     return this.detail?.manifest ?? null;
   }
 
@@ -132,6 +163,7 @@ class PanelState {
 
   async select(id: string): Promise<void> {
     if (this.workflowId === id && this.detail) return;
+    this.template = null;
     this.workflowId = id;
     this.loading = true;
     this.submitError = null;
@@ -162,7 +194,13 @@ class PanelState {
    * parameters from any screen, a failed job's card, an upscale — is asking
    * to edit before generating, which a media layout gives no room to do.
    */
-  async editWith(id: string, params: Record<string, unknown>): Promise<void> {
+  async editWith(
+    id: string,
+    params: Record<string, unknown>,
+    template: Template | null = null,
+  ): Promise<void> {
+    // Reuse parameters fills the panel from a run, not from a template.
+    this.template = template;
     const layout = app.layout("generate");
     if (withInputs(layout) !== layout) {
       app.setLayout("generate", withInputs(layout));
@@ -238,40 +276,46 @@ class PanelState {
   }
 
   /**
-   * Upscale (§10): take one of the app's own outputs into the input store,
-   * then fill this workflow from the run that made it.
+   * Apply a template (§4.8): fill its workflow with what it sets, over
+   * whatever the panel would have held — and, given an output, with that
+   * output as the picture and the run that made it under the rest. That is
+   * the Upscale action (§10): the bundled Upscale template sets scale 2 and
+   * creativity 0.2 on the family's img2img workflow, and asks for the image.
    *
-   * Upscaling is not a special case in the pipeline and is not one here
-   * either — it is `editWith` with the picture attached. What makes it one
-   * click is that the workflow already carries the numbers that matter: a
-   * creativity of 0.4 and a scale of 2 are its manifest defaults, so nothing
-   * has to be preset on the way in and both are there to be changed before
-   * generating.
+   * Nothing about the job is special: the values are ordinary values, there
+   * to be changed before generating.
    */
-  async upscale(
-    workflowId: string,
-    output: { id: string },
-    sourceParams: Record<string, unknown>,
+  async applyTemplate(
+    template: Template,
+    from: { output?: { id: string }; sourceParams?: Record<string, unknown> } =
+      {},
   ): Promise<void> {
-    const media = await api.adoptOutput(output.id);
-    const manifest = (await api.workflow(workflowId)).manifest;
-    const imageKey = manifest?.params.find((param) => param.type === "image")
-      ?.key;
-    if (!imageKey) {
-      throw new Error(`"${workflowId}" has no image param to upscale into`);
+    const manifest = (await api.workflow(template.workflow)).manifest;
+    if (!manifest) {
+      throw new Error(`"${template.workflow}" has no inputs to fill`);
     }
     // Only the keys this workflow actually has. `editWith` warns about the
     // rest, which is right when a workflow has changed under a saved run and
-    // wrong here: an upscale workflow has no `size` because it takes that
+    // wrong here: an img2img workflow has no `size` because it takes that
     // from the picture, and saying so on every upscale is noise.
     const shared: Record<string, unknown> = {};
-    for (const param of manifest?.params ?? []) {
-      if (param.key in sourceParams) {
-        shared[param.key] = sourceParams[param.key];
+    for (const param of manifest.params) {
+      if (from.sourceParams && param.key in from.sourceParams) {
+        shared[param.key] = from.sourceParams[param.key];
       }
     }
-    // The picture last: it is the one thing the source run cannot supply.
-    await this.editWith(workflowId, { ...shared, [imageKey]: media.filename });
+    const params = { ...shared, ...plain(template.values) };
+    if (from.output) {
+      const imageKey = manifest.params.find((param) => param.type === "image")
+        ?.key;
+      if (!imageKey) {
+        throw new Error(`"${template.workflow}" has no image to put it in`);
+      }
+      // The picture last: it is the one thing neither the run nor the
+      // template can supply.
+      params[imageKey] = (await api.adoptOutput(from.output.id)).filename;
+    }
+    await this.editWith(template.workflow, params, template);
   }
 
   // --------------------------------------------------------------- the size
