@@ -175,7 +175,7 @@ Deno.test("an upscale run uploads its input and records what it came from", asyn
       body: JSON.stringify({ output_id: source.id }),
     });
 
-    const jobId = await generate(app, "krea2-upscale", {
+    const jobId = await generate(app, "krea2-img2img", {
       image: input.filename,
       creativity: 0.4,
     });
@@ -228,7 +228,7 @@ Deno.test("a job naming an input the store has lost says so", async () => {
     const response = await app.fetch("/api/jobs", {
       method: "POST",
       body: JSON.stringify({
-        workflow_id: "krea2-upscale",
+        workflow_id: "krea2-img2img",
         params: { image: `${missing}.png` },
       }),
     });
@@ -258,7 +258,7 @@ Deno.test("an upscale can be walked back to the image it came from", async () =>
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ output_id: source.id }),
     });
-    await generate(app, "krea2-upscale", {
+    await generate(app, "krea2-img2img", {
       image: input.filename,
       creativity: 0.4,
     });
@@ -304,7 +304,7 @@ Deno.test("a deleted parent stays in the chain as an orphan", async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ output_id: source.id }),
     });
-    await generate(app, "krea2-upscale", {
+    await generate(app, "krea2-img2img", {
       image: input.filename,
       creativity: 0.4,
     });

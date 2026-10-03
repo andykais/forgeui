@@ -77,6 +77,9 @@ app to ComfyUI's lifecycle for no benefit.
       workflow.ui.json      LiteGraph format (for the embedded editor)
       workflow.api.json     prompt format (what gets queued)
       manifest.json         exposed params (§4)
+  templates/
+    bundled/<id>.json       shipped with the app, overwritten on upgrade (§4.8)
+    user/<id>.json          user-created or user-overridden templates
   outputs/YYYY/MM/DD/
     <jobid>-<n>.png|mp4|…   generated media
     <jobid>.json            sidecar: full reproduction record (§6.2)
@@ -162,8 +165,10 @@ Field notes:
 - `family` on the workflow and `filter.family` on `lora_list` / `checkpoint`
   params restrict pickers to compatible models (§8.1).
 - `category` (string, optional) tags the workflow's role for UI routing. Known
-  value: `img2img` — a workflow exposing `image` (required) and `denoise`,
-  used by **Use image in workflow** and **Upscale image** (§10).
+  value: `img2img` — a workflow exposing `image` (required), `creativity`
+  and `scale`, used by **Use image in workflow**, and the workflow the
+  bundled Upscale templates fill (§4.8, §10). *Amended:* `upscale` was a
+  category too; an upscale is now a template on an img2img workflow.
   Uncategorised workflows are ordinary generators.
 
 ### 4.3 Param types (closed set)
@@ -316,7 +321,7 @@ Initial set:
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
-| `<id>-upscale` | as its sibling | image | one per image family: `krea2-upscale`, `sd15-upscale`, `illustrious-upscale`, `anima-upscale`, `z-image-upscale`, `flux-klein-upscale`. `category: upscale`; image (required), creativity (0.2), scale (2), prompt, seed, loras; the upscale-model path and the sampling overrides advanced (§10) |
+| `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
 LTX-2.3 Image to Video, Anima, Flux Klein, Z-Image Turbo,
@@ -344,6 +349,73 @@ counted among the literal inputs. Row order is panel order. "Auto-expose
 all" generates one advanced param per literal widget value, for a freshly
 imported graph. Saving a bundled workflow's manifest creates the user copy
 first (§4.6) and changes the workflow hash; existing outputs are unaffected.
+
+### 4.8 Templates
+
+*Added with the img2img workflows.* A **template** is a saved way to fill a
+workflow's panel: some of its params set to chosen values, some left for
+whoever applies it to fill in. A favourite combination of LoRAs is one; the
+numbers that turn an img2img workflow into an upscale are another. Templates
+are a groundwork for now — they can be made, edited and deleted, the Upscale
+action applies them (§10), and **Open in Generate** applies one by hand.
+Choosing one from the Generate picker is to come, once there is an answer to
+how a long list of them stays easy to sift through.
+
+```json
+{
+  "format": 1,
+  "id": "krea2-upscale",
+  "name": "Upscale 2×",
+  "description": "Twice the size, with a light touch of new detail.",
+  "workflow": "krea2-img2img",
+  "action": "upscale",
+  "values": { "scale": 2, "creativity": 0.2 },
+  "ask": ["image"]
+}
+```
+
+- **One workflow.** A template names one workflow by id and only ever fills
+  that workflow's params. LoRAs and models belong to a family anyway, and a
+  template that guessed its way across workflows would set keys that do not
+  exist on half of them.
+- **Each param is in one of three states:**
+  - **set** — in `values`: applying the template puts this value in the
+    panel. Values are checked against the workflow's param types when saved,
+    exactly as a job's are (§4.3), with nothing required; `seed: -1` stays
+    "random" rather than being rolled.
+  - **ask** — in `ask`: the template leaves it to the person applying it, and
+    the panel treats it as **required** for as long as the template is
+    applied — a saved set of LoRAs whose prompt still has to be written.
+    A param the workflow already requires is required either way; listing it
+    says so on the template's own page too.
+  - **open** — in neither: whatever the panel would have held anyway, which
+    is the workflow default or, for the Upscale action, the source output's
+    value.
+
+  A key cannot be both set and asked.
+- **Applying** fills the panel by key the way Reuse Parameters does (§6.4),
+  and the panel shows which template it came from and what it asks for.
+  Choosing another workflow drops it. Nothing about the job changes: the
+  values are ordinary job values, so where a value comes from is still the
+  job, then the manifest default, then the graph (§4.3). Which template an
+  output was made with is not recorded yet.
+- **`action`** (optional, closed set: `upscale`) is how an action on an
+  output finds its template: the Upscale button looks for templates with
+  `action: "upscale"` whose workflow is in the output's family (§10).
+- **Bundled and user**, as workflows are (§4.6): `templates/bundled/` ships
+  with the app and is overwritten on upgrade; `templates/user/` is never
+  touched by one. Saving a bundled template writes a user copy with the same
+  id, which shadows it; deleting that copy brings the bundled one back. A
+  bundled template with no copy cannot be deleted.
+- **A template outlives its workflow.** No foreign key, as for outputs (§7):
+  a template whose workflow is gone, or that sets a key the workflow no
+  longer has, still lists — with what is wrong with it — rather than
+  vanishing or refusing the whole list.
+- **Made from Generate.** **Save as template** in the panel header captures
+  the current workflow and lets each param be saved, asked for, or left
+  open. Required params start as *ask*, params changed from the workflow's
+  default as *set*, everything else as *open*. Opened from a template, the
+  same dialog offers to update it.
 
 ---
 
@@ -915,33 +987,35 @@ param on the img2img-style workflows.
 
 No new architecture: img2img, upscale and (later) editing are all workflows
 with an `image` param.
-- Every image workflow has an **upscale sibling** (§4.6): `krea2-upscale` and
-  one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein. The
-  `krea2-img2img` workflow that used to stand for this whole idea is gone —
-  it was the old Flux.1 graph under a Krea name, it had never been run, and
-  an upscale workflow does the job it was there to demonstrate. LTX-2.3 has none:
-  it writes a video, and none of these graphs upscale one.
+- Every image workflow has an **img2img sibling** (§4.6): `krea2-img2img`
+  and one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein.
+  *Amended:* these were the `<id>-upscale` workflows. An upscale is an
+  img2img run at `scale` 2 and a low `creativity`, so the graphs became
+  general img2img workflows (scale 1, creativity 0.5 by default) and the
+  upscale became a **bundled template** on each (§4.8). LTX-2.3 has none:
+  it writes a video, and none of these graphs take one.
   Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
   (+ optional `mask`) + `prompt` — and are added as user workflows later.
 - Every output has **Use image in workflow** (video: **Use video in
   workflow**) listing workflows with a matching `image`/`video` param.
-- **Upscale image** sits beside it, and routes to the `category: upscale`
-  workflow in the **same family** as the output (no menu when exactly one
-  matches, a popover when several do, hidden when none; **image outputs
-  only** — never shown on videos, because none of these graphs upscale one).
-  Every image family has one, so the action is never dark on an output the
-  app made itself; LTX-2.3 has none, which is what the video rule is for.
+- **Upscale image** sits beside it, and applies the `action: "upscale"`
+  template (§4.8) whose workflow is in the **same family** as the output (no
+  menu when exactly one matches, a popover of template names when several
+  do, hidden when none; **image outputs only** — never shown on videos,
+  because none of these graphs take one). Every image family has a bundled
+  one, so the action is never dark on an output the app made itself.
 
-  It was going to be the `img2img` workflow with `denoise` and `size` preset
-  on the way in. Making it **its own workflow** instead is what lets it be
-  tweaked like everything else: the numbers that make it an upscale are the
-  workflow's own params — `creativity` defaulting to **0.2**, `scale` to
-  **2** — so nothing is preset, both are visible and adjustable before
-  generating, and a user who wants a different upscale saves a copy and
-  changes it. Size is relative (`ImageScaleBy`) rather than absolute, so the
-  result follows whatever was handed in and there is no source resolution to
-  read off and snap.
+  *Amended:* it was first its own workflow, so that the numbers that make it
+  an upscale — `scale` **2**, `creativity` **0.2** — were the workflow's own
+  params rather than values preset by the client, visible and adjustable
+  before generating, and changeable by saving a copy. A template keeps all of
+  that: the values land in the panel as ordinary values, and a user who wants
+  a different upscale edits the template (which makes a user copy) instead
+  of keeping a second copy of the whole graph in step with the first. Size is
+  relative (`ImageScaleBy`) rather than absolute, so the result follows
+  whatever was handed in and there is no source resolution to read off and
+  snap.
 
   **`creativity` is a slice of the model's own schedule, not `KSampler`'s
   `denoise`.** This shipped bound to `denoise` first, and the results were
@@ -969,15 +1043,17 @@ with an `image` param.
   SwarmUI's default is `pixel-lanczos` too.
 
   Prompt, seed and LoRAs are prefilled from the source output's sidecar,
-  **narrowed to the keys the upscale workflow actually exposes** — the
+  **narrowed to the keys the img2img workflow actually exposes**, under the
+  template's values — the
   "ignored: …" warning `editWith` shows is right when a workflow changed
   under a saved run and noise on every upscale. Mechanically identical to
   "use in workflow": the input is hashed into the content-addressed store and
   `derived_from_output` recorded. An upscale is an ordinary derived output,
-  not a special case. Resolution is client-side: `GET /api/workflows` carries
-  `category` and `family`, `GET /api/outputs/:id` the output's family and
-  kind; the client picks the target, `POST /api/inputs` adopts the output,
-  and the panel is filled. No upscale-specific route.
+  not a special case. Resolution is client-side: `GET /api/templates` carries
+  each template's `action` and its workflow's `family`, `GET /api/outputs/:id`
+  the output's family and kind; the client picks the template,
+  `POST /api/inputs` adopts the output, and the panel is filled. No
+  upscale-specific route.
 - **The size follows the picture.** A workflow that has both an `image` and a
   `size` sets the size from what was just attached: the picture's own shape
   and its own pixels, snapped to the model's grid because that is the only
@@ -987,7 +1063,7 @@ with an `image` param.
   and bringing it down would be overruling a decision already made. It is
   announced in a toast, and the size row still overrules it: this saves you
   saying the same thing twice, it does not take the say away. A workflow with
-  no `size` — every upscale, which states a `scale` — is untouched.
+  no `size` — every img2img workflow, which states a `scale` — is untouched.
 - **An `image` param takes a picture four ways**: the file picker, a drop, a
   paste, and a result dragged straight out of the grid. Pasting claims the
   zone the pointer is **over** as well as the one with focus — focus alone
@@ -1008,6 +1084,7 @@ with an `image` param.
 ### 11.1 Global layout
 Left nav rail, with Lucide icons: **Generate** `pencil-sparkles`,
 **Gallery** `images`, **Models** `brain`, **Workflows** `workflow`,
+**Templates** `layout-template`,
 **ComfyUI** `server`, **Telemetry** `activity`, **Settings** `settings`. The rail is a **56px icon
 rail by default**,
 collapsible to 196px labelled; the state persists. There are no keyboard
@@ -1245,6 +1322,19 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   ComfyUI" (embedded editor loads `workflow.ui.json`; its Save writes both
   json files and returns here); **Save manifest** (changes the workflow hash;
   existing outputs keep their own graph copy).
+
+**Templates** (§4.8)
+- Table of templates: name (+ USER COPY badge on one that shadows a bundled
+  template), the workflow it fills (a link) and its family, what it **sets**
+  (`scale 2 · creativity 0.2`, LoRAs by title), what it **asks** for, the
+  action it serves, and source. A template with a problem — its workflow
+  gone, a key the workflow no longer has — says so on its row.
+- Selecting a row opens its page: name and description edited in place, and
+  every param of its workflow with its state (set / ask / open) switchable
+  and its set value shown. **Open in Generate** applies it; saving from
+  there offers to update it, which is how a set value is changed. **Delete**
+  removes a user template, or a user copy (bringing the bundled one back);
+  never shown on a bundled template.
 
 **ComfyUI**
 - Full embedded ComfyUI UI (same-origin proxy, §4.1), as an escape hatch.
@@ -1618,6 +1708,11 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
 DELETE /api/workflows/:id               user copies only; 409 for bundled
+GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems
+GET  /api/templates/:id
+POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name
+PUT  /api/templates/:id                 replace name/description/values/ask/action (bundled → creates the user copy)
+DELETE /api/templates/:id               user templates and user copies; 409 for a bundled template with no copy
 POST /api/jobs                          {workflow_id, params, origin?}   one job per call
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed)
 POST /api/jobs/:id/cancel
@@ -1703,7 +1798,8 @@ orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
 Civitai fetch-info and URL import (raw only).
 
 Landed so far: the store and `POST /api/inputs`, the `image` param widget
-(picker, drop, paste), `krea2-upscale` and the Upscale action, `output_inputs`
+(picker, drop, paste), the img2img workflows and the Upscale action (as
+bundled templates, §4.8), `output_inputs`
 provenance, and the lineage view. Still to come in this phase: `video` params,
 "Use image in workflow", the orphan sweep, and the rest of the list.
 
@@ -1802,8 +1898,10 @@ If it fails, update the fake; never make the default suite depend on it.
    upscale`** workflow, which carries `creativity` 0.4 and `scale` 2 as its
    own defaults (§10). It was going to be the `img2img` workflow with those
    two preset by the client; a workflow of its own is what makes it
-   adjustable and copyable like every other workflow. `krea2-upscale` ships
-   first, so Upscale is hidden on outputs of families that have none yet.
+   adjustable and copyable like every other workflow. *Revised again:* it is
+   the img2img workflow after all, with the two values in a bundled
+   **template** (§4.8) — adjustable and copyable as a template is, without a
+   second copy of every graph.
 2. *(Resolved)* `display_name` collisions allowed; hash is the identity
    (§8.1).
 3. Should notes / Civitai description be searchable anywhere, given they are

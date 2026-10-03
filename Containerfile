@@ -100,6 +100,8 @@ WORKDIR /app
 COPY deno.json deno.lock ./
 COPY src/ ./src/
 COPY workflows/ ./workflows/
+# The bundled templates (the Upscale button's among them) ship the same way.
+COPY templates/ ./templates/
 COPY --from=frontend /app/src/frontend/dist/ ./src/frontend/dist/
 
 # Pre-fetch Deno's module cache so the container doesn't need network access
