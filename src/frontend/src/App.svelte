@@ -10,6 +10,8 @@
   import ModelDetail from "./screens/ModelDetail.svelte";
   import Workflows from "./screens/Workflows.svelte";
   import WorkflowDetail from "./screens/WorkflowDetail.svelte";
+  import Templates from "./screens/Templates.svelte";
+  import TemplateDetail from "./screens/TemplateDetail.svelte";
   import Comfy from "./screens/Comfy.svelte";
   import Telemetry from "./screens/Telemetry.svelte";
   import Settings from "./screens/Settings.svelte";
@@ -49,6 +51,10 @@
       <Workflows />
     {:else if screen === "workflow" && router.current.id}
       <WorkflowDetail id={router.current.id} />
+    {:else if screen === "templates"}
+      <Templates />
+    {:else if screen === "template" && router.current.id}
+      <TemplateDetail id={router.current.id} />
     {:else if screen === "comfy"}
       <Comfy />
     {:else if screen === "telemetry"}
