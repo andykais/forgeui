@@ -58,6 +58,7 @@ const BUNDLED = [
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-img2img", "Stable Diffusion 1.5 (img2img)"],
+  ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
   ["z-image-turbo", "Z-Image Turbo"],
   ["z-image-img2img", "Z-Image Turbo (img2img)"],
 ] as const;
@@ -244,6 +245,21 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
     ]);
     assertEquals(byId.get("sd15")!.params.advanced, 2); // steps, cfg
+    // The image, the mask painted over it, and what to paint (§10). How
+    // soft the edge is belongs here, not to the brush.
+    assertEquals(keys("sd15-inpaint"), [
+      "image",
+      "mask",
+      "prompt",
+      "negative",
+      "creativity",
+      "seed",
+      "loras",
+    ]);
+    // No category: nothing routes to an inpaint yet (§4.2).
+    assertEquals(byId.get("sd15-inpaint")!.category, null);
+    // grow, feather, steps, cfg, sampler, scheduler, model.
+    assertEquals(byId.get("sd15-inpaint")!.params.advanced, 7);
 
     assertEquals(byId.get("ltx2-i2v")!.kind, "video");
     assertEquals(
@@ -274,6 +290,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "ltx-2",
         "sd15",
         "sd15",
+        // And its inpaint, the one workflow that takes a mask (§4.6).
+        "sd15",
         "z-image",
         "z-image",
       ],
@@ -299,6 +317,7 @@ Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async 
         const { values } = coerceParams(manifest, {
           prompt: "a granite bowl of figs",
           image: "abc123.png",
+          mask: "abc124.png",
           loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
           // What the audio workflows ask for instead of a prompt.
           audio: "abc123.wav",
