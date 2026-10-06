@@ -491,6 +491,31 @@
           {/if}
         </div>
       </div>
+      {#if output.template}
+        <!--
+          The template the panel was filled from (§4.8), by the name it had
+          then; a link while it still exists.
+        -->
+        <div class="field">
+          <div class="key">template</div>
+          <div>
+            {#if app.templates.some((template) => template.id === output.template?.id)}
+              <a
+                class="template-link"
+                href={`/templates/${output.template.id}`}
+                onclick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                  event.preventDefault();
+                  navigate(`/templates/${output.template?.id}`);
+                }}>{output.template.name}</a
+              >
+            {:else}
+              {output.template.name}
+              <span class="dim">· since deleted</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
 
       <!-- Only the roles no param already names; the rest appear once, below. -->
       {#each otherModels as model (model.role + model.name)}
@@ -996,5 +1021,13 @@
 
   .node-text .dim {
     font-size: 10px;
+  }
+
+  .template-link {
+    color: var(--accent);
+  }
+
+  .template-link:hover {
+    text-decoration: underline;
   }
 </style>

@@ -21,6 +21,7 @@ import {
   type Progress,
   setJobPromptId,
   type SidecarModelRef,
+  type TemplateRef,
   updateJobProgress,
   updateJobStatus,
 } from "../db/queries.ts";
@@ -48,6 +49,7 @@ import { completedProgress, ProgressTracker } from "./progress.ts";
 import { parseSidecar } from "./sidecar.ts";
 import { log, logError, oneLine, seconds } from "../log.ts";
 import { INPUT_FILENAME, type InputStore } from "../inputs/store.ts";
+import type { TemplateStore } from "../templates/store.ts";
 
 /**
  * The job pipeline (§5): validate, rewrite, persist, submit, follow the
@@ -108,6 +110,8 @@ export interface SubmitJobBody {
   workflow_id?: unknown;
   params?: unknown;
   origin?: unknown;
+  /** The id of the template the panel was filled from (§4.8). */
+  template?: unknown;
 }
 
 export interface RerunJobBody {
@@ -177,6 +181,8 @@ export interface JobRunnerOptions {
   outputs: OutputStore;
   /** The content-addressed input store an `image` param names (§9). */
   inputs?: InputStore;
+  /** What a submit's `template` is checked against (§4.8). */
+  templates?: TemplateStore;
   /** Fills in the hashes of models the library has already hashed (§8.1). */
   resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   /** Whether a model of this class is on disk under this name (§5.1). */
@@ -213,6 +219,7 @@ export class JobRunner {
   #hub: WsHub;
   #outputs: OutputStore;
   #inputs: InputStore | null;
+  #templates: TemplateStore | null;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
   #allowModelDownloads?: () => boolean;
@@ -233,6 +240,7 @@ export class JobRunner {
     this.#hub = options.hub;
     this.#outputs = options.outputs;
     this.#inputs = options.inputs ?? null;
+    this.#templates = options.templates ?? null;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
     this.#allowModelDownloads = options.allowModelDownloads;
@@ -279,6 +287,7 @@ export class JobRunner {
     // Before the work, with the other request-shape checks: a bad origin is a
     // bad request, and finding out after the GPU has run is no use to anyone.
     const origin = readOrigin(body.origin);
+    const template = this.#readTemplate(body.template, workflowId);
     // Params are checked before the connection: what is wrong with the panel
     // is wrong whether or not ComfyUI happens to be up, and saying so is more
     // use than "not connected".
@@ -311,7 +320,29 @@ export class JobRunner {
       params: values,
       graph,
       origin,
+      template,
     });
+  }
+
+  /**
+   * The template a submit says the panel was filled from (§4.8), as the job
+   * records it: its id, and its name now. It has to exist and fill this
+   * workflow — a record that named a template it could not have been is
+   * worse than none.
+   */
+  #readTemplate(raw: unknown, workflowId: string): TemplateRef | null {
+    if (raw === undefined || raw === null || raw === "") return null;
+    if (typeof raw !== "string") {
+      throw new JobRequestError("template: expected a template id");
+    }
+    const template = this.#templates?.get(raw);
+    if (!template) throw new JobRequestError(`template: no template "${raw}"`);
+    if (template.workflow !== workflowId) {
+      throw new JobRequestError(
+        `template: "${raw}" fills ${template.workflow}, not ${workflowId}`,
+      );
+    }
+    return { id: template.id, name: template.name };
   }
 
   /** `Rerun now ⟳`: the frozen graph, verbatim apart from where it writes. */
@@ -330,6 +361,9 @@ export class JobRunner {
       // not whoever asked for the original. Inheriting it would file a
       // person's rerun under the model that made the first.
       origin: readOrigin(body.origin),
+      // The template, though, is kept: a rerun replays the same values, and
+      // they came from where the original's did (§4.8).
+      template: source.template,
     });
   }
 
@@ -338,6 +372,7 @@ export class JobRunner {
     params: Record<string, unknown>;
     workflowId: string | null;
     workflowHash: string | null;
+    template: TemplateRef | null;
   }> {
     if (typeof body.job_id === "string" && body.job_id.length > 0) {
       const job = getJob(this.#db, body.job_id);
@@ -350,6 +385,7 @@ export class JobRunner {
         params: job.params,
         workflowId: job.workflow_id,
         workflowHash: job.workflow_hash,
+        template: job.template,
       };
     }
     if (typeof body.output_id === "string" && body.output_id.length > 0) {
@@ -371,6 +407,7 @@ export class JobRunner {
         params: sidecar.params,
         workflowId: sidecar.workflow?.id ?? output.workflow_id,
         workflowHash: sidecar.workflow?.hash ?? output.workflow_hash,
+        template: output.template,
       };
     }
     throw new JobRequestError("rerun needs an output_id or a job_id");
@@ -432,6 +469,7 @@ export class JobRunner {
     params: Record<string, unknown>;
     graph: ApiGraph;
     origin: Origin;
+    template: TemplateRef | null;
   }): Promise<JobRow> {
     // Truncated to the second because the sidecar is the source of truth and
     // §6.2 records `created_at` to the second: this keeps the row, the sidecar
@@ -451,6 +489,7 @@ export class JobRunner {
       params: input.params,
       api_graph: input.graph,
       origin: input.origin,
+      template: input.template,
       created_at: createdAt,
     });
     // The prompt id is ours and is recorded first, so events that arrive

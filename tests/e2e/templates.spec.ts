@@ -118,3 +118,64 @@ test("a template saved from Generate asks for what it left out", async ({ page }
   await expect(page.getByRole("heading", { name: "Templates" })).toBeVisible();
   await expect(page.getByRole("cell", { name })).toHaveCount(0);
 });
+
+test("the picker lists a workflow's templates under it, and what one makes says so", async ({
+  page,
+  request,
+}) => {
+  const name = `Quick figs ${Date.now()}`;
+  const created = await (await request.post("/api/templates", {
+    data: { name, workflow: "krea2", values: { steps: 6 }, ask: ["prompt"] },
+  })).json();
+
+  await page.goto("/generate");
+  await page.locator(".workflow-card").click();
+  // Under its workflow, inside the family group: the next rows after Krea 2
+  // Turbo, before the next workflow.
+  const options = page.locator(".popover button.option");
+  const rows = await options.evaluateAll((elements) =>
+    elements.map((element) => ({
+      text: element.textContent ?? "",
+      template: element.classList.contains("template-option"),
+    }))
+  );
+  const workflowAt = rows.findIndex((row) =>
+    !row.template && row.text.trim().startsWith("Krea 2 Turbo") &&
+    !row.text.includes("(img2img)")
+  );
+  const templateAt = rows.findIndex((row) => row.text.includes(name));
+  expect(workflowAt).toBeGreaterThanOrEqual(0);
+  expect(templateAt).toBeGreaterThan(workflowAt);
+  // Only the workflow's own templates sit between it and this one.
+  expect(rows.slice(workflowAt + 1, templateAt + 1).every((row) => row.template))
+    .toBe(true);
+  await expect(options.nth(templateAt)).toHaveClass(/template-option/);
+
+  await options.nth(templateAt).click();
+  await expect(page.locator(".workflow-card")).toContainText(`Krea 2 Turbo · ${name}`);
+  await expect(page.locator(".from-template")).toContainText("asks for Prompt");
+  // Its value, over the last run's.
+  await page.getByRole("button", { name: /Advanced/ }).click();
+  await expect(page.locator('[data-param="steps"] input.narrow')).toHaveValue("6");
+
+  const prompt = `figs from a template, ${Date.now()}`;
+  await page.locator('[data-param="prompt"] textarea').fill(prompt);
+  const before = await page.locator(".tile").count();
+  await page.getByRole("button", { name: "Generate", exact: true }).click();
+  await expect(page.locator(".tile")).toHaveCount(before + 1, { timeout: 30_000 });
+
+  // Found by its template, and named by it.
+  const body = await (await request.get(
+    `/api/outputs?template=${encodeURIComponent(created.id)}`,
+  )).json();
+  expect(body.outputs).toHaveLength(1);
+  expect(body.outputs[0].template).toEqual({ id: created.id, name });
+  expect(body.outputs[0].prompt).toBe(prompt);
+
+  // And the viewer says so, with a link to it.
+  await page.goto(`/gallery?output=${body.outputs[0].id}`);
+  const link = page.getByRole("link", { name, exact: true });
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page.getByLabel("Template name")).toHaveValue(name);
+});

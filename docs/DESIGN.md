@@ -356,10 +356,10 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
 workflow's panel: some of its params set to chosen values, some left for
 whoever applies it to fill in. A favourite combination of LoRAs is one; the
 numbers that turn an img2img workflow into an upscale are another. Templates
-are a groundwork for now — they can be made, edited and deleted, the Upscale
-action applies them (§10), and **Open in Generate** applies one by hand.
-Choosing one from the Generate picker is to come, once there is an answer to
-how a long list of them stays easy to sift through.
+can be made, edited and deleted; the Upscale action applies them (§10),
+**Open in Generate** applies one by hand, and the Generate workflow picker
+lists each workflow's templates under it (§11.2). Every output records which
+template it was made with (§6.2).
 
 ```json
 {
@@ -397,8 +397,16 @@ how a long list of them stays easy to sift through.
   and the panel shows which template it came from and what it asks for.
   Choosing another workflow drops it. Nothing about the job changes: the
   values are ordinary job values, so where a value comes from is still the
-  job, then the manifest default, then the graph (§4.3). Which template an
-  output was made with is not recorded yet.
+  job, then the manifest default, then the graph (§4.3).
+- **Recorded on what it made.** A submit names the template the panel was
+  filled from (`template` on `POST /api/jobs`, §12); the job keeps it, and
+  the sidecar and every output record it as `{id, name}` (§6.2) — the name
+  as it was then, because a template can be renamed or deleted later and
+  the output must still say what it came from. It is recorded whatever was
+  changed after the template filled the panel: it says where the run
+  started, not that every value is the template's. `GET /api/outputs
+  ?template=<id>` finds them. A rerun keeps the template of the run it
+  repeats, since it replays the same values.
 - **`action`** (optional, closed set: `upscale`) is how an action on an
   output finds its template: the Upscale button looks for templates with
   `action: "upscale"` whose workflow is in the output's family (§10).
@@ -497,6 +505,7 @@ or replacing any workflow must never affect the ability to rerun an old output.
   },
   "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
   "origin": { "source": "ui", "project": "herons", "note": "iteration 3, pushing the LoRA past 0.9" },
+  "template": { "id": "grainy-herons", "name": "Grainy herons" },
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
   "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024, "notes": "hands are wrong, the light is right" } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
@@ -535,6 +544,13 @@ The three fields are denormalised onto `jobs` and `outputs` (§7) so the
 gallery can filter by them; the sidecar stays the source of truth and
 `reindex` rebuilds them from it.
 
+`template` is the template the panel was filled from when the job was
+submitted (§4.8): its id, and its name at that moment, so an output still
+says where it came from after the template is renamed or deleted. `null`
+for a run that used none, and absent from sidecars written before the field
+existed, which reads the same. Denormalised onto `jobs` and `outputs` as
+`template_id` / `template_name` (§7), for `?template=`.
+
 ### 6.3 Why `rename()` and not copy
 ComfyUI writes to `staging/` on the same filesystem; moving is a metadata
 operation, so there is exactly one copy of every file. `staging/` is swept on
@@ -571,7 +587,8 @@ CREATE TABLE jobs (
   error_json TEXT,
   origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
   origin_project TEXT, origin_note TEXT,
-  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
+  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+  template_id TEXT, template_name TEXT  -- the template it was made with (§4.8, §6.2); no FK
 );
 
 CREATE TABLE outputs (
@@ -586,10 +603,12 @@ CREATE TABLE outputs (
   prompt TEXT,                    -- denormalised for search
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  template_id TEXT, template_name TEXT  -- from the sidecar's `template` (§6.2); no FK, as for workflows
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
+CREATE INDEX outputs_template ON outputs(template_id, created_at DESC);
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
@@ -1104,7 +1123,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 **Generate**
 - Workflow selector sits **inside the param panel**, at the top, as a card
   (thumb of last output, name, family/kind badges, last run). Clicking it
-  opens a picker grouped by family and kind.
+  opens a picker grouped by family and kind. *Amended:* each workflow's
+  templates (§4.8) are listed under it, inside its family group, as
+  smaller indented rows; choosing one applies it, and the card names the
+  template beside the workflow.
 - Param panel rendered from the manifest: required params first, then
   optional, then a collapsed **Advanced** section. A PARAMETERS header row
   carries **Reset to defaults**. Sticky **Generate** button (one click = one job).
@@ -1713,16 +1735,19 @@ GET  /api/templates/:id
 POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name
 PUT  /api/templates/:id                 replace name/description/values/ask/action (bundled → creates the user copy)
 DELETE /api/templates/:id               user templates and user copies; 409 for a bundled template with no copy
-POST /api/jobs                          {workflow_id, params, origin?}   one job per call
-POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed)
+POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
+                                        the id of the template the panel was filled from (§4.8), which must
+                                        exist and fill this workflow
+POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
+                                        keeps the repeated run's template
 POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
 GET  /api/jobs/:id                      one job row with the ids of its outputs
 GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2, plus `project` and
-                                        `source` from the origin block (§6.2), which the screens do
-                                        not offer yet; sort newest|oldest
+                                        `source` from the origin block and `template` (an id, §4.8)
+                                        (§6.2), which the screens do not offer yet; sort newest|oldest
                                         rows carry the row of §7 plus media_url, the models chips
                                         and generation_ms (the job's wall clock, for DURATION)
 GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);
