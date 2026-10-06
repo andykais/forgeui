@@ -294,6 +294,7 @@ export class JobRunner {
     const { values } = coerceParams(workflow.manifest, params);
     try {
       this.#assertModelsPresent(workflow.manifest, values);
+      this.#assertMasksFit(workflow.manifest, values);
       this.#assertNoRuntimeDownloads(workflow.apiGraph);
       this.#assertConnected();
     } catch (cause) {
@@ -943,6 +944,36 @@ export class JobRunner {
           `Pick one that is, or add the file and rescan.`,
       );
     }
+  }
+
+  /**
+   * Refuse a mask painted on a picture of another size (§9). ComfyUI would
+   * stretch it over the image without a word, and repaint somewhere other
+   * than where it was painted — the panel can say "repaint it", a finished
+   * job cannot. Inputs the store does not know are left to the upload step,
+   * which has its own, better message for them.
+   */
+  #assertMasksFit(manifest: Manifest, values: Record<string, unknown>): void {
+    if (!this.#inputs) return;
+    for (const param of applicableParams(manifest, values)) {
+      if (param.type !== "mask" || param.of === undefined) continue;
+      const mask = this.#storedInput(values[param.key]);
+      const image = this.#storedInput(values[param.of]);
+      if (!mask || !image) continue;
+      if (mask.width === null || image.width === null) continue;
+      if (mask.width === image.width && mask.height === image.height) continue;
+      throw new JobRequestError(
+        `${param.key}: painted on a ${mask.width}×${mask.height} picture, ` +
+          `but ${param.of} is ${image.width}×${image.height}; paint it again ` +
+          `over this image`,
+      );
+    }
+  }
+
+  #storedInput(value: unknown) {
+    if (typeof value !== "string") return null;
+    const match = value.match(INPUT_FILENAME);
+    return match ? this.#inputs?.get(match[1]!) ?? null : null;
   }
 
   /**

@@ -13,6 +13,7 @@
   import ModelParam from "./ModelParam.svelte";
   import AudioParam from "./AudioParam.svelte";
   import ImageParam from "./ImageParam.svelte";
+  import MaskParam from "./MaskParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param, Template } from "../../types.ts";
   import { applicableParams } from "../../lib/applies.ts";
 
@@ -492,6 +493,15 @@
           onchange={(filename) => onchange(param.key, filename)}
           onattach={onimage}
         />
+      {:else if param.type === "mask"}
+        {@const under = manifest.params.find((other) => other.key === param.of)}
+        <MaskParam
+          {param}
+          value={(values[param.key] as string) ?? ""}
+          image={param.of ? ((values[param.of] as string) ?? "") : ""}
+          imageLabel={under?.label ?? param.of ?? "image"}
+          onchange={(filename) => onchange(param.key, filename)}
+        />
       {:else if param.type === "audio"}
         <AudioParam
           {param}
@@ -501,9 +511,8 @@
         />
       {:else}
         <!--
-          mask and video: the mask canvas is Phase 4 and video inputs wait on
-          the same store's video half, so the panel says so rather than
-          pretending to accept a file.
+          video: video inputs wait on the store's video half, so the panel
+          says so rather than pretending to accept a file.
         -->
         <p class="note">
           <TriangleAlert size={12} />

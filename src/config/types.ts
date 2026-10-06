@@ -16,6 +16,11 @@ export const KEY_ACTIONS = [
   "select_down",
   "fullscreen",
   "close",
+  // The mask editor's, live only while it is open (§10).
+  "brush_smaller",
+  "brush_larger",
+  "undo",
+  "redo",
 ] as const;
 export type KeyAction = typeof KEY_ACTIONS[number];
 

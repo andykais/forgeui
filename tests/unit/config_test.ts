@@ -64,6 +64,11 @@ Deno.test("first run writes config.yaml with defaults and a keys block", async (
       select_down: ["ArrowDown", "s"],
       fullscreen: ["f"],
       close: ["Escape"],
+      // The mask editor's (§10).
+      brush_smaller: ["["],
+      brush_larger: ["]"],
+      undo: ["z"],
+      redo: ["y", "Z"],
     });
     // Every known kind is written out empty, so pointing one somewhere is
     // an edit rather than a guess at the key's name (§3).
@@ -395,6 +400,10 @@ Deno.test("bindings somebody chose are left exactly as they are", async () => {
     const { store } = await loadConfig({ dataDir: dir });
     assertEquals(store.config.keys.select_prev, ["h"]);
     assertEquals(store.config.keys.select_next, ["ArrowRight"]);
+    // A binding added since is still there: the edited block is merged over
+    // the defaults, not in place of them, so the mask editor's keys arrive.
+    assertEquals(store.config.keys.undo, ["z"]);
+    assertEquals(store.config.keys.brush_larger, ["]"]);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
