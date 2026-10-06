@@ -3,6 +3,7 @@
   import Grid2x2 from "@lucide/svelte/icons/grid-2x2";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
@@ -11,6 +12,7 @@
   import { clockTime, relativeTime } from "../lib/format.ts";
   import { afterRemoval } from "../lib/neighbour.ts";
   import { queuePosition } from "../lib/queue.ts";
+  import { describeValues } from "../lib/templates.ts";
   import type { Output, Template, TileSize } from "../types.ts";
   import { withoutMetadata } from "../types.ts";
   import LayoutPicker from "../components/LayoutPicker.svelte";
@@ -108,6 +110,34 @@
   function pick(id: string) {
     pickerOpen = false;
     setQuery({ workflow: id });
+  }
+
+  /**
+   * Each workflow's templates (§4.8), listed under it in the picker. One that
+   * no longer fits its workflow is left out: choosing it could only fail.
+   */
+  const templatesByWorkflow = $derived.by(() => {
+    const byWorkflow = new Map<string, Template[]>();
+    for (const template of app.templates) {
+      if (template.problems.length > 0) continue;
+      byWorkflow.set(template.workflow, [
+        ...(byWorkflow.get(template.workflow) ?? []),
+        template,
+      ]);
+    }
+    return byWorkflow;
+  });
+
+  /** Choosing a template applies it: its workflow, filled as it says. */
+  async function pickTemplate(template: Template) {
+    pickerOpen = false;
+    try {
+      await panel.applyTemplate(template);
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not apply it");
+      return;
+    }
+    setQuery({ workflow: template.workflow });
   }
 
   /** The workflow's inputs are edited here, not in ComfyUI (§4.7). */
@@ -383,7 +413,12 @@
           {/if}
         </span>
         <span class="card-text">
-          <span class="card-name">{selectedWorkflow?.name ?? "Choose a workflow"}</span>
+          <span class="card-name">
+            {selectedWorkflow?.name ?? "Choose a workflow"}
+            {#if panel.template && panel.template.workflow === selectedWorkflow?.id}
+              <span class="card-template">· {panel.template.name}</span>
+            {/if}
+          </span>
           <span class="card-meta row">
             {#if selectedWorkflow?.family}
               <span class="badge accent">{selectedWorkflow.family}</span>
@@ -419,6 +454,24 @@
                 </span>
               </span>
             </button>
+            <!-- The workflow's templates under it, smaller: a way into it, not another workflow. -->
+            {#each templatesByWorkflow.get(workflow.id) ?? [] as template (template.id)}
+              <button
+                class="option template-option"
+                title={template.description ?? undefined}
+                onclick={() => pickTemplate(template)}
+              >
+                <LayoutTemplate size={11} />
+                <span class="option-text">
+                  <span class="template-name">{template.name}</span>
+                  <span class="mono dim option-keys">
+                    {describeValues(template.values, app.loras)}{template.ask.length > 0
+                      ? ` · asks ${template.ask.join(", ")}`
+                      : ""}
+                  </span>
+                </span>
+              </button>
+            {/each}
           {/each}
         {/each}
       </Popover>
@@ -783,6 +836,30 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    font-size: 12px;
+  }
+
+  /* A template sits under its workflow: indented, smaller, one level down. */
+  .template-option {
+    padding: 3px 7px 3px 41px;
+    gap: 6px;
+    color: var(--text-3);
+  }
+
+  .template-option .option-text {
+    font-size: 11px;
+  }
+
+  .template-option .template-name {
+    color: var(--text-2);
+  }
+
+  .template-option:hover .template-name {
+    color: var(--text);
+  }
+
+  .card-template {
+    color: var(--accent);
     font-size: 12px;
   }
 

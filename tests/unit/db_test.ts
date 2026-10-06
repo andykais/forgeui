@@ -58,6 +58,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         "output_models_model",
         "outputs_created",
         "outputs_project",
+        "outputs_template",
         "outputs_workflow",
         "samples_content",
         "samples_model",
@@ -135,6 +136,13 @@ Deno.test("a database from before origin gains the columns, and says it does not
         [null],
       );
       assert(names(migrated, "index").includes("outputs_project"));
+      // Migration 13: the template an output was made with, none on old rows.
+      assert(names(migrated, "index").includes("outputs_template"));
+      assertEquals(
+        migrated.prepare("SELECT template_id, template_name FROM outputs")
+          .value<[string | null, string | null]>(),
+        [null, null],
+      );
       // The rows themselves are untouched.
       assertEquals(
         migrated.prepare("SELECT count(*) FROM outputs").value<[number]>(),
