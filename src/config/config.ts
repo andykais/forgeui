@@ -264,6 +264,14 @@ const SUPERSEDED_KEYS: readonly Record<string, string[]>[] = [
     fullscreen: ["f"],
     close: ["Escape"],
   },
+  {
+    select_prev: ["ArrowLeft", "a"],
+    select_next: ["ArrowRight", "d"],
+    select_up: ["ArrowUp", "w"],
+    select_down: ["ArrowDown", "s"],
+    fullscreen: ["f"],
+    close: ["Escape"],
+  },
 ];
 
 function sameBlock(

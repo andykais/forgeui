@@ -434,9 +434,45 @@ describe("each param type renders from the manifest", () => {
     expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
   });
 
-  test("mask and video still say why they cannot run yet", () => {
-    mount([{ key: "mask", label: "Mask", type: "mask", bind: "11.mask" }]);
+  test("video still says why it cannot run yet", () => {
+    mount([{ key: "clip", label: "Clip", type: "video", bind: "11.video" }]);
     expect(screen.getByText(/arrive in a later phase/)).toBeTruthy();
+  });
+
+  const maskParams: Param[] = [
+    { key: "image", label: "Image", type: "image", required: true, bind: "25.image" },
+    { key: "mask", label: "Mask", type: "mask", of: "image", required: true, bind: "40.image" },
+  ];
+  const picture = `${"a".repeat(64)}.png`;
+  const painted = `${"b".repeat(64)}.png`;
+
+  test("a mask waits for its picture, naming it", () => {
+    mount(maskParams);
+    expect(screen.getByText(/Attach the image first/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /paint the mask/ })).toBeNull();
+    expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
+  });
+
+  test("with the picture attached, the mask is painted over it", () => {
+    mount(maskParams, { image: picture });
+    const button = screen.getByRole("button", { name: "Mask: paint the mask" });
+    expect(button.textContent).toContain("Paint mask");
+    // The picture it is painted over, from the store (§9).
+    expect(button.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/media/inputs/aa/${picture}`,
+    );
+    expect(button.querySelector("[data-mask-tint]")).toBeNull();
+  });
+
+  test("a painted mask is tinted over the picture, and can be taken off", async () => {
+    const { handlers } = mount(maskParams, { image: picture, mask: painted });
+    const button = screen.getByRole("button", { name: "Mask: edit the mask" });
+    expect(button.textContent).toContain("Edit mask");
+    expect(
+      (button.querySelector("[data-mask-tint]") as HTMLElement).getAttribute("style"),
+    ).toContain(`/api/media/inputs/bb/${painted}`);
+    await fireEvent.click(screen.getByRole("button", { name: "Remove the mask" }));
+    expect(handlers.onchange).toHaveBeenCalledWith("mask", "");
   });
 });
 

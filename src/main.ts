@@ -26,6 +26,7 @@ import { openTelemetryDatabase } from "./telemetry/db.ts";
 import { TelemetryStore } from "./telemetry/store.ts";
 import { MemoryMonitor } from "./telemetry/memory.ts";
 import { syncBundledWorkflows, WorkflowStore } from "./workflows/loader.ts";
+import { syncBundledTemplates, TemplateStore } from "./templates/store.ts";
 import { log, logError } from "./log.ts";
 import { APP_VERSION } from "./version.ts";
 
@@ -52,6 +53,7 @@ export interface App {
   memory: MemoryMonitor;
   paths: DataPaths;
   workflows: WorkflowStore;
+  templates: TemplateStore;
   comfy: ComfyManager;
   jobs: JobRunner;
   outputs: OutputStore;
@@ -79,10 +81,8 @@ async function startAppWith(
   args: CliArgs,
   options: StartAppOptions,
 ): Promise<App> {
-  const { store, db, telemetryDb, paths, created, workflows } = await bootstrap(
-    args,
-    options.env,
-  );
+  const { store, db, telemetryDb, paths, created, workflows, templates } =
+    await bootstrap(args, options.env);
 
   const hub = new WsHub();
   const telemetry = new TelemetryStore({ db: telemetryDb });
@@ -132,6 +132,7 @@ async function startAppWith(
     hub,
     outputs,
     inputs,
+    templates,
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
     allowModelDownloads: () => store.config.comfy.allow_model_downloads,
@@ -149,6 +150,7 @@ async function startAppWith(
     db,
     paths,
     workflows,
+    templates,
     comfy,
     jobs,
     outputs,
@@ -228,6 +230,7 @@ async function startAppWith(
     memory,
     paths,
     workflows,
+    templates,
     comfy,
     jobs,
     outputs,
@@ -263,9 +266,20 @@ async function bootstrap(args: CliArgs, env?: EnvSource) {
   // Bundled workflows are app-owned and refreshed on every launch (§4.6).
   await syncBundledWorkflows(store.paths.bundledWorkflows);
   const workflows = await WorkflowStore.load(store.paths);
+  // Templates the same way: the shipped ones refreshed, the user's kept (§4.8).
+  await syncBundledTemplates(store.paths.bundledTemplates);
+  const templates = await TemplateStore.load(store.paths);
   const db = openDatabase(store.paths.db);
   const telemetryDb = openTelemetryDatabase(store.paths.telemetryDb);
-  return { store, db, telemetryDb, paths: store.paths, created, workflows };
+  return {
+    store,
+    db,
+    telemetryDb,
+    paths: store.paths,
+    created,
+    workflows,
+    templates,
+  };
 }
 
 export async function main(argv: string[]): Promise<number> {

@@ -4,7 +4,13 @@
   import ImageUpscale from "@lucide/svelte/icons/image-upscale";
   import Plus from "@lucide/svelte/icons/plus";
   import { untrack } from "svelte";
-  import type { Lineage, LineageNode, Output, OutputDetail } from "../types.ts";
+  import type {
+    Lineage,
+    LineageNode,
+    Output,
+    OutputDetail,
+    Template,
+  } from "../types.ts";
   import { absoluteTime, duration, relativeTime, shortId } from "../lib/format.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
@@ -34,10 +40,10 @@
     onrerun: () => void;
     ondelete: () => void;
     /**
-     * Upscale this output with the named workflow (§10). Absent hides the
-     * action, which is what a screen with nowhere to land does.
+     * Upscale this output with the named template (§4.8, §10). Absent hides
+     * the action, which is what a screen with nowhere to land does.
      */
-    onupscale?: (workflowId: string) => void;
+    onupscale?: (template: Template) => void;
     /**
      * Open another output — a lineage node. The screen decides what that
      * means: Generate keeps you in the session when it can, Gallery walks to
@@ -104,11 +110,12 @@
   let upscaleOpen = $state(false);
 
   /**
-   * Upscale is the same-family `category: upscale` workflow (§10). One match
-   * runs outright, several offer the choice, none hides the button: an
-   * action with nowhere to go is worse than no action.
+   * Upscale is an `action: "upscale"` template on a workflow in the output's
+   * own family (§4.8, §10). One match applies outright, several offer the
+   * choice, none hides the button: an action with nowhere to go is worse
+   * than no action.
    */
-  const upscalers = $derived(onupscale ? app.upscalersFor(output) : []);
+  const upscalers = $derived(onupscale ? app.upscaleTemplatesFor(output) : []);
   let promoting = $state(false);
   let checked = $state<Record<string, boolean>>({});
   const sidecar = $derived(output.sidecar);
@@ -323,8 +330,8 @@
     <button onclick={onrerun}>Generate again ⟳</button>
     {#if upscalers.length === 1}
       <button
-        title={`Upscale with ${upscalers[0]!.name}`}
-        onclick={() => onupscale?.(upscalers[0]!.id)}
+        title={`${upscalers[0]!.name} — ${upscalers[0]!.workflow_name ?? upscalers[0]!.workflow}`}
+        onclick={() => onupscale?.(upscalers[0]!)}
       >
         <ImageUpscale size={12} /> Upscale
       </button>
@@ -339,15 +346,16 @@
           title="Upscale with"
           onclose={() => (upscaleOpen = false)}
         >
-          {#each upscalers as workflow (workflow.id)}
+          {#each upscalers as template (template.id)}
             <button
               class="option"
+              title={template.workflow_name ?? template.workflow}
               onclick={() => {
                 upscaleOpen = false;
-                onupscale?.(workflow.id);
+                onupscale?.(template);
               }}
             >
-              <span class="option-name">{workflow.name}</span>
+              <span class="option-name">{template.name}</span>
             </button>
           {/each}
         </Popover>
@@ -483,6 +491,31 @@
           {/if}
         </div>
       </div>
+      {#if output.template}
+        <!--
+          The template the panel was filled from (§4.8), by the name it had
+          then; a link while it still exists.
+        -->
+        <div class="field">
+          <div class="key">template</div>
+          <div>
+            {#if app.templates.some((template) => template.id === output.template?.id)}
+              <a
+                class="template-link"
+                href={`/templates/${output.template.id}`}
+                onclick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                  event.preventDefault();
+                  navigate(`/templates/${output.template?.id}`);
+                }}>{output.template.name}</a
+              >
+            {:else}
+              {output.template.name}
+              <span class="dim">· since deleted</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
 
       <!-- Only the roles no param already names; the rest appear once, below. -->
       {#each otherModels as model (model.role + model.name)}
@@ -988,5 +1021,13 @@
 
   .node-text .dim {
     font-size: 10px;
+  }
+
+  .template-link {
+    color: var(--accent);
+  }
+
+  .template-link:hover {
+    text-decoration: underline;
   }
 </style>

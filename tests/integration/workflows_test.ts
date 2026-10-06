@@ -45,21 +45,22 @@ const KREA2_SAVE = "9";
 const BUNDLED = [
   ["ace-step-song", "ACE-Step Song"],
   ["anima", "Anima"],
-  ["anima-upscale", "Anima (upscale)"],
+  ["anima-img2img", "Anima (img2img)"],
   ["breeze-tts-clone", "Breeze TTS (voice clone)"],
   ["breeze-tts-design", "Breeze TTS (voice design)"],
   ["flux-klein", "Flux.2 Klein"],
-  ["flux-klein-upscale", "Flux.2 Klein (upscale)"],
+  ["flux-klein-img2img", "Flux.2 Klein (img2img)"],
   ["illustrious", "Illustrious XL"],
-  ["illustrious-upscale", "Illustrious XL (upscale)"],
+  ["illustrious-img2img", "Illustrious XL (img2img)"],
   ["krea2", "Krea 2 Turbo"],
-  ["krea2-upscale", "Krea 2 Turbo (upscale)"],
+  ["krea2-img2img", "Krea 2 Turbo (img2img)"],
   ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
-  ["sd15-upscale", "Stable Diffusion 1.5 (upscale)"],
+  ["sd15-img2img", "Stable Diffusion 1.5 (img2img)"],
+  ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
   ["z-image-turbo", "Z-Image Turbo"],
-  ["z-image-upscale", "Z-Image Turbo (upscale)"],
+  ["z-image-img2img", "Z-Image Turbo (img2img)"],
 ] as const;
 
 async function list(app: { fetch: (p: string) => Promise<Response> }) {
@@ -160,9 +161,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     // steps, cfg, the text encoder and VAE, and the enhancer's own length.
     assertEquals(byId.get("krea2")!.params.advanced, 5);
-    // Upscale is an ordinary workflow, so its knobs are ordinary params
-    // (§10): the image, how far the model may stray, and how much bigger.
-    assertEquals(keys("krea2-upscale"), [
+    // img2img's knobs are ordinary params (§10): the image, how far the
+    // model may stray, and how much bigger. Upscale is a template on it.
+    assertEquals(keys("krea2-img2img"), [
       "image",
       "creativity",
       "scale",
@@ -170,9 +171,9 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "seed",
       "loras",
     ]);
-    assertEquals(byId.get("krea2-upscale")!.category, "upscale");
+    assertEquals(byId.get("krea2-img2img")!.category, "img2img");
     // The upscale-model path, the sampling overrides, and the loaders.
-    assertEquals(byId.get("krea2-upscale")!.params.advanced, 11);
+    assertEquals(byId.get("krea2-img2img")!.params.advanced, 11);
     // No official ComfyUI page for this SDXL finetune, so its graph is
     // unchanged (§7); it gains the model param like the rest.
     assertEquals(keys("illustrious"), [
@@ -244,13 +245,28 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "loras",
     ]);
     assertEquals(byId.get("sd15")!.params.advanced, 2); // steps, cfg
+    // The image, the mask painted over it, and what to paint (§10). How
+    // soft the edge is belongs here, not to the brush.
+    assertEquals(keys("sd15-inpaint"), [
+      "image",
+      "mask",
+      "prompt",
+      "negative",
+      "creativity",
+      "seed",
+      "loras",
+    ]);
+    // No category: nothing routes to an inpaint yet (§4.2).
+    assertEquals(byId.get("sd15-inpaint")!.category, null);
+    // grow, feather, steps, cfg, sampler, scheduler, model.
+    assertEquals(byId.get("sd15-inpaint")!.params.advanced, 7);
 
     assertEquals(byId.get("ltx2-i2v")!.kind, "video");
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
-      // Every family that can upscale has two: the workflow and its
-      // upscale sibling, in display-name order (§10).
+      // Every image family has two: the workflow and its img2img sibling,
+      // in display-name order (§10).
       [
         // ACE-Step 1.5 is its own family for the same reason LTX-2 is: its
         // encoder and latent nodes are not 1.0's (§6).
@@ -273,6 +289,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "ltx-2",
         "ltx-2",
         "sd15",
+        "sd15",
+        // And its inpaint, the one workflow that takes a mask (§4.6).
         "sd15",
         "z-image",
         "z-image",
@@ -299,6 +317,7 @@ Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async 
         const { values } = coerceParams(manifest, {
           prompt: "a granite bowl of figs",
           image: "abc123.png",
+          mask: "abc124.png",
           loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
           // What the audio workflows ask for instead of a prompt.
           audio: "abc123.wav",
@@ -867,10 +886,10 @@ Deno.test("a user workflow shadows the bundled one it was copied from", async ()
   });
 });
 
-Deno.test("the upscale workflow names no upscale model it cannot promise", async () => {
+Deno.test("the img2img workflow names no upscale model it cannot promise", async () => {
   await withTestApp(async (app) => {
     const detail = await app.json<WorkflowDetail>(
-      "/api/workflows/krea2-upscale",
+      "/api/workflows/krea2-img2img",
     );
     const param = detail.manifest!.params.find((p) =>
       p.key === "upscale_model"
@@ -884,21 +903,21 @@ Deno.test("the upscale workflow names no upscale model it cannot promise", async
     // a scalar-bound param's default is whatever the graph holds.
     assertEquals((param as { default?: string }).default, "");
     const loader = Object.values(
-      app.workflows.require("krea2-upscale").apiGraph,
+      app.workflows.require("krea2-img2img").apiGraph,
     )
       .find((node) => node.class_type === "UpscaleModelLoader");
     assertEquals(loader?.inputs.model_name, "");
   });
 });
 
-Deno.test("every image family has an upscale workflow, all the same shape", async () => {
+Deno.test("every image family has an img2img workflow, all the same shape", async () => {
   await withTestApp(async (app) => {
     const workflows = await list(app);
-    const upscalers = workflows.filter((w) => w.category === "upscale");
+    const upscalers = workflows.filter((w) => w.category === "img2img");
 
     // One per image family, and none for LTX — it writes a video, and none of
-    // these graphs upscale one (§10). An Upscale button with nowhere to go is
-    // what this is here to prevent.
+    // these graphs take one (§10). The Upscale template on each is what the
+    // Upscale button applies, and it needs somewhere to go.
     const imageFamilies = new Set(
       workflows.filter((w) => w.kind === "image" && w.category === null)
         .map((w) => w.family),
@@ -917,20 +936,21 @@ Deno.test("every image family has an upscale workflow, all the same shape", asyn
       const byKey = new Map(params.map((param) => [param.key, param]));
       const where = `${workflow.id}`;
 
-      // The four that make it an upscale rather than a generation, and the
-      // two numbers that make it a *good* one (§10).
+      // What makes it image to image rather than a generation, and its two
+      // numbers: plain img2img by default; the Upscale template sets 2 and
+      // 0.2 (§4.8, §10).
       for (const key of ["image", "creativity", "scale", "seed", "prompt"]) {
         assert(byKey.has(key), `${where}: no ${key} param`);
       }
       assertEquals(byKey.get("image")!.required, true, where);
       assertEquals(
         (byKey.get("creativity") as { default: number }).default,
-        0.2,
+        0.5,
         where,
       );
       assertEquals(
         (byKey.get("scale") as { default: number }).default,
-        2,
+        1,
         where,
       );
       assertEquals(workflow.kind, "image", where);

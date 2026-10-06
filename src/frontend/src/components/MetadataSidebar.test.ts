@@ -125,6 +125,7 @@ function output(extra: Record<string, unknown> = {}): OutputDetail {
   return {
     id: "01JOUT",
     job_id: "01J",
+    template: null,
     path: "outputs/a.png",
     sidecar_path: "outputs/a.json",
     kind: "image",

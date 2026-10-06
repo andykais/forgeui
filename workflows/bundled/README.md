@@ -1,6 +1,6 @@
 # Bundled workflows
 
-The 17 workflows of DESIGN §4.6, shipped with the app and copied into
+The 18 workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
@@ -9,21 +9,22 @@ from then on (§4.6).
 | --------------------- | ------------------------------ | ------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ace-step-song`       | ACE-Step Song                  | ace-step-1.5 | audio | style, lyrics, duration, bpm, key_scale, time_signature, language, seed, model · language_model, vae, steps, audio_codes, encoder_cfg advanced                                                                                                                         |
 | `anima`               | Anima                          | anima        | image | prompt, negative, model, size, seed, loras, turbo · steps/cfg (or the turbo pair, `when` turbo), clip, vae advanced                                                                                                                                                    |
-| `anima-upscale`       | Anima (upscale)                | anima        | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                |
+| `anima-img2img`       | Anima (img2img)                | anima        | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                |
 | `breeze-tts-clone`    | Breeze TTS (voice clone)       | —            | audio | reference, transcript, text, direct, instruction (`when` direct), seed · build, cfg_scale (`when` direct), max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                               |
 | `breeze-tts-design`   | Breeze TTS (voice design)      | —            | audio | voice, text, seed · build, cfg_scale, max_new_tokens, temperature, repetition_penalty advanced; **requires `ComfyUI-Breeze-TTS-2`**                                                                                                                                    |
 | `flux-klein`          | Flux.2 Klein                   | flux2        | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                                                                                                                                                                      |
-| `flux-klein-upscale`  | Flux.2 Klein (upscale)         | flux2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, upscale_method, clip, vae, model advanced                                                                                     |
+| `flux-klein-img2img`  | Flux.2 Klein (img2img)         | flux2        | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, upscale_method, clip, vae, model advanced                                                                                     |
 | `illustrious`         | Illustrious XL                 | sdxl         | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                       |
-| `illustrious-upscale` | Illustrious XL (upscale)       | sdxl         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
+| `illustrious-img2img` | Illustrious XL (img2img)       | sdxl         | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
 | `krea2`               | Krea 2 Turbo                   | krea2        | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, max_length (`when` enhance) advanced                                                                                                                                                                |
-| `krea2-upscale`       | Krea 2 Turbo (upscale)         | krea2        | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                          |
+| `krea2-img2img`       | Krea 2 Turbo (img2img)         | krea2        | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                          |
 | `ltx2-ia2v`           | LTX-2.3 Image + Audio to Video | ltx-2        | video | image, audio, prompt, negative, size, duration, start, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced |
 | `ltx2-i2v`            | LTX-2.3 Image to Video         | ltx-2        | video | image, prompt, negative, size, duration, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced               |
 | `sd15`                | Stable Diffusion 1.5           | sd15         | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                              |
-| `sd15-upscale`        | Stable Diffusion 1.5 (upscale) | sd15         | image | `category: upscale`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
+| `sd15-inpaint`        | Stable Diffusion 1.5 (inpaint) | sd15         | image | image, mask (`of` image), prompt, negative, creativity, seed, loras · grow, feather, steps, cfg, sampler, scheduler, model advanced                                                                                                                                    |
+| `sd15-img2img`        | Stable Diffusion 1.5 (img2img) | sd15         | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
 | `z-image-turbo`       | Z-Image Turbo                  | z-image      | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                                                                                    |
-| `z-image-upscale`     | Z-Image Turbo (upscale)        | z-image      | image | `category: upscale`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                                   |
+| `z-image-img2img`     | Z-Image Turbo (img2img)        | z-image      | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                                   |
 
 Each directory holds `workflow.api.json` (what gets queued) and `manifest.json`
 (what the Generate panel renders). There is no `workflow.ui.json` yet — see
@@ -77,14 +78,16 @@ in `src/workflows/nodes.ts` was read from.
 a Flux-family model; the page it is named after covers **Krea 2**, which runs on
 a Qwen3-VL text encoder and is a different architecture. Deriving from the
 source made the workflow match its name. There was a `krea2-img2img` holding the
-old Flux graph under the Krea name; it has been dropped — it had never been run,
-and an upscale workflow does the job it was there to demonstrate.
+old Flux graph under the Krea name; it has been dropped — it had never been run.
+The name is back, on the img2img workflow below, which is a different graph.
 
-**The upscale workflows were written here rather than imported.** Each is its
+**The img2img workflows were written here rather than imported.** Each is its
 own family's loaders with `LoadImage` → `ImageScaleBy` → `VAEEncode` in front
 and the advanced sampling set behind, so each names the same model files its
-sibling does. They come from one script rather than by hand, which is what keeps
-them the same shape as each other.
+sibling does. They were generated rather than drawn by hand, which is what keeps
+them the same shape as each other. They began as `<family>-upscale`; an upscale
+is now a bundled template on each (`templates/bundled/`, DESIGN.md §4.8): scale
+2, creativity 0.2.
 
 `ltx2-i2v` is the official Comfy-Org LTX-2.3 image-to-video template
 (`templates/video_ltx2_3_i2v.json`), which ships as a single subgraph node; it
@@ -129,7 +132,7 @@ saving replaces it with the editor's own.
 ## Choices worth knowing about
 
 - **Flux-shaped workflows** (`krea2`, `flux-klein`, `z-image-turbo` and their
-  upscale siblings) have no negative prompt: `ConditioningZeroOut` supplies the
+  img2img siblings) have no negative prompt: `ConditioningZeroOut` supplies the
   empty negative they expect, and CFG defaults to 1.
 - **`ltx2-i2v`** asks for a length in **seconds**, not frames: the graph
   multiplies duration by fps and adds one itself, and the same frame rate
@@ -141,11 +144,11 @@ saving replaces it with the editor's own.
   text-encoder pairing all come out of that one checkpoint. LoRAs splice in
   after the distilled LoRA as model-only loaders, because an LTX-2 video LoRA
   has nothing to say to a Gemma text encoder.
-- **The `-upscale` workflows** scale with `ImageScaleBy`, so the result is a
-  multiple of whatever was handed in rather than a size stated up front — which
-  is what an upscale means. It then re-samples at `creativity` (the KSampler's
-  denoise, 0.4 by default) so the model puts detail into what the scaler could
-  only interpolate. Everything about it is an ordinary param: save a copy and
+- **The `-img2img` workflows** scale with `ImageScaleBy`, so the result is a
+  multiple of whatever was handed in rather than a size stated up front: 1 keeps
+  it, 2 is an upscale. They then re-run the last `creativity` of the model's own
+  schedule (0.5 by default; the Upscale template uses 0.2) so the model reworks
+  what was handed in. Everything about it is an ordinary param: save a copy and
   change the numbers, or the scaler, or the model.
 - **The two speech workflows are the only ones that need a custom node pack.**
   They say so in `requires`, which is checked at load: a graph using a node the

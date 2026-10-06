@@ -95,6 +95,38 @@ export interface WorkflowSummary {
   has_ui_json: boolean;
 }
 
+/**
+ * A saved way to fill one workflow's panel (§4.8): the params it sets, the
+ * ones it asks for, and — by omission — the ones it leaves open.
+ */
+export interface Template {
+  id: string;
+  name: string;
+  description: string | null;
+  workflow: string;
+  workflow_name: string | null;
+  family: string | null;
+  /** What an action on an output finds it by; `upscale` is the only one. */
+  action: "upscale" | null;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: "bundled" | "user";
+  /** A user copy that shadows a bundled template of the same id. */
+  has_bundled: boolean;
+  /** What no longer fits: its workflow gone, a key it no longer has. */
+  problems: string[];
+}
+
+/** What a save sends; the server checks it against the workflow. */
+export interface TemplateBody {
+  name: string;
+  description?: string | null;
+  workflow?: string;
+  action?: Template["action"];
+  values: Record<string, unknown>;
+  ask: string[];
+}
+
 export interface ApiNode {
   class_type: string;
   inputs: Record<string, unknown>;
@@ -149,10 +181,21 @@ export interface Job {
   api_graph: Record<string, ApiNode>;
   progress: Progress | null;
   error: JobError | null;
+  /** The template the panel was filled from when it was submitted (§4.8). */
+  template: TemplateRef | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   outputs: string[];
+}
+
+/**
+ * The template a run was made with (§4.8, §6.2): its id, and its name as it
+ * was then — a template renamed or deleted since still reads as it did.
+ */
+export interface TemplateRef {
+  id: string;
+  name: string;
 }
 
 export interface Output {
@@ -179,6 +222,8 @@ export interface Output {
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
+  /** The template it was made with (§4.8); null when none. */
+  template: TemplateRef | null;
   media_url: string;
   /** The drawn waveform of an audio output (§2.2); null for every other kind. */
   waveform_url: string | null;

@@ -3,6 +3,7 @@
   import Grid2x2 from "@lucide/svelte/icons/grid-2x2";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import List from "@lucide/svelte/icons/list";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
@@ -11,7 +12,8 @@
   import { clockTime, relativeTime } from "../lib/format.ts";
   import { afterRemoval } from "../lib/neighbour.ts";
   import { queuePosition } from "../lib/queue.ts";
-  import type { Output, TileSize } from "../types.ts";
+  import { describeValues } from "../lib/templates.ts";
+  import type { Output, Template, TileSize } from "../types.ts";
   import { withoutMetadata } from "../types.ts";
   import LayoutPicker from "../components/LayoutPicker.svelte";
   import ParamPanel from "../components/params/ParamPanel.svelte";
@@ -110,6 +112,34 @@
     setQuery({ workflow: id });
   }
 
+  /**
+   * Each workflow's templates (§4.8), listed under it in the picker. One that
+   * no longer fits its workflow is left out: choosing it could only fail.
+   */
+  const templatesByWorkflow = $derived.by(() => {
+    const byWorkflow = new Map<string, Template[]>();
+    for (const template of app.templates) {
+      if (template.problems.length > 0) continue;
+      byWorkflow.set(template.workflow, [
+        ...(byWorkflow.get(template.workflow) ?? []),
+        template,
+      ]);
+    }
+    return byWorkflow;
+  });
+
+  /** Choosing a template applies it: its workflow, filled as it says. */
+  async function pickTemplate(template: Template) {
+    pickerOpen = false;
+    try {
+      await panel.applyTemplate(template);
+    } catch (cause) {
+      toasts.message(cause instanceof Error ? cause.message : "could not apply it");
+      return;
+    }
+    setQuery({ workflow: template.workflow });
+  }
+
   /** The workflow's inputs are edited here, not in ComfyUI (§4.7). */
   function editWorkflow() {
     if (selectedWorkflow) navigate(`/workflows/${selectedWorkflow.id}`);
@@ -189,22 +219,37 @@
   }
 
   /**
-   * One click to an upscale (§10): the output becomes the workflow's image
-   * and the run that made it fills the rest. The numbers that make it an
-   * upscale — creativity 0.4, scale 2 — are the workflow's own defaults, so
-   * there is nothing to preset and everything to adjust before generating.
+   * One click to an upscale (§4.8, §10): the template's workflow, the output
+   * as its image, the run that made it under the rest, and the template's
+   * own numbers — scale 2, creativity 0.2 for the bundled one — on top,
+   * there to be adjusted before generating.
    */
-  async function upscale(output: Output, workflowId: string) {
+  async function upscale(output: Output, template: Template) {
     const detail = await api.output(output.id);
     try {
-      await panel.upscale(workflowId, output, detail.sidecar?.params ?? output.params);
+      await panel.applyTemplate(template, {
+        output,
+        sourceParams: detail.sidecar?.params ?? output.params,
+      });
     } catch (cause) {
       toasts.message(
         `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
       );
       return;
     }
-    setQuery({ workflow: workflowId });
+    setQuery({ workflow: template.workflow });
+  }
+
+  /**
+   * A template saved from the panel (§4.8) is the one the panel now follows:
+   * what it asks for is required from here on, as if it had been applied.
+   */
+  async function templateSaved(template: Template, how: "created" | "updated") {
+    panel.template = template;
+    toasts.message(
+      `${how === "created" ? "Saved" : "Updated"} template “${template.name}”`,
+    );
+    await app.refreshTemplates().catch(() => {});
   }
 
   async function rerun(output: Output) {
@@ -368,7 +413,12 @@
           {/if}
         </span>
         <span class="card-text">
-          <span class="card-name">{selectedWorkflow?.name ?? "Choose a workflow"}</span>
+          <span class="card-name">
+            {selectedWorkflow?.name ?? "Choose a workflow"}
+            {#if panel.template && panel.template.workflow === selectedWorkflow?.id}
+              <span class="card-template">· {panel.template.name}</span>
+            {/if}
+          </span>
           <span class="card-meta row">
             {#if selectedWorkflow?.family}
               <span class="badge accent">{selectedWorkflow.family}</span>
@@ -404,6 +454,24 @@
                 </span>
               </span>
             </button>
+            <!-- The workflow's templates under it, smaller: a way into it, not another workflow. -->
+            {#each templatesByWorkflow.get(workflow.id) ?? [] as template (template.id)}
+              <button
+                class="option template-option"
+                title={template.description ?? undefined}
+                onclick={() => pickTemplate(template)}
+              >
+                <LayoutTemplate size={11} />
+                <span class="option-text">
+                  <span class="template-name">{template.name}</span>
+                  <span class="mono dim option-keys">
+                    {describeValues(template.values, app.loras)}{template.ask.length > 0
+                      ? ` · asks ${template.ask.join(", ")}`
+                      : ""}
+                  </span>
+                </span>
+              </button>
+            {/each}
           {/each}
         {/each}
       </Popover>
@@ -419,6 +487,16 @@
         checkpoints={app.checkpoints}
         modelsOfClass={(c) => app.modelsOfClass(c)}
         warnings={panel.warnings}
+        template={panel.template}
+        ontemplateclear={() => (panel.template = null)}
+        saveTemplate={panel.workflowId && panel.workflowManifest
+          ? {
+              workflow: panel.workflowId,
+              workflowName: selectedWorkflow?.name ?? panel.workflowId,
+              manifest: panel.workflowManifest,
+              onsaved: templateSaved,
+            }
+          : null}
         onedit={selectedWorkflow ? editWorkflow : undefined}
         onsubmit={generate}
         onchange={(key, value) => panel.set(key, value)}
@@ -758,6 +836,30 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    font-size: 12px;
+  }
+
+  /* A template sits under its workflow: indented, smaller, one level down. */
+  .template-option {
+    padding: 3px 7px 3px 41px;
+    gap: 6px;
+    color: var(--text-3);
+  }
+
+  .template-option .option-text {
+    font-size: 11px;
+  }
+
+  .template-option .template-name {
+    color: var(--text-2);
+  }
+
+  .template-option:hover .template-name {
+    color: var(--text);
+  }
+
+  .card-template {
+    color: var(--accent);
     font-size: 12px;
   }
 

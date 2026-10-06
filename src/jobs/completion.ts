@@ -267,6 +267,7 @@ export async function completeJob(
     params: job.params,
     models,
     origin: job.origin === null ? null : { ...job.origin },
+    template: job.template === null ? null : { ...job.template },
     api_graph: job.api_graph,
     outputs: sidecarOutputs,
     timing: input.timing,
@@ -315,6 +316,8 @@ export async function completeJob(
       // Denormalised off the job so the gallery can filter by it (§6.2);
       // the sidecar above is what `reindex` rebuilds this from.
       origin: job.origin,
+      // Which template the panel was filled from (§4.8), for `?template=`.
+      template: job.template,
       // This app made it, which is what a null source means (§5.4).
       source: null,
       // Nothing has been said about it yet; it was made a moment ago.

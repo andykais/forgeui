@@ -318,7 +318,7 @@ Deno.test("a round names its files, and one of them feeds the next round", async
 
     const next = await callTool<RoundResult>(app, "generate", {
       jobs: [{
-        workflow_id: "krea2-upscale",
+        workflow_id: "krea2-img2img",
         params: { image: attached.value, creativity: 0.4 },
       }],
     });

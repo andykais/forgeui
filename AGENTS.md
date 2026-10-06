@@ -38,6 +38,7 @@ src/config/     config.yaml layers, CLI overrides, extra_model_paths.yaml
 src/db/         schema.sql (verbatim DESIGN §7), migrations, all SQL
 src/comfy/      http client, ws client, child process, launch flags, proxy
 src/workflows/  manifest validation, param coercion, graph rewrite, loader
+src/templates/  saved ways to fill a workflow's panel: bundled + user, checked against the workflow (§4.8)
 src/jobs/       submit/progress/completion pipeline, node timings, sidecar, png
 src/outputs/    gallery queries, soft delete, reindex
 src/models/     the folder scan, the background hasher, output_models backfill,
@@ -48,6 +49,7 @@ src/http/       router, routes/*, /ws hub, media, static
 src/frontend/   the Svelte app — npm + Vite, the only non-Deno toolchain
 tests/          unit/ integration/ golden/ fake-comfy/ fixtures/ e2e/
 workflows/bundled/<id>/   the eight workflows of §4.6 (+ README)
+templates/bundled/<id>.json   the bundled templates of §4.8 — the Upscale button's (+ README)
 ```
 
 ## Commands

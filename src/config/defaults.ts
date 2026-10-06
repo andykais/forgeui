@@ -114,6 +114,12 @@ export function defaultConfig(): Config {
       select_down: ["ArrowDown", "s"],
       fullscreen: ["f"],
       close: ["Escape"],
+      // The mask editor's (§10). Bare keys, as every binding is: `undo` is
+      // `z`, not Ctrl+Z, because a chord matches nothing (§11.4).
+      brush_smaller: ["["],
+      brush_larger: ["]"],
+      undo: ["z"],
+      redo: ["y", "Z"],
     },
     ui: {
       rail_expanded: false,

@@ -285,6 +285,36 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 13,
+    name: "the template an output was made with",
+    // DESIGN.md §4.8, §6.2: which template filled the panel a job was
+    // submitted from, on the job and on every output, for `?template=`. In
+    // schema.sql too, so this does nothing on a fresh database. Existing
+    // rows stay NULL: nothing before this recorded a template, and a
+    // sidecar written before it has none for `reindex` to find.
+    apply: (db) => {
+      const columnsOf = (table: string) =>
+        new Set(
+          db.prepare(`PRAGMA table_info(${table})`)
+            .values<[number, string]>()
+            .map(([, name]) => name),
+        );
+      for (const table of ["jobs", "outputs"]) {
+        const present = columnsOf(table);
+        if (!present.has("template_id")) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN template_id TEXT`);
+        }
+        if (!present.has("template_name")) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN template_name TEXT`);
+        }
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS outputs_template
+           ON outputs(template_id, created_at DESC)`,
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

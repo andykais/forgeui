@@ -268,13 +268,16 @@ Deno.test("workflow-level fields are checked", () => {
     manifest([], { kind: "audio", outputs: [{ node: "9", kind: "audio" }] }),
     { graph },
   );
-  // `upscale` joined `img2img` when the Upscale action gained something to
-  // route to (§10); a category nobody routes on is still refused.
-  assertThrows(
-    () => validateManifest(manifest([], { category: "inpaint" }), { graph }),
-    ManifestError,
-    "one of img2img, upscale",
-  );
+  // `upscale` was a category until Upscale became a template on an img2img
+  // workflow (§4.8, §10); a category nobody routes on is refused, it
+  // included.
+  for (const category of ["inpaint", "upscale"]) {
+    assertThrows(
+      () => validateManifest(manifest([], { category }), { graph }),
+      ManifestError,
+      "one of img2img",
+    );
+  }
   assertThrows(
     () =>
       validateManifest(

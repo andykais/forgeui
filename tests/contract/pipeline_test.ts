@@ -12,6 +12,7 @@ import { parseSidecar } from "../../src/jobs/sidecar.ts";
 import type { JobRow, Progress } from "../../src/db/queries.ts";
 import type { ApiGraph } from "../../src/workflows/types.ts";
 import { startTestApp, type TestApp } from "../fixtures/app.ts";
+import { tinyPng } from "../fixtures/png.ts";
 import {
   CHECKPOINT,
   COMFY_DIR,
@@ -74,24 +75,34 @@ interface OutputView {
   models: { role: string; name: string }[];
 }
 
-const bundled = (file: string) =>
-  fromFileUrl(new URL(`../../workflows/bundled/sd15/${file}`, import.meta.url));
+const bundled = (id: string, file: string) =>
+  fromFileUrl(
+    new URL(`../../workflows/bundled/${id}/${file}`, import.meta.url),
+  );
 
 /**
- * The bundled `sd15` graph names the checkpoint `setup-comfy.sh` downloads.
- * When the ComfyUI under test has a different one, shadow it with a user copy
- * (§4.6) rather than skipping the run.
+ * The bundled `sd15` graphs name the checkpoint `setup-comfy.sh` downloads.
+ * When the ComfyUI under test has a different one, shadow them with user
+ * copies (§4.6) rather than skipping the run.
  */
 async function workflowFiles(): Promise<Record<string, string>> {
-  const api = JSON.parse(await Deno.readTextFile(bundled("workflow.api.json")));
-  if (api["1"].inputs.ckpt_name === CHECKPOINT) return {};
-  api["1"].inputs.ckpt_name = CHECKPOINT;
-  return {
-    "workflows/user/sd15/workflow.api.json": JSON.stringify(api, null, 2),
-    "workflows/user/sd15/manifest.json": await Deno.readTextFile(
-      bundled("manifest.json"),
-    ),
-  };
+  const files: Record<string, string> = {};
+  for (const id of ["sd15", "sd15-inpaint"]) {
+    const api = JSON.parse(
+      await Deno.readTextFile(bundled(id, "workflow.api.json")),
+    );
+    if (api["1"].inputs.ckpt_name === CHECKPOINT) continue;
+    api["1"].inputs.ckpt_name = CHECKPOINT;
+    files[`workflows/user/${id}/workflow.api.json`] = JSON.stringify(
+      api,
+      null,
+      2,
+    );
+    files[`workflows/user/${id}/manifest.json`] = await Deno.readTextFile(
+      bundled(id, "manifest.json"),
+    );
+  }
+  return files;
 }
 
 async function startApp(): Promise<TestApp> {
@@ -383,3 +394,156 @@ contractTest("the embedded editor is served through /comfy/", async () => {
     await app.dispose();
   }
 });
+
+/**
+ * An 8-bit RGB or RGBA PNG's pixels, as RGB: enough to read back what
+ * ComfyUI wrote. Its PNGs are filtered per row, so the five filters of the
+ * PNG spec are undone here.
+ */
+async function decodePng(
+  png: Uint8Array,
+): Promise<{ width: number; height: number; rgb: Uint8Array }> {
+  const chunks = readChunks(png);
+  const ihdr = new DataView(chunks[0]!.data.buffer, chunks[0]!.data.byteOffset);
+  const width = ihdr.getUint32(0);
+  const height = ihdr.getUint32(4);
+  const channels = chunks[0]!.data[9] === 6 ? 4 : 3;
+  assertEquals(chunks[0]!.data[8], 8, "only 8-bit PNGs are read here");
+  const idat = chunks.filter((c) => c.type === "IDAT").map((c) => c.data);
+  const joined = new Uint8Array(idat.reduce((n, d) => n + d.length, 0));
+  let at = 0;
+  for (const data of idat) {
+    joined.set(data, at);
+    at += data.length;
+  }
+  const raw = new Uint8Array(
+    await new Response(
+      new Blob([joined]).stream().pipeThrough(
+        new DecompressionStream("deflate"),
+      ),
+    ).arrayBuffer(),
+  );
+  const stride = width * channels;
+  const out = new Uint8Array(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]!;
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? out[y * stride + x - channels]! : 0;
+      const b = y > 0 ? out[(y - 1) * stride + x]! : 0;
+      const c = x >= channels && y > 0
+        ? out[(y - 1) * stride + x - channels]!
+        : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = a;
+      else if (filter === 2) predicted = b;
+      else if (filter === 3) predicted = (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      out[y * stride + x] = (line[x]! + predicted) & 0xff;
+    }
+  }
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    rgb.set(out.subarray(i * channels, i * channels + 3), i * 3);
+  }
+  return { width, height, rgb };
+}
+
+contractTest("a painted mask repaints only what it covers", async () => {
+  const app = await startApp();
+  try {
+    const upload = async (bytes: Uint8Array, name: string) => {
+      const form = new FormData();
+      form.set("file", new File([bytes.buffer as ArrayBuffer], name));
+      return await app.json<{ filename: string }>("/api/inputs", {
+        method: "POST",
+        body: form,
+      });
+    };
+    // A flat picture, and a mask over its right half: white repaints (§9).
+    const ORIGINAL: [number, number, number] = [96, 128, 160];
+    const image = await upload(
+      tinyPng({ width: 256, height: 256, color: ORIGINAL }),
+      "flat.png",
+    );
+    const mask = await upload(
+      tinyPng({
+        width: 256,
+        height: 256,
+        pixel: (x) => x >= 128 ? [255, 255, 255] : [0, 0, 0],
+      }),
+      "mask.png",
+    );
+
+    const submitted = await app.json<JobResponse>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "sd15-inpaint",
+        params: {
+          image: image.filename,
+          mask: mask.filename,
+          prompt: PROMPT,
+          seed: SEED,
+          steps: STEPS,
+          creativity: 1,
+          grow: 8,
+          feather: 8,
+        },
+      }),
+    });
+    const done = await awaitJob(app, submitted.id);
+    assertEquals(done.status, "done", JSON.stringify(done.error));
+
+    const bytes = await Deno.readFile(
+      join(
+        app.paths.outputs,
+        dayOf(submitted.created_at),
+        `${submitted.id}-0.png`,
+      ),
+    );
+    const { width, height, rgb } = await decodePng(bytes);
+    assertEquals([width, height], [256, 256]);
+    const at = (
+      x: number,
+      y: number,
+    ) => [...rgb.subarray((y * width + x) * 3, (y * width + x) * 3 + 3)];
+
+    // Well clear of the mask, grown and feathered: the original's own
+    // pixels, exactly, because the result is pasted back through the mask
+    // rather than decoded wholesale out of the latent.
+    for (const y of [4, 64, 128, 200, 250]) {
+      for (const x of [2, 40, 90]) {
+        assertEquals(at(x, y), ORIGINAL, `kept pixel ${x},${y} changed`);
+      }
+    }
+    // Inside it, the model drew something: a flat field stays flat only if
+    // nothing was repainted.
+    const inside = [at(200, 64), at(220, 128), at(180, 200), at(240, 240)];
+    assert(
+      inside.some((pixel) =>
+        pixel.some((value, channel) =>
+          Math.abs(value - ORIGINAL[channel]!) > 12
+        )
+      ),
+      `nothing was repainted under the mask: ${JSON.stringify(inside)}`,
+    );
+
+    // The mask is an input of the output, as the image is (§9 step 5).
+    const sidecar = parseSidecar(
+      await Deno.readTextFile(
+        join(
+          app.paths.outputs,
+          dayOf(submitted.created_at),
+          `${submitted.id}.json`,
+        ),
+      ),
+    );
+    assertEquals(sidecar.params.mask, mask.filename);
+  } finally {
+    await app.dispose();
+  }
+}, { sampler: true, app: true });

@@ -14,7 +14,7 @@ import {
   type SidecarModelRef,
 } from "../db/queries.ts";
 import { promptText, toneText } from "../jobs/completion.ts";
-import type { MediaSource, Origin } from "../db/queries.ts";
+import type { MediaSource, Origin, TemplateRef } from "../db/queries.ts";
 import { readPngSize } from "../jobs/png.ts";
 import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
 import { sha256Hex } from "../workflows/hash.ts";
@@ -38,6 +38,20 @@ function originOf(sidecar: Sidecar): Origin | null {
   return row.source === null && row.project === null && row.note === null
     ? null
     : row;
+}
+
+/**
+ * The sidecar's `template` block (§4.8, §6.2), as the row holds it. Absent
+ * or malformed reads as none: nothing a rebuild can recover was recorded.
+ */
+function templateOf(sidecar: Sidecar): TemplateRef | null {
+  const template = sidecar.template;
+  if (!template || typeof template !== "object") return null;
+  if (typeof template.id !== "string" || template.id.length === 0) return null;
+  return {
+    id: template.id,
+    name: typeof template.name === "string" ? template.name : template.id,
+  };
 }
 
 /**
@@ -227,6 +241,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
         params: sidecar.params,
         deleted_at: null,
         created_at: createdAt,
+        template: templateOf(sidecar),
       };
       // A rebuild replaces whatever was there before.
       deleteOutputRow(db, id);
@@ -242,6 +257,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
       insertRebuiltJob(db, {
         id: sidecar.job_id,
         origin: originOf(sidecar),
+        template: templateOf(sidecar),
         workflow_id: sidecar.workflow?.id ?? null,
         workflow_hash: sidecar.workflow?.hash ?? null,
         params: sidecar.params,

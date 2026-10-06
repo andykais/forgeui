@@ -77,6 +77,9 @@ app to ComfyUI's lifecycle for no benefit.
       workflow.ui.json      LiteGraph format (for the embedded editor)
       workflow.api.json     prompt format (what gets queued)
       manifest.json         exposed params (§4)
+  templates/
+    bundled/<id>.json       shipped with the app, overwritten on upgrade (§4.8)
+    user/<id>.json          user-created or user-overridden templates
   outputs/YYYY/MM/DD/
     <jobid>-<n>.png|mp4|…   generated media
     <jobid>.json            sidecar: full reproduction record (§6.2)
@@ -162,8 +165,10 @@ Field notes:
 - `family` on the workflow and `filter.family` on `lora_list` / `checkpoint`
   params restrict pickers to compatible models (§8.1).
 - `category` (string, optional) tags the workflow's role for UI routing. Known
-  value: `img2img` — a workflow exposing `image` (required) and `denoise`,
-  used by **Use image in workflow** and **Upscale image** (§10).
+  value: `img2img` — a workflow exposing `image` (required), `creativity`
+  and `scale`, used by **Use image in workflow**, and the workflow the
+  bundled Upscale templates fill (§4.8, §10). *Amended:* `upscale` was a
+  category too; an upscale is now a template on an img2img workflow.
   Uncategorised workflows are ordinary generators.
 
 ### 4.3 Param types (closed set)
@@ -179,7 +184,7 @@ Field notes:
 | `checkpoint` | model picker (filtered by family) | scalar (filename) |
 | `lora_list` | repeatable rows: lora picker + strength(s) | `chain` (graph rewrite, §4.4) |
 | `image` | file picker / drop / paste, thumbnail with the stored size | scalar (`LoadImage.image`), content-addressed (§9) |
-| `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
+| `mask` | painted over the image its `of` names, in the mask editor (§10) | scalar (`LoadImageMask.image`, channel `red`), content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
 **Where a param's value comes from**, first match wins:
@@ -316,7 +321,8 @@ Initial set:
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
-| `<id>-upscale` | as its sibling | image | one per image family: `krea2-upscale`, `sd15-upscale`, `illustrious-upscale`, `anima-upscale`, `z-image-upscale`, `flux-klein-upscale`. `category: upscale`; image (required), creativity (0.2), scale (2), prompt, seed, loras; the upscale-model path and the sampling overrides advanced (§10) |
+| `sd15-inpaint` | sd15 | image | image (required), mask (required, `of: image`), prompt, negative, creativity (0.75), seed, loras; grow, feather, steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
+| `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
 LTX-2.3 Image to Video, Anima, Flux Klein, Z-Image Turbo,
@@ -328,8 +334,15 @@ mocks.
 download and it produces an image on a CPU in seconds, so it is the workflow
 the contract check (§14.1) generates with. The other seven need a GPU and
 hand-picked model files. Editing
-workflows (Kontext-style), inpainting and dedicated upscalers are not bundled;
-they are ordinary user workflows added later.
+workflows (Kontext-style) and dedicated upscalers are not bundled;
+they are ordinary user workflows added later. *Amended:* inpainting was on
+that list. `sd15-inpaint` is bundled for the same reason `sd15` is: the mask
+editor (§10) needs a workflow that takes a mask, and this one runs on the
+contract check's CPU ComfyUI, so a painted mask is proven against the real
+thing rather than the fake. It uses the plain SD 1.5 checkpoint with a
+noise mask, not an inpainting checkpoint, so it needs no second download. It has
+no `category` yet: a category is for routing, and nothing routes to an
+inpaint until **Edit image** (§13, Phase 4) does.
 
 Exact node graphs are authored in ComfyUI and committed as files; the table
 above defines the intended manifest surface.
@@ -344,6 +357,81 @@ counted among the literal inputs. Row order is panel order. "Auto-expose
 all" generates one advanced param per literal widget value, for a freshly
 imported graph. Saving a bundled workflow's manifest creates the user copy
 first (§4.6) and changes the workflow hash; existing outputs are unaffected.
+
+### 4.8 Templates
+
+*Added with the img2img workflows.* A **template** is a saved way to fill a
+workflow's panel: some of its params set to chosen values, some left for
+whoever applies it to fill in. A favourite combination of LoRAs is one; the
+numbers that turn an img2img workflow into an upscale are another. Templates
+can be made, edited and deleted; the Upscale action applies them (§10),
+**Open in Generate** applies one by hand, and the Generate workflow picker
+lists each workflow's templates under it (§11.2). Every output records which
+template it was made with (§6.2).
+
+```json
+{
+  "format": 1,
+  "id": "krea2-upscale",
+  "name": "Upscale 2×",
+  "description": "Twice the size, with a light touch of new detail.",
+  "workflow": "krea2-img2img",
+  "action": "upscale",
+  "values": { "scale": 2, "creativity": 0.2 },
+  "ask": ["image"]
+}
+```
+
+- **One workflow.** A template names one workflow by id and only ever fills
+  that workflow's params. LoRAs and models belong to a family anyway, and a
+  template that guessed its way across workflows would set keys that do not
+  exist on half of them.
+- **Each param is in one of three states:**
+  - **set** — in `values`: applying the template puts this value in the
+    panel. Values are checked against the workflow's param types when saved,
+    exactly as a job's are (§4.3), with nothing required; `seed: -1` stays
+    "random" rather than being rolled.
+  - **ask** — in `ask`: the template leaves it to the person applying it, and
+    the panel treats it as **required** for as long as the template is
+    applied — a saved set of LoRAs whose prompt still has to be written.
+    A param the workflow already requires is required either way; listing it
+    says so on the template's own page too.
+  - **open** — in neither: whatever the panel would have held anyway, which
+    is the workflow default or, for the Upscale action, the source output's
+    value.
+
+  A key cannot be both set and asked.
+- **Applying** fills the panel by key the way Reuse Parameters does (§6.4),
+  and the panel shows which template it came from and what it asks for.
+  Choosing another workflow drops it. Nothing about the job changes: the
+  values are ordinary job values, so where a value comes from is still the
+  job, then the manifest default, then the graph (§4.3).
+- **Recorded on what it made.** A submit names the template the panel was
+  filled from (`template` on `POST /api/jobs`, §12); the job keeps it, and
+  the sidecar and every output record it as `{id, name}` (§6.2) — the name
+  as it was then, because a template can be renamed or deleted later and
+  the output must still say what it came from. It is recorded whatever was
+  changed after the template filled the panel: it says where the run
+  started, not that every value is the template's. `GET /api/outputs
+  ?template=<id>` finds them. A rerun keeps the template of the run it
+  repeats, since it replays the same values.
+- **`action`** (optional, closed set: `upscale`) is how an action on an
+  output finds its template: the Upscale button looks for templates with
+  `action: "upscale"` whose workflow is in the output's family (§10).
+- **Bundled and user**, as workflows are (§4.6): `templates/bundled/` ships
+  with the app and is overwritten on upgrade; `templates/user/` is never
+  touched by one. Saving a bundled template writes a user copy with the same
+  id, which shadows it; deleting that copy brings the bundled one back. A
+  bundled template with no copy cannot be deleted.
+- **A template outlives its workflow.** No foreign key, as for outputs (§7):
+  a template whose workflow is gone, or that sets a key the workflow no
+  longer has, still lists — with what is wrong with it — rather than
+  vanishing or refusing the whole list.
+- **Made from Generate.** **Save as template** in the panel header captures
+  the current workflow and lets each param be saved, asked for, or left
+  open. Required params start as *ask*, params changed from the workflow's
+  default as *set*, everything else as *open*. Opened from a template, the
+  same dialog offers to update it.
 
 ---
 
@@ -425,6 +513,7 @@ or replacing any workflow must never affect the ability to rerun an old output.
   },
   "models": [ { "role": "checkpoint", "name": "krea2.safetensors", "hash": "sha256:…" } ],
   "origin": { "source": "ui", "project": "herons", "note": "iteration 3, pushing the LoRA past 0.9" },
+  "template": { "id": "grainy-herons", "name": "Grainy herons" },
   "api_graph": { "...the fully rewritten prompt-format graph that was queued..." },
   "outputs": [ { "file": "01J…-0.png", "kind": "image", "width": 1024, "height": 1024, "notes": "hands are wrong, the light is right" } ],
   "timing": { "total_ms": 12034, "nodes": { "3": 9800, "8": 1200 } },
@@ -463,6 +552,13 @@ The three fields are denormalised onto `jobs` and `outputs` (§7) so the
 gallery can filter by them; the sidecar stays the source of truth and
 `reindex` rebuilds them from it.
 
+`template` is the template the panel was filled from when the job was
+submitted (§4.8): its id, and its name at that moment, so an output still
+says where it came from after the template is renamed or deleted. `null`
+for a run that used none, and absent from sidecars written before the field
+existed, which reads the same. Denormalised onto `jobs` and `outputs` as
+`template_id` / `template_name` (§7), for `?template=`.
+
 ### 6.3 Why `rename()` and not copy
 ComfyUI writes to `staging/` on the same filesystem; moving is a metadata
 operation, so there is exactly one copy of every file. `staging/` is swept on
@@ -499,7 +595,8 @@ CREATE TABLE jobs (
   error_json TEXT,
   origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
   origin_project TEXT, origin_note TEXT,
-  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
+  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+  template_id TEXT, template_name TEXT  -- the template it was made with (§4.8, §6.2); no FK
 );
 
 CREATE TABLE outputs (
@@ -514,10 +611,12 @@ CREATE TABLE outputs (
   prompt TEXT,                    -- denormalised for search
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  template_id TEXT, template_name TEXT  -- from the sidecar's `template` (§6.2); no FK, as for workflows
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
+CREATE INDEX outputs_template ON outputs(template_id, created_at DESC);
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
@@ -900,6 +999,16 @@ swept since. The upload happens before the job row exists: an input the store
 has lost is as much a bad request as an empty prompt, and neither should leave
 a failed job behind to explain itself.
 
+**A mask is a PNG the size of its image**: white repaints, black keeps,
+grey is in between. It is bound through `LoadImageMask` on the `red`
+channel, which reads white as 1; the `alpha` channel would read it inverted
+(transparent repaints), which is the convention nobody guesses right. It is
+stored and uploaded like any other input, so a rerun, Reuse parameters and
+the output's inputs carry it with no more machinery. **The submit refuses a
+mask whose size is not its image's** (`mask: painted on a W×H picture, but
+image is W×H`), because ComfyUI would stretch it over the picture without a
+word and repaint somewhere other than where it was painted.
+
 The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
 really a JPEG otherwise fails inside ComfyUI's load step, well past the point
@@ -915,33 +1024,35 @@ param on the img2img-style workflows.
 
 No new architecture: img2img, upscale and (later) editing are all workflows
 with an `image` param.
-- Every image workflow has an **upscale sibling** (§4.6): `krea2-upscale` and
-  one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein. The
-  `krea2-img2img` workflow that used to stand for this whole idea is gone —
-  it was the old Flux.1 graph under a Krea name, it had never been run, and
-  an upscale workflow does the job it was there to demonstrate. LTX-2.3 has none:
-  it writes a video, and none of these graphs upscale one.
+- Every image workflow has an **img2img sibling** (§4.6): `krea2-img2img`
+  and one each for sd15, Illustrious, Anima, Z-Image and Flux.2 Klein.
+  *Amended:* these were the `<id>-upscale` workflows. An upscale is an
+  img2img run at `scale` 2 and a low `creativity`, so the graphs became
+  general img2img workflows (scale 1, creativity 0.5 by default) and the
+  upscale became a **bundled template** on each (§4.8). LTX-2.3 has none:
+  it writes a video, and none of these graphs take one.
   Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
   (+ optional `mask`) + `prompt` — and are added as user workflows later.
 - Every output has **Use image in workflow** (video: **Use video in
   workflow**) listing workflows with a matching `image`/`video` param.
-- **Upscale image** sits beside it, and routes to the `category: upscale`
-  workflow in the **same family** as the output (no menu when exactly one
-  matches, a popover when several do, hidden when none; **image outputs
-  only** — never shown on videos, because none of these graphs upscale one).
-  Every image family has one, so the action is never dark on an output the
-  app made itself; LTX-2.3 has none, which is what the video rule is for.
+- **Upscale image** sits beside it, and applies the `action: "upscale"`
+  template (§4.8) whose workflow is in the **same family** as the output (no
+  menu when exactly one matches, a popover of template names when several
+  do, hidden when none; **image outputs only** — never shown on videos,
+  because none of these graphs take one). Every image family has a bundled
+  one, so the action is never dark on an output the app made itself.
 
-  It was going to be the `img2img` workflow with `denoise` and `size` preset
-  on the way in. Making it **its own workflow** instead is what lets it be
-  tweaked like everything else: the numbers that make it an upscale are the
-  workflow's own params — `creativity` defaulting to **0.2**, `scale` to
-  **2** — so nothing is preset, both are visible and adjustable before
-  generating, and a user who wants a different upscale saves a copy and
-  changes it. Size is relative (`ImageScaleBy`) rather than absolute, so the
-  result follows whatever was handed in and there is no source resolution to
-  read off and snap.
+  *Amended:* it was first its own workflow, so that the numbers that make it
+  an upscale — `scale` **2**, `creativity` **0.2** — were the workflow's own
+  params rather than values preset by the client, visible and adjustable
+  before generating, and changeable by saving a copy. A template keeps all of
+  that: the values land in the panel as ordinary values, and a user who wants
+  a different upscale edits the template (which makes a user copy) instead
+  of keeping a second copy of the whole graph in step with the first. Size is
+  relative (`ImageScaleBy`) rather than absolute, so the result follows
+  whatever was handed in and there is no source resolution to read off and
+  snap.
 
   **`creativity` is a slice of the model's own schedule, not `KSampler`'s
   `denoise`.** This shipped bound to `denoise` first, and the results were
@@ -969,15 +1080,17 @@ with an `image` param.
   SwarmUI's default is `pixel-lanczos` too.
 
   Prompt, seed and LoRAs are prefilled from the source output's sidecar,
-  **narrowed to the keys the upscale workflow actually exposes** — the
+  **narrowed to the keys the img2img workflow actually exposes**, under the
+  template's values — the
   "ignored: …" warning `editWith` shows is right when a workflow changed
   under a saved run and noise on every upscale. Mechanically identical to
   "use in workflow": the input is hashed into the content-addressed store and
   `derived_from_output` recorded. An upscale is an ordinary derived output,
-  not a special case. Resolution is client-side: `GET /api/workflows` carries
-  `category` and `family`, `GET /api/outputs/:id` the output's family and
-  kind; the client picks the target, `POST /api/inputs` adopts the output,
-  and the panel is filled. No upscale-specific route.
+  not a special case. Resolution is client-side: `GET /api/templates` carries
+  each template's `action` and its workflow's `family`, `GET /api/outputs/:id`
+  the output's family and kind; the client picks the template,
+  `POST /api/inputs` adopts the output, and the panel is filled. No
+  upscale-specific route.
 - **The size follows the picture.** A workflow that has both an `image` and a
   `size` sets the size from what was just attached: the picture's own shape
   and its own pixels, snapped to the model's grid because that is the only
@@ -987,7 +1100,7 @@ with an `image` param.
   and bringing it down would be overruling a decision already made. It is
   announced in a toast, and the size row still overrules it: this saves you
   saying the same thing twice, it does not take the say away. A workflow with
-  no `size` — every upscale, which states a `scale` — is untouched.
+  no `size` — every img2img workflow, which states a `scale` — is untouched.
 - **An `image` param takes a picture four ways**: the file picker, a drop, a
   paste, and a result dragged straight out of the grid. Pasting claims the
   zone the pointer is **over** as well as the one with focus — focus alone
@@ -997,8 +1110,30 @@ with an `image` param.
   is a prompt. A dragged tile carries its **output id**, not its bytes: the
   drop adopts the file the app already wrote rather than uploading a copy of
   it back to itself (§9).
-- The `mask` widget is a simple brush/erase canvas over the bound image,
-  producing a PNG that goes through §9.
+- **The mask editor.** A `mask` param sits under its image as the picture
+  with the mask tinted over it, and a **Paint mask** button (**Edit mask**
+  once there is one; disabled, saying why, until the image is attached).
+  It opens a full-window overlay with the image as large as the window
+  allows and the mask over it in the accent colour, and only these tools:
+  - **Brush** and **Eraser**, round, with one **size** in the image's own
+    pixels (a slider, and `brush_smaller` / `brush_larger`, §11.4); the
+    outline of the brush follows the pointer, so its size is never a guess;
+  - **Invert**, **Clear**, **Undo** and **Redo** (`undo` / `redo`, §11.4;
+    every stroke, invert and clear is one step);
+  - **Hide mask**, a toggle, to see the picture underneath.
+
+  **Done** writes the PNG (§9) and sets the param; **Cancel** and `close`
+  leave it as it was. A mask with nothing painted on it is no mask: Done
+  clears the param rather than uploading a black square. Reopening an
+  existing mask paints on top of it.
+
+  *Not SwarmUI's editor.* That one is a layered image editor — layers,
+  colour brushes, selections, move — because it edits pictures; this one
+  only says *where*. Brush hardness is left out on purpose: how soft the
+  edge is belongs to the workflow, as `grow` and `feather` params (§4.6),
+  so the same rough mask can be tried at several softnesses, and anything
+  that sends a mask without painting it — `forge mcp` — gets the same
+  knobs.
 - Provenance chain via `derived_from_output` gives a "lineage" view.
 
 ---
@@ -1008,6 +1143,7 @@ with an `image` param.
 ### 11.1 Global layout
 Left nav rail, with Lucide icons: **Generate** `pencil-sparkles`,
 **Gallery** `images`, **Models** `brain`, **Workflows** `workflow`,
+**Templates** `layout-template`,
 **ComfyUI** `server`, **Telemetry** `activity`, **Settings** `settings`. The rail is a **56px icon
 rail by default**,
 collapsible to 196px labelled; the state persists. There are no keyboard
@@ -1027,7 +1163,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 **Generate**
 - Workflow selector sits **inside the param panel**, at the top, as a card
   (thumb of last output, name, family/kind badges, last run). Clicking it
-  opens a picker grouped by family and kind.
+  opens a picker grouped by family and kind. *Amended:* each workflow's
+  templates (§4.8) are listed under it, inside its family group, as
+  smaller indented rows; choosing one applies it, and the card names the
+  template beside the workflow.
 - Param panel rendered from the manifest: required params first, then
   optional, then a collapsed **Advanced** section. A PARAMETERS header row
   carries **Reset to defaults**. Sticky **Generate** button (one click = one job).
@@ -1245,6 +1384,19 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   ComfyUI" (embedded editor loads `workflow.ui.json`; its Save writes both
   json files and returns here); **Save manifest** (changes the workflow hash;
   existing outputs keep their own graph copy).
+
+**Templates** (§4.8)
+- Table of templates: name (+ USER COPY badge on one that shadows a bundled
+  template), the workflow it fills (a link) and its family, what it **sets**
+  (`scale 2 · creativity 0.2`, LoRAs by title), what it **asks** for, the
+  action it serves, and source. A template with a problem — its workflow
+  gone, a key the workflow no longer has — says so on its row.
+- Selecting a row opens its page: name and description edited in place, and
+  every param of its workflow with its state (set / ask / open) switchable
+  and its set value shown. **Open in Generate** applies it; saving from
+  there offers to update it, which is how a set value is changed. **Delete**
+  removes a user template, or a user copy (bringing the bundled one back);
+  never shown on a bundled template.
 
 **ComfyUI**
 - Full embedded ComfyUI UI (same-origin proxy, §4.1), as an escape hatch.
@@ -1558,7 +1710,17 @@ table toggle** — small tiles, large tiles, table — stored per screen.
     select_down:  [ArrowDown, s]
     fullscreen:   [f]
     close:        [Escape]
+    brush_smaller: ["["]
+    brush_larger:  ["]"]
+    undo:         [z]
+    redo:         [y, Z]
   ```
+
+  The last four are the mask editor's (§10), and are live only while it is
+  open; outside it nothing listens for them. *Amended:* the table had only
+  the first six. `undo` is a bare `z` rather than `Ctrl+Z` because a binding
+  is never a chord (below) — the same rule that keeps `Ctrl+A` from moving
+  the selection.
 
   A chord is never one of these: a binding is a bare key, and several are
   plain letters, so an event carrying ctrl, meta or alt matches nothing —
@@ -1618,16 +1780,24 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
 DELETE /api/workflows/:id               user copies only; 409 for bundled
-POST /api/jobs                          {workflow_id, params, origin?}   one job per call
-POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed)
+GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems
+GET  /api/templates/:id
+POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name
+PUT  /api/templates/:id                 replace name/description/values/ask/action (bundled → creates the user copy)
+DELETE /api/templates/:id               user templates and user copies; 409 for a bundled template with no copy
+POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
+                                        the id of the template the panel was filled from (§4.8), which must
+                                        exist and fill this workflow
+POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
+                                        keeps the repeated run's template
 POST /api/jobs/:id/cancel
 POST /api/jobs/clear                    cancel every queued job
 GET  /api/jobs?status=active
 GET  /api/jobs?workflow_id=&limit=1        last-used params for a workflow
 GET  /api/jobs/:id                      one job row with the ids of its outputs
 GET  /api/outputs?cursor&filters…&sort   keyset paginated; filters per §11.2, plus `project` and
-                                        `source` from the origin block (§6.2), which the screens do
-                                        not offer yet; sort newest|oldest
+                                        `source` from the origin block and `template` (an id, §4.8)
+                                        (§6.2), which the screens do not offer yet; sort newest|oldest
                                         rows carry the row of §7 plus media_url, the models chips
                                         and generation_ms (the job's wall clock, for DURATION)
 GET  /api/outputs/days?filters&dates=   per-day counts for the given days only (lazy, client-driven);
@@ -1703,12 +1873,18 @@ orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
 Civitai fetch-info and URL import (raw only).
 
 Landed so far: the store and `POST /api/inputs`, the `image` param widget
-(picker, drop, paste), `krea2-upscale` and the Upscale action, `output_inputs`
+(picker, drop, paste), the img2img workflows and the Upscale action (as
+bundled templates, §4.8), `output_inputs`
 provenance, and the lineage view. Still to come in this phase: `video` params,
 "Use image in workflow", the orphan sweep, and the rest of the list.
 
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows.
+
+Landed so far: the mask editor (§10) and `sd15-inpaint` (§4.6). Still to
+come: instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit), an inpaint
+for the other families, an **Edit image** action beside Upscale, and a way
+for `forge mcp` to make a mask without painting one.
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,
@@ -1802,8 +1978,10 @@ If it fails, update the fake; never make the default suite depend on it.
    upscale`** workflow, which carries `creativity` 0.4 and `scale` 2 as its
    own defaults (§10). It was going to be the `img2img` workflow with those
    two preset by the client; a workflow of its own is what makes it
-   adjustable and copyable like every other workflow. `krea2-upscale` ships
-   first, so Upscale is hidden on outputs of families that have none yet.
+   adjustable and copyable like every other workflow. *Revised again:* it is
+   the img2img workflow after all, with the two values in a bundled
+   **template** (§4.8) — adjustable and copyable as a template is, without a
+   second copy of every graph.
 2. *(Resolved)* `display_name` collisions allowed; hash is the identity
    (§8.1).
 3. Should notes / Civitai description be searchable anywhere, given they are
