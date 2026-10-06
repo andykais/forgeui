@@ -1,6 +1,6 @@
 # Bundled workflows
 
-The 17 workflows of DESIGN §4.6, shipped with the app and copied into
+The 18 workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
@@ -21,6 +21,7 @@ from then on (§4.6).
 | `ltx2-ia2v`           | LTX-2.3 Image + Audio to Video | ltx-2        | video | image, audio, prompt, negative, size, duration, start, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced |
 | `ltx2-i2v`            | LTX-2.3 Image to Video         | ltx-2        | video | image, prompt, negative, size, duration, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced               |
 | `sd15`                | Stable Diffusion 1.5           | sd15         | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                              |
+| `sd15-inpaint`        | Stable Diffusion 1.5 (inpaint) | sd15         | image | image, mask (`of` image), prompt, negative, creativity, seed, loras · grow, feather, steps, cfg, sampler, scheduler, model advanced                                                                                                                                    |
 | `sd15-img2img`        | Stable Diffusion 1.5 (img2img) | sd15         | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
 | `z-image-turbo`       | Z-Image Turbo                  | z-image      | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                                                                                    |
 | `z-image-img2img`     | Z-Image Turbo (img2img)        | z-image      | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                                   |

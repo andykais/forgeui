@@ -521,11 +521,14 @@ test("Reuse parameters from a media layout shows the inputs", async ({ page }) =
  */
 test("the gallery is where you left it after the viewer closes", async ({ page, request }) => {
   await anOutput(page);
-  const workflow = new URL(page.url()).searchParams.get("workflow")!;
+  // Named, not read off the URL: that is whichever workflow another spec
+  // left open, and one that needs more than a prompt — an inpaint's image
+  // and mask — would refuse all six.
   for (let i = 0; i < 6; i++) {
-    await request.post("/api/jobs", {
-      data: { workflow_id: workflow, params: { prompt: `a scroll mark ${i}` } },
+    const response = await request.post("/api/jobs", {
+      data: { workflow_id: "illustrious", params: { prompt: `a scroll mark ${i}` } },
     });
+    expect(response.status()).toBe(201);
   }
   // Short enough that a handful of tiles has to scroll.
   await page.setViewportSize({ width: 960, height: 420 });

@@ -184,7 +184,7 @@ Field notes:
 | `checkpoint` | model picker (filtered by family) | scalar (filename) |
 | `lora_list` | repeatable rows: lora picker + strength(s) | `chain` (graph rewrite, §4.4) |
 | `image` | file picker / drop / paste, thumbnail with the stored size | scalar (`LoadImage.image`), content-addressed (§9) |
-| `mask` | paint over the bound `image` param | scalar, content-addressed (§9) |
+| `mask` | painted over the image its `of` names, in the mask editor (§10) | scalar (`LoadImageMask.image`, channel `red`), content-addressed (§9) |
 | `video` | upload / pick from gallery | scalar, content-addressed (§9) |
 
 **Where a param's value comes from**, first match wins:
@@ -321,6 +321,7 @@ Initial set:
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
+| `sd15-inpaint` | sd15 | image | image (required), mask (required, `of: image`), prompt, negative, creativity (0.75), seed, loras; grow, feather, steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
 | `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
@@ -333,8 +334,15 @@ mocks.
 download and it produces an image on a CPU in seconds, so it is the workflow
 the contract check (§14.1) generates with. The other seven need a GPU and
 hand-picked model files. Editing
-workflows (Kontext-style), inpainting and dedicated upscalers are not bundled;
-they are ordinary user workflows added later.
+workflows (Kontext-style) and dedicated upscalers are not bundled;
+they are ordinary user workflows added later. *Amended:* inpainting was on
+that list. `sd15-inpaint` is bundled for the same reason `sd15` is: the mask
+editor (§10) needs a workflow that takes a mask, and this one runs on the
+contract check's CPU ComfyUI, so a painted mask is proven against the real
+thing rather than the fake. It uses the plain SD 1.5 checkpoint with a
+noise mask, not an inpainting checkpoint, so it needs no second download. It has
+no `category` yet: a category is for routing, and nothing routes to an
+inpaint until **Edit image** (§13, Phase 4) does.
 
 Exact node graphs are authored in ComfyUI and committed as files; the table
 above defines the intended manifest surface.
@@ -991,6 +999,16 @@ swept since. The upload happens before the job row exists: an input the store
 has lost is as much a bad request as an empty prompt, and neither should leave
 a failed job behind to explain itself.
 
+**A mask is a PNG the size of its image**: white repaints, black keeps,
+grey is in between. It is bound through `LoadImageMask` on the `red`
+channel, which reads white as 1; the `alpha` channel would read it inverted
+(transparent repaints), which is the convention nobody guesses right. It is
+stored and uploaded like any other input, so a rerun, Reuse parameters and
+the output's inputs carry it with no more machinery. **The submit refuses a
+mask whose size is not its image's** (`mask: painted on a W×H picture, but
+image is W×H`), because ComfyUI would stretch it over the picture without a
+word and repaint somewhere other than where it was painted.
+
 The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
 really a JPEG otherwise fails inside ComfyUI's load step, well past the point
@@ -1092,8 +1110,30 @@ with an `image` param.
   is a prompt. A dragged tile carries its **output id**, not its bytes: the
   drop adopts the file the app already wrote rather than uploading a copy of
   it back to itself (§9).
-- The `mask` widget is a simple brush/erase canvas over the bound image,
-  producing a PNG that goes through §9.
+- **The mask editor.** A `mask` param sits under its image as the picture
+  with the mask tinted over it, and a **Paint mask** button (**Edit mask**
+  once there is one; disabled, saying why, until the image is attached).
+  It opens a full-window overlay with the image as large as the window
+  allows and the mask over it in the accent colour, and only these tools:
+  - **Brush** and **Eraser**, round, with one **size** in the image's own
+    pixels (a slider, and `brush_smaller` / `brush_larger`, §11.4); the
+    outline of the brush follows the pointer, so its size is never a guess;
+  - **Invert**, **Clear**, **Undo** and **Redo** (`undo` / `redo`, §11.4;
+    every stroke, invert and clear is one step);
+  - **Hide mask**, a toggle, to see the picture underneath.
+
+  **Done** writes the PNG (§9) and sets the param; **Cancel** and `close`
+  leave it as it was. A mask with nothing painted on it is no mask: Done
+  clears the param rather than uploading a black square. Reopening an
+  existing mask paints on top of it.
+
+  *Not SwarmUI's editor.* That one is a layered image editor — layers,
+  colour brushes, selections, move — because it edits pictures; this one
+  only says *where*. Brush hardness is left out on purpose: how soft the
+  edge is belongs to the workflow, as `grow` and `feather` params (§4.6),
+  so the same rough mask can be tried at several softnesses, and anything
+  that sends a mask without painting it — `forge mcp` — gets the same
+  knobs.
 - Provenance chain via `derived_from_output` gives a "lineage" view.
 
 ---
@@ -1670,7 +1710,17 @@ table toggle** — small tiles, large tiles, table — stored per screen.
     select_down:  [ArrowDown, s]
     fullscreen:   [f]
     close:        [Escape]
+    brush_smaller: ["["]
+    brush_larger:  ["]"]
+    undo:         [z]
+    redo:         [y, Z]
   ```
+
+  The last four are the mask editor's (§10), and are live only while it is
+  open; outside it nothing listens for them. *Amended:* the table had only
+  the first six. `undo` is a bare `z` rather than `Ctrl+Z` because a binding
+  is never a chord (below) — the same rule that keeps `Ctrl+A` from moving
+  the selection.
 
   A chord is never one of these: a binding is a bare key, and several are
   plain letters, so an event carrying ctrl, meta or alt matches nothing —
@@ -1830,6 +1880,11 @@ provenance, and the lineage view. Still to come in this phase: `video` params,
 
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows.
+
+Landed so far: the mask editor (§10) and `sd15-inpaint` (§4.6). Still to
+come: instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit), an inpaint
+for the other families, an **Edit image** action beside Upscale, and a way
+for `forge mcp` to make a mask without painting one.
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,
