@@ -476,7 +476,11 @@ class PanelState {
     this.submitting = true;
     this.submitError = null;
     try {
-      const job = await api.submit(this.workflowId, this.values);
+      // The template the panel was filled from, while it still applies, is
+      // recorded on what this makes (§4.8).
+      const template =
+        this.template?.workflow === this.workflowId ? this.template.id : null;
+      const job = await api.submit(this.workflowId, this.values, template);
       // The resolved seed comes back on the job row (§11.3's greyed hint).
       const manifest = this.manifest;
       if (manifest) {

@@ -145,13 +145,19 @@ export const api = {
   // says so itself rather than the server assuming it, so that a job posted
   // by anything else stays honestly unattributed instead of being filed
   // under the one thing the gallery filter is for telling apart.
-  submit: (workflowId: string, params: Record<string, unknown>) =>
+  /** `template`: the id of the template the panel was filled from (§4.8). */
+  submit: (
+    workflowId: string,
+    params: Record<string, unknown>,
+    template: string | null = null,
+  ) =>
     request<Job>("/api/jobs", {
       method: "POST",
       body: JSON.stringify({
         workflow_id: workflowId,
         params,
         origin: { source: "ui" },
+        ...(template ? { template } : {}),
       }),
     }),
   rerun: (body: { output_id?: string; job_id?: string }) =>

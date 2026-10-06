@@ -31,6 +31,7 @@ function output(extra: Partial<Output> = {}): Output {
     params: {},
     deleted_at: null,
     created_at: 1_789_000_000_000,
+    template: null,
     media_url: "/api/media/outputs/a.flac",
     waveform_url: "/api/media/outputs/a.flac.waveform.png",
     generation_ms: 900,

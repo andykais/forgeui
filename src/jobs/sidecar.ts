@@ -29,6 +29,12 @@ export interface Sidecar {
    * an LLM asked for has an `origin` and no `source`.
    */
   source?: SidecarSource | null;
+  /**
+   * The template the panel was filled from when the job was submitted
+   * (§4.8, §6.2): its id and its name then. Null for a run that used none;
+   * absent from sidecars written before the field existed.
+   */
+  template?: SidecarTemplate | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
   timing: SidecarTiming;
@@ -43,6 +49,12 @@ export interface SidecarWorkflow {
   hash: string;
   family: string | null;
   kind: string;
+  [unknownField: string]: unknown;
+}
+
+export interface SidecarTemplate {
+  id: string;
+  name: string;
   [unknownField: string]: unknown;
 }
 
@@ -106,6 +118,7 @@ export interface SidecarInit {
   params: Record<string, unknown>;
   models?: SidecarModel[];
   origin?: SidecarOrigin | null;
+  template?: SidecarTemplate | null;
   source?: SidecarSource | null;
   api_graph: Record<string, unknown> | null;
   outputs: SidecarOutput[];
@@ -133,6 +146,7 @@ export function buildSidecar(init: SidecarInit): Sidecar {
     params: init.params,
     models: init.models ?? [],
     origin: init.origin ?? null,
+    template: init.template ?? null,
     source: init.source ?? null,
     api_graph: init.api_graph,
     outputs: init.outputs,

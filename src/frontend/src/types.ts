@@ -181,10 +181,21 @@ export interface Job {
   api_graph: Record<string, ApiNode>;
   progress: Progress | null;
   error: JobError | null;
+  /** The template the panel was filled from when it was submitted (§4.8). */
+  template: TemplateRef | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   outputs: string[];
+}
+
+/**
+ * The template a run was made with (§4.8, §6.2): its id, and its name as it
+ * was then — a template renamed or deleted since still reads as it did.
+ */
+export interface TemplateRef {
+  id: string;
+  name: string;
 }
 
 export interface Output {
@@ -211,6 +222,8 @@ export interface Output {
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
+  /** The template it was made with (§4.8); null when none. */
+  template: TemplateRef | null;
   media_url: string;
   /** The drawn waveform of an audio output (§2.2); null for every other kind. */
   waveform_url: string | null;

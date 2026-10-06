@@ -39,6 +39,11 @@ function filtersFrom(url: URL): OutputFilters {
   if (project && project.trim().length > 0) filters.project = project.trim();
   const source = url.searchParams.get("source");
   if (source && source.trim().length > 0) filters.source = source.trim();
+  // The template an output was made with, by id (§4.8, §6.2).
+  const template = url.searchParams.get("template");
+  if (template && template.trim().length > 0) {
+    filters.template = template.trim();
+  }
   return filters;
 }
 

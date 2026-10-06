@@ -28,9 +28,11 @@ const fakeApi = {
   workflow: vi.fn(async () => ({
     id: "up",
     name: "Up",
+    runnable: true,
     manifest: upscaleManifest,
   })),
   jobs: vi.fn(async () => []),
+  submit: vi.fn(async () => ({ params: {} })),
 };
 vi.mock("../api.ts", () => ({ api: fakeApi }));
 /** Just enough of the app store: Generate's layout, and a way to change it. */
@@ -207,11 +209,33 @@ describe("upscaling an output", () => {
     fakeApi.workflow.mockResolvedValueOnce({
       id: "up",
       name: "Up",
+      runnable: true,
       manifest: { ...upscaleManifest, params: [] } as unknown as Manifest,
     });
     await expect(
       panel.applyTemplate(template(), { output: { id: "01JOUT" } }),
     ).rejects.toThrow(/no image/);
+  });
+});
+
+/**
+ * The template the panel was filled from is recorded on what it makes
+ * (§4.8, §6.2): the submit names it, and stops naming it once it is let go.
+ */
+describe("a submit names its template", () => {
+  test("while it applies, and not after", async () => {
+    await panel.applyTemplate(template({ values: { scale: 2 }, ask: [] }));
+    panel.values = { ...panel.values, image: `${"a".repeat(64)}.png` };
+    await panel.submit();
+    expect(fakeApi.submit).toHaveBeenLastCalledWith(
+      "up",
+      expect.objectContaining({ scale: 2 }),
+      "krea2-upscale",
+    );
+
+    panel.template = null;
+    await panel.submit();
+    expect(fakeApi.submit).toHaveBeenLastCalledWith("up", expect.anything(), null);
   });
 });
 
