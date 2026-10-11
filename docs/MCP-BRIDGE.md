@@ -101,7 +101,7 @@ deno task compile          # produces ./forge
 | `--http host:port` | Streamable HTTP |
 | `--stdio` | the harness launches the bridge as a subprocess instead |
 | `--no-free-vram` | skip asking ComfyUI to unload after a round |
-| `--progress` | relay progress notifications. **The model never sees these** — it is unloaded for the whole call. Turn them on only if your harness renders them for you |
+| `--progress` | relay progress notifications, one per finished job. **The model never sees these** — it is unloaded for the whole call. Turn them on if your harness renders them for you; pi does, and also restarts its request timeout on each one (§5.1) |
 | `--timeout` | default ceiling for one round, seconds (900) |
 
 A systemd unit, if you want it to come back after a reboot:
@@ -171,7 +171,7 @@ exactly that reason.
 ### The one setting that matters
 
 **Raise the harness's MCP request timeout above your longest batch.** (In pi
-that setting is `requestTimeoutMs` — §5.1.) A
+that setting is `timeout`, in seconds — §5.1.) A
 `generate` of six Flux images can run for minutes, and nothing the bridge
 sends can make a client wait longer than it has decided to. If your harness's
 timeout is fixed and short, call `generate` with `wait: false` and poll
@@ -184,40 +184,60 @@ instead. Everything else here works out of the box; this one does not.
 [pi](https://github.com/earendil-works/pi) is the harness this was built
 against. Four pieces have to line up; the rest of its setup is untouched.
 
-### 5.1 MCP is an extension, not built in
+### 5.1 MCP is built in
 
-```sh
-pi install npm:pi-mcp-adapter
-```
-
-Then `~/.pi/agent/mcp.json` (or `.pi/mcp.json` to keep it per project):
+pi has had an MCP client of its own since 1.0 — no extension to install. Put
+the bridge in `~/.pi/agent/mcp.json` (or `.pi/mcp.json` to keep it per
+project):
 
 ```json
 {
   "mcpServers": {
     "forgeui": {
       "url": "http://127.0.0.1:7801/mcp",
-      "directTools": true,
-      "lifecycle": "keep-alive",
-      "requestTimeoutMs": 1800000
+      "exposure": "direct",
+      "timeout": 1800
     }
   }
 }
 ```
 
-Three of those four keys matter:
+`pi mcp add forgeui --url http://127.0.0.1:7801/mcp --exposure direct` writes
+all of that but `timeout`, which it has no flag for — add that line by hand.
 
-- **`directTools: true`** registers each of the bridge's tools as a real pi
-  tool. Left out, every call goes through one `mcp` proxy tool the model has to
-  *search* first — an extra round trip, and it wastes the tool descriptions.
-- **`requestTimeoutMs`** is §4's "one setting that matters", by its real name.
-  A round runs for minutes; the adapter's default is far shorter. 30 minutes
-  here.
-- **`lifecycle: "keep-alive"`** stops the adapter hanging up between rounds —
-  `idleTimeout` defaults to 10 minutes, and your thinking will exceed that.
+Both keys after `url` matter:
 
-The bridge serves both protocol eras (its handler defaults to
-`legacy: 'stateless'`), so it does not matter which one the adapter speaks.
+- **`exposure: "direct"`** declares each of the bridge's tools to the model as
+  a real tool, `mcp__forgeui__generate` and so on. The default, `codemode`,
+  declares none of them: the model has to write a script that finds them with
+  `searchTools()` first — an extra round trip, and it wastes the tool
+  descriptions. Fourteen tools is the small set `direct` is for.
+- **`timeout`** is §4's "one setting that matters", by its real name. It is in
+  *seconds*, per request, and defaults to 60; a round runs for minutes. 30
+  minutes here. A progress notification restarts it, but with `--progress`
+  (§3) the bridge sends one only as each job finishes, so size it for the
+  whole batch anyway.
+
+Nothing else needs saying: the built-in client keeps the connection between
+rounds and reconnects on the next call if it drops, and it speaks the
+2025-11-25 protocol, which the bridge serves through its handler's
+`legacy: 'stateless'` default. `pi mcp list` connects and prints the tools —
+the quickest check that the two can talk:
+
+```text
+forgeui: connected, 14 tools (direct, global)
+```
+
+An installed extension that registers its own `/mcp` command replaces this
+built-in support entirely, and pi then does not read `mcp.json` at all. If
+`pi mcp list` shows the bridge but a session has no `mcp__forgeui__*` tools,
+look at `pi list` for one.
+
+The bridge does not use MCP's *tasks* (the long-running-request extension),
+and nothing in this loop needs them: `generate` is one ordinary `tools/call`
+held open for the whole round, and `wait: false` covers a client that cannot
+wait (§4). No tool declares `execution.taskSupport`, so a client without
+tasks — pi's included — loses nothing.
 
 ### 5.2 llama-swap has to own llama-server
 
@@ -441,7 +461,9 @@ MCP has image and audio content blocks but none for video, so both tools send
 a clip as an embedded resource: `{"type":"resource","resource":{"uri",
 "mimeType":"video/mp4","blob"}}`. Whether the model can watch it is up to the
 harness and the model; most VLMs cannot, and the preview is still the cheap
-way to hand one to a person.
+way to hand one to a person. pi saves such a clip to a temporary file and
+tells the model its path; an audio block reaches the model only as a
+placeholder, so in pi a take is something to `save_to`, not to listen to.
 
 ---
 
@@ -456,6 +478,7 @@ way to hand one to a person.
 | The model "sees" nothing | `--mmproj` missing from the llama-swap `cmd`, **or** `input: ["text","image"]` missing from `models.json` — both are needed (§5.2, §5.4) |
 | Eviction seems to do nothing | llama-swap is not the thing that started `llama-server` (§5.2) |
 | pi packs a prompt the server rejects | `contextWindow` in `models.json` exceeds `--ctx-size` (§5.4) |
-| The tool call dies after N seconds | the harness's MCP timeout, not the bridge. §4 |
+| The tool call dies after N seconds | the harness's MCP timeout, not the bridge. §4; in pi, a missing `timeout` is 60 seconds (§5.1) |
+| pi has no `mcp__forgeui__*` tools | `exposure` is not `direct`, or an installed extension that registers `/mcp` has replaced the built-in MCP support (§5.1) |
 | `Mcp-Method header is absent` | you are hand-rolling a client; the 2026-07-28 HTTP binding mirrors `method` and `params.name` into headers |
 | Images are enormous in context | the model called `get_output_file` rather than `get_output_preview`, or ForgeUI's machine has no ffmpeg — the preview then says `max_edge … was not applied`. Install ffmpeg where ForgeUI runs, or resize client side: `inputLimits.images.resize` in `models.json` (§5.4) |
