@@ -5,7 +5,7 @@
   import List from "@lucide/svelte/icons/list";
   import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import { api } from "../api.ts";
-  import { app } from "../stores/app.svelte.ts";
+  import { app, type ReuseTarget } from "../stores/app.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
   import { untrack } from "svelte";
   import { navigate, router, setQuery } from "../router.svelte.ts";
@@ -224,20 +224,26 @@
    * own numbers — scale 2, creativity 0.2 for the bundled one — on top,
    * there to be adjusted before generating.
    */
-  async function upscale(output: Output, template: Template) {
+  /**
+   * Reuse image (§10): Generate on the chosen workflow, or template, with
+   * this picture in it and the run that made it under the rest.
+   */
+  async function reuse(output: Output, target: ReuseTarget) {
     const detail = await api.output(output.id);
     try {
-      await panel.applyTemplate(template, {
-        output,
+      await panel.reuseImage(output, {
+        workflow: target.workflow.id,
+        template: target.template,
         sourceParams: detail.sidecar?.params ?? output.params,
+        sameFamily: target.sameFamily,
       });
     } catch (cause) {
       toasts.message(
-        `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
+        `Could not reuse it: ${cause instanceof Error ? cause.message : cause}`,
       );
       return;
     }
-    setQuery({ workflow: template.workflow });
+    setQuery({ workflow: target.workflow.id });
   }
 
   /**
@@ -403,7 +409,15 @@
   -->
   <section class="panel scroll" data-panel-loading={panel.loading}>
     <div class="card-wrap">
-      <button class="workflow-card" onclick={() => (pickerOpen = !pickerOpen)}>
+      <button
+        class="workflow-card"
+        onclick={() => {
+          pickerOpen = !pickerOpen;
+          // A template's thumbnail is the last thing it made, which may be
+          // the run that just finished.
+          if (pickerOpen) void app.refreshTemplates().catch(() => {});
+        }}
+      >
         <span class="thumb">
           {#if thumbnailFor(selectedWorkflow?.last_output_id ?? null)}
             <MediaThumb
@@ -461,7 +475,25 @@
                 title={template.description ?? undefined}
                 onclick={() => pickTemplate(template)}
               >
-                <LayoutTemplate size={11} />
+                <!--
+                  Its own last picture, or its workflow's until it has one: a
+                  template is a way into that workflow, and an empty square
+                  says nothing about either.
+                -->
+                <span class="option-thumb template-thumb">
+                  {#if template.last_output}
+                    <MediaThumb
+                      src={template.last_output.media_url}
+                      kind={template.last_output.kind}
+                    />
+                  {:else if thumbnailFor(workflow.last_output_id)}
+                    <MediaThumb
+                      src={thumbnailFor(workflow.last_output_id)}
+                      kind={kindFor(workflow.last_output_id)}
+                    />
+                  {/if}
+                  <span class="template-mark"><LayoutTemplate size={9} /></span>
+                </span>
                 <span class="option-text">
                   <span class="template-name">{template.name}</span>
                   <span class="mono dim option-keys">
@@ -566,7 +598,7 @@
       onedit={reuseParams}
       onrerun={rerun}
       ondelete={remove}
-      onupscale={upscale}
+      onreuse={reuse}
       onopenoutput={openOutput}
       onfollow={() => {
         following = true;
@@ -840,6 +872,24 @@
   }
 
   /* A template sits under its workflow: indented, smaller, one level down. */
+  .template-thumb {
+    position: relative;
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Marks it as a template wherever the picture came from. */
+  .template-mark {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    padding: 1px;
+    border-radius: 2px 0 0 0;
+    background: rgb(13 13 13 / 80%);
+    color: var(--text-2);
+  }
+
   .template-option {
     padding: 3px 7px 3px 41px;
     gap: 6px;

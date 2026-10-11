@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 /**
  * Templates (DESIGN.md §4.8): a screen of their own on the rail, the bundled
- * Upscale templates behind the Upscale button, and a template saved from the
+ * Upscale templates in Reuse image, and a template saved from the
  * Generate panel that knows which inputs it still asks for.
  */
 
@@ -24,7 +24,8 @@ test("Templates sits on the rail and lists the bundled Upscale templates", async
 
   await page.getByRole("row", { name: /Krea 2 Turbo \(img2img\)/ }).click();
   await expect(page.getByLabel("Template name")).toHaveValue("Upscale 2×");
-  await expect(page.getByText("used by Upscale image")).toBeVisible();
+  await expect(page.getByText(/an upscale, first under its workflow in Reuse image/))
+    .toBeVisible();
   // What it sets, and what it leaves to whoever presses the button.
   const scale = page.locator('[data-param="scale"]');
   await expect(scale.getByRole("radio", { name: "Save value" })).toHaveAttribute(
@@ -41,7 +42,7 @@ test("Templates sits on the rail and lists the bundled Upscale templates", async
   await expect(page.getByRole("link", { name: "Templates" })).toHaveClass(/active/);
 });
 
-test("Upscale applies the family's template: its numbers, the picture, the run", async ({
+test("Upscale 2× in Reuse image: its numbers, the picture, the run", async ({
   page,
 }) => {
   await pickKrea(page);
@@ -53,7 +54,12 @@ test("Upscale applies the family's template: its numbers, the picture, the run",
 
   await page.goto("/gallery");
   await page.locator(".tile .surface").first().click();
-  await page.getByRole("button", { name: /Upscale/ }).first().click();
+  await page.getByRole("button", { name: "Reuse image" }).first().click();
+  // First under its family's img2img workflow, which is first of all.
+  const menu = page.locator("[data-reuse-menu]");
+  await expect(menu.locator(".reuse-option").first()).toHaveText("Krea 2 Turbo (img2img)");
+  await expect(menu.locator(".reuse-option").nth(1)).toContainText("Upscale 2×");
+  await menu.locator(".reuse-option").nth(1).click();
 
   await expect(page.locator(".workflow-card")).toContainText("Krea 2 Turbo (img2img)");
   const banner = page.locator(".from-template");
@@ -171,6 +177,15 @@ test("the picker lists a workflow's templates under it, and what one makes says 
   expect(body.outputs).toHaveLength(1);
   expect(body.outputs[0].template).toEqual({ id: created.id, name });
   expect(body.outputs[0].prompt).toBe(prompt);
+
+  // Its row in the picker now shows what it made, as a workflow's does.
+  await page.locator(".workflow-card").click();
+  const row = page.locator(".popover button.template-option").filter({ hasText: name });
+  await expect(row.locator(".template-thumb img")).toHaveAttribute(
+    "src",
+    body.outputs[0].media_url,
+  );
+  await page.keyboard.press("Escape");
 
   // And the viewer says so, with a link to it.
   await page.goto(`/gallery?output=${body.outputs[0].id}`);

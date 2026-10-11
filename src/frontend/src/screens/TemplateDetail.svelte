@@ -240,7 +240,9 @@
             >{template.workflow_name ?? template.workflow}</a
           >
           {#if template.family}<span class="badge accent">{template.family}</span>{/if}
-          {#if template.action === "upscale"}<span>· used by Upscale image</span>{/if}
+          {#if template.action === "upscale"}<span
+              >· an upscale, first under its workflow in Reuse image</span
+            >{/if}
         </div>
 
         <textarea

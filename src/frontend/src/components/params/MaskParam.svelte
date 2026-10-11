@@ -2,6 +2,7 @@
   import Brush from "@lucide/svelte/icons/brush";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
+  import { untrack } from "svelte";
   import { api, ApiError } from "../../api.ts";
   import { app } from "../../stores/app.svelte.ts";
   import { inputUrl } from "../../lib/mask.ts";
@@ -64,17 +65,48 @@
     };
   });
 
+  /** Both sizes are known, for this mask over this picture. */
+  const measured = $derived(
+    sizes &&
+      sizes.mask === value &&
+      sizes.image === image &&
+      sizes.imageSize &&
+      sizes.maskSize
+      ? { image: sizes.imageSize, mask: sizes.maskSize }
+      : null,
+  );
   /**
-   * The mask was painted on a picture of another size: the image changed
-   * underneath it. The server would refuse the run; saying so here, next to
-   * the button that fixes it, is the useful place.
+   * Drawn over the picture only once it is known to fit: a mask of another
+   * size stretched over it says the wrong place, and drawing it while the
+   * sizes are still loading is how it used to flash up misplaced (§10).
    */
-  const mismatch = $derived.by(() => {
-    if (!sizes || sizes.mask !== value || sizes.image !== image) return null;
-    const { imageSize, maskSize } = sizes;
-    if (!imageSize || !maskSize) return null;
-    if (imageSize[0] === maskSize[0] && imageSize[1] === maskSize[1]) return null;
-    return `Painted on a ${maskSize[0]}×${maskSize[1]} picture; this one is ${imageSize[0]}×${imageSize[1]}. Paint it again.`;
+  const fits = $derived(
+    measured !== null &&
+      measured.image[0] === measured.mask[0] &&
+      measured.image[1] === measured.mask[1],
+  );
+  /** Why the mask just went, said where it was. */
+  let cleared = $state<string | null>(null);
+
+  /**
+   * The picture changed size underneath the mask: it was painted for
+   * another picture, so it goes (§10). A same-size swap keeps it — the
+   * strokes still land on pixels — and a mask arriving with its picture
+   * from a saved run is measured together with it, so it is never mistaken
+   * for one left behind.
+   */
+  $effect(() => {
+    if (measured === null || fits) return;
+    const [mw, mh] = measured.mask;
+    const [iw, ih] = measured.image;
+    untrack(() => {
+      cleared = `The mask was painted on a ${mw}×${mh} picture and this one is ${iw}×${ih}, so it was cleared. Paint it again.`;
+      onchange("");
+    });
+  });
+  $effect(() => {
+    // A new mask painted, or another one arriving, says the rest.
+    if (value !== "") untrack(() => (cleared = null));
   });
 
   async function save(png: Blob | null) {
@@ -116,7 +148,7 @@
       onclick={() => (open = true)}
     >
       <img class="shot" src={inputUrl(image)} alt="" />
-      {#if value}
+      {#if value && fits}
         <div
           class="tint"
           class:white={app.maskView === "white"}
@@ -140,8 +172,8 @@
       </button>
     {/if}
   {/if}
-  {#if mismatch}
-    <p class="error"><TriangleAlert size={11} /> {mismatch}</p>
+  {#if cleared}
+    <p class="note"><TriangleAlert size={11} /> {cleared}</p>
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 </div>
@@ -149,7 +181,7 @@
 {#if open && image !== ""}
   <MaskEditor
     image={inputUrl(image)}
-    mask={value && !mismatch ? inputUrl(value) : null}
+    mask={value ? inputUrl(value) : null}
     {label}
     ondone={save}
     oncancel={() => (open = false)}
@@ -241,6 +273,15 @@
   .clear:hover {
     background: rgb(13 13 13 / 90%);
     color: var(--text);
+  }
+
+  .note {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--running);
   }
 
   .error {

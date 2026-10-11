@@ -383,7 +383,7 @@ first (§4.6) and changes the workflow hash; existing outputs are unaffected.
 workflow's panel: some of its params set to chosen values, some left for
 whoever applies it to fill in. A favourite combination of LoRAs is one; the
 numbers that turn an img2img workflow into an upscale are another. Templates
-can be made, edited and deleted; the Upscale action applies them (§10),
+can be made, edited and deleted; **Reuse image** lists them (§10),
 **Open in Generate** applies one by hand, and the Generate workflow picker
 lists each workflow's templates under it (§11.2). Every output records which
 template it was made with (§6.2).
@@ -416,7 +416,7 @@ template it was made with (§6.2).
     A param the workflow already requires is required either way; listing it
     says so on the template's own page too.
   - **open** — in neither: whatever the panel would have held anyway, which
-    is the workflow default or, for the Upscale action, the source output's
+    is the workflow default or, for Reuse image, the source output's
     value.
 
   A key cannot be both set and asked.
@@ -434,9 +434,11 @@ template it was made with (§6.2).
   started, not that every value is the template's. `GET /api/outputs
   ?template=<id>` finds them. A rerun keeps the template of the run it
   repeats, since it replays the same values.
-- **`action`** (optional, closed set: `upscale`) is how an action on an
-  output finds its template: the Upscale button looks for templates with
-  `action: "upscale"` whose workflow is in the output's family (§10).
+- **`action`** (optional, closed set: `upscale`) says what a template is
+  for. *Amended:* the Upscale button looked templates up by it; that button
+  is now **Reuse image** (§10), which lists every template on a workflow
+  that takes a picture, so `action` only labels the template — the
+  Templates screen says what it is used for.
 - **Bundled and user**, as workflows are (§4.6): `templates/bundled/` ships
   with the app and is overwritten on upgrade; `templates/user/` is never
   touched by one. Saving a bundled template writes a user copy with the same
@@ -631,11 +633,13 @@ CREATE TABLE outputs (
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
   created_at INTEGER NOT NULL,
-  template_id TEXT, template_name TEXT  -- from the sidecar's `template` (§6.2); no FK, as for workflows
+  template_id TEXT, template_name TEXT,  -- from the sidecar's `template` (§6.2); no FK, as for workflows
+  pixel_hash TEXT                 -- PNG pixels, how a paste finds its parent (§9); '' = not a PNG; a cache of the file
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
 CREATE INDEX outputs_template ON outputs(template_id, created_at DESC);
+CREATE INDEX outputs_pixels ON outputs(pixel_hash) WHERE pixel_hash <> '';
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
@@ -667,7 +671,8 @@ CREATE TABLE inputs (
   kind TEXT NOT NULL,             -- image|mask|video
   width INTEGER, height INTEGER,
   original_name TEXT, derived_from_output TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  pixel_hash TEXT                 -- PNG pixels, for finding the output it came from (§9); '' = not a PNG
 );
 CREATE TABLE output_inputs (
   output_id TEXT NOT NULL, input_sha256 TEXT NOT NULL, param_key TEXT NOT NULL,
@@ -1026,12 +1031,44 @@ stored and uploaded like any other input, so a rerun, Reuse parameters and
 the output's inputs carry it with no more machinery. **The submit refuses a
 mask whose size is not its image's** (`mask: painted on a W×H picture, but
 image is W×H`), because ComfyUI would stretch it over the picture without a
-word and repaint somewhere other than where it was painted.
+word and repaint somewhere other than where it was painted. The panel gets there
+first: when the picture under a mask changes size, the mask is **cleared**,
+with a note saying it was painted for a W×H picture — and it is only ever
+drawn over a picture it is known to fit, never stretched while the sizes
+load. *Amended:* it used to keep the mask and warn, and the thumbnail drew
+it stretched over the new picture in the meantime. A same-size swap keeps
+it: the strokes still land on pixels.
 
 The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
 really a JPEG otherwise fails inside ComfyUI's load step, well past the point
 where anything useful can be said about it. PNG, JPEG and WebP only.
+
+**Where an input came from** (`derived_from_output`) is what the lineage
+view walks (§11.2), and it is found three ways, first match wins:
+
+1. **Adopted**: the input was one of the app's outputs by id — a dragged
+   tile, Reuse image (§10).
+2. **The same file**: an uploaded or dropped file whose bytes hash to an
+   output's `sha256` — a render saved to disk and dragged back in.
+3. **The same picture**: a PNG whose decoded pixels hash to an output's
+   `pixel_hash` — sha256 over `"<w>x<h>\n"` and the pixels as 8-bit RGBA.
+   This is the paste: a browser copies the *picture*, not the file, and
+   re-encodes it on the way to the clipboard, so its bytes match nothing
+   while every pixel matches the output it came from. Only PNG is decoded;
+   the outputs are PNGs and so is what a clipboard holds.
+
+Several outputs can share a picture — a rerun of one seed makes the same
+pixels again — and the parent is the **earliest** surviving one, which is
+the one the others repeat. A match is never invented: no hash, no parent.
+
+Both hashes are of the media itself, so they are a cache rather than a
+record: `reindex` recomputes them from the files, and they are not written
+into the sidecar. `outputs.pixel_hash` and `inputs.pixel_hash` (migration
+14) fill in on completion and on upload; what was made or attached before
+them is hashed once in the background after boot, outputs first, and every
+input with no parent yet is then matched — so the pastes that lost their
+history before this find it again.
 
 The "edit this image" vs. "use as inspiration" distinction is not a storage
 concept — it is which workflow the image is sent to and a `denoise`/`strength`
@@ -1053,14 +1090,30 @@ with an `image` param.
   Editing workflows (Kontext /
   Qwen-Image-Edit / Klein-edit / inpaint) are the same shape — `image`
   (+ optional `mask`) + `prompt` — and are added as user workflows later.
-- Every output has **Use image in workflow** (video: **Use video in
-  workflow**) listing workflows with a matching `image`/`video` param.
-- **Upscale image** sits beside it, and applies the `action: "upscale"`
-  template (§4.8) whose workflow is in the **same family** as the output (no
-  menu when exactly one matches, a popover of template names when several
-  do, hidden when none; **image outputs only** — never shown on videos,
-  because none of these graphs take one). Every image family has a bundled
-  one, so the action is never dark on an output the app made itself.
+- **Reuse image** on every image output opens a menu of everything that
+  takes a picture: each runnable workflow with an `image` param, with its
+  templates (§4.8) under it as smaller rows — the Generate picker's own
+  shape. Workflows of the **output's family come first**, then the rest by
+  family and name, so an output's img2img, inpaint and Upscale 2× are at
+  the top and nothing else is out of reach. Choosing one opens Generate on
+  it with:
+  - the picture **adopted** into its first `image` param (§9) — hard-linked,
+    never re-uploaded, so the lineage holds;
+  - the run's **words**: every `text` param the two share by key, so the
+    prompt comes along without a copy and paste;
+  - within the **same family** only, the rest of the run's params the
+    workflow shares (seed, LoRAs, sampler…): another family's LoRAs are not
+    LoRAs this model can load;
+  - a template's values over all of that, and its asks still asked;
+  - any `mask` empty: it was painted for some other picture, if any.
+
+  *Amended:* this replaces **Upscale image** and the **Use image in
+  workflow** that never landed. Upscale was one way to reuse a picture with
+  its own button, and the common next step — inpaint what came out — had
+  none: it was copy the picture, paste it, then copy and paste the prompt.
+  An upscale is now the **Upscale 2×** row under its family's img2img
+  workflow, one click further, and every other use is one click at all.
+  Image outputs only — none of these graphs take a video.
 
   *Amended:* it was first its own workflow, so that the numbers that make it
   an upscale — `scale` **2**, `creativity` **0.2** — were the workflow's own
@@ -1121,7 +1174,8 @@ with an `image` param.
   saying the same thing twice, it does not take the say away. A workflow with
   no `size` — every img2img workflow, which states a `scale` — is untouched.
 - **An `image` param takes a picture four ways**: the file picker, a drop, a
-  paste, and a result dragged straight out of the grid. Pasting claims the
+  paste, and a result dragged straight out of the grid — or out of the open
+  viewer, which carries the same output id a tile does. Pasting claims the
   zone the pointer is **over** as well as the one with focus — focus alone
   meant clicking (which opens the file dialog) and pressing Escape to get
   back out of it, for something the pointer was already resting on. Anything
@@ -1190,7 +1244,8 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   (thumb of last output, name, family/kind badges, last run). Clicking it
   opens a picker grouped by family and kind. *Amended:* each workflow's
   templates (§4.8) are listed under it, inside its family group, as
-  smaller indented rows; choosing one applies it, and the card names the
+  smaller indented rows, each with the last picture it made as its
+  thumbnail (its workflow's until it has made one); choosing one applies it, and the card names the
   template beside the workflow.
 - Param panel rendered from the manifest: required params first, then
   optional, then each **section** the manifest lists (§4.2), then a
@@ -1308,8 +1363,8 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   model pages; shift-click filters the grid to them.
 - Output actions, named for consequence: **Edit in Generate →** (navigates,
   fills the panel, no job), **Rerun now ⟳** (enqueues immediately, stays
-  put), **Use image in workflow** / **Use video in workflow**, **Upscale
-  image**, **Promote to sample**, **Delete**. No favorites in v1.
+  put), **Reuse image** (§10; *amended* from Use image in workflow and
+  Upscale image), **Promote to sample**, **Delete**. No favorites in v1.
 - **Delete** has no confirmation: the item disappears and an undo toast
   (~8s) restores it. Deleting from inside the viewer **steps to the next
   oldest** rather than dropping back to the grid — working through a batch
@@ -1800,7 +1855,7 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 ## 12. HTTP API (app ↔ frontend)
 
 ```
-GET  /api/workflows                     list (latest versions): id, name, family, kind, category, params summary, source, last_job_at, last_output_id
+GET  /api/workflows                     list (latest versions): id, name, family, kind, category, params summary, source, last_job_at, last_output_id, image_param (the first `image` param's key, or null: what Reuse image lists, §10)
 GET  /api/workflows/:id                 manifest + metadata (+ has_user_copy)
 GET  /api/workflows/:id/inputs          every literal input of api.json: [{node_id, node_type, node_title, input, value, type_hint}]
 PUT  /api/workflows/:id                 save manifest / ui+api json (bundled → creates the user copy)
@@ -1808,7 +1863,7 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
 DELETE /api/workflows/:id               user copies only; 409 for bundled
-GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems
+GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems, last_output ({id, kind, media_url} of the newest output made with it, or null)
 GET  /api/templates/:id
 POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name
 PUT  /api/templates/:id                 replace name/description/values/ask/action (bundled → creates the user copy)
@@ -1901,17 +1956,17 @@ orphan sweeps, LTX bundled workflow verified end-to-end, video previews,
 Civitai fetch-info and URL import (raw only).
 
 Landed so far: the store and `POST /api/inputs`, the `image` param widget
-(picker, drop, paste), the img2img workflows and the Upscale action (as
-bundled templates, §4.8), `output_inputs`
-provenance, and the lineage view. Still to come in this phase: `video` params,
-"Use image in workflow", the orphan sweep, and the rest of the list.
+(picker, drop, paste), the img2img workflows and Upscale (as bundled
+templates, §4.8), `output_inputs` provenance and the lineage view, **Reuse
+image** (§10), and parents found by checksum (§9). Still to come in this
+phase: `video` params, the orphan sweep, and the rest of the list.
 
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows.
 
 Landed so far: the mask editor (§10) and `sd15-inpaint` (§4.6). Still to
 come: instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit), an inpaint
-for the other families, an **Edit image** action beside Upscale, and a way
+for the other families, and a way
 for `forge mcp` to make a mask without painting one.
 
 **Phase 5 — quality**

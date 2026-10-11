@@ -35,6 +35,9 @@ function summary(
     last_job_at: usage.get(workflow.id)?.last_job_at ?? null,
     last_output_id: usage.get(workflow.id)?.last_output_id ?? null,
     has_ui_json: workflow.uiGraph !== null,
+    // Where a picture goes, for Reuse image (§10): the first image param.
+    image_param:
+      manifest?.params.find((param) => param.type === "image")?.key ?? null,
   };
 }
 

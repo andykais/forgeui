@@ -98,6 +98,18 @@ Deno.test("the template travels from the submit to the job, the sidecar and the 
     const found = await outputsFor(app, id);
     assertEquals(found.map((o) => o.id), job.outputs);
     assertEquals(await outputsFor(app, "no-such-template"), []);
+
+    // And the template's thumbnail in the picker is the last thing it made.
+    const listed = await app.json<{
+      templates: { id: string; last_output: OutputView | null }[];
+    }>("/api/templates");
+    const mine = listed.templates.find((template) => template.id === id)!;
+    assertEquals(mine.last_output?.id, job.outputs[0]);
+    assertEquals(mine.last_output?.media_url, output.media_url);
+    assertEquals(
+      listed.templates.find((template) => template.id !== id)?.last_output,
+      null,
+    );
   }, { comfy: true });
 });
 

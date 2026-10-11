@@ -120,6 +120,8 @@ export interface WorkflowSummary {
   last_job_at: number | null;
   last_output_id: string | null;
   has_ui_json: boolean;
+  /** The first `image` param's key: what Reuse image puts the picture in. */
+  image_param: string | null;
 }
 
 /**
@@ -142,6 +144,8 @@ export interface Template {
   has_bundled: boolean;
   /** What no longer fits: its workflow gone, a key it no longer has. */
   problems: string[];
+  /** The newest output made with it: its thumbnail in the Generate picker. */
+  last_output: { id: string; kind: string; media_url: string } | null;
 }
 
 /** What a save sends; the server checks it against the workflow. */

@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import { decodePreviewFrame } from "../../src/http/ws.ts";
+import { deflateSync } from "node:zlib";
 import {
+  decodePng,
   readChunks,
   readPngSize,
   readTextChunks,
@@ -323,6 +325,39 @@ contractTest("a real generation runs end to end through the app", async () => {
       [sample.id],
     );
 
+    // A paste of it — the same pixels, written again as a browser would —
+    // finds its way back to it (§9). ComfyUI's PNGs are PIL's, filtered and
+    // compressed as the fake's are not, which is the point of asking here.
+    const decoded = (await decodePng(bytes))!;
+    assertEquals([decoded.width, decoded.height], [SIZE[0], SIZE[1]]);
+    const raw = new Uint8Array((decoded.width * 4 + 1) * decoded.height);
+    for (let y = 0; y < decoded.height; y++) {
+      raw.set(
+        decoded.rgba.subarray(
+          y * decoded.width * 4,
+          (y + 1) * decoded.width * 4,
+        ),
+        y * (decoded.width * 4 + 1) + 1,
+      );
+    }
+    const header = new Uint8Array(13);
+    new DataView(header.buffer).setUint32(0, decoded.width);
+    new DataView(header.buffer).setUint32(4, decoded.height);
+    header[8] = 8;
+    header[9] = 6;
+    const pasted = serializeChunks([
+      { type: "IHDR", data: header },
+      { type: "IDAT", data: new Uint8Array(deflateSync(raw)) },
+      { type: "IEND", data: new Uint8Array(0) },
+    ]);
+    const form = new FormData();
+    form.set("file", new File([pasted.buffer as ArrayBuffer], "image.png"));
+    const input = await app.json<{ derived_from_output: string | null }>(
+      "/api/inputs",
+      { method: "POST", body: form },
+    );
+    assertEquals(input.derived_from_output, `${submitted.id}-0`);
+
     // Rerun now ⟳ queues the frozen graph verbatim: same seed, same image.
     const rerun = await app.json<JobResponse>("/api/jobs/rerun", {
       method: "POST",
@@ -390,68 +425,38 @@ contractTest("the embedded editor is served through /comfy/", async () => {
     assertEquals(objectInfo.status, 200);
     const body = await objectInfo.json() as Record<string, unknown>;
     assert("KSampler" in body, "ComfyUI's object_info did not come through");
+
+    // An image dropped into the editor is uploaded the way its own frontend
+    // does it — multipart, to /api/upload/image — and that has to survive
+    // the proxy, body and boundary intact.
+    const form = new FormData();
+    const picture = tinyPng({ width: 32, height: 24, color: [10, 20, 30] });
+    form.set(
+      "image",
+      new File([picture.buffer as ArrayBuffer], "dropped-into-editor.png", {
+        type: "image/png",
+      }),
+    );
+    form.set("type", "input");
+    form.set("overwrite", "true");
+    const upload = await app.fetch("/comfy/api/upload/image", {
+      method: "POST",
+      body: form,
+    });
+    assertEquals(upload.status, 200, await upload.clone().text());
+    assertEquals(
+      (await upload.json() as { name: string }).name,
+      "dropped-into-editor.png",
+    );
+    const view = await app.fetch(
+      "/comfy/api/view?filename=dropped-into-editor.png&type=input",
+    );
+    assertEquals(view.status, 200);
+    assertEquals(new Uint8Array(await view.arrayBuffer()), picture);
   } finally {
     await app.dispose();
   }
 });
-
-/**
- * An 8-bit RGB or RGBA PNG's pixels, as RGB: enough to read back what
- * ComfyUI wrote. Its PNGs are filtered per row, so the five filters of the
- * PNG spec are undone here.
- */
-async function decodePng(
-  png: Uint8Array,
-): Promise<{ width: number; height: number; rgb: Uint8Array }> {
-  const chunks = readChunks(png);
-  const ihdr = new DataView(chunks[0]!.data.buffer, chunks[0]!.data.byteOffset);
-  const width = ihdr.getUint32(0);
-  const height = ihdr.getUint32(4);
-  const channels = chunks[0]!.data[9] === 6 ? 4 : 3;
-  assertEquals(chunks[0]!.data[8], 8, "only 8-bit PNGs are read here");
-  const idat = chunks.filter((c) => c.type === "IDAT").map((c) => c.data);
-  const joined = new Uint8Array(idat.reduce((n, d) => n + d.length, 0));
-  let at = 0;
-  for (const data of idat) {
-    joined.set(data, at);
-    at += data.length;
-  }
-  const raw = new Uint8Array(
-    await new Response(
-      new Blob([joined]).stream().pipeThrough(
-        new DecompressionStream("deflate"),
-      ),
-    ).arrayBuffer(),
-  );
-  const stride = width * channels;
-  const out = new Uint8Array(stride * height);
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)]!;
-    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
-    for (let x = 0; x < stride; x++) {
-      const a = x >= channels ? out[y * stride + x - channels]! : 0;
-      const b = y > 0 ? out[(y - 1) * stride + x]! : 0;
-      const c = x >= channels && y > 0
-        ? out[(y - 1) * stride + x - channels]!
-        : 0;
-      let predicted = 0;
-      if (filter === 1) predicted = a;
-      else if (filter === 2) predicted = b;
-      else if (filter === 3) predicted = (a + b) >> 1;
-      else if (filter === 4) {
-        const p = a + b - c;
-        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-      }
-      out[y * stride + x] = (line[x]! + predicted) & 0xff;
-    }
-  }
-  const rgb = new Uint8Array(width * height * 3);
-  for (let i = 0; i < width * height; i++) {
-    rgb.set(out.subarray(i * channels, i * channels + 3), i * 3);
-  }
-  return { width, height, rgb };
-}
 
 contractTest("a painted mask repaints only what it covers", async () => {
   const app = await startApp();
@@ -505,12 +510,12 @@ contractTest("a painted mask repaints only what it covers", async () => {
         `${submitted.id}-0.png`,
       ),
     );
-    const { width, height, rgb } = await decodePng(bytes);
+    const { width, height, rgba } = (await decodePng(bytes))!;
     assertEquals([width, height], [256, 256]);
     const at = (
       x: number,
       y: number,
-    ) => [...rgb.subarray((y * width + x) * 3, (y * width + x) * 3 + 3)];
+    ) => [...rgba.subarray((y * width + x) * 4, (y * width + x) * 4 + 3)];
 
     // Well clear of the mask, grown and feathered: the original's own
     // pixels, exactly, because the result is pasted back through the mask

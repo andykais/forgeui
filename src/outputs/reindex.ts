@@ -11,11 +11,12 @@ import {
   type OutputRow,
   rebuildOutputsFts,
   refreshModelUsage,
+  setOutputPixelHash,
   type SidecarModelRef,
 } from "../db/queries.ts";
 import { promptText, toneText } from "../jobs/completion.ts";
 import type { MediaSource, Origin, TemplateRef } from "../db/queries.ts";
-import { readPngSize } from "../jobs/png.ts";
+import { pixelHash, readPngSize } from "../jobs/png.ts";
 import { parseSidecar, type Sidecar } from "../jobs/sidecar.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 
@@ -246,6 +247,10 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
       // A rebuild replaces whatever was there before.
       deleteOutputRow(db, id);
       insertOutput(db, row);
+      // A cache of the file, recomputed from it like the sha256 above (§9).
+      if (row.kind === "image") {
+        setOutputPixelHash(db, id, (await pixelHash(bytes)) ?? "");
+      }
       const models = options.resolveModels?.(sidecar.models) ?? sidecar.models;
       result.output_models += insertOutputModels(db, id, models);
       result.outputs++;

@@ -1,4 +1,5 @@
 import type { Database } from "./db/sqlite.ts";
+import { backfillPixelHashes } from "./outputs/pixels.ts";
 import {
   assertAbsoluteModelFolders,
   ConfigError,
@@ -192,6 +193,23 @@ async function startAppWith(
       }`,
     );
   });
+
+  // Outputs and inputs from before pixel hashes (migration 14): hashed once,
+  // and every input with no parent then matched, so a paste that lost its
+  // history finds it again (§9).
+  if (!options.skipModels) {
+    backfillPixelHashes({ db, paths }).then(({ parents }) => {
+      if (parents > 0) {
+        log(`inputs: found where ${parents} came from`);
+      }
+    }).catch((error) => {
+      logError(
+        `could not backfill the pixel hashes: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+    });
+  }
 
   // Samples from before they were hashed (migration 12): hashed once, and
   // the same file twice for one model merged into one (§8.3).
