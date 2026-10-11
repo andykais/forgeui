@@ -3,7 +3,7 @@
   "tasks": {
     "start": "deno run --allow-env --allow-net --allow-read --allow-run --allow-write src/main.ts",
     "reindex": "deno run --allow-env --allow-net --allow-read --allow-write src/main.ts reindex",
-    "mcp": "deno run --allow-env --allow-net --allow-read --allow-write src/cli.ts mcp",
+    "mcp": "deno run --unstable-no-legacy-abort --allow-env --allow-net --allow-read --allow-write src/cli.ts mcp",
     "compile": "deno compile --allow-env --allow-net --allow-read --allow-run --allow-write --output forge src/cli.ts",
     "test": "deno test --allow-run --allow-env --allow-net=127.0.0.1,localhost --allow-read --allow-write",
     "comfy:setup": "bash scripts/setup-comfy.sh",
