@@ -161,6 +161,20 @@ Field notes:
 - `bind` is `"<nodeId>.<inputName>"` for scalar params. Everything not bound is
   hardcoded in the graph (VAE, sampler, scheduler, model path, …).
 - `advanced: true` places the param in a collapsed section.
+- `section: "<id>"` places the param in a **section** the manifest names in
+  a top-level `sections` list: `[{ "id": "mask", "label": "Mask",
+  "description"?: "…", "collapsed"?: false }]`. A section is a titled,
+  collapsible group for params that belong together — the mask and the two
+  numbers that shape its edge — so that the main list stays the handful
+  most runs touch and Advanced stays what most runs never do. It is open
+  unless it says `collapsed: true`, and, like Advanced, it opens itself when
+  a param inside it needs attention (a required one left empty, a model
+  that is not on disk). Sections sit after the main params and before
+  Advanced, in the order listed, each param in manifest order. A param is in
+  a section *or* advanced, never both, a `section` must name a listed id,
+  and a listed section must hold at least one param — a section nobody
+  fills is a heading that silently disappears. The workflow page shows
+  section membership; it is edited in the manifest for now.
 - `required: true` blocks submission when empty.
 - `family` on the workflow and `filter.family` on `lora_list` / `checkpoint`
   params restrict pickers to compatible models (§8.1).
@@ -321,7 +335,8 @@ Initial set:
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
-| `sd15-inpaint` | sd15 | image | image (required), mask (required, `of: image`), prompt, negative, creativity (0.75), seed, loras; grow, feather, steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
+| `krea2-inpaint` | krea2 | image | as `sd15-inpaint` on Krea 2 Turbo: image (required), prompt, creativity (0.85), seed, loras; the **Mask** section; steps, cfg, sampler, scheduler, clip, vae and the model advanced |
+| `sd15-inpaint` | sd15 | image | image (required), prompt, negative, creativity (0.75), seed, loras; a **Mask** section (§4.2) holding mask (required, `of: image`), grow and feather; steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
 | `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
@@ -342,7 +357,11 @@ contract check's CPU ComfyUI, so a painted mask is proven against the real
 thing rather than the fake. It uses the plain SD 1.5 checkpoint with a
 noise mask, not an inpainting checkpoint, so it needs no second download. It has
 no `category` yet: a category is for routing, and nothing routes to an
-inpaint until **Edit image** (§13, Phase 4) does.
+inpaint until **Edit image** (§13, Phase 4) does. `krea2-inpaint` is the
+same graph on Krea 2 Turbo — its UNet, Qwen text encoder and VAE, and the
+img2img sibling's schedule slice — for trying an inpaint on a model worth
+keeping the result of; like every Krea 2 workflow it needs a GPU and the
+model files, so only the fake runs it here.
 
 Exact node graphs are authored in ComfyUI and committed as files; the table
 above defines the intended manifest surface.
@@ -1120,7 +1139,13 @@ with an `image` param.
     outline of the brush follows the pointer, so its size is never a guess;
   - **Invert**, **Clear**, **Undo** and **Redo** (`undo` / `redo`, §11.4;
     every stroke, invert and clear is one step);
-  - **Hide mask**, a toggle, to see the picture underneath.
+  - **Hide mask**, a toggle, to see the picture underneath;
+  - **Tint / White**, how the mask is drawn: the accent at half strength,
+    which lets the picture show through, or **solid white**, which does
+    not and reads at a glance on a small or busy picture where the tint
+    blurs into it. The choice is `ui.mask_view` (`tint` | `white`) in
+    `config.yaml`, kept like the other view choices, and the panel's
+    thumbnail of the mask follows it.
 
   **Done** writes the PNG (§9) and sets the param; **Cancel** and `close`
   leave it as it was. A mask with nothing painted on it is no mask: Done
@@ -1168,7 +1193,10 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   smaller indented rows; choosing one applies it, and the card names the
   template beside the workflow.
 - Param panel rendered from the manifest: required params first, then
-  optional, then a collapsed **Advanced** section. A PARAMETERS header row
+  optional, then each **section** the manifest lists (§4.2), then a
+  collapsed **Advanced** section. A section's head is its label, the keys
+  inside it and a problem badge when one of them needs attention — the same
+  head Advanced has, because it is the same kind of thing with a name. A PARAMETERS header row
   carries **Reset to defaults**. Sticky **Generate** button (one click = one job).
   Seed row has 🎲 and 🔒.
 - Selecting a workflow populates the panel with the params from the **most

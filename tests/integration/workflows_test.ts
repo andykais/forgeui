@@ -54,6 +54,7 @@ const BUNDLED = [
   ["illustrious-img2img", "Illustrious XL (img2img)"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-img2img", "Krea 2 Turbo (img2img)"],
+  ["krea2-inpaint", "Krea 2 Turbo (inpaint)"],
   ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
@@ -246,7 +247,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     ]);
     assertEquals(byId.get("sd15")!.params.advanced, 2); // steps, cfg
     // The image, the mask painted over it, and what to paint (§10). How
-    // soft the edge is belongs here, not to the brush.
+    // soft the edge is belongs here, not to the brush — in the Mask section
+    // with the mask, rather than among Advanced (§4.2).
     assertEquals(keys("sd15-inpaint"), [
       "image",
       "mask",
@@ -255,11 +257,36 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "creativity",
       "seed",
       "loras",
+      "grow",
+      "feather",
+    ]);
+    for (const id of ["sd15-inpaint", "krea2-inpaint"]) {
+      const manifest = (await detail(app, id)).manifest!;
+      assertEquals(manifest.sections, [{
+        id: "mask",
+        label: "Mask",
+        description: "Where to repaint, and how soft its edge is.",
+      }]);
+      assertEquals(
+        manifest.params.filter((param) => param.section === "mask")
+          .map((param) => param.key),
+        ["mask", "grow", "feather"],
+      );
+    }
+    assertEquals(keys("krea2-inpaint"), [
+      "image",
+      "prompt",
+      "creativity",
+      "seed",
+      "loras",
+      "mask",
+      "grow",
+      "feather",
     ]);
     // No category: nothing routes to an inpaint yet (§4.2).
     assertEquals(byId.get("sd15-inpaint")!.category, null);
-    // grow, feather, steps, cfg, sampler, scheduler, model.
-    assertEquals(byId.get("sd15-inpaint")!.params.advanced, 7);
+    // steps, cfg, sampler, scheduler, model.
+    assertEquals(byId.get("sd15-inpaint")!.params.advanced, 5);
 
     assertEquals(byId.get("ltx2-i2v")!.kind, "video");
     assertEquals(
@@ -282,6 +309,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "sdxl",
         "sdxl",
         "krea2",
+        "krea2",
+        // And an inpaint, to try the mask editor on a model worth it (§4.6).
         "krea2",
         // LTX-2.3, which is a different architecture from the LTX-Video
         // this workflow replaced (§6). Two of them now: the same model, one

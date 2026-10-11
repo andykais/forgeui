@@ -4,6 +4,13 @@
   "family": "sd15",
   "kind": "image",
   "description": "Repaint part of a picture with Stable Diffusion 1.5. Paint over what should change; everything outside the mask is the original's own pixels. Creativity is how far the painted part may stray from what is there now — near 1 draws something new, low touches it up.",
+  "sections": [
+    {
+      "id": "mask",
+      "label": "Mask",
+      "description": "Where to repaint, and how soft its edge is."
+    }
+  ],
   "params": [
     {
       "key": "image",
@@ -19,6 +26,7 @@
       "of": "image",
       "required": true,
       "description": "Where to repaint: paint over it. White is repainted, black is kept.",
+      "section": "mask",
       "bind": "40.image"
     },
     {
@@ -80,8 +88,8 @@
       "min": -64,
       "max": 128,
       "default": 8,
-      "advanced": true,
       "description": "Pixels to widen the mask by before repainting, so the edit reaches a little past where the brush stopped. Negative shrinks it.",
+      "section": "mask",
       "bind": "41.expand"
     },
     {
@@ -91,8 +99,8 @@
       "min": 1,
       "max": 31,
       "default": 8,
-      "advanced": true,
       "description": "How soft the mask's edge is, in pixels. A soft edge blends the repainted part into what is kept; a hard one leaves a seam.",
+      "section": "mask",
       "bind": "43.blur_radius"
     },
     {

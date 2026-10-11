@@ -3,6 +3,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import { api, ApiError } from "../../api.ts";
+  import { app } from "../../stores/app.svelte.ts";
   import { inputUrl } from "../../lib/mask.ts";
   import type { Param } from "../../types.ts";
   import MaskEditor from "./MaskEditor.svelte";
@@ -118,6 +119,7 @@
       {#if value}
         <div
           class="tint"
+          class:white={app.maskView === "white"}
           data-mask-tint
           style:mask-image={`url(${inputUrl(value)})`}
         ></div>
@@ -200,6 +202,12 @@
     mask-position: center;
     mask-repeat: no-repeat;
     pointer-events: none;
+  }
+
+  /* The editor's White view, which reads where the tint blurs (§10). */
+  .tint.white {
+    background: #fff;
+    opacity: 1;
   }
 
   .action {

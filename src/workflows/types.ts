@@ -129,6 +129,8 @@ export interface ParamCommon {
   required?: boolean;
   /** Renders inside the collapsed Advanced section (§11.2). */
   advanced?: boolean;
+  /** Renders inside the named section of `Manifest.sections` (§4.2). */
+  section?: string;
   /** Only applies while another param holds a given value (§4.3). */
   when?: ParamWhen;
   /**
@@ -308,6 +310,19 @@ export interface ManifestOutput {
   kind: WorkflowKind;
 }
 
+/**
+ * A titled, collapsible group of params (§4.2): the params that belong
+ * together but are not what most runs touch — a mask and the two numbers
+ * that shape its edge.
+ */
+export interface ManifestSection {
+  id: string;
+  label: string;
+  description?: string;
+  /** Starts closed; open unless it says so. */
+  collapsed?: boolean;
+}
+
 export interface Manifest {
   id: string;
   name: string;
@@ -349,6 +364,8 @@ export interface Manifest {
    * (§4.3) and is not empty wins.
    */
   tone: string[];
+  /** The sections params may name, in the order the panel shows them. */
+  sections: ManifestSection[];
   params: Param[];
   outputs: ManifestOutput[];
 }

@@ -47,6 +47,8 @@ export interface Param {
   type: ParamType;
   required?: boolean;
   advanced?: boolean;
+  /** The `sections` entry it is shown under (§4.2). */
+  section?: string;
   when?: ParamWhen;
   default?: unknown;
   /**
@@ -87,8 +89,18 @@ export interface Manifest {
   prompt: string | null;
   /** The params that say what it sounds like, best first (§11.5). */
   tone: string[];
+  /** Titled, collapsible groups params can name (§4.2). */
+  sections?: ManifestSection[];
   params: Param[];
   outputs: { node: string; kind: "image" | "video" | "audio" }[];
+}
+
+export interface ManifestSection {
+  id: string;
+  label: string;
+  description?: string;
+  /** Starts closed; open unless it says so. */
+  collapsed?: boolean;
 }
 
 export interface WorkflowSummary {
@@ -411,6 +423,8 @@ export interface Config {
     model_thumbnail: "first_sample" | "latest_generated";
     /** Families kept out of sight entirely; their models read as hidden. */
     hidden_families: string[];
+    /** How a painted mask is drawn: tinted, or solid white (§10). */
+    mask_view: "tint" | "white";
   };
 }
 

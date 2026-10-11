@@ -128,14 +128,6 @@ class PanelState {
     return this.manifest?.params ?? [];
   }
 
-  get mainParams(): Param[] {
-    return this.params.filter((param) => !param.advanced);
-  }
-
-  get advancedParams(): Param[] {
-    return this.params.filter((param) => param.advanced);
-  }
-
   /** §11.3: blocked while ComfyUI is away or a required param is empty. */
   get missingRequired(): string[] {
     if (!this.manifest) return [];

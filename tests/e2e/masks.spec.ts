@@ -149,6 +149,42 @@ test("a mask is painted over its picture, and the run takes it", async ({ page, 
   // Reopened, it paints on top of what is there.
   await edit.click();
   await expect.poll(() => painted(page)).toBeGreaterThan(0.02);
+
+  // White draws the mask solid, for a picture the tint blurs into (§10).
+  // The choice is kept in config.yaml, and the panel's thumbnail follows it.
+  const canvas = page.locator("[data-mask-canvas]");
+  const look = () =>
+    canvas.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { opacity: style.opacity, filter: style.filter };
+    });
+  expect(await look()).toEqual({ opacity: "0.55", filter: "none" });
+  await editor.getByRole("radio", { name: "White" }).click();
+  await expect(editor.getByRole("radio", { name: "White" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(await look()).toEqual({ opacity: "1", filter: "brightness(0) invert(1)" });
+  await expect.poll(async () =>
+    (await (await request.get("/api/config")).json()).ui.mask_view
+  ).toBe("white");
+  // Only how it is drawn: the paint itself is untouched.
+  expect(await painted(page)).toBeGreaterThan(0.02);
+  await editor.getByRole("button", { name: "Cancel" }).click();
+  await expect(edit.locator("[data-mask-tint]")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await edit.click();
+  await expect(editor.getByRole("radio", { name: "White" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  // Back to the tint, which is where the other specs expect it.
+  await editor.getByRole("radio", { name: "Tint" }).click();
+  await expect.poll(async () =>
+    (await (await request.get("/api/config")).json()).ui.mask_view
+  ).toBe("tint");
   await editor.getByRole("button", { name: "Cancel" }).click();
 
   const prompt = `a stone well in the field, ${Date.now()}`;
@@ -208,4 +244,35 @@ test("a mask from another picture says to paint it again", async ({ page }) => {
   await expect(page.locator('[data-param="mask"]')).toContainText(
     "Painted on a 64×64 picture; this one is 96×64. Paint it again.",
   );
+});
+
+test("the mask and its edge are a section of their own, on both inpaints", async ({ page }) => {
+  for (const [id, name] of [
+    ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
+    ["krea2-inpaint", "Krea 2 Turbo (inpaint)"],
+  ]) {
+    await page.goto(`/generate?workflow=${id}`);
+    await expect(page.locator(".workflow-card")).toContainText(name);
+    await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
+    const section = page.locator('[data-group="section:mask"]');
+    const head = section.locator("button.group-head");
+    await expect(head).toContainText("mask · grow · feather");
+    // After the main params, before Advanced (§4.2).
+    const order = await page.locator("[data-param], [data-group]").evaluateAll((all) =>
+      all.map((element) =>
+        (element as HTMLElement).dataset.group ?? (element as HTMLElement).dataset.param
+      )
+    );
+    expect(order.indexOf("section:mask")).toBeGreaterThan(order.indexOf("prompt"));
+    expect(order.indexOf("section:mask")).toBeLessThan(order.indexOf("advanced"));
+    for (const key of ["mask", "grow", "feather"]) {
+      await expect(section.locator(`[data-param="${key}"]`)).toBeVisible();
+    }
+    // Collapsing it hides all three; the main params stay.
+    await head.click();
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator('[data-param="grow"]')).toHaveCount(0);
+    await expect(page.locator('[data-param="prompt"]')).toBeVisible();
+    await head.click();
+  }
 });

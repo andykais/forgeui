@@ -551,6 +551,17 @@ class AppState {
     void this.refreshModels();
   }
 
+  /** How a painted mask is drawn, in the editor and the panel (§10). */
+  get maskView(): Config["ui"]["mask_view"] {
+    return this.config?.ui.mask_view ?? "tint";
+  }
+
+  setMaskView(view: Config["ui"]["mask_view"]): void {
+    this.#patchUi({ mask_view: view }, (ui) => {
+      ui.mask_view = view;
+    });
+  }
+
   /** Optimistic locally, then persisted: Settings has no save button (§11.2). */
   #patchUi(patch: unknown, apply: (ui: Config["ui"]) => void): void {
     if (!this.config) return;

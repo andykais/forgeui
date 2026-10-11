@@ -673,8 +673,8 @@ Deno.test("families come back with model and workflow counts", async () => {
     // upscale sibling (§10). The enhancer is a checkbox on the one Krea 2
     // workflow rather than a third (§7.1).
     assertEquals(byName.get("flux2")?.workflows, 2);
-    assertEquals(byName.get("krea2")?.workflows, 2);
-    // sd15 has a third: the inpaint the mask editor drives (§4.6).
+    // Krea 2 and sd15 each have a third: an inpaint (§4.6).
+    assertEquals(byName.get("krea2")?.workflows, 3);
     assertEquals(byName.get("sd15")?.workflows, 3);
     assertEquals(byName.get("sd15")?.models, 0);
     // The video workflow is LTX-2.3 now, and none of these graphs upscale a
