@@ -315,6 +315,30 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 14,
+    name: "pixel hashes, for finding the output a pasted picture came from",
+    // DESIGN.md §9: a paste is the browser's re-encoding of a picture, so its
+    // bytes match no output while its pixels do. A cache of the media, filled
+    // in after boot for what predates it; nothing here backfills, because
+    // hashing every output is not a migration's job.
+    apply: (db) => {
+      for (const table of ["outputs", "inputs"]) {
+        const present = new Set(
+          db.prepare(`PRAGMA table_info(${table})`)
+            .values<[number, string]>()
+            .map(([, name]) => name),
+        );
+        if (!present.has("pixel_hash")) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN pixel_hash TEXT`);
+        }
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS outputs_pixels
+           ON outputs(pixel_hash) WHERE pixel_hash <> ''`,
+      );
+    },
+  },
 ];
 
 export const SCHEMA_VERSION: number =

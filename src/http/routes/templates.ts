@@ -2,6 +2,8 @@ import {
   type StoredTemplate,
   templateProblems,
 } from "../../templates/store.ts";
+import { latestTemplateOutputs } from "../../db/queries.ts";
+import { mediaUrl } from "../../outputs/store.ts";
 import { json, readJson } from "../json.ts";
 import type { AppContext, Route } from "../server.ts";
 
@@ -10,8 +12,13 @@ import type { AppContext, Route } from "../server.ts";
  * (§4.8, §12): the file's own fields, plus what its workflow says about it
  * now — its name and family, and anything that no longer fits.
  */
-function view(ctx: AppContext, template: StoredTemplate) {
+function view(
+  ctx: AppContext,
+  template: StoredTemplate,
+  latest = latestTemplateOutputs(ctx.db),
+) {
   const workflow = ctx.workflows.get(template.workflow);
+  const last = latest.get(template.id);
   return {
     id: template.id,
     name: template.name,
@@ -25,6 +32,11 @@ function view(ctx: AppContext, template: StoredTemplate) {
     source: template.source,
     has_bundled: template.hasBundled,
     problems: templateProblems(template, ctx.workflows),
+    // Its thumbnail in the Generate picker: the last thing it made. Named
+    // whole rather than by id, so it shows however long ago that was.
+    last_output: last
+      ? { id: last.id, kind: last.kind, media_url: mediaUrl(last.path) }
+      : null,
   };
 }
 
@@ -33,12 +45,14 @@ export function templateRoutes(ctx: AppContext): Route[] {
     {
       method: "GET",
       path: "/api/templates",
-      handler: () =>
-        json({
+      handler: () => {
+        const latest = latestTemplateOutputs(ctx.db);
+        return json({
           templates: ctx.templates.list().map((template) =>
-            view(ctx, template)
+            view(ctx, template, latest)
           ),
-        }),
+        });
+      },
     },
     {
       method: "POST",

@@ -7,9 +7,11 @@ import {
   type JobRow,
   type OutputRow,
   refreshModelUsage,
+  setOutputPixelHash,
   type SidecarModelRef,
   updateNodeTimings,
 } from "../db/queries.ts";
+import { pixelHashOf } from "../outputs/pixels.ts";
 import type { ComfyImageRef } from "../comfy/events.ts";
 import { sha256Hex } from "../workflows/hash.ts";
 import type { Manifest, WorkflowKind } from "../workflows/types.ts";
@@ -327,6 +329,10 @@ export async function completeJob(
       created_at: createdAt.getTime(),
     };
     insertOutput(db, row);
+    // What the picture looks like, so a paste of it finds its way back (§9).
+    if (row.kind === "image") {
+      setOutputPixelHash(db, row.id, await pixelHashOf(entry.absolutePath));
+    }
     insertOutputModels(db, row.id, resolved);
     rows.push(row);
   }

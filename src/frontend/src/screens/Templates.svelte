@@ -58,7 +58,7 @@
             <th>Workflow</th>
             <th>Sets</th>
             <th>Asks for</th>
-            <th>Used by</th>
+            <th>For</th>
             <th>Source</th>
           </tr>
         </thead>
@@ -94,7 +94,8 @@
               </td>
               <td class="mono dim">{asks(template)}</td>
               <td class="dim">
-                {template.action === "upscale" ? "Upscale image" : "—"}
+                <!-- What `action` labels it as (§4.8); Reuse image lists them all. -->
+                {template.action === "upscale" ? "Upscale" : "—"}
               </td>
               <td class="dim">{template.source}</td>
             </tr>

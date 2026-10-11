@@ -269,10 +269,8 @@ class PanelState {
 
   /**
    * Apply a template (§4.8): fill its workflow with what it sets, over
-   * whatever the panel would have held — and, given an output, with that
-   * output as the picture and the run that made it under the rest. That is
-   * the Upscale action (§10): the bundled Upscale template sets scale 2 and
-   * creativity 0.2 on the family's img2img workflow, and asks for the image.
+   * whatever the panel would have held. Given an output, it is Reuse image
+   * with that template (§10) — the run's picture and words under it.
    *
    * Nothing about the job is special: the values are ordinary values, there
    * to be changed before generating.
@@ -282,32 +280,81 @@ class PanelState {
     from: { output?: { id: string }; sourceParams?: Record<string, unknown> } =
       {},
   ): Promise<void> {
-    const manifest = (await api.workflow(template.workflow)).manifest;
-    if (!manifest) {
+    if (from.output) {
+      await this.reuseImage(from.output, {
+        workflow: template.workflow,
+        template,
+        sourceParams: from.sourceParams ?? {},
+        sameFamily: true,
+      });
+      return;
+    }
+    if (!(await api.workflow(template.workflow)).manifest) {
       throw new Error(`"${template.workflow}" has no inputs to fill`);
+    }
+    await this.editWith(template.workflow, plain(template.values), template);
+  }
+
+  /**
+   * Reuse image (§10): open a workflow — or a template on one — with an
+   * output's picture in its first `image` param, adopted so the lineage
+   * holds, and the run that made it under the rest:
+   *
+   * - its words always: every `text` param the two share by key, which is
+   *   the prompt that otherwise had to be copied across by hand;
+   * - the rest it shares only within the same family, because another
+   *   family's LoRAs are not LoRAs this model can load;
+   * - a template's values over all of that;
+   * - a mask never: it was painted for some other picture, if any.
+   */
+  async reuseImage(
+    output: { id: string },
+    target: {
+      workflow: string;
+      template?: Template | null;
+      sourceParams: Record<string, unknown>;
+      sameFamily: boolean;
+    },
+  ): Promise<void> {
+    const manifest = (await api.workflow(target.workflow)).manifest;
+    if (!manifest) {
+      throw new Error(`"${target.workflow}" has no inputs to fill`);
+    }
+    const imageKey = manifest.params.find((param) => param.type === "image")
+      ?.key;
+    if (!imageKey) {
+      throw new Error(`"${target.workflow}" has no image to put it in`);
     }
     // Only the keys this workflow actually has. `editWith` warns about the
     // rest, which is right when a workflow has changed under a saved run and
     // wrong here: an img2img workflow has no `size` because it takes that
-    // from the picture, and saying so on every upscale is noise.
-    const shared: Record<string, unknown> = {};
+    // from the picture, and saying so on every reuse is noise.
+    const carried: Record<string, unknown> = {};
     for (const param of manifest.params) {
-      if (from.sourceParams && param.key in from.sourceParams) {
-        shared[param.key] = from.sourceParams[param.key];
+      if (!(param.key in target.sourceParams)) continue;
+      if (
+        param.type === "image" ||
+        param.type === "mask" ||
+        param.type === "video" ||
+        param.type === "audio"
+      ) {
+        continue;
+      }
+      if (param.type === "text" || target.sameFamily) {
+        carried[param.key] = target.sourceParams[param.key];
       }
     }
-    const params = { ...shared, ...plain(template.values) };
-    if (from.output) {
-      const imageKey = manifest.params.find((param) => param.type === "image")
-        ?.key;
-      if (!imageKey) {
-        throw new Error(`"${template.workflow}" has no image to put it in`);
-      }
-      // The picture last: it is the one thing neither the run nor the
-      // template can supply.
-      params[imageKey] = (await api.adoptOutput(from.output.id)).filename;
+    const params: Record<string, unknown> = {
+      ...carried,
+      ...(target.template ? plain(target.template.values) : {}),
+    };
+    for (const param of manifest.params) {
+      if (param.type === "mask") params[param.key] = "";
     }
-    await this.editWith(template.workflow, params, template);
+    // The picture last: it is the one thing neither the run nor a template
+    // can supply.
+    params[imageKey] = (await api.adoptOutput(output.id)).filename;
+    await this.editWith(target.workflow, params, target.template ?? null);
   }
 
   // --------------------------------------------------------------- the size

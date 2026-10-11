@@ -170,6 +170,7 @@ function template(patch: Partial<Template> = {}): Template {
     source: "bundled",
     has_bundled: false,
     problems: [],
+    last_output: null,
     ...patch,
   };
 }
@@ -222,6 +223,67 @@ describe("upscaling an output", () => {
  * The template the panel was filled from is recorded on what it makes
  * (§4.8, §6.2): the submit names it, and stops naming it once it is let go.
  */
+describe("Reuse image (§10)", () => {
+  const inpaint = {
+    ...upscaleManifest,
+    id: "inpaint",
+    params: [
+      { key: "image", type: "image", required: true, bind: "6.image" },
+      { key: "mask", type: "mask", of: "image", required: true, bind: "21.image" },
+      { key: "prompt", type: "text", bind: "4.text" },
+      { key: "negative", type: "text", bind: "5.text" },
+      { key: "seed", type: "seed", default: -1, bind: "9.seed" },
+      { key: "loras", type: "lora_list", bind: { chain: {} } },
+    ],
+  } as unknown as Manifest;
+  /** Once for the reuse, once for the panel opening it. */
+  function serve(manifest: Manifest) {
+    const detail = { id: manifest.id, name: "Inpaint", runnable: true, manifest };
+    fakeApi.workflow.mockResolvedValueOnce(detail).mockResolvedValueOnce(detail);
+  }
+  const run = {
+    prompt: "a stone well in a field",
+    negative: "blurry",
+    seed: 42,
+    loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
+    // An inpaint run's own mask was painted for that run's picture.
+    mask: `${"c".repeat(64)}.png`,
+  };
+
+  test("another family: the picture and the words, not its seed or LoRAs", async () => {
+    serve(inpaint);
+    await panel.reuseImage({ id: "01JOUT" }, {
+      workflow: "inpaint",
+      sourceParams: run,
+      sameFamily: false,
+    });
+    expect(fakeApi.adoptOutput).toHaveBeenLastCalledWith("01JOUT");
+    expect(panel.workflowId).toBe("inpaint");
+    expect(panel.values.image).toBe(`${"a".repeat(64)}.png`);
+    expect(panel.values.prompt).toBe("a stone well in a field");
+    expect(panel.values.negative).toBe("blurry");
+    // Another model's LoRAs are not LoRAs this one can load.
+    expect(panel.values.loras).toEqual([]);
+    expect(panel.values.seed).not.toBe(42);
+    // And never a mask painted for some other picture.
+    expect(panel.values.mask).toBe("");
+    expect(panel.template).toBeNull();
+  });
+
+  test("its own family: the rest of the run comes too", async () => {
+    serve(inpaint);
+    await panel.reuseImage({ id: "01JOUT" }, {
+      workflow: "inpaint",
+      sourceParams: run,
+      sameFamily: true,
+    });
+    expect(panel.values.prompt).toBe("a stone well in a field");
+    expect(panel.values.seed).toBe(42);
+    expect(panel.values.loras).toEqual(run.loras);
+    expect(panel.values.mask).toBe("");
+  });
+});
+
 describe("a submit names its template", () => {
   test("while it applies, and not after", async () => {
     await panel.applyTemplate(template({ values: { scale: 2 }, ask: [] }));

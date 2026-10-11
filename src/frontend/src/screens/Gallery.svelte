@@ -5,13 +5,13 @@
   import List from "@lucide/svelte/icons/list";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { api } from "../api.ts";
-  import { app } from "../stores/app.svelte.ts";
+  import { app, type ReuseTarget } from "../stores/app.svelte.ts";
   import { panel } from "../stores/panel.svelte.ts";
   import { navigate, router, setQuery } from "../router.svelte.ts";
   import { dayLabel, localDate } from "../lib/format.ts";
   import { byModel } from "../lib/models.ts";
   import { afterRemoval } from "../lib/neighbour.ts";
-  import type { Output, Template, TileSize } from "../types.ts";
+  import type { Output, TileSize } from "../types.ts";
   import Tile from "../components/Tile.svelte";
   import MediaTable from "../components/MediaTable.svelte";
   import { untrack } from "svelte";
@@ -201,20 +201,26 @@
    * own numbers — scale 2, creativity 0.2 for the bundled one — on top,
    * there to be adjusted before generating.
    */
-  async function upscale(output: Output, template: Template) {
+  /**
+   * Reuse image (§10): Generate on the chosen workflow, or template, with
+   * this picture in it and the run that made it under the rest.
+   */
+  async function reuse(output: Output, target: ReuseTarget) {
     const detail = await api.output(output.id);
     try {
-      await panel.applyTemplate(template, {
-        output,
+      await panel.reuseImage(output, {
+        workflow: target.workflow.id,
+        template: target.template,
         sourceParams: detail.sidecar?.params ?? output.params,
+        sameFamily: target.sameFamily,
       });
     } catch (cause) {
       toasts.message(
-        `Could not upscale: ${cause instanceof Error ? cause.message : cause}`,
+        `Could not reuse it: ${cause instanceof Error ? cause.message : cause}`,
       );
       return;
     }
-    navigate(`/generate?workflow=${template.workflow}`);
+    navigate(`/generate?workflow=${target.workflow.id}`);
   }
 
   async function rerun(output: Output) {
@@ -365,7 +371,7 @@
       onedit={reuseParams}
       onrerun={rerun}
       ondelete={remove}
-      onupscale={upscale}
+      onreuse={reuse}
       onopenoutput={openOutput}
     />
   {/if}

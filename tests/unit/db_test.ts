@@ -57,6 +57,7 @@ Deno.test("open creates the §7 schema in WAL mode", async () => {
         "model_files_hash",
         "output_models_model",
         "outputs_created",
+        "outputs_pixels",
         "outputs_project",
         "outputs_template",
         "outputs_workflow",

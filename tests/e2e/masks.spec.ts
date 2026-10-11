@@ -220,7 +220,7 @@ test("a mask is painted over its picture, and the run takes it", async ({ page, 
   expect(corner).toEqual([0, 0, 0, 255]);
 });
 
-test("a mask from another picture says to paint it again", async ({ page }) => {
+test("a mask is cleared when the picture under it changes size", async ({ page }) => {
   await page.goto("/generate?workflow=sd15-inpaint");
   await expect(page.locator('[data-panel-loading="false"]')).toBeVisible();
   const imageInput = page.locator('[data-param="image"] input[type="file"]');
@@ -233,17 +233,30 @@ test("a mask from another picture says to paint it again", async ({ page }) => {
   await page.getByRole("button", { name: /Mask: (paint|edit) the mask/ }).click();
   await strokeAcross(page);
   await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
-  await expect(page.getByRole("button", { name: "Mask: edit the mask" })).toBeVisible();
+  const edit = page.getByRole("button", { name: "Mask: edit the mask" });
+  await expect(edit.locator("[data-mask-tint]")).toBeVisible();
 
-  // A different picture under the same mask.
+  // The same size again: the strokes still land on pixels, so it stays.
+  await imageInput.setInputFiles({
+    name: "same.png",
+    mimeType: "image/png",
+    buffer: png(64, 64, [40, 200, 40]),
+  });
+  await expect(page.locator('[data-param="image"] img')).toHaveAttribute("src", /./);
+  await expect(edit.locator("[data-mask-tint]")).toBeVisible();
+
+  // Another size: painted for another picture, so it goes, and says why —
+  // rather than being drawn stretched over this one (§10).
   await imageInput.setInputFiles({
     name: "wide.png",
     mimeType: "image/png",
     buffer: png(96, 64, [40, 40, 200]),
   });
   await expect(page.locator('[data-param="mask"]')).toContainText(
-    "Painted on a 64×64 picture; this one is 96×64. Paint it again.",
+    "painted on a 64×64 picture and this one is 96×64, so it was cleared",
   );
+  await expect(page.getByRole("button", { name: "Mask: paint the mask" })).toBeVisible();
+  await expect(page.locator("[data-mask-tint]")).toHaveCount(0);
 });
 
 test("the mask and its edge are a section of their own, on both inpaints", async ({ page }) => {

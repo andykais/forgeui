@@ -111,28 +111,50 @@ class AppState {
   }
 
   /**
-   * The Upscale templates that could take this output (§4.8, §10): an
-   * `action: "upscale"` template whose workflow is in the output's own
-   * family, can run, and still fits it — and images only, since none of
-   * these graphs take a video.
-   *
-   * A list rather than one answer, because a user may keep several: the
-   * caller applies the only match outright and offers a choice when there
-   * are more.
+   * Everything an output's picture can be reused in (§10): each runnable
+   * workflow with an `image` param, with its templates under it — the
+   * Generate picker's own shape. The output's family comes first, then the
+   * rest by family and name, so its img2img, inpaint and Upscale 2× are at
+   * the top and nothing else is out of reach. Images only: none of these
+   * graphs take a video.
    */
-  upscaleTemplatesFor(
+  reuseTargetsFor(
     output: { family: string | null; kind: string } | null,
-  ): Template[] {
-    if (!output || output.kind !== "image" || output.family === null) {
-      return [];
-    }
-    return this.templates.filter(
-      (template) =>
-        template.action === "upscale" &&
-        template.family === output.family &&
-        template.problems.length === 0 &&
-        this.workflow(template.workflow)?.runnable === true,
+  ): ReuseGroup[] {
+    if (!output || output.kind !== "image") return [];
+    const takers = this.workflows.filter(
+      (workflow) => workflow.runnable && workflow.image_param !== null,
     );
+    const byWorkflow = new Map<string, Template[]>();
+    for (const template of this.templates) {
+      if (template.problems.length > 0) continue;
+      byWorkflow.set(template.workflow, [
+        ...(byWorkflow.get(template.workflow) ?? []),
+        template,
+      ]);
+    }
+    const rank = (workflow: WorkflowSummary) =>
+      output.family !== null && workflow.family === output.family ? 0 : 1;
+    return [...takers]
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          // A workflow nobody filed under a family goes after those that are.
+          Number(a.family === null) - Number(b.family === null) ||
+          (a.family ?? "").localeCompare(b.family ?? "") ||
+          a.name.localeCompare(b.name),
+      )
+      .map((workflow) => ({
+        workflow,
+        sameFamily: rank(workflow) === 0,
+        // An upscale first under its workflow: it is what Reuse image was
+        // called before it took everything else in (§10).
+        templates: [...(byWorkflow.get(workflow.id) ?? [])].sort(
+          (a, b) =>
+            Number(b.action === "upscale") - Number(a.action === "upscale") ||
+            a.name.localeCompare(b.name),
+        ),
+      }));
   }
 
   jobOutputs(job: Job): Output[] {
@@ -589,6 +611,21 @@ class AppState {
     }
     return null;
   }
+}
+
+/** What a Reuse image row opens (§10): a workflow, or a template on it. */
+export interface ReuseTarget {
+  workflow: WorkflowSummary;
+  template: Template | null;
+  sameFamily: boolean;
+}
+
+/** One workflow Reuse image offers, with its templates (§10). */
+export interface ReuseGroup {
+  workflow: WorkflowSummary;
+  /** The output's own family: its runs' seeds and LoRAs carry over. */
+  sameFamily: boolean;
+  templates: Template[];
 }
 
 export const app = new AppState();

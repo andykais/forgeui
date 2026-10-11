@@ -2,8 +2,15 @@ import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { tick } from "svelte";
 import ParamPanel from "./ParamPanel.svelte";
-import type { Manifest, ManifestSection, ModelEntry, Param } from "../../types.ts";
+import type {
+  InputMedia,
+  Manifest,
+  ManifestSection,
+  ModelEntry,
+  Param,
+} from "../../types.ts";
 import { fillValues } from "../../stores/panel.svelte.ts";
+import { api } from "../../api.ts";
 
 /**
  * §14.1: one test per param type rendering from a manifest, the
@@ -466,15 +473,39 @@ describe("each param type renders from the manifest", () => {
     expect(button.querySelector("[data-mask-tint]")).toBeNull();
   });
 
+  /** The store's word on each input's size, as `GET /api/inputs/:sha` gives it. */
+  function sized(byName: Record<string, [number, number]>) {
+    return vi.spyOn(api, "input").mockImplementation(async (sha256: string) => {
+      const name = Object.keys(byName).find((key) => key.startsWith(sha256))!;
+      const [width, height] = byName[name]!;
+      return { filename: name, width, height } as InputMedia;
+    });
+  }
+
   test("a painted mask is tinted over the picture, and can be taken off", async () => {
+    const spy = sized({ [picture]: [64, 48], [painted]: [64, 48] });
     const { handlers } = mount(maskParams, { image: picture, mask: painted });
     const button = screen.getByRole("button", { name: "Mask: edit the mask" });
     expect(button.textContent).toContain("Edit mask");
-    expect(
-      (button.querySelector("[data-mask-tint]") as HTMLElement).getAttribute("style"),
-    ).toContain(`/api/media/inputs/bb/${painted}`);
+    // Drawn once the two are known to fit, never before (§10).
+    await vi.waitFor(() =>
+      expect(
+        (button.querySelector("[data-mask-tint]") as HTMLElement).getAttribute("style"),
+      ).toContain(`/api/media/inputs/bb/${painted}`),
+    );
     await fireEvent.click(screen.getByRole("button", { name: "Remove the mask" }));
     expect(handlers.onchange).toHaveBeenCalledWith("mask", "");
+    spy.mockRestore();
+  });
+
+  test("a mask from a picture of another size is cleared, and says why", async () => {
+    const spy = sized({ [picture]: [96, 64], [painted]: [64, 64] });
+    const { handlers } = mount(maskParams, { image: picture, mask: painted });
+    await vi.waitFor(() => expect(handlers.onchange).toHaveBeenCalledWith("mask", ""));
+    expect(screen.getByText(/painted on a 64×64 picture and this one is 96×64/)).toBeTruthy();
+    // Never drawn stretched over the wrong picture on the way.
+    expect(document.querySelector("[data-mask-tint]")).toBeNull();
+    spy.mockRestore();
   });
 });
 
