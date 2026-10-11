@@ -181,6 +181,13 @@ export interface ImportConfig {
   /** The fallback, and the only source for models Civitai has deleted. */
   archive_url: string;
   /**
+   * Where the archive keeps its galleries: everyone's posts under a version,
+   * with their generation data. The archive's own model page reads it from
+   * here, and `--download-samples` tops up from it when a version looked up
+   * through the archive has fewer showcase images than were asked for (§4.3).
+   */
+  archive_gallery_url: string;
+  /**
    * A Civitai API key, from civitai.com/user/account. Sent as a Bearer
    * header to Civitai only — never to the archive or the image CDN — and
    * only needed for gated, early-access or paid models; everything public

@@ -158,6 +158,21 @@ Deno.test("cdn: the card transform becomes the original", () => {
   );
 });
 
+Deno.test("cdn: the archive's card becomes its full-size image", () => {
+  assertEquals(
+    originalImageUrl(
+      "https://c.genur.art/fe74d016-5876-434e-a99e-fe56a4075027_small.webp",
+    ),
+    "https://c.genur.art/fe74d016-5876-434e-a99e-fe56a4075027_large.webp",
+  );
+  assertEquals(
+    originalImageUrl(
+      "https://c.genur.art/fe74d016-5876-434e-a99e-fe56a4075027_large.webp",
+    ),
+    "https://c.genur.art/fe74d016-5876-434e-a99e-fe56a4075027_large.webp",
+  );
+});
+
 Deno.test("source record: a civitai model and version", () => {
   const result = sourceRecordFromCivitai({
     model: {

@@ -631,9 +631,16 @@ export function isoSeconds(date: Date): string {
 
 /**
  * Civitai's CDN puts its transform in the path — `width=450,optimized=true`
- * is the card thumbnail. A sample should be the image, not the card.
+ * is the card thumbnail. A sample should be the image, not the card. The
+ * archive's CDN names its sizes instead: `<uuid>_small.webp` is the card and
+ * `<uuid>_large.webp` the full-resolution image.
  */
 export function originalImageUrl(url: string): string {
+  const archived = url.replace(
+    /(\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_small(\.[a-z0-9]+)$/i,
+    "$1_large$2",
+  );
+  if (archived !== url) return archived;
   return url.replace(
     /\/(?:[a-z]+=[^/,]+,)*[a-z]+=[^/,]+\//i,
     (segment) =>

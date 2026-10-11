@@ -243,6 +243,7 @@ Deno.test("the import block defaults, and what a layer may override", () => {
   const base = defaultConfig().import;
   assertEquals(base.civitai_url, "https://civitai.red");
   assertEquals(base.archive_url, "https://civitaiarchive.com");
+  assertEquals(base.archive_gallery_url, "https://genur.art");
   assertEquals(base.dir, null);
   assertEquals(base.model_dir, null);
 

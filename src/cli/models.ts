@@ -161,6 +161,7 @@ export async function runModels(
   const client = options.client ?? new CivitaiClient({
     civitaiUrl: settings.civitai_url,
     archiveUrl: settings.archive_url,
+    archiveGalleryUrl: settings.archive_gallery_url,
     timeoutMs: options.timeoutMs,
     token,
     say,
@@ -914,6 +915,11 @@ async function fetchSamples(input: {
     from: "showcase" as const,
   }));
   const civitai = found.record.source.kind === "civitai" && versionId !== null;
+  // A lookup the archive answered has the archive's gallery behind it, from
+  // its sister site, and each of its images — the showcase's too — is a post
+  // there with the generation data the version object leaves out.
+  const archive = found.record.source.kind === "civitai-archive" &&
+    versionId !== null && client.archiveGalleryUrl !== null;
   const creator = found.record.creator?.username ?? null;
   const fromApi = (image: Record<string, unknown>): Candidate => ({
     id: typeof image.id === "number" ? image.id : null,
@@ -927,12 +933,25 @@ async function fetchSamples(input: {
     meta: (image.meta ?? null) as Record<string, unknown> | null,
     from: "gallery" as const,
   });
+  const fromArchive = (row: Record<string, unknown>): Candidate => ({
+    id: typeof row.id === "number" ? row.id : null,
+    url: String(row.url ?? ""),
+    width: null,
+    height: null,
+    kind: row.type === "video" ? "video" as const : "image" as const,
+    page_url: typeof row.id === "number"
+      ? `${client.archiveGalleryUrl}/posts/${row.id}`
+      : null,
+    meta: null,
+    from: "gallery" as const,
+  });
   const tried = async (
     what: string,
     ask: () => Promise<Record<string, unknown>[]>,
+    as: (row: Record<string, unknown>) => Candidate = fromApi,
   ): Promise<Candidate[]> => {
     try {
-      return (await ask()).map(fromApi);
+      return (await ask()).map(as);
     } catch (cause) {
       // A failure here costs links or extra samples, never the batch.
       say(
@@ -970,8 +989,17 @@ async function fetchSamples(input: {
   }
 
   let gallery: Candidate[] = [];
+  const taken = new Set(showcase.map((image) => mediaKey(image.url)));
+  if (archive && limit > showcase.length) {
+    gallery = (await tried(
+      "the archive's gallery",
+      // Over-asked by what the showcase holds, as below: the author's own
+      // posts are in the gallery too.
+      () => client.archiveGallery(versionId!, limit + showcase.length),
+      fromArchive,
+    )).filter((image) => !taken.has(mediaKey(image.url)));
+  }
   if (civitai && limit > showcase.length) {
-    const taken = new Set(showcase.map((image) => mediaKey(image.url)));
     gallery = (await tried(
       "the gallery",
       // The most-reacted first: the gallery is everyone's posts, and what
@@ -985,6 +1013,31 @@ async function fetchSamples(input: {
   }
   const candidates = [...showcase, ...gallery];
 
+  /**
+   * The archive's post for an image, read only for the ones downloaded: the
+   * full-size URL, the dimensions and the `meta` its search rows and the
+   * version object lack. Without it the card's URL is upsized by name and
+   * the sample has no generation data, which costs nothing else.
+   */
+  const fromPost = async (image: Candidate) => {
+    let post: Record<string, unknown> | null = null;
+    try {
+      post = await client.archivePost(image.id!);
+    } catch {
+      return;
+    }
+    if (post === null) return;
+    if (typeof post.url === "string" && post.url.length > 0) {
+      image.url = post.url;
+    }
+    if (typeof post.width === "number") image.width = post.width;
+    if (typeof post.height === "number") image.height = post.height;
+    const meta = post.meta;
+    if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
+      image.meta ??= meta as Record<string, unknown>;
+    }
+  };
+
   const samples: ImportSample[] = [];
   let skipped = 0;
   let fromShowcase = 0;
@@ -992,6 +1045,7 @@ async function fetchSamples(input: {
   for (const image of candidates) {
     if (samples.length >= limit) break;
     if (image.url.length === 0) continue;
+    if (archive && image.id !== null) await fromPost(image);
     const url = originalImageUrl(image.url);
     let bytes: Uint8Array;
     try {
@@ -1045,11 +1099,12 @@ type Candidate = LookupResult["images"][number] & {
 /**
  * What identifies one image on Civitai's CDN whatever size or format the URL
  * asks for: the UUID path segment, the same in a version's image list and in
- * the images endpoint. The whole URL when there is none.
+ * the images endpoint — and on the archive's, where it starts the file name
+ * (`<uuid>_small.webp`). The whole URL when there is none.
  */
 function mediaKey(url: string): string {
   return url.match(
-    /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i,
+    /\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[/_]/i,
   )
     ?.[1]?.toLowerCase() ?? originalImageUrl(url);
 }

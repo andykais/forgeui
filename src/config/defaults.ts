@@ -87,6 +87,8 @@ export const DEFAULT_COMFY_URL = "http://127.0.0.1:8188";
  */
 export const DEFAULT_CIVITAI_URL = "https://civitai.red";
 export const DEFAULT_ARCHIVE_URL = "https://civitaiarchive.com";
+/** The archive's sister site, which serves its model galleries. */
+export const DEFAULT_ARCHIVE_GALLERY_URL = "https://genur.art";
 
 export function defaultConfig(): Config {
   return {
@@ -132,6 +134,7 @@ export function defaultConfig(): Config {
       model_dir: null,
       civitai_url: DEFAULT_CIVITAI_URL,
       archive_url: DEFAULT_ARCHIVE_URL,
+      archive_gallery_url: DEFAULT_ARCHIVE_GALLERY_URL,
       civitai_token: null,
       civitai_cli: "civitai",
       huggingface_url: "https://huggingface.co",

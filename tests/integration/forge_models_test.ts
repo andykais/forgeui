@@ -109,6 +109,13 @@ async function withCli(
     noLocalFile?: boolean;
     /** More of the version's gallery: other people's posts under it. */
     gallery?: (url: string) => unknown[];
+    /** The archive's copy: its showcase, its gallery and the posts behind them. */
+    archived?: (url: string) => {
+      images: unknown[];
+      gallery: unknown[];
+      posts: Record<number, unknown>;
+      pageSize?: number;
+    };
   } = {},
 ): Promise<void> {
   const { bytes, hash } = await fixture();
@@ -152,7 +159,11 @@ async function withCli(
       ...(options.gallery?.(fake.url) ?? []),
     ],
   };
+  const archived = options.archived?.(fake.url);
   const archive = {
+    archiveGallery: { 501240: archived?.gallery ?? [] },
+    archiveGalleryPageSize: archived?.pageSize,
+    archivePosts: archived?.posts ?? {},
     archiveByHash: {
       [hash]: {
         files: [{
@@ -177,7 +188,7 @@ async function withCli(
           baseModel: "SD 1.5",
           trigger: ["cyberrealistic"],
           files: [{ name: FILENAME, sha256: hash, is_primary: true }],
-          images: [],
+          images: archived?.images ?? [],
         },
       },
     },
@@ -200,6 +211,7 @@ async function withCli(
     import: {
       civitai_url: fake.url,
       archive_url: fake.url,
+      archive_gallery_url: fake.url,
     },
   });
   const paths = dataPaths(dataDir, config.import);
@@ -207,6 +219,7 @@ async function withCli(
   const client = new CivitaiClient({
     civitaiUrl: fake.url,
     archiveUrl: fake.url,
+    archiveGalleryUrl: fake.url,
     timeoutMs: 5000,
     now: () => new Date("2026-09-25T10:00:00Z"),
   });
@@ -587,6 +600,136 @@ Deno.test("the archive answers when civitai does not", async () => {
     assert(h.fake.matching("/by-hash/").length > 0);
     assert(h.fake.matching("/api/sha256/").length > 0);
   }, { archiveOnly: true });
+});
+
+/** The archive's CDN: a card-sized `<uuid>_small.webp`, and `_large` beside it. */
+function archiveImage(url: string, n: number, size: "small" | "large") {
+  return `${url}/img/0000000${n}-0000-4000-8000-00000000000${n}_${size}.webp`;
+}
+
+/**
+ * The archive's copy of the version: one showcase image, a gallery that
+ * lists it again among three others, and the posts behind them — except
+ * 700003's, which the archive has lost.
+ */
+function archivedOf(url: string) {
+  const post = (n: number, meta: Record<string, unknown>) => ({
+    id: 700000 + n,
+    url: archiveImage(url, n, "large"),
+    width: 1096,
+    height: 1648,
+    type: "image",
+    meta,
+  });
+  const row = (n: number) => ({
+    id: 700000 + n,
+    url: archiveImage(url, n, "small"),
+    type: "image",
+    is_nsfw: n === 2,
+  });
+  return {
+    images: [{
+      id: 700001,
+      image_url: archiveImage(url, 1, "small"),
+      width: 1096,
+      height: 1648,
+      type: "image",
+      link: `${url}/posts/700001`,
+      has_metadata: true,
+    }],
+    gallery: [row(1), row(2), row(3), row(4)],
+    posts: {
+      700001: post(1, { prompt: "an archived fox", seed: 7 }),
+      700002: post(2, { prompt: "a gallery fox", seed: 8 }),
+      700004: post(4, { prompt: "another", seed: 9 }),
+    },
+    pageSize: 2,
+  };
+}
+
+Deno.test("the archive's gallery tops up samples, as Civitai's does", async () => {
+  await withCli(async (h) => {
+    const lines: string[] = [];
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 3,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: (line) => lines.push(line),
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals((batch.source as { kind: string }).kind, "civitai-archive");
+    // The model page's image first, then the gallery's best — the showcase
+    // image it lists again is taken once.
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [
+        `${h.fake.url}/posts/700001`,
+        `${h.fake.url}/posts/700002`,
+        `${h.fake.url}/posts/700003`,
+      ],
+    );
+    // Each post supplies the generation data the archive's version lacks…
+    const seeds = batch.samples!.map((sample) =>
+      (sample.raw as { fields?: { seed?: number } } | null)?.fields?.seed ??
+        null
+    );
+    assertEquals(seeds, [7, 8, null]);
+    assertEquals(batch.samples![0]!.width, 1096);
+    // …and the full-size image, even where the post is gone: never the card.
+    const fetched = h.fake.matching("/img/").map((entry) => entry.path);
+    assertEquals(fetched.length, 3);
+    for (const path of fetched) assertStringIncludes(path, "_large.webp");
+    // Ranked by the site's own "top", mature posts included (§4.3), and read
+    // a page at a time until the count is covered.
+    const asked = h.fake.matching("/api/search").filter((request) =>
+      request.params.model_version_id === "501240"
+    );
+    assertEquals(
+      asked.map((request) => [
+        request.params.sort,
+        request.params.is_nsfw,
+        request.params.page,
+      ]),
+      [["top", "true", "1"], ["top", "true", "2"]],
+    );
+    // Only the posts of what was downloaded are read.
+    assertEquals(
+      h.fake.matching("/api/posts/").map((entry) => entry.path),
+      ["/api/posts/700001", "/api/posts/700002", "/api/posts/700003"],
+    );
+    assertStringIncludes(
+      lines.join("\n"),
+      "samples       3 (1 from the model page, 2 from its gallery)",
+    );
+  }, { archiveOnly: true, archived: archivedOf });
+});
+
+Deno.test("the archive's gallery is not asked when its showcase is enough", async () => {
+  await withCli(async (h) => {
+    const result = await runModels({
+      ...base,
+      localFile: FILENAME,
+      downloadSamples: 1,
+      config: h.config,
+      paths: h.paths,
+      client: h.client,
+      log: () => {},
+    });
+    const batch = await readBatch(result.dir);
+    assertEquals(
+      batch.samples!.map((sample) => sample.source?.url),
+      [`${h.fake.url}/posts/700001`],
+    );
+    assertEquals(
+      h.fake.matching("/api/search").filter((request) =>
+        request.params.model_version_id !== undefined
+      ),
+      [],
+    );
+  }, { archiveOnly: true, archived: archivedOf });
 });
 
 Deno.test("§3.1's invariant: `forge models` never opens app.db", async () => {
