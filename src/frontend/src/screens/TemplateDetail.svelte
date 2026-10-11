@@ -14,6 +14,7 @@
     STATE_LABELS,
     statesOf,
   } from "../lib/templates.ts";
+  import { groupParams } from "../lib/sections.ts";
   import type { Manifest, Param, Template } from "../types.ts";
 
   /**
@@ -64,8 +65,11 @@
       ? statesOf(template, manifest)
       : ({} as Record<string, ParamState>),
   );
-  const main = $derived(manifest?.params.filter((param) => !param.advanced) ?? []);
-  const advanced = $derived(manifest?.params.filter((param) => param.advanced) ?? []);
+  const groups = $derived(
+    manifest
+      ? groupParams(manifest, manifest.params)
+      : { main: [], sections: [], advanced: [] },
+  );
 
   /** Save what changed; a bundled template comes back as the user's copy. */
   async function put(body: Parameters<typeof api.saveTemplate>[1], what: string) {
@@ -295,10 +299,14 @@
     <div class="params">
       <div class="label">Inputs</div>
       {#if manifest}
-        {#each main as param (param.key)}{@render row(param)}{/each}
-        {#if advanced.length > 0}
+        {#each groups.main as param (param.key)}{@render row(param)}{/each}
+        {#each groups.sections as { section, params } (section.id)}
+          <div class="label advanced">{section.label}</div>
+          {#each params as param (param.key)}{@render row(param)}{/each}
+        {/each}
+        {#if groups.advanced.length > 0}
           <div class="label advanced">Advanced</div>
-          {#each advanced as param (param.key)}{@render row(param)}{/each}
+          {#each groups.advanced as param (param.key)}{@render row(param)}{/each}
         {/if}
         <p class="dim note">
           To change a saved value, open the template in Generate, adjust it, and use <strong

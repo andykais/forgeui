@@ -10,6 +10,7 @@ import {
   type LoraRow,
   type Manifest,
   type ManifestOutput,
+  type ManifestSection,
   MODEL_PARAM_CLASS,
   type ModelFilter,
   type ModelParamType,
@@ -289,7 +290,16 @@ function validateParam(
     ...(raw.when !== undefined
       ? { when: paramWhen(raw.when, `${at}.when`) }
       : {}),
+    ...(raw.section !== undefined
+      ? { section: nonEmptyStr(raw.section, `${at}.section`) }
+      : {}),
   };
+  if (common.section !== undefined && common.advanced === true) {
+    fail(
+      `${at}.section`,
+      "a param in a section is not also advanced; it is in one or the other",
+    );
+  }
 
   const scalarBind = (): string => {
     const bind = nonEmptyStr(raw.bind, `${at}.bind`);
@@ -527,6 +537,24 @@ function validateParam(
   }
 }
 
+function validateSection(value: unknown, where: string): ManifestSection {
+  const raw = record(value, where);
+  const id = nonEmptyStr(raw.id, `${where}.id`);
+  if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+    fail(`${where}.id`, "a lower_snake_case identifier");
+  }
+  return {
+    id,
+    label: nonEmptyStr(raw.label, `${where}.label`),
+    ...(raw.description !== undefined
+      ? { description: str(raw.description, `${where}.description`) }
+      : {}),
+    ...(raw.collapsed !== undefined
+      ? { collapsed: bool(raw.collapsed, `${where}.collapsed`) }
+      : {}),
+  };
+}
+
 function validateOutput(
   value: unknown,
   where: string,
@@ -679,6 +707,35 @@ export function validateManifest(
       );
     }
   }
+  const sections = raw.sections === undefined
+    ? []
+    : array(raw.sections, "manifest.sections").map((section, i) =>
+      validateSection(section, `manifest.sections[${i}]`)
+    );
+  const sectionIds = new Set<string>();
+  for (const section of sections) {
+    if (sectionIds.has(section.id)) {
+      throw new ManifestError(
+        `manifest.sections: duplicate id "${section.id}"`,
+      );
+    }
+    sectionIds.add(section.id);
+  }
+  for (const param of params) {
+    if (param.section !== undefined && !sectionIds.has(param.section)) {
+      throw new ManifestError(
+        `manifest.params (${param.key}).section: no section "${param.section}"`,
+      );
+    }
+  }
+  // A heading with nothing under it is a caption that silently disappears.
+  for (const section of sections) {
+    if (!params.some((param) => param.section === section.id)) {
+      throw new ManifestError(
+        `manifest.sections (${section.id}): no param is in this section`,
+      );
+    }
+  }
   const loraLists = params.filter((param) => param.type === "lora_list");
   if (loraLists.length > 1) {
     throw new ManifestError(
@@ -730,6 +787,7 @@ export function validateManifest(
     requires,
     prompt,
     tone,
+    sections,
     params,
     // An empty list is a draft: it loads and lists, but cannot be submitted.
     outputs: array(raw.outputs, "manifest.outputs").map((output, i) =>
@@ -750,6 +808,9 @@ export function serializeManifest(manifest: Manifest): string {
     requires: manifest.requires,
     prompt: manifest.prompt,
     tone: manifest.tone,
+    // Only when there are any: every manifest written before sections would
+    // otherwise gain an empty list on its next save.
+    ...(manifest.sections.length > 0 ? { sections: manifest.sections } : {}),
     params: manifest.params,
     outputs: manifest.outputs,
   };

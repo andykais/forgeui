@@ -421,3 +421,17 @@ Deno.test("layers merge per key, deepest last", () => {
   assertEquals(merged.comfy, { mode: "managed", path: "/b" });
   assertEquals(merged.ui?.tile_size, { gallery: "small", models: "table" });
 });
+
+Deno.test("the mask view is tint or white, and tint unless chosen (§10)", () => {
+  assertEquals(defaultConfig().ui.mask_view, "tint");
+  assertEquals(
+    parseConfigDocument("ui:\n  mask_view: white\n", "config.yaml").ui
+      ?.mask_view,
+    "white",
+  );
+  assertThrows(
+    () => parseConfigDocument("ui:\n  mask_view: red\n", "config.yaml"),
+    ConfigError,
+    "mask_view",
+  );
+});

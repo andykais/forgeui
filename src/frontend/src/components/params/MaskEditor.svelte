@@ -56,6 +56,7 @@
   let tool = $state<"brush" | "eraser">("brush");
   let size = $state(32);
   let hidden = $state(false);
+  const view = $derived(app.maskView);
   let range = $state({ min: 2, max: 512 });
   let history = $state<MaskHistory | null>(null);
   /** Bumped on every change, so undo/redo's enabled state is re-read. */
@@ -381,6 +382,31 @@
         {#if hidden}<EyeOff size={14} /> Show mask{:else}<Eye size={14} /> Hide mask{/if}
       </button>
     </div>
+    <!--
+      How the mask is drawn (§10): the tint lets the picture show through,
+      white does not, and reads at a glance where the tint blurs into a busy
+      or small picture. Kept in config.yaml, and the panel follows it.
+    -->
+    <div class="group" role="radiogroup" aria-label="Mask colour">
+      <button
+        role="radio"
+        aria-checked={view === "tint"}
+        class:on={view === "tint"}
+        title="Draw the mask in the accent, half see-through"
+        onclick={() => app.setMaskView("tint")}
+      >
+        <span class="swatch tint-swatch"></span> Tint
+      </button>
+      <button
+        role="radio"
+        aria-checked={view === "white"}
+        class:on={view === "white"}
+        title="Draw the mask in solid white"
+        onclick={() => app.setMaskView("white")}
+      >
+        <span class="swatch white-swatch"></span> White
+      </button>
+    </div>
     <span class="spacer"></span>
     {#if error}<span class="error mono">{error}</span>{/if}
     <button title={`Leave the mask as it was${keyHint("close")}`} onclick={oncancel}
@@ -400,6 +426,7 @@
           {width}
           {height}
           class:hidden
+          class:white={view === "white"}
           data-mask-canvas
           onpointerdown={onPointerDown}
           onpointermove={onPointerMove}
@@ -557,6 +584,28 @@
     opacity: 0.55;
     cursor: none;
     touch-action: none;
+  }
+
+  /* Solid white whatever the paint is: every painted pixel's colour goes to
+     black and then flips to white, and its coverage is kept. */
+  canvas.white {
+    opacity: 1;
+    filter: brightness(0) invert(1);
+  }
+
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+
+  .tint-swatch {
+    background: var(--accent);
+    opacity: 0.7;
+  }
+
+  .white-swatch {
+    background: #fff;
   }
 
   canvas.hidden {

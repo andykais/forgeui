@@ -16,10 +16,12 @@
   import MaskParam from "./MaskParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param, Template } from "../../types.ts";
   import { applicableParams } from "../../lib/applies.ts";
+  import { groupParams } from "../../lib/sections.ts";
 
   /**
    * The param panel is rendered from the manifest alone (§4.2, §11.2):
-   * required params first, then optional, then a collapsed Advanced section,
+   * required params first, then optional, then the manifest's sections, then
+   * a collapsed Advanced section,
    * under a PARAMETERS header that carries Edit and Reset to defaults.
    */
   interface Props {
@@ -94,7 +96,13 @@
     onaudio,
   }: Props = $props();
 
-  let advancedOpen = $state(false);
+  /**
+   * Which collapsible groups are open, by id — a section's own, or
+   * `advanced`. Unset means the group's default: a section is open unless
+   * the manifest says `collapsed`, Advanced is closed (§4.2).
+   */
+  let opened = $state<Record<string, boolean>>({});
+  const ADVANCED = "advanced";
   let savingTemplate = $state(false);
   let paramsEl = $state<HTMLDivElement | undefined>(undefined);
 
@@ -114,8 +122,35 @@
    * one that works.
    */
   const applies = $derived(applicableParams(manifest, values));
-  const main = $derived(applies.filter((param) => !param.advanced));
-  const advanced = $derived(applies.filter((param) => param.advanced));
+  const groups = $derived(groupParams(manifest, applies));
+  const main = $derived(groups.main);
+  const advanced = $derived(groups.advanced);
+
+  /** Every collapsible group, in the order it is shown. */
+  const collapsibles = $derived([
+    ...groups.sections.map(({ section, params }) => ({
+      id: `section:${section.id}`,
+      label: section.label,
+      description: section.description ?? null,
+      params,
+      initiallyOpen: !(section.collapsed ?? false),
+    })),
+    ...(advanced.length > 0
+      ? [
+          {
+            id: ADVANCED,
+            label: "Advanced",
+            description: null,
+            params: advanced,
+            initiallyOpen: false,
+          },
+        ]
+      : []),
+  ]);
+
+  function isOpen(id: string, initiallyOpen: boolean): boolean {
+    return opened[id] ?? initiallyOpen;
+  }
   /** Required first, then optional, keeping manifest order within each group. */
   const ordered = $derived([
     ...main.filter((param) => param.required),
@@ -139,8 +174,8 @@
   /**
    * What would stop this param from running, in the terms the server refuses
    * the job in (§5.1): a required field left empty, or a model that is not in
-   * the model folders. A collapsed Advanced section hides both, so the panel
-   * has to say that they are down there.
+   * the model folders. A collapsed section hides both, so the panel has to
+   * say that they are down there.
    */
   function problemOf(param: Param): string | null {
     const value = values[param.key];
@@ -160,24 +195,35 @@
     return empty ? "required" : null;
   }
 
-  const advancedProblems = $derived(
-    advanced.filter((param) => problemOf(param) !== null).map((param) => param.key),
+  const problems = $derived(
+    Object.fromEntries(
+      collapsibles.map((group) => [
+        group.id,
+        group.params
+          .filter((param) => problemOf(param) !== null)
+          .map((param) => param.key),
+      ]),
+    ) as Record<string, string[]>,
   );
 
   /**
-   * A problem the user cannot see is a problem they cannot fix, so Advanced
-   * opens itself when one appears. It opens once per distinct set, so closing
-   * it again sticks.
+   * A problem the user cannot see is a problem they cannot fix, so a
+   * collapsed group opens itself when one appears inside it. It opens once
+   * per distinct set, so closing it again sticks.
    */
-  let announced = $state("");
+  let announced: Record<string, string> = {};
   $effect(() => {
-    const signature = advancedProblems.join(" ");
+    const signatures = Object.entries(problems).map(
+      ([id, keys]) => [id, keys.join(" ")] as const,
+    );
     untrack(() => {
-      if (signature.length === 0) {
-        announced = "";
-      } else if (signature !== announced) {
-        announced = signature;
-        advancedOpen = true;
+      for (const [id, signature] of signatures) {
+        if (signature.length === 0) {
+          delete announced[id];
+        } else if (signature !== announced[id]) {
+          announced[id] = signature;
+          opened = { ...opened, [id]: true };
+        }
       }
     });
   });
@@ -526,31 +572,43 @@
     {@render field(param)}
   {/each}
 
-  {#if advanced.length > 0}
-    <div class="advanced">
-      <button class="advanced-head" onclick={() => (advancedOpen = !advancedOpen)}>
-        {#if advancedOpen}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
-        <span>Advanced</span>
+  <!--
+    The manifest's sections, then Advanced (§4.2): one head each — the name,
+    the keys inside, a problem badge — because they are the same kind of
+    thing, and Advanced is only the one whose name the app chose.
+  -->
+  {#each collapsibles as group (group.id)}
+    {@const open = isOpen(group.id, group.initiallyOpen)}
+    {@const issues = problems[group.id] ?? []}
+    <div class="group" class:advanced={group.id === ADVANCED} data-group={group.id}>
+      <button
+        class="group-head"
+        aria-expanded={open}
+        title={group.description ?? undefined}
+        onclick={() => (opened = { ...opened, [group.id]: !open })}
+      >
+        {#if open}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
+        <span class="group-label">{group.label}</span>
         <span class="mono dim keys">
-          {advanced.map((param) => param.key).join(" · ")}
+          {group.params.map((param) => param.key).join(" · ")}
         </span>
-        {#if advancedProblems.length > 0}
-          <span class="badge error problems" title="Something down here needs fixing">
+        {#if issues.length > 0}
+          <span class="badge error problems" title="Something in here needs fixing">
             <TriangleAlert size={11} />
-            {advancedProblems.length}
+            {issues.length}
           </span>
         {/if}
-        <span class="mono dim count">{advanced.length}</span>
+        <span class="mono dim count">{group.params.length}</span>
       </button>
-      {#if advancedOpen}
-        <div class="advanced-body">
-          {#each advanced as param (param.key)}
+      {#if open}
+        <div class="group-body">
+          {#each group.params as param (param.key)}
             {@render field(param)}
           {/each}
         </div>
       {/if}
     </div>
-  {/if}
+  {/each}
 </div>
 
 <style>
@@ -664,12 +722,12 @@
     accent-color: var(--accent);
   }
 
-  .advanced {
+  .group {
     border-top: 1px solid var(--line);
     padding-top: 10px;
   }
 
-  .advanced-head {
+  .group-head {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -680,7 +738,7 @@
     color: var(--text-2);
   }
 
-  .advanced-head:hover {
+  .group-head:hover {
     background: transparent;
     color: var(--text);
   }
@@ -703,7 +761,11 @@
     gap: 3px;
   }
 
-  .advanced-body {
+  .group-label {
+    flex: none;
+  }
+
+  .group-body {
     display: flex;
     flex-direction: column;
     gap: 12px;

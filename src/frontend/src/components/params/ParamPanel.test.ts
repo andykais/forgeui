@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { tick } from "svelte";
 import ParamPanel from "./ParamPanel.svelte";
-import type { Manifest, ModelEntry, Param } from "../../types.ts";
+import type { Manifest, ManifestSection, ModelEntry, Param } from "../../types.ts";
 import { fillValues } from "../../stores/panel.svelte.ts";
 
 /**
@@ -11,8 +11,9 @@ import { fillValues } from "../../stores/panel.svelte.ts";
  * reorder, and the seed's 🎲 / 🔒 behaviour.
  */
 
-function manifestWith(params: Param[]): Manifest {
+function manifestWith(params: Param[], sections?: ManifestSection[]): Manifest {
   return {
+    ...(sections ? { sections } : {}),
     id: "fixture",
     name: "Fixture",
     family: "flux",
@@ -147,6 +148,7 @@ function mount(
     checkpoints: ModelEntry[];
     byClass: Record<string, ModelEntry[]>;
     loraFiles: boolean;
+    sections: ManifestSection[];
   }> = {},
 ) {
   const handlers: Handlers = {
@@ -160,7 +162,7 @@ function mount(
   };
   const result = render(ParamPanel, {
     props: {
-      manifest: manifestWith(params),
+      manifest: manifestWith(params, extra.sections),
       values,
       seedLocked: extra.seedLocked ?? false,
       lastSeed: extra.lastSeed ?? null,
@@ -798,6 +800,77 @@ describe("the panel header and the prompt", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));
+  });
+});
+
+describe("sections (§4.2)", () => {
+  const params: Param[] = [
+    { key: "prompt", label: "Prompt", type: "text", required: true, bind: "6.text" },
+    { key: "grow", label: "Grow", type: "int", section: "mask", bind: "41.expand" },
+    { key: "steps", label: "Steps", type: "int", advanced: true, bind: "3.steps" },
+    {
+      key: "mask",
+      label: "Mask",
+      type: "text",
+      required: true,
+      section: "mask",
+      bind: "40.image",
+    },
+    { key: "feather", label: "Feather", type: "int", section: "mask", bind: "43.r" },
+  ];
+  const mask: ManifestSection = { id: "mask", label: "Mask", description: "Where" };
+
+  /** Each field and group head, top to bottom, as the panel shows them. */
+  function layout(): string[] {
+    return [
+      ...document.querySelectorAll<HTMLElement>("[data-param], [data-group]"),
+    ].map((element) =>
+      element.dataset.group ? `[${element.dataset.group}]` : element.dataset.param!,
+    );
+  }
+
+  test("a section sits between the main params and Advanced, in manifest order", () => {
+    mount(params, { prompt: "figs", mask: "m" }, { sections: [mask] });
+    expect(layout()).toEqual([
+      "prompt",
+      "[section:mask]",
+      "grow",
+      "mask",
+      "feather",
+      "[advanced]",
+    ]);
+    const head = screen.getByRole("button", { name: /^Mask/ });
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.textContent).toContain("grow · mask · feather");
+    expect(head.getAttribute("title")).toBe("Where");
+  });
+
+  test("it collapses, and can start collapsed", async () => {
+    mount(params, { prompt: "figs", mask: "m" }, { sections: [mask] });
+    await fireEvent.click(screen.getByRole("button", { name: /^Mask/ }));
+    expect(layout()).toEqual(["prompt", "[section:mask]", "[advanced]"]);
+
+    document.body.innerHTML = "";
+    mount(params, { prompt: "figs", mask: "m" }, {
+      sections: [{ ...mask, collapsed: true }],
+    });
+    expect(screen.getByRole("button", { name: /^Mask/ }).getAttribute("aria-expanded"))
+      .toBe("false");
+  });
+
+  test("a collapsed section opens itself for a required field left empty", async () => {
+    mount(params, { prompt: "figs", mask: "" }, {
+      sections: [{ ...mask, collapsed: true }],
+    });
+    await tick();
+    const head = screen.getByRole("button", { name: /^Mask/ });
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.querySelector(".problems")?.textContent).toContain("1");
+  });
+
+  test("a section the manifest does not list leaves its params where they were", () => {
+    mount(params, { prompt: "figs", mask: "m" });
+    expect(layout()).toEqual(["prompt", "mask", "grow", "feather", "[advanced]"]);
   });
 });
 

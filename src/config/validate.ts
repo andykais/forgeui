@@ -3,6 +3,7 @@ import {
   KEY_ACTIONS,
   type KeyAction,
   LAYOUTS,
+  MASK_VIEWS,
   MODEL_CLASSES,
   MODEL_THUMBNAILS,
   type ModelClass,
@@ -144,6 +145,7 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
     "workflow_order",
     "model_thumbnail",
     "hidden_families",
+    "mask_view",
   ]);
   const ui: PartialUiConfig = {};
   pick(raw, "rail_expanded", ui, bool, where);
@@ -181,6 +183,9 @@ function validateUi(value: unknown, where: string): PartialUiConfig {
       `${where}.model_thumbnail`,
       MODEL_THUMBNAILS,
     );
+  }
+  if ("mask_view" in raw) {
+    ui.mask_view = oneOf(raw.mask_view, `${where}.mask_view`, MASK_VIEWS);
   }
   if ("hidden_families" in raw) {
     ui.hidden_families = stringList(

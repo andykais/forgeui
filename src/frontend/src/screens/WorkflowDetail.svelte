@@ -433,7 +433,15 @@
                   {#if param.required}<span class="req">required</span>{/if}
                 </td>
                 <td class="adv">
-                  {#if param.type !== "lora_list"}
+                  {#if param.section}
+                    <!-- In a section rather than Advanced (§4.2); set in the manifest. -->
+                    <span
+                      class="badge section-badge"
+                      title="Shown in this section of the panel; sections are set in manifest.json"
+                      >{draft?.sections?.find((section) => section.id === param.section)
+                        ?.label ?? param.section}</span
+                    >
+                  {:else if param.type !== "lora_list"}
                     <input
                       type="checkbox"
                       checked={param.advanced ?? false}
@@ -648,6 +656,11 @@
   .adv input {
     width: auto;
     accent-color: var(--accent);
+  }
+
+  .section-badge {
+    font-size: 10px;
+    white-space: nowrap;
   }
 
   .node {

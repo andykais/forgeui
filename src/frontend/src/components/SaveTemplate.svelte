@@ -12,6 +12,7 @@
     STATE_LABELS,
     statesOf,
   } from "../lib/templates.ts";
+  import { groupParams } from "../lib/sections.ts";
   import type { Manifest, ModelEntry, Param, Template } from "../types.ts";
 
   /**
@@ -68,8 +69,8 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
 
-  const main = $derived(manifest.params.filter((param) => !param.advanced));
-  const advanced = $derived(manifest.params.filter((param) => param.advanced));
+  /** The panel's own grouping, so a param is found where it was set (§4.2). */
+  const groups = $derived(groupParams(manifest, manifest.params));
   const counts = $derived({
     set: Object.values(states).filter((state) => state === "set").length,
     ask: Object.values(states).filter((state) => state === "ask").length,
@@ -159,10 +160,14 @@
   {/snippet}
 
   <div class="params">
-    {#each main as param (param.key)}{@render row(param)}{/each}
-    {#if advanced.length > 0}
+    {#each groups.main as param (param.key)}{@render row(param)}{/each}
+    {#each groups.sections as { section, params } (section.id)}
+      <div class="label advanced">{section.label}</div>
+      {#each params as param (param.key)}{@render row(param)}{/each}
+    {/each}
+    {#if groups.advanced.length > 0}
       <div class="label advanced">Advanced</div>
-      {#each advanced as param (param.key)}{@render row(param)}{/each}
+      {#each groups.advanced as param (param.key)}{@render row(param)}{/each}
     {/if}
   </div>
 
