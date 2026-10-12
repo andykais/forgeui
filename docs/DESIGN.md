@@ -335,6 +335,7 @@ Initial set:
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
+| `<id>-inpaint` | as its sibling | image | `illustrious-inpaint`, `anima-inpaint`, `z-image-inpaint`, `flux-klein-inpaint`: each family's img2img graph with the scaling taken out and `sd15-inpaint`'s mask put in — the picture unscaled, the **Mask** section (§4.2), differential diffusion on the model, a noise mask on the latent, and the result pasted back through the mask. Creativity 0.75 on the full-schedule models (Illustrious, Anima), 0.85 on the few-step ones (Z-Image, Flux.2 Klein), as on Krea 2 |
 | `krea2-inpaint` | krea2 | image | as `sd15-inpaint` on Krea 2 Turbo: image (required), prompt, creativity (0.85), seed, loras; the **Mask** section; steps, cfg, sampler, scheduler, clip, vae and the model advanced |
 | `sd15-inpaint` | sd15 | image | image (required), prompt, negative, creativity (0.75), seed, loras; a **Mask** section (§4.2) holding mask (required, `of: image`), grow and feather; steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
 | `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
@@ -361,7 +362,10 @@ inpaint until **Edit image** (§13, Phase 4) does. `krea2-inpaint` is the
 same graph on Krea 2 Turbo — its UNet, Qwen text encoder and VAE, and the
 img2img sibling's schedule slice — for trying an inpaint on a model worth
 keeping the result of; like every Krea 2 workflow it needs a GPU and the
-model files, so only the fake runs it here.
+model files, so only the fake runs it here. *Amended:* every image family
+with an img2img sibling now has an inpaint beside it, the same mask graph
+on its own loaders and schedule. LTX-2.3 has none: it makes a video, and a
+mask painted over its first frame says nothing about the frames after it.
 
 Exact node graphs are authored in ComfyUI and committed as files; the table
 above defines the intended manifest surface.
@@ -1964,9 +1968,9 @@ phase: `video` params, the orphan sweep, and the rest of the list.
 **Phase 4 — editing**
 `mask` widget, inpaint/edit bundled workflows.
 
-Landed so far: the mask editor (§10) and `sd15-inpaint` (§4.6). Still to
-come: instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit), an inpaint
-for the other families, and a way
+Landed so far: the mask editor (§10), and an inpaint for every image family
+(§4.6). Still to come: instruction-edit workflows (Flux.2 Klein,
+Qwen-Image-Edit), and a way
 for `forge mcp` to make a mask without painting one.
 
 **Phase 5 — quality**
