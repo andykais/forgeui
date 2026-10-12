@@ -1,0 +1,192 @@
+{
+  "id": "z-image-inpaint",
+  "name": "Z-Image Turbo (inpaint)",
+  "family": "z-image",
+  "kind": "image",
+  "category": null,
+  "description": "Repaint part of a picture with Z-Image Turbo. Paint over what should change; everything outside the mask is the original's own pixels. Creativity is how much of the model's schedule is re-run inside the mask — near 1 draws something new, lower keeps the shapes that are there.",
+  "sections": [
+    {
+      "id": "mask",
+      "label": "Mask",
+      "description": "Where to repaint, and how soft its edge is."
+    }
+  ],
+  "params": [
+    {
+      "key": "image",
+      "label": "Image",
+      "type": "image",
+      "required": true,
+      "bind": "25.image"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "description": "What the painted part should become.",
+      "bind": "20.text"
+    },
+    {
+      "key": "creativity",
+      "label": "Creativity",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.85,
+      "description": "How much of the model's schedule to re-run inside the mask: low keeps the shapes that are there and touches them up, near 1 replaces them.",
+      "bind": "31.denoise"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "33.noise_seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "z-image"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "2.CLIP",
+          "model_to": [
+            "4.model"
+          ],
+          "clip_to": [
+            "20.clip"
+          ]
+        }
+      }
+    },
+    {
+      "key": "mask",
+      "label": "Mask",
+      "type": "mask",
+      "of": "image",
+      "required": true,
+      "description": "Where to repaint: paint over it. White is repainted, black is kept.",
+      "section": "mask",
+      "bind": "41.image"
+    },
+    {
+      "key": "grow",
+      "label": "Grow",
+      "type": "int",
+      "min": -64,
+      "max": 128,
+      "default": 8,
+      "description": "Pixels to widen the mask by before repainting, so the edit reaches a little past where the brush stopped. Negative shrinks it.",
+      "section": "mask",
+      "bind": "42.expand"
+    },
+    {
+      "key": "feather",
+      "label": "Feather",
+      "type": "int",
+      "min": 1,
+      "max": 31,
+      "default": 8,
+      "description": "How soft the mask's edge is, in pixels. A soft edge blends the repainted part into what is kept; a hard one leaves a seam.",
+      "section": "mask",
+      "bind": "44.blur_radius"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "min": 1,
+      "max": 100,
+      "advanced": true,
+      "description": "The model's full schedule, of which Creativity re-runs the tail.",
+      "bind": "30.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "34.cfg"
+    },
+    {
+      "key": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "options": [
+        "euler",
+        "euler_ancestral",
+        "dpmpp_2m",
+        "dpmpp_sde",
+        "ddim",
+        "res_multistep"
+      ],
+      "advanced": true,
+      "bind": "32.sampler_name"
+    },
+    {
+      "key": "scheduler",
+      "label": "Scheduler",
+      "type": "enum",
+      "options": [
+        "simple",
+        "normal",
+        "karras",
+        "exponential",
+        "sgm_uniform",
+        "beta"
+      ],
+      "advanced": true,
+      "bind": "30.scheduler"
+    },
+    {
+      "key": "shift",
+      "label": "Shift",
+      "type": "float",
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "advanced": true,
+      "bind": "4.shift"
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "2.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "3.vae_name"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "z-image"
+      },
+      "advanced": true,
+      "bind": "1.unet_name"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "37",
+      "kind": "image"
+    }
+  ]
+}

@@ -46,12 +46,15 @@ const BUNDLED = [
   ["ace-step-song", "ACE-Step Song"],
   ["anima", "Anima"],
   ["anima-img2img", "Anima (img2img)"],
+  ["anima-inpaint", "Anima (inpaint)"],
   ["breeze-tts-clone", "Breeze TTS (voice clone)"],
   ["breeze-tts-design", "Breeze TTS (voice design)"],
   ["flux-klein", "Flux.2 Klein"],
   ["flux-klein-img2img", "Flux.2 Klein (img2img)"],
+  ["flux-klein-inpaint", "Flux.2 Klein (inpaint)"],
   ["illustrious", "Illustrious XL"],
   ["illustrious-img2img", "Illustrious XL (img2img)"],
+  ["illustrious-inpaint", "Illustrious XL (inpaint)"],
   ["krea2", "Krea 2 Turbo"],
   ["krea2-img2img", "Krea 2 Turbo (img2img)"],
   ["krea2-inpaint", "Krea 2 Turbo (inpaint)"],
@@ -62,6 +65,7 @@ const BUNDLED = [
   ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
   ["z-image-turbo", "Z-Image Turbo"],
   ["z-image-img2img", "Z-Image Turbo (img2img)"],
+  ["z-image-inpaint", "Z-Image Turbo (inpaint)"],
 ] as const;
 
 async function list(app: { fetch: (p: string) => Promise<Response> }) {
@@ -260,7 +264,16 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "grow",
       "feather",
     ]);
-    for (const id of ["sd15-inpaint", "krea2-inpaint"]) {
+    for (
+      const id of [
+        "sd15-inpaint",
+        "krea2-inpaint",
+        "illustrious-inpaint",
+        "anima-inpaint",
+        "z-image-inpaint",
+        "flux-klein-inpaint",
+      ]
+    ) {
       const manifest = (await detail(app, id)).manifest!;
       assertEquals(manifest.sections, [{
         id: "mask",
@@ -292,12 +305,13 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
     assertEquals(
       [...byId.values()].map((w) => w.family),
       // flux-klein is FLUX.2, a different architecture from Flux.1 (§6).
-      // Every image family has two: the workflow and its img2img sibling,
-      // in display-name order (§10).
+      // Every image family has three: the workflow, its img2img sibling and
+      // its inpaint, in display-name order (§4.6, §10).
       [
         // ACE-Step 1.5 is its own family for the same reason LTX-2 is: its
         // encoder and latent nodes are not 1.0's (§6).
         "ace-step-1.5",
+        "anima",
         "anima",
         "anima",
         // The two speech workflows have no family: their weights are not
@@ -306,21 +320,23 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         null,
         "flux2",
         "flux2",
+        "flux2",
+        "sdxl",
         "sdxl",
         "sdxl",
         "krea2",
         "krea2",
-        // And an inpaint, to try the mask editor on a model worth it (§4.6).
         "krea2",
         // LTX-2.3, which is a different architecture from the LTX-Video
         // this workflow replaced (§6). Two of them now: the same model, one
-        // imagining its own sound and one lip-syncing to a take (§3).
+        // imagining its own sound and one lip-syncing to a take (§3). No
+        // inpaint: a mask on the first frame says nothing about the rest.
         "ltx-2",
         "ltx-2",
         "sd15",
         "sd15",
-        // And its inpaint, the one workflow that takes a mask (§4.6).
         "sd15",
+        "z-image",
         "z-image",
         "z-image",
       ],
