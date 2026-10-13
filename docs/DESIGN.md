@@ -1821,6 +1821,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   bindings are off, which is what leaves `esc` to revert an edit-in-place
   header (§8.1).
 
+  **On any page opened from a list — a model, a template, a workflow — `close`
+  is that page's Back button**, and the Back button says so. One step at a
+  time, as above: a viewer, a popover or a dialog open on the page takes it
+  first, and a field being typed in keeps it. *Amended:* only the viewer
+  answered it before, so leaving a model page you had not opened anything on
+  took the mouse; the workflow page had no Back button at all and has one now.
+  A workflow's page links each of its templates (§4.8), and a template's page
+  links its workflow.
+
   A first run writes the whole default tree into `config.yaml`, which makes
   the file self-documenting and also **freezes every value in it**: a default
   changed later loses the merge to the stored one, which is how these letters
