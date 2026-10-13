@@ -1,11 +1,18 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import type { Job, Layout, Output, OutputDetail, UiScreen } from "../types.ts";
+  import type {
+    Job,
+    Layout,
+    Output,
+    OutputDetail,
+    UiScreen,
+  } from "../types.ts";
   import { hasMetadata } from "../types.ts";
   import { api } from "../api.ts";
-  import { app } from "../stores/app.svelte.ts";
+  import { app, type ReuseTarget } from "../stores/app.svelte.ts";
   import { clock, dimensions } from "../lib/format.ts";
+  import { startOutputDrag } from "../lib/drag.ts";
   import MetadataSidebar from "./MetadataSidebar.svelte";
   import Filmstrip from "./Filmstrip.svelte";
 
@@ -38,8 +45,8 @@
     onedit: (output: Output) => void;
     onrerun: (output: Output) => void;
     ondelete: (output: Output) => void;
-    /** Upscale this output with the named workflow (§10). */
-    onupscale?: (output: Output, workflowId: string) => void;
+    /** Reuse this output's picture in a workflow or a template (§10). */
+    onreuse?: (output: Output, target: ReuseTarget) => void;
     /** Open another output by id — a lineage node (§11.2). */
     onopenoutput?: (id: string) => void;
     onfollow?: () => void;
@@ -58,7 +65,7 @@
     onedit,
     onrerun,
     ondelete,
-    onupscale,
+    onreuse,
     onopenoutput,
     onfollow,
   }: Props = $props();
@@ -249,7 +256,17 @@
           <audio src={selected.media_url} controls autoplay></audio>
         </div>
       {:else}
-        <img src={selected.media_url} alt={selected.prompt ?? selected.id} />
+        <!--
+          Draggable as a tile is: what travels is the output's id, so a drop
+          on an image param adopts the file rather than finding no file at
+          all in a plain image drag (§11.2).
+        -->
+        <img
+          src={selected.media_url}
+          alt={selected.prompt ?? selected.id}
+          draggable="true"
+          ondragstart={(event) => startOutputDrag(event, selected)}
+        />
       {/if}
       {#if !isAudio}
         <span class="size-chip mono">
@@ -292,9 +309,7 @@
         onedit={() => onedit(selected)}
         onrerun={() => onrerun(selected)}
         ondelete={() => ondelete(selected)}
-        onupscale={onupscale
-          ? (workflowId) => onupscale(selected, workflowId)
-          : undefined}
+        onreuse={onreuse ? (target) => onreuse(selected, target) : undefined}
         onopen={onopenoutput}
       />
     {:else}

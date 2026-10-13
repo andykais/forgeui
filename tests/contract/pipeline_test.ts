@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import { decodePreviewFrame } from "../../src/http/ws.ts";
+import { deflateSync } from "node:zlib";
 import {
+  decodePng,
   readChunks,
   readPngSize,
   readTextChunks,
@@ -12,6 +14,7 @@ import { parseSidecar } from "../../src/jobs/sidecar.ts";
 import type { JobRow, Progress } from "../../src/db/queries.ts";
 import type { ApiGraph } from "../../src/workflows/types.ts";
 import { startTestApp, type TestApp } from "../fixtures/app.ts";
+import { tinyPng } from "../fixtures/png.ts";
 import {
   CHECKPOINT,
   COMFY_DIR,
@@ -74,24 +77,34 @@ interface OutputView {
   models: { role: string; name: string }[];
 }
 
-const bundled = (file: string) =>
-  fromFileUrl(new URL(`../../workflows/bundled/sd15/${file}`, import.meta.url));
+const bundled = (id: string, file: string) =>
+  fromFileUrl(
+    new URL(`../../workflows/bundled/${id}/${file}`, import.meta.url),
+  );
 
 /**
- * The bundled `sd15` graph names the checkpoint `setup-comfy.sh` downloads.
- * When the ComfyUI under test has a different one, shadow it with a user copy
- * (§4.6) rather than skipping the run.
+ * The bundled `sd15` graphs name the checkpoint `setup-comfy.sh` downloads.
+ * When the ComfyUI under test has a different one, shadow them with user
+ * copies (§4.6) rather than skipping the run.
  */
 async function workflowFiles(): Promise<Record<string, string>> {
-  const api = JSON.parse(await Deno.readTextFile(bundled("workflow.api.json")));
-  if (api["1"].inputs.ckpt_name === CHECKPOINT) return {};
-  api["1"].inputs.ckpt_name = CHECKPOINT;
-  return {
-    "workflows/user/sd15/workflow.api.json": JSON.stringify(api, null, 2),
-    "workflows/user/sd15/manifest.json": await Deno.readTextFile(
-      bundled("manifest.json"),
-    ),
-  };
+  const files: Record<string, string> = {};
+  for (const id of ["sd15", "sd15-inpaint"]) {
+    const api = JSON.parse(
+      await Deno.readTextFile(bundled(id, "workflow.api.json")),
+    );
+    if (api["1"].inputs.ckpt_name === CHECKPOINT) continue;
+    api["1"].inputs.ckpt_name = CHECKPOINT;
+    files[`workflows/user/${id}/workflow.api.json`] = JSON.stringify(
+      api,
+      null,
+      2,
+    );
+    files[`workflows/user/${id}/manifest.json`] = await Deno.readTextFile(
+      bundled(id, "manifest.json"),
+    );
+  }
+  return files;
 }
 
 async function startApp(): Promise<TestApp> {
@@ -312,6 +325,39 @@ contractTest("a real generation runs end to end through the app", async () => {
       [sample.id],
     );
 
+    // A paste of it — the same pixels, written again as a browser would —
+    // finds its way back to it (§9). ComfyUI's PNGs are PIL's, filtered and
+    // compressed as the fake's are not, which is the point of asking here.
+    const decoded = (await decodePng(bytes))!;
+    assertEquals([decoded.width, decoded.height], [SIZE[0], SIZE[1]]);
+    const raw = new Uint8Array((decoded.width * 4 + 1) * decoded.height);
+    for (let y = 0; y < decoded.height; y++) {
+      raw.set(
+        decoded.rgba.subarray(
+          y * decoded.width * 4,
+          (y + 1) * decoded.width * 4,
+        ),
+        y * (decoded.width * 4 + 1) + 1,
+      );
+    }
+    const header = new Uint8Array(13);
+    new DataView(header.buffer).setUint32(0, decoded.width);
+    new DataView(header.buffer).setUint32(4, decoded.height);
+    header[8] = 8;
+    header[9] = 6;
+    const pasted = serializeChunks([
+      { type: "IHDR", data: header },
+      { type: "IDAT", data: new Uint8Array(deflateSync(raw)) },
+      { type: "IEND", data: new Uint8Array(0) },
+    ]);
+    const form = new FormData();
+    form.set("file", new File([pasted.buffer as ArrayBuffer], "image.png"));
+    const input = await app.json<{ derived_from_output: string | null }>(
+      "/api/inputs",
+      { method: "POST", body: form },
+    );
+    assertEquals(input.derived_from_output, `${submitted.id}-0`);
+
     // Rerun now ⟳ queues the frozen graph verbatim: same seed, same image.
     const rerun = await app.json<JobResponse>("/api/jobs/rerun", {
       method: "POST",
@@ -379,7 +425,130 @@ contractTest("the embedded editor is served through /comfy/", async () => {
     assertEquals(objectInfo.status, 200);
     const body = await objectInfo.json() as Record<string, unknown>;
     assert("KSampler" in body, "ComfyUI's object_info did not come through");
+
+    // An image dropped into the editor is uploaded the way its own frontend
+    // does it — multipart, to /api/upload/image — and that has to survive
+    // the proxy, body and boundary intact.
+    const form = new FormData();
+    const picture = tinyPng({ width: 32, height: 24, color: [10, 20, 30] });
+    form.set(
+      "image",
+      new File([picture.buffer as ArrayBuffer], "dropped-into-editor.png", {
+        type: "image/png",
+      }),
+    );
+    form.set("type", "input");
+    form.set("overwrite", "true");
+    const upload = await app.fetch("/comfy/api/upload/image", {
+      method: "POST",
+      body: form,
+    });
+    assertEquals(upload.status, 200, await upload.clone().text());
+    assertEquals(
+      (await upload.json() as { name: string }).name,
+      "dropped-into-editor.png",
+    );
+    const view = await app.fetch(
+      "/comfy/api/view?filename=dropped-into-editor.png&type=input",
+    );
+    assertEquals(view.status, 200);
+    assertEquals(new Uint8Array(await view.arrayBuffer()), picture);
   } finally {
     await app.dispose();
   }
 });
+
+contractTest("a painted mask repaints only what it covers", async () => {
+  const app = await startApp();
+  try {
+    const upload = async (bytes: Uint8Array, name: string) => {
+      const form = new FormData();
+      form.set("file", new File([bytes.buffer as ArrayBuffer], name));
+      return await app.json<{ filename: string }>("/api/inputs", {
+        method: "POST",
+        body: form,
+      });
+    };
+    // A flat picture, and a mask over its right half: white repaints (§9).
+    const ORIGINAL: [number, number, number] = [96, 128, 160];
+    const image = await upload(
+      tinyPng({ width: 256, height: 256, color: ORIGINAL }),
+      "flat.png",
+    );
+    const mask = await upload(
+      tinyPng({
+        width: 256,
+        height: 256,
+        pixel: (x) => x >= 128 ? [255, 255, 255] : [0, 0, 0],
+      }),
+      "mask.png",
+    );
+
+    const submitted = await app.json<JobResponse>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "sd15-inpaint",
+        params: {
+          image: image.filename,
+          mask: mask.filename,
+          prompt: PROMPT,
+          seed: SEED,
+          steps: STEPS,
+          creativity: 1,
+          grow: 8,
+          feather: 8,
+        },
+      }),
+    });
+    const done = await awaitJob(app, submitted.id);
+    assertEquals(done.status, "done", JSON.stringify(done.error));
+
+    const bytes = await Deno.readFile(
+      join(
+        app.paths.outputs,
+        dayOf(submitted.created_at),
+        `${submitted.id}-0.png`,
+      ),
+    );
+    const { width, height, rgba } = (await decodePng(bytes))!;
+    assertEquals([width, height], [256, 256]);
+    const at = (
+      x: number,
+      y: number,
+    ) => [...rgba.subarray((y * width + x) * 4, (y * width + x) * 4 + 3)];
+
+    // Well clear of the mask, grown and feathered: the original's own
+    // pixels, exactly, because the result is pasted back through the mask
+    // rather than decoded wholesale out of the latent.
+    for (const y of [4, 64, 128, 200, 250]) {
+      for (const x of [2, 40, 90]) {
+        assertEquals(at(x, y), ORIGINAL, `kept pixel ${x},${y} changed`);
+      }
+    }
+    // Inside it, the model drew something: a flat field stays flat only if
+    // nothing was repainted.
+    const inside = [at(200, 64), at(220, 128), at(180, 200), at(240, 240)];
+    assert(
+      inside.some((pixel) =>
+        pixel.some((value, channel) =>
+          Math.abs(value - ORIGINAL[channel]!) > 12
+        )
+      ),
+      `nothing was repainted under the mask: ${JSON.stringify(inside)}`,
+    );
+
+    // The mask is an input of the output, as the image is (§9 step 5).
+    const sidecar = parseSidecar(
+      await Deno.readTextFile(
+        join(
+          app.paths.outputs,
+          dayOf(submitted.created_at),
+          `${submitted.id}.json`,
+        ),
+      ),
+    );
+    assertEquals(sidecar.params.mask, mask.filename);
+  } finally {
+    await app.dispose();
+  }
+}, { sampler: true, app: true });

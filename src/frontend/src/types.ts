@@ -37,6 +37,8 @@ export interface Param {
   type: ParamType;
   required?: boolean;
   advanced?: boolean;
+  /** The `sections` entry it is shown under (§4.2). */
+  section?: string;
   when?: ParamWhen;
   default?: unknown;
   /**
@@ -72,8 +74,18 @@ export interface Manifest {
   prompt: string | null;
   /** The params that say what it sounds like, best first (§11.5). */
   tone: string[];
+  /** Titled, collapsible groups params can name (§4.2). */
+  sections?: ManifestSection[];
   params: Param[];
   outputs: { node: string; kind: "image" | "video" | "audio" }[];
+}
+
+export interface ManifestSection {
+  id: string;
+  label: string;
+  description?: string;
+  /** Starts closed; open unless it says so. */
+  collapsed?: boolean;
 }
 
 export interface WorkflowSummary {
@@ -93,6 +105,42 @@ export interface WorkflowSummary {
   last_job_at: number | null;
   last_output_id: string | null;
   has_ui_json: boolean;
+  /** The first `image` param's key: what Reuse image puts the picture in. */
+  image_param: string | null;
+}
+
+/**
+ * A saved way to fill one workflow's panel (§4.8): the params it sets, the
+ * ones it asks for, and — by omission — the ones it leaves open.
+ */
+export interface Template {
+  id: string;
+  name: string;
+  description: string | null;
+  workflow: string;
+  workflow_name: string | null;
+  family: string | null;
+  /** What an action on an output finds it by; `upscale` is the only one. */
+  action: "upscale" | null;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: "bundled" | "user";
+  /** A user copy that shadows a bundled template of the same id. */
+  has_bundled: boolean;
+  /** What no longer fits: its workflow gone, a key it no longer has. */
+  problems: string[];
+  /** The newest output made with it: its thumbnail in the Generate picker. */
+  last_output: { id: string; kind: string; media_url: string } | null;
+}
+
+/** What a save sends; the server checks it against the workflow. */
+export interface TemplateBody {
+  name: string;
+  description?: string | null;
+  workflow?: string;
+  action?: Template["action"];
+  values: Record<string, unknown>;
+  ask: string[];
 }
 
 export interface ApiNode {
@@ -149,10 +197,21 @@ export interface Job {
   api_graph: Record<string, ApiNode>;
   progress: Progress | null;
   error: JobError | null;
+  /** The template the panel was filled from when it was submitted (§4.8). */
+  template: TemplateRef | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   outputs: string[];
+}
+
+/**
+ * The template a run was made with (§4.8, §6.2): its id, and its name as it
+ * was then — a template renamed or deleted since still reads as it did.
+ */
+export interface TemplateRef {
+  id: string;
+  name: string;
 }
 
 export interface Output {
@@ -179,6 +238,8 @@ export interface Output {
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
+  /** The template it was made with (§4.8); null when none. */
+  template: TemplateRef | null;
   media_url: string;
   /** The drawn waveform of an audio output (§2.2); null for every other kind. */
   waveform_url: string | null;
@@ -351,6 +412,8 @@ export interface Config {
     model_thumbnail: "first_sample" | "latest_generated";
     /** Families kept out of sight entirely; their models read as hidden. */
     hidden_families: string[];
+    /** How a painted mask is drawn: tinted, or solid white (§10). */
+    mask_view: "tint" | "white";
   };
 }
 

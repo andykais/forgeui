@@ -521,12 +521,26 @@ test("Reuse parameters from a media layout shows the inputs", async ({ page }) =
  */
 test("the gallery is where you left it after the viewer closes", async ({ page, request }) => {
   await anOutput(page);
-  const workflow = new URL(page.url()).searchParams.get("workflow")!;
+  // Named, not read off the URL: that is whichever workflow another spec
+  // left open, and one that needs more than a prompt — an inpaint's image
+  // and mask — would refuse all six.
+  const jobs: string[] = [];
   for (let i = 0; i < 6; i++) {
-    await request.post("/api/jobs", {
-      data: { workflow_id: workflow, params: { prompt: `a scroll mark ${i}` } },
+    const response = await request.post("/api/jobs", {
+      data: { workflow_id: "illustrious", params: { prompt: `a scroll mark ${i}` } },
     });
+    expect(response.status()).toBe(201);
+    jobs.push((await response.json()).id);
   }
+  // All of them made before the gallery is opened: it shows what was there
+  // when it loaded, so a job still queued then is a tile that never comes,
+  // and how many were done in time depended on how busy the suite was.
+  await expect.poll(async () => {
+    const statuses = await Promise.all(jobs.map(async (id) =>
+      (await (await request.get(`/api/jobs/${id}`)).json()).status
+    ));
+    return statuses.every((status) => status === "done");
+  }, { timeout: 60_000 }).toBe(true);
   // Short enough that a handful of tiles has to scroll.
   await page.setViewportSize({ width: 960, height: 420 });
   await page.goto("/gallery");

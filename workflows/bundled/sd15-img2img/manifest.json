@@ -1,10 +1,10 @@
 {
-  "id": "illustrious-upscale",
-  "name": "Illustrious XL (upscale)",
-  "family": "sdxl",
+  "id": "sd15-img2img",
+  "name": "Stable Diffusion 1.5 (img2img)",
+  "family": "sd15",
   "kind": "image",
-  "category": "upscale",
-  "description": "Upscale an image with Illustrious XL: the image is scaled up, then the tail of the model's own sampling schedule is re-run so it puts detail into what the scaler could only interpolate.",
+  "category": "img2img",
+  "description": "Image to image with Stable Diffusion 1.5: the image is scaled by Scale, then the last part of the model's own sampling schedule is re-run over it. Creativity is how much of that schedule to re-run — low keeps the picture and sharpens it, high redraws it. Upscale is a template on this workflow (scale 2, creativity 0.2).",
   "params": [
     {
       "key": "image",
@@ -20,8 +20,8 @@
       "min": 0,
       "max": 1,
       "step": 0.05,
-      "default": 0.2,
-      "description": "How much of the model's schedule to re-run, and so how far it may stray from the original. 0.2 sharpens; higher redraws, and starts inventing detail that was never there.",
+      "default": 0.5,
+      "description": "How much of the model's schedule to re-run, and so how far it may stray from the original. Around 0.2 keeps the picture and sharpens it, as an upscale wants; 0.5 reworks it; near 1 barely looks at it.",
       "bind": "31.denoise"
     },
     {
@@ -31,8 +31,8 @@
       "min": 1,
       "max": 4,
       "step": 0.25,
-      "default": 2,
-      "description": "How many times larger than the source.",
+      "default": 1,
+      "description": "How many times larger than the source: 1 keeps its size, 2 is an upscale.",
       "bind": "26.scale_by"
     },
     {
@@ -60,7 +60,7 @@
       "label": "LoRAs",
       "type": "lora_list",
       "filter": {
-        "family": "sdxl"
+        "family": "sd15"
       },
       "bind": {
         "chain": {
@@ -185,7 +185,7 @@
       "type": "model",
       "filter": {
         "class": "diffusion",
-        "family": "sdxl"
+        "family": "sd15"
       },
       "advanced": true,
       "bind": "1.ckpt_name"

@@ -166,3 +166,137 @@ export function withTextChunk(
   chunks.splice(1, 0, { type: "tEXt", data });
   return serializeChunks(chunks);
 }
+
+/** A decoded picture, as 8-bit RGBA whatever the file stored. */
+export interface PngPixels {
+  width: number;
+  height: number;
+  rgba: Uint8Array;
+}
+
+/**
+ * Decode a PNG's pixels (§9): 8- or 16-bit, grey, grey+alpha, RGB, RGBA or
+ * palette, not interlaced — every PNG a renderer or a clipboard writes.
+ * Returns null for anything else rather than guessing at it.
+ */
+export async function decodePng(png: Uint8Array): Promise<PngPixels | null> {
+  let chunks: PngChunk[];
+  try {
+    chunks = readChunks(png);
+  } catch {
+    return null;
+  }
+  const ihdr = chunks[0];
+  if (!ihdr || ihdr.type !== "IHDR" || ihdr.data.length < 13) return null;
+  const header = new DataView(
+    ihdr.data.buffer,
+    ihdr.data.byteOffset,
+    ihdr.data.byteLength,
+  );
+  const width = header.getUint32(0);
+  const height = header.getUint32(4);
+  const depth = ihdr.data[8]!;
+  const colour = ihdr.data[9]!;
+  const interlace = ihdr.data[12]!;
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colour];
+  if (channels === undefined || interlace !== 0) return null;
+  if (colour === 3 ? depth !== 8 : depth !== 8 && depth !== 16) return null;
+  if (width === 0 || height === 0 || width * height > 1 << 28) return null;
+
+  const idat = chunks.filter((chunk) => chunk.type === "IDAT");
+  const joined = new Uint8Array(idat.reduce((n, c) => n + c.data.length, 0));
+  let at = 0;
+  for (const chunk of idat) {
+    joined.set(chunk.data, at);
+    at += chunk.data.length;
+  }
+  let raw: Uint8Array;
+  try {
+    raw = new Uint8Array(
+      await new Response(
+        new Blob([joined]).stream().pipeThrough(
+          new DecompressionStream("deflate"),
+        ),
+      ).arrayBuffer(),
+    );
+  } catch {
+    return null;
+  }
+  const bpp = channels * (depth / 8);
+  const stride = width * bpp;
+  if (raw.length < (stride + 1) * height) return null;
+
+  // Undo each row's filter (PNG spec §9) in place, one row behind another.
+  const out = new Uint8Array(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]!;
+    const line = y * (stride + 1) + 1;
+    const row = y * stride;
+    const prev = row - stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? out[row + x - bpp]! : 0;
+      const b = y > 0 ? out[prev + x]! : 0;
+      const c = x >= bpp && y > 0 ? out[prev + x - bpp]! : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = a;
+      else if (filter === 2) predicted = b;
+      else if (filter === 3) predicted = (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) return null;
+      out[row + x] = (raw[line + x]! + predicted) & 0xff;
+    }
+  }
+
+  const palette = chunks.find((chunk) => chunk.type === "PLTE")?.data;
+  const alphas = chunks.find((chunk) => chunk.type === "tRNS")?.data;
+  if (colour === 3 && !palette) return null;
+  const step = depth / 8;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    // The high byte of a 16-bit sample is its 8-bit value.
+    const sample = (n: number) => out[i * bpp + n * step]!;
+    let r: number, g: number, b: number, alpha = 255;
+    if (colour === 3) {
+      const index = out[i]!;
+      r = palette![index * 3] ?? 0;
+      g = palette![index * 3 + 1] ?? 0;
+      b = palette![index * 3 + 2] ?? 0;
+      alpha = alphas?.[index] ?? 255;
+    } else if (colour === 0 || colour === 4) {
+      r = g = b = sample(0);
+      if (colour === 4) alpha = sample(1);
+    } else {
+      r = sample(0);
+      g = sample(1);
+      b = sample(2);
+      if (colour === 6) alpha = sample(3);
+    }
+    rgba[i * 4] = r;
+    rgba[i * 4 + 1] = g;
+    rgba[i * 4 + 2] = b;
+    rgba[i * 4 + 3] = alpha;
+  }
+  return { width, height, rgba };
+}
+
+/**
+ * What a picture looks like, as a hash (§9): sha256 over `"<w>x<h>\n"` and
+ * its pixels as 8-bit RGBA. Two files of one picture — a render, and the
+ * browser's re-encoding of it on the way to the clipboard — hash the same,
+ * where their bytes never would. Null for what `decodePng` cannot read.
+ */
+export async function pixelHash(png: Uint8Array): Promise<string | null> {
+  const pixels = await decodePng(png);
+  if (!pixels) return null;
+  const head = new TextEncoder().encode(`${pixels.width}x${pixels.height}\n`);
+  const message = new Uint8Array(head.length + pixels.rgba.length);
+  message.set(head);
+  message.set(pixels.rgba, head.length);
+  const digest = await crypto.subtle.digest("SHA-256", message);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}

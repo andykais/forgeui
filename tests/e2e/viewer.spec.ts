@@ -97,6 +97,10 @@ test("the model page answers the keys its own button promises", async ({
   await page.keyboard.press("Escape");
   await expect(page.locator(".main")).toHaveCount(0);
   await expect(page.locator(".grid .tile").first()).toBeVisible();
+
+  // And with nothing open on the page, the one after is its Back button.
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/models$/);
 });
 
 test("escape in the model's own fields still reverts the edit", async ({

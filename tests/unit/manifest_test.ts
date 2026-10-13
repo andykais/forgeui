@@ -268,13 +268,16 @@ Deno.test("workflow-level fields are checked", () => {
     manifest([], { kind: "audio", outputs: [{ node: "9", kind: "audio" }] }),
     { graph },
   );
-  // `upscale` joined `img2img` when the Upscale action gained something to
-  // route to (§10); a category nobody routes on is still refused.
-  assertThrows(
-    () => validateManifest(manifest([], { category: "inpaint" }), { graph }),
-    ManifestError,
-    "one of img2img, upscale",
-  );
+  // `upscale` was a category until Upscale became a template on an img2img
+  // workflow (§4.8, §10); a category nobody routes on is refused, it
+  // included.
+  for (const category of ["inpaint", "upscale"]) {
+    assertThrows(
+      () => validateManifest(manifest([], { category }), { graph }),
+      ManifestError,
+      "one of img2img",
+    );
+  }
   assertThrows(
     () =>
       validateManifest(
@@ -314,6 +317,60 @@ Deno.test("serialising a manifest keeps the §4.2 field order", () => {
     "params",
     "outputs",
   ]);
+});
+
+Deno.test("sections group params, and say what is wrong with them", () => {
+  const prompt = { key: "prompt", type: "text", bind: "6.text" };
+  const steps = {
+    key: "steps",
+    type: "int",
+    bind: "3.steps",
+    section: "sampling",
+  };
+  const sampling = { id: "sampling", label: "Sampling" };
+  const parsed = validateManifest(
+    manifest([prompt, steps], {
+      sections: [{
+        ...sampling,
+        description: "How it samples",
+        collapsed: true,
+      }],
+    }),
+    { graph },
+  );
+  assertEquals(parsed.sections, [{
+    id: "sampling",
+    label: "Sampling",
+    description: "How it samples",
+    collapsed: true,
+  }]);
+  assertEquals(parsed.params[1]!.section, "sampling");
+  // Written back where §4.2 puts it, and only when there is one.
+  assertEquals(
+    Object.keys(JSON.parse(serializeManifest(parsed))).slice(9, 11),
+    ["sections", "params"],
+  );
+  assertEquals(validateManifest(manifest([prompt]), { graph }).sections, []);
+
+  invalid([prompt, steps], 'no section "sampling"');
+  invalid([prompt, steps], 'duplicate id "sampling"', {
+    sections: [sampling, sampling],
+  });
+  invalid(
+    [prompt, { ...steps, advanced: true }],
+    "not also advanced",
+    { sections: [sampling] },
+  );
+  // A heading nobody fills would silently vanish from the panel.
+  invalid([prompt, steps], "(seed): no param is in this section", {
+    sections: [sampling, { id: "seed", label: "Seed" }],
+  });
+  invalid([prompt], "a lower_snake_case identifier", {
+    sections: [{ id: "Sampling", label: "Sampling" }],
+  });
+  invalid([prompt], "manifest.sections[0].label", {
+    sections: [{ id: "sampling" }],
+  });
 });
 
 Deno.test("the workflow hash tracks content, not formatting", async () => {

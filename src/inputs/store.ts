@@ -7,7 +7,11 @@ import {
   type InputRow,
   insertInput,
   insertOutputInput,
+  outputMatching,
+  setInputParent,
+  setInputPixelHash,
 } from "../db/queries.ts";
+import { pixelHash } from "../jobs/png.ts";
 import type { DataPaths } from "../config/paths.ts";
 import { type ProbedMedia, probeMedia } from "./probe.ts";
 import { readAudio } from "../media/audio.ts";
@@ -91,7 +95,16 @@ export class InputStore {
     // Write even when the row exists: a row whose file has been swept away
     // is worse than a redundant write, and the content cannot differ.
     await Deno.writeFile(absolute, bytes);
-    return this.#record({
+    // Where it came from, if it came from here (§9): the same file as an
+    // output, or — a paste, which the browser re-encodes — the same pixels.
+    const pixels = probed.kind === "image"
+      ? (await pixelHash(bytes).catch(() => null)) ?? ""
+      : null;
+    const parent = options.derivedFromOutput ??
+      (probed.kind === "image"
+        ? outputMatching(this.#db, { sha256, pixelHash: pixels || null })
+        : null);
+    const stored = this.#record({
       sha256,
       relative,
       probed,
@@ -101,8 +114,16 @@ export class InputStore {
       audio: probed.kind === "audio" ? await readAudio(absolute) : null,
       kind: options.kind ?? probed.kind,
       originalName: options.originalName ?? null,
-      derivedFromOutput: options.derivedFromOutput ?? null,
+      derivedFromOutput: parent,
     });
+    if (pixels !== null) setInputPixelHash(this.#db, sha256, pixels);
+    // A row that was already here keeps what it had; a parent it lacked is
+    // filled in, since the output may have been made after it first came.
+    if (parent && stored.derived_from_output === null) {
+      setInputParent(this.#db, sha256, parent);
+      return { ...stored, derived_from_output: parent };
+    }
+    return stored;
   }
 
   /**
@@ -135,7 +156,7 @@ export class InputStore {
       // hardlinks at all: the copy is the fallback, never the failure.
       await Deno.writeFile(absolute, bytes);
     }
-    return this.#record({
+    const adopted = this.#record({
       sha256,
       relative,
       probed,
@@ -147,6 +168,14 @@ export class InputStore {
       originalName: null,
       derivedFromOutput: outputId,
     });
+    if (probed.kind === "image") {
+      setInputPixelHash(
+        this.#db,
+        sha256,
+        (await pixelHash(bytes).catch(() => null)) ?? "",
+      );
+    }
+    return adopted;
   }
 
   #record(input: {

@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { DEFAULT_MODEL_KINDS } from "../../src/config/defaults.ts";
 
@@ -39,6 +39,17 @@ Deno.test("the Containerfile wires every model kind the app knows", async () => 
  * CMD alone it wrote its batch to ~/.forgeui inside the container, where the
  * running app never looks.
  */
+Deno.test("the container ships what the app reads from its own tree", async () => {
+  // Bundled workflows and templates are read from beside src/ and copied
+  // into the data dir on boot (§4.6, §4.8). Leave one out and nothing
+  // fails: the Upscale button just quietly has nowhere to go.
+  const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
+  const containerfile = await Deno.readTextFile(join(root, "Containerfile"));
+  for (const dir of ["src", "workflows", "templates"]) {
+    assertStringIncludes(containerfile, `COPY ${dir}/ ./${dir}/`);
+  }
+});
+
 Deno.test("every forge command in the container finds /workspace", async () => {
   const root = join(dirname(fromFileUrl(import.meta.url)), "..", "..");
   const containerfile = await Deno.readTextFile(join(root, "Containerfile"));

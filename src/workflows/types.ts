@@ -77,11 +77,11 @@ export const WORKFLOW_KINDS = ["image", "video", "audio"] as const;
 export type WorkflowKind = typeof WORKFLOW_KINDS[number];
 
 /**
- * Known `category` values (§4.2). Both are routed on: `img2img` answers
- * "use this image in a workflow", and `upscale` is what the Upscale action
- * looks for in the output's own family (§10).
+ * Known `category` values (§4.2). `img2img` answers "use this image in a
+ * workflow", and is what the bundled Upscale templates fill (§4.8, §10);
+ * there is no `upscale` category any more.
  */
-export const WORKFLOW_CATEGORIES = ["img2img", "upscale"] as const;
+export const WORKFLOW_CATEGORIES = ["img2img"] as const;
 export type WorkflowCategory = typeof WORKFLOW_CATEGORIES[number];
 
 /**
@@ -129,6 +129,8 @@ export interface ParamCommon {
   required?: boolean;
   /** Renders inside the collapsed Advanced section (§11.2). */
   advanced?: boolean;
+  /** Renders inside the named section of `Manifest.sections` (§4.2). */
+  section?: string;
   /** Only applies while another param holds a given value (§4.3). */
   when?: ParamWhen;
   /**
@@ -308,6 +310,19 @@ export interface ManifestOutput {
   kind: WorkflowKind;
 }
 
+/**
+ * A titled, collapsible group of params (§4.2): the params that belong
+ * together but are not what most runs touch — a mask and the two numbers
+ * that shape its edge.
+ */
+export interface ManifestSection {
+  id: string;
+  label: string;
+  description?: string;
+  /** Starts closed; open unless it says so. */
+  collapsed?: boolean;
+}
+
 export interface Manifest {
   id: string;
   name: string;
@@ -349,6 +364,8 @@ export interface Manifest {
    * (§4.3) and is not empty wins.
    */
   tone: string[];
+  /** The sections params may name, in the order the panel shows them. */
+  sections: ManifestSection[];
   params: Param[];
   outputs: ManifestOutput[];
 }
