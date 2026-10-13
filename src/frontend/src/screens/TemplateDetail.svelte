@@ -1,5 +1,7 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import { escapeGoesBack } from "../lib/back.ts";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
@@ -170,6 +172,10 @@
   }
 </script>
 
+<svelte:window
+  onkeydown={(event) => escapeGoesBack(event, () => navigate("/templates"))}
+/>
+
 {#if error}
   <div class="empty">
     <p class="error mono">{error}</p>
@@ -186,7 +192,7 @@
     <header class="head">
       <button
         class="back"
-        title="Back to templates"
+        title="Back to templates (esc)"
         onclick={() => navigate("/templates")}
       >
         <ArrowLeft size={15} />
@@ -236,8 +242,12 @@
 
         <div class="meta mono dim">
           fills
-          <a class="link" href={`/workflows/${template.workflow}`} onclick={openWorkflow}
-            >{template.workflow_name ?? template.workflow}</a
+          <a
+            class="link workflow-link"
+            href={`/workflows/${template.workflow}`}
+            title="Open this template's workflow"
+            onclick={openWorkflow}
+            >{template.workflow_name ?? template.workflow} <ArrowRight size={11} /></a
           >
           {#if template.family}<span class="badge accent">{template.family}</span>{/if}
           {#if template.action === "upscale"}<span
@@ -408,6 +418,12 @@
 
   .link {
     color: var(--accent);
+  }
+
+  .workflow-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
   }
 
   .description {

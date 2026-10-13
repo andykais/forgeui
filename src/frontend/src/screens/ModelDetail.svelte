@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { escapeGoesBack } from "../lib/back.ts";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Brain from "@lucide/svelte/icons/brain";
   import Copy from "@lucide/svelte/icons/copy";
@@ -383,7 +384,11 @@
       sampleKeys(event);
       return;
     }
-    if (!selected) return;
+    if (!selected) {
+      // Nothing open on the page: `close` is the Back button (§11.4).
+      escapeGoesBack(event, () => navigate("/models"));
+      return;
+    }
     const action = app.keyAction(event);
     if (!action) return;
     const index = outputs.findIndex((output) => output.id === selectedId);
@@ -515,7 +520,7 @@
     </nav>
 
     <header class="head">
-      <button class="back" title="Back to models" onclick={() => navigate("/models")}>
+      <button class="back" title="Back to models (esc)" onclick={() => navigate("/models")}>
         <ArrowLeft size={15} />
       </button>
 
