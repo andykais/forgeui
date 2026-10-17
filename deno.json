@@ -20,6 +20,7 @@
     "test:ui": "cd src/frontend && npm run test",
     "test:e2e": "cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.config.ts",
     "test:e2e:comfy": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && npm install --no-audit --no-fund --silent && npx playwright test --config playwright.comfy.config.ts\"",
+    "qa": "deno run --allow-all scripts/visual_qa.ts",
     "shots:phase2": "deno run --allow-all scripts/with_comfy.ts bash -c \"cd tests/e2e && FORGEUI_E2E_COMFY_APP_PORT=7897 FORGEUI_SHOTS_DIR=$PWD/docs/screenshots/phase-2 npx playwright test --config playwright.shots.config.ts\""
   },
   "imports": {
@@ -52,10 +53,13 @@
     "src/frontend/",
     "tests/e2e/node_modules/",
     "tests/e2e/.tmp-data/",
+    "tests/e2e/.tmp-qa-data/",
+    "tests/e2e/.qa/",
     "tests/e2e/test-results/",
     "tests/e2e/*.spec.ts",
     "tests/e2e/playwright.comfy.config.ts",
     "tests/e2e/playwright.shots.config.ts",
+    "tests/e2e/playwright.qa.config.ts",
     "tests/e2e/playwright.config.ts"
   ]
 }

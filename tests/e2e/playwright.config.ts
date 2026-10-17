@@ -28,9 +28,10 @@ export default defineConfig({
    * Only the smoke test. `comfy.spec.ts` needs a real ComfyUI
    * (`deno task test:e2e:comfy`); `shots.spec.ts` and `video.spec.ts` are the
    * documentation demos, run by name, and they leave state behind that the
-   * smoke test would then trip over.
+   * smoke test would then trip over. `qa.spec.ts` is the visual QA walk of
+   * `deno task qa`, which has a config of its own.
    */
-  testIgnore: /(comfy|shots|shots-phase2|video)\.spec\.ts/,
+  testIgnore: /(comfy|shots|shots-phase2|video|qa)\.spec\.ts/,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
