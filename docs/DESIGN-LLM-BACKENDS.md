@@ -22,7 +22,8 @@ with experts offloaded to RAM), served directly rather than behind a proxy, with
 its own load/unload API. It cannot sit behind llama-swap usefully — llama-swap
 would kill and restart the whole process, throwing away a 1–3 minute cold start
 that Strata's own unload avoids (it ends only the engine; the HTTP server and
-the OS file cache stay, and a reload measures about 5 s). So the bridge has to
+the OS file cache stay). Measured on the target box: `/unload` about 1 s,
+`/load` about 25 s. So the bridge has to
 speak to it directly.
 
 ## What Strata gives us
@@ -37,7 +38,7 @@ From Strata's `docs/DETAILS.md` and vhotseat's working config for it
 | `POST /unload?wait=<s>` | waits up to `s` seconds for the running turn first (`wait=1` means up to 300 s) |
 | `POST /load` | loads ahead of a request; synchronous |
 | any `/v1/chat/completions`, `/v1/messages` | **loads the model if it is not loaded** |
-| `Authorization: Bearer <key>` | required on everything when Strata has an `api_key` |
+| `Authorization: Bearer <key>` | only when Strata has an `api_key`. The target box runs without one, so no header is the normal case |
 
 vhotseat treats an unload as done on HTTP 200 with `status` in
 `["unloaded", "not loaded"]`, as busy on 409 or `status: "busy"`, and then
@@ -129,21 +130,21 @@ the same reason: after an unload there is nothing loaded to ask.
 `release()`:
 
 1. Read `currentModel()` first, for the label.
-2. `POST /unload?wait=<--llm-busy-wait>` with an empty JSON body and the bearer
-   header. Timeout `wait + 30 s` (vhotseat's rule).
+2. `POST /unload?wait=<--llm-busy-wait>` with an empty JSON body, and the bearer
+   header only if `--llm-api-key` was given. Timeout `wait + 30 s` (vhotseat's rule).
 3. Outcome by status, then body:
    - 200 and `status` ∈ {`unloaded`, `not loaded`} or no readable body → step 4.
    - 409, or `status: "busy"` → throw `LlmHostError("Strata is still answering
      another request after <n>s; nothing was submitted")`. The round has
      submitted nothing yet, so this costs nothing but the call.
-   - 401/403 → throw, naming `--llm-api-key`.
+   - 401/403 → throw: Strata wants a key, and `--llm-api-key` is missing or wrong.
    - anything else → throw with code and body.
 4. Poll `GET /health` every 250 ms until `loaded` is false, up to
    `--llm-unload-timeout`. Strata ends the engine process on unload, so this should
    be immediate; the poll is the same floor llama-swap gets, not a guess.
 
-`restore()`, with `--llm-reload eager`: `POST /load`, timeout `max(300 s,
-unload timeout)`, errors logged to stderr and never thrown — a failed
+`restore()`, with `--llm-reload eager`: `POST /load`, timeout
+`--llm-load-timeout` (45 s: a measured load takes about 25 s), errors logged to stderr and never thrown — a failed
 pre-warm still leaves Strata's own load-on-request behind it. The default is
 `lazy`, which matches llama-swap: return the tool result and let the harness's
 next completion load the model.
@@ -153,7 +154,7 @@ completion that arrives while ComfyUI is still letting go gets a 503 with
 `Retry-After`, and whether the harness retries that is the harness's business.
 Loading from the bridge, after `free_vram` has returned, moves that wait to the
 one place that knows the GPU has just been handed back. It costs the tool call
-~5 s and saves the same on the next completion.
+the ~25 s load and saves the same on the next completion.
 
 ## 3. The `forge mcp` flags
 
@@ -167,8 +168,9 @@ about the LLM is on its command line, which the harness launcher (MCP-BRIDGE.md
 | `--llm-backend <llama-swap\|strata>` | none | which client to build; absent means the bridge never evicts |
 | `--llm-url <url>` | — | the server's base URL; required with `--llm-backend` |
 | `--llm-model <id>` | — | exists today. llama-swap: the id to unload. Strata: the label for `origin.source` |
-| `--llm-api-key <key>` | `$FORGEUI_LLM_API_KEY` | Strata's bearer token. The env var keeps it out of `ps` |
+| `--llm-api-key <key>` | `$FORGEUI_LLM_API_KEY`, else none | Strata's bearer token, for a Strata that has one. Without it no `Authorization` header is sent |
 | `--llm-unload-timeout <s>` | 60 | how long a release may take to be confirmed |
+| `--llm-load-timeout <s>` | 45 | Strata only: how long the eager `POST /load` may take |
 | `--llm-busy-wait <s>` | 30 | Strata only: `?wait=` for a turn already running |
 | `--llm-reload <lazy\|eager>` | lazy | Strata only: `POST /load` once the round is over |
 | `--llama-swap <url>` | — | kept: shorthand for `--llm-backend llama-swap --llm-url <url>` |
@@ -178,7 +180,7 @@ Rules, checked before anything listens (exit 2 on a violation):
 
 - `--llama-swap` with `--strata`, or either with a contradicting
   `--llm-backend`, is an error.
-- `--llm-api-key`, `--llm-busy-wait` and `--llm-reload eager` with llama-swap
+- `--llm-api-key`, `--llm-busy-wait`, `--llm-load-timeout` and `--llm-reload eager` with llama-swap
   are an error rather than silently ignored — a flag that does nothing is a
   mistake worth hearing about.
 
@@ -191,9 +193,10 @@ startup line names the backend: `…, strata at http://127.0.0.1:2335`.
 
 - `tests/unit/mcp_strata_test.ts`, with a scripted fake `fetch` in the style
   of `mcp_llama_test.ts`: 200 `unloaded`; 200 `not loaded`; 200 with no body;
-  409 → refused with the busy message; `status: "busy"` in a 200; 401 names
-  the key; `/health` still `loaded: true` past the timeout → refused; the
-  bearer header is sent on every call; the model label comes from `--llm-model`,
+  409 → refused with the busy message; `status: "busy"` in a 200; 401 says a
+  key is needed; `/health` still `loaded: true` past the timeout → refused;
+  no `Authorization` header without a key, and the bearer header on every call
+  with one; a `/load` slower than the load timeout is abandoned, not thrown; the model label comes from `--llm-model`,
   then `/health`, then the last seen; `?wait=` carries the busy wait; eager reload
   posts `/load` and a failing `/load` does not throw.
 - `tests/integration/mcp_round_test.ts`: the existing ordering test
