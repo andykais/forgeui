@@ -24,6 +24,16 @@ export interface LoraChain {
   clip_to: string[] | null;
 }
 
+/** A `bool` that moves a link rather than setting a literal (§4.4). */
+export interface BoolSwitch {
+  /** `"<node_id>.<input>"` — the input that changes where it reads from. */
+  input: string;
+  /** `"<node_id>.<output>"` to link when the box is ticked. */
+  on: string;
+  /** And when it is not. */
+  off: string;
+}
+
 /** When a param applies at all: another param's value has to equal `is` (§4.3). */
 export interface ParamWhen {
   param: string;
@@ -55,7 +65,12 @@ export interface Param {
   source?: string;
   filter?: { family?: string; class?: string };
   /** A list is a model pick that lands in several loaders at once (§4.6). */
-  bind: string | string[] | { w: string; h: string } | { chain: LoraChain };
+  bind:
+    | string
+    | string[]
+    | { w: string; h: string }
+    | { chain: LoraChain }
+    | { switch: BoolSwitch };
   of?: string;
 }
 

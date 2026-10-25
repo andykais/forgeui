@@ -385,10 +385,14 @@ test("Workflows", async ({ page }) => {
 
 test("ComfyUI, Telemetry, Settings", async ({ page }) => {
   watchConsole(page);
-  // Through the rail: a hard load of /comfy is the server's ComfyUI proxy.
+  // Loaded directly rather than through the rail: a bare /comfy is the app's
+  // screen, and the iframe inside it is what reaches the proxy.
   await shot(page, "ComfyUI", "Editor", "The embedded editor (a stand-in here).", async () => {
-    await connected(page, "/generate");
-    await page.getByRole("link", { name: "ComfyUI" }).click();
+    await connected(page, "/comfy");
+    await page.waitForTimeout(1_500);
+  });
+  await shot(page, "ComfyUI", "Editing a workflow", "Krea 2 Turbo, with the Save & return toolbar.", async () => {
+    await connected(page, "/comfy?workflow=krea2");
     await page.waitForTimeout(1_500);
   });
 

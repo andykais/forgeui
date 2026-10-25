@@ -83,6 +83,18 @@ Deno.test("/comfy/* proxies ComfyUI so the editor is same-origin (§4.1)", async
     assertEquals(page.status, 200);
     assertStringIncludes(await page.text(), "fake ComfyUI");
 
+    // A bare `/comfy` is the app's own screen, not the proxy: a reload there,
+    // or "Open in ComfyUI" opened in a new tab, has to get the app back.
+    for (const path of ["/comfy", "/comfy?workflow=krea2"]) {
+      const screen = await app.fetch(path);
+      assertEquals(screen.status, 200);
+      assertStringIncludes(
+        screen.headers.get("content-type") ?? "",
+        "text/html",
+      );
+      assert(!(await screen.text()).includes("fake ComfyUI"), path);
+    }
+
     // Query strings and status codes pass straight through.
     const missing = await app.fetch("/comfy/view?filename=nope.png");
     assertEquals(missing.status, 404);

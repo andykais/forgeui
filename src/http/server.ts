@@ -147,10 +147,10 @@ export function createHandler(
       }
       return ctx.hub.handle(req);
     }
-    if (
-      url.pathname === COMFY_PREFIX ||
-      url.pathname.startsWith(`${COMFY_PREFIX}/`)
-    ) {
+    // `/comfy/…` only: a bare `/comfy` is the app's own ComfyUI screen, which
+    // a reload or a link opened in a new tab must get rather than the editor
+    // without its toolbar. The iframe loads `/comfy/`.
+    if (url.pathname.startsWith(`${COMFY_PREFIX}/`)) {
       const target = () => ctx.comfy.client.url;
       try {
         return isWebSocketUpgrade(req)
