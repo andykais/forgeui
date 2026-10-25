@@ -16,8 +16,8 @@ import type {
   SubmitJob,
 } from "./forgeui.ts";
 import { isTerminal } from "./forgeui.ts";
-import type { LlamaSwap } from "./llama.ts";
-import { sourceFor } from "./llama.ts";
+import type { LlmHost } from "./llm.ts";
+import { sourceFor } from "./llm.ts";
 
 /**
  * How often a round re-reads the jobs it is waiting on.
@@ -67,7 +67,8 @@ export interface RoundResult {
 
 export interface RoundDeps {
   forge: ForgeUi;
-  llama: LlamaSwap | null;
+  /** The LLM server to take the GPU from; `null` when it is not on this GPU. */
+  llm: LlmHost | null;
   /** Ask ForgeUI to make ComfyUI drop its weights, once the round is over. */
   freeVram?: boolean;
   /** Progress for a human watching, when the client asked for it (§5.3). */
@@ -92,12 +93,12 @@ export async function runRound(
   request: RoundRequest,
   deps: RoundDeps,
 ): Promise<RoundResult> {
-  const { forge, llama } = deps;
+  const { forge, llm } = deps;
 
   // 1–2. The GPU, before anything is submitted into it.
-  const modelId = llama === null ? null : await llama.currentModel();
+  const modelId = llm === null ? null : await llm.currentModel();
   const source = sourceFor(modelId);
-  if (llama !== null) await llama.unload();
+  if (llm !== null) await llm.release();
 
   const origin: Origin = {
     source,
@@ -214,7 +215,7 @@ export async function runRound(
     // ComfyUI holding the weights the model is about to want.
     //
     // Never silently: swallowing this is how the GPU stays full and the only
-    // symptom is llama-swap failing to start the model minutes later, with
+    // symptom is the LLM server failing to load the model minutes later, with
     // nothing in any log to connect the two.
     if (deps.freeVram) {
       try {
@@ -226,6 +227,10 @@ export async function runRound(
         );
       }
     }
+    // 7. Only after ComfyUI has let go: an eager reload into a GPU still
+    // holding the diffusion weights is the OOM the eviction was for. A no-op
+    // unless asked for, and it never throws.
+    if (llm !== null) await llm.restore();
   }
 
   // The files, last: a chained job takes an output by id, and the model

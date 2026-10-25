@@ -6,7 +6,7 @@
  * that takes minutes.
  *
  * Note what is *not* here: a `source` argument. The bridge fills that in from
- * llama-swap (§6.2), so there is no parameter through which the model could
+ * the LLM server (§6.2), so there is no parameter through which the model could
  * set it — the schema is the enforcement, not the server.
  */
 
@@ -22,13 +22,13 @@ import type {
   SampleRow,
   StoredInputView,
 } from "./forgeui.ts";
-import type { LlamaSwap } from "./llama.ts";
+import type { LlmHost } from "./llm.ts";
 import { runRound } from "./round.ts";
 import { APP_VERSION } from "../version.ts";
 
 export interface BridgeOptions {
   forge: ForgeUi;
-  llama: LlamaSwap | null;
+  llm: LlmHost | null;
   /** Ask ComfyUI to drop its weights after each round. */
   freeVram: boolean;
   /** Relay per-job progress; off unless a human is watching (§5.3). */
@@ -162,7 +162,7 @@ async function saveTarget(
 }
 
 export function createBridgeServer(options: BridgeOptions): McpServer {
-  const { forge, llama } = options;
+  const { forge, llm } = options;
   const server = new McpServer({ name: "forgeui", version: APP_VERSION });
 
   server.registerTool("list_workflows", {
@@ -628,12 +628,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   }, async () => {
     try {
       const status = await forge.get("/api/system/status").catch(() => null);
-      const running = llama === null
-        ? []
-        : await llama.running().catch(() => []);
+      const running = llm === null ? [] : await llm.resident().catch(() => []);
       return text({
+        llm_backend: llm === null ? null : llm.backend,
         llm_resident: running,
-        llm_model: llama === null ? null : await llama.currentModel(),
+        llm_model: llm === null ? null : await llm.currentModel(),
         comfyui: status,
       });
     } catch (cause) {
@@ -687,7 +686,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         project,
         note,
         timeoutMs: (timeout_s ?? options.defaultTimeoutMs / 1000) * 1000,
-      }, { forge, llama, freeVram: options.freeVram, onProgress });
+      }, { forge, llm, freeVram: options.freeVram, onProgress });
       return text(result);
     } catch (cause) {
       return failure(cause);

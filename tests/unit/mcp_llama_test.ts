@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { LlamaSwap, parseRunning, sourceFor } from "../../src/mcp/llama.ts";
+import { LlamaSwap, parseRunning } from "../../src/mcp/llama.ts";
+import { sourceFor } from "../../src/mcp/llm.ts";
 
 /**
  * `GET /running` has no documented response shape (DESIGN-AGENT-LOOP §8), so
@@ -63,7 +64,7 @@ Deno.test("unload waits for the GPU to actually come free", async () => {
     [],
   ]);
   const swap = new LlamaSwap({ url: "http://swap", fetch: fetcher });
-  const { was } = await swap.unload();
+  const { was } = await swap.release();
   assertEquals(was, "qwen-vlm");
   assertEquals(seen.includes("POST /api/models/unload"), true);
   // Polled until empty rather than trusting the POST.
@@ -81,7 +82,7 @@ Deno.test("a model that will not let go fails loudly rather than submitting", as
     unloadTimeoutMs: 300,
   });
   await assertRejects(
-    () => swap.unload(),
+    () => swap.release(),
     Error,
     "refusing to submit into an OOM",
   );

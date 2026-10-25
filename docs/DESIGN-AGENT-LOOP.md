@@ -265,8 +265,11 @@ generate({
 
 In order, the bridge:
 
-1. `POST /api/models/unload` to llama-swap.
-2. Polls `GET /running` until empty, or fails loudly. Submitting while the VLM
+1. `POST /api/models/unload` to llama-swap — or `POST /unload?wait=N` to
+   Strata, whose 409 refuses the round before anything is submitted
+   (DESIGN-LLM-BACKENDS §2).
+2. Polls `GET /running` until empty (Strata: `GET /health` until `loaded` is
+   false), or fails loudly. Submitting while the VLM
    still holds 18GB is how you get an OOM that looks like a ComfyUI bug.
 3. Opens ForgeUI's WebSocket **before** submitting. After is a race that loses
    the completion of a fast job.
@@ -319,8 +322,9 @@ here than anywhere else, because that GPU is also the one the model needs back.
 ### 5.4 Where it lives, and what it depends on
 
 *Built as described.* `src/mcp/`, run as `forge mcp`, sharing the repo and
-nothing else — `deno task test` does not need llama-swap, and the fake in the
-tests stands in for it.
+nothing else — `deno task test` does not need llama-swap or Strata, and the
+fakes in the tests stand in for them. Which of the two the bridge takes turns
+with is a flag; both sit behind `LlmHost` (DESIGN-LLM-BACKENDS §1).
 
 Two dependencies came with it, both deviations from "Deno std only": **Cliffy**
 for the command line, and **`@modelcontextprotocol/server`** for the protocol.
@@ -568,6 +572,9 @@ Without those, `origin` is a write-only field and will rot.
 ---
 
 ## 8. llama-swap — as it works today
+
+Strata is the other server the bridge takes turns with; its calls and why it
+does not sit behind llama-swap are in DESIGN-LLM-BACKENDS.
 
 ```yaml
 models:

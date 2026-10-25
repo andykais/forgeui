@@ -1,6 +1,6 @@
 # Design — the bridge hands the GPU to llama-swap *or* Strata
 
-**Status:** proposal. Nothing here is implemented.
+**Status:** built, §1–§4. The load gate (§5) is not.
 **Touches:** DESIGN-AGENT-LOOP §5.2, §5.4, §8, §10, MCP-BRIDGE.md §2–§3,
 AGENTS.md (the "never needs llama-swap" rule). Not DESIGN.md: the choice is
 made on `forge mcp`'s command line, and `config.yaml` is not involved.
@@ -85,7 +85,9 @@ process, and ComfyUI's side is already ours.
 
 ## 1. The seam — `LlmHost`
 
-`src/mcp/llm.ts` (new):
+`src/mcp/llm.ts` holds the interface; `src/mcp/backends.ts` builds one from
+the flags (§3), kept apart so the two clients can import the error class
+without an import cycle.
 
 ```ts
 export type LlmBackend = "llama-swap" | "strata";
@@ -93,9 +95,9 @@ export type LlmBackend = "llama-swap" | "strata";
 export interface LlmHost {
   readonly backend: LlmBackend;
   readonly url: string;
-  /** What is resident now — `gpu_status`'s `llm_resident`. Never throws. */
+  /** What is resident now — `gpu_status`'s `llm_resident`. May throw. */
   resident(): Promise<string[]>;
-  /** The name a round is attributed to (`origin.source`, §6.2). */
+  /** The name a round is attributed to (`origin.source`, §6.2). Never throws. */
   currentModel(): Promise<string | null>;
   /** Make the GPU free and confirm it, or throw `LlmHostError`. */
   release(): Promise<{ was: string | null }>;
@@ -103,7 +105,8 @@ export interface LlmHost {
   restore(): Promise<void>;
 }
 export class LlmHostError extends Error {}
-export function createLlmHost(options: LlmOptions, fetch?: typeof fetch): LlmHost | null;
+// backends.ts
+export function createLlmHost(options: LlmOptions | null, fetch?: typeof fetch): LlmHost | null;
 ```
 
 - `LlamaSwap` (`src/mcp/llama.ts`) implements it with no behaviour change:
@@ -117,7 +120,7 @@ export function createLlmHost(options: LlmOptions, fetch?: typeof fetch): LlmHos
 - `gpu_status` gains `llm_backend` beside `llm_resident` and `llm_model`
   (additive; nothing reads its shape but the model).
 
-`sourceFor` stays as it is: `llm:<model>` regardless of backend.
+`sourceFor` moves to `llm.ts` unchanged: `llm:<model>` regardless of backend.
 
 ## 2. The Strata client
 
@@ -196,21 +199,21 @@ startup line names the backend: `…, strata at http://127.0.0.1:2335`.
   409 → refused with the busy message; `status: "busy"` in a 200; 401 says a
   key is needed; `/health` still `loaded: true` past the timeout → refused;
   no `Authorization` header without a key, and the bearer header on every call
-  with one; a `/load` slower than the load timeout is abandoned, not thrown; the model label comes from `--llm-model`,
-  then `/health`, then the last seen; `?wait=` carries the busy wait; eager reload
-  posts `/load` and a failing `/load` does not throw.
-- `tests/integration/mcp_round_test.ts`: the existing ordering test
-  (unload before the first submit) runs once per backend; a busy Strata
-  submits **nothing**; with eager reload the calls read
-  `unload, …submits…, free_vram, load` in that order.
-- `tests/unit/mcp_flags_test.ts` on `resolveLlmOptions`: the shorthands, the
+  with one; a `/load` slower than the load timeout is abandoned, not thrown;
+  the model label comes from `--llm-model`, then `/health`, then the last
+  seen; `?wait=` carries the busy wait; eager reload posts `/load` and a
+  failing `/load` does not throw.
+- `tests/integration/mcp_round_test.ts`: a round against a fake Strata
+  unloads it and labels the work with `/health`'s model; a busy Strata
+  submits **nothing**; with eager reload `/load` comes after `free_vram`.
+- `tests/unit/mcp_backends_test.ts` on `resolveLlmOptions`: the shorthands, the
   env var, the defaults, each conflict.
 - `tests/unit/mcp_llama_test.ts` unchanged apart from the renamed methods —
   the proof the refactor changed no llama-swap behaviour.
 
 There is no contract test against a real Strata; it needs a GPU and a 30 GB
 model, which is outside what `docs/HARDWARE-CHECKLIST.md` provisions. Instead
-MCP-BRIDGE.md gets a "check it the way the bridge will" block for Strata
+MCP-BRIDGE.md §2.1 has a "check it the way the bridge will" block for Strata
 (`curl /health`, `curl -X POST '/unload?wait=30'`), as §2 has for llama-swap.
 
 ## 5. Later, optional — a load gate for Strata
@@ -241,15 +244,13 @@ all. Worth a look once rounds carry a VRAM estimate; not before.
 
 ## 6. Order of work
 
-1. DESIGN-AGENT-LOOP takes this doc's decisions (§5.2's steps 1–2 become
-   backend-neutral, §8 gains a Strata table, §10's hazard row names the gate).
-2. The `LlmHost` seam; `LlamaSwap` behind it; all existing tests green with no
-   behaviour change.
-3. The flags and `resolveLlmOptions`; `--llama-swap` stays.
-4. `Strata`, its unit tests, the per-backend round tests.
-5. MCP-BRIDGE.md: a Strata section beside §2 and a launcher example. AGENTS.md:
-   "never needs llama-swap" becomes "never needs llama-swap or Strata".
-6. (Optional) §5, the gate.
+1. ~~DESIGN-AGENT-LOOP takes this doc's decisions.~~ Done: §5.2 and §8 point
+   here.
+2. ~~The `LlmHost` seam; `LlamaSwap` behind it.~~ Done.
+3. ~~The flags and `resolveLlmOptions`; `--llama-swap` stays.~~ Done.
+4. ~~`Strata`, its unit tests, the per-backend round tests.~~ Done.
+5. ~~MCP-BRIDGE.md §2.1 and the AGENTS.md rule.~~ Done.
+6. (Optional) §5, the gate. Not started.
 
 ## Open question
 
