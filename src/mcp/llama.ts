@@ -7,7 +7,10 @@
  * next completion, which is the whole reason the handoff needs so little code.
  */
 
-export class LlamaSwapError extends Error {
+import type { LlmHost } from "./llm.ts";
+import { LlmHostError, sleep } from "./llm.ts";
+
+export class LlamaSwapError extends LlmHostError {
   override readonly name = "LlamaSwapError";
 }
 
@@ -57,11 +60,6 @@ export function parseRunning(body: unknown): string[] {
   return ids;
 }
 
-/** `llm:qwen-vlm` — what lands in `origin.source` (§6.2). */
-export function sourceFor(modelId: string | null): string {
-  return modelId === null ? "llm:unknown" : `llm:${modelId}`;
-}
-
 export interface LlamaSwapOptions {
   /** Base URL, e.g. `http://127.0.0.1:8080`. */
   url: string;
@@ -72,8 +70,9 @@ export interface LlamaSwapOptions {
   fetch?: typeof fetch;
 }
 
-export class LlamaSwap {
-  readonly #url: string;
+export class LlamaSwap implements LlmHost {
+  readonly backend = "llama-swap" as const;
+  readonly url: string;
   readonly #model: string | null;
   readonly #unloadTimeoutMs: number;
   readonly #fetch: typeof fetch;
@@ -87,14 +86,14 @@ export class LlamaSwap {
   #lastSeen: string | null = null;
 
   constructor(options: LlamaSwapOptions) {
-    this.#url = options.url.replace(/\/+$/, "");
+    this.url = options.url.replace(/\/+$/, "");
     this.#model = options.model ?? null;
     this.#unloadTimeoutMs = options.unloadTimeoutMs ?? 60_000;
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
   async #json(path: string, init?: RequestInit): Promise<unknown> {
-    const response = await this.#fetch(`${this.#url}${path}`, init);
+    const response = await this.#fetch(`${this.url}${path}`, init);
     if (!response.ok) {
       throw new LlamaSwapError(
         `llama-swap ${
@@ -112,7 +111,7 @@ export class LlamaSwap {
   }
 
   /** What is resident right now. */
-  async running(): Promise<string[]> {
+  async resident(): Promise<string[]> {
     const ids = parseRunning(await this.#json("/running"));
     if (ids.length > 0) this.#lastSeen = ids[0]!;
     return ids;
@@ -128,7 +127,7 @@ export class LlamaSwap {
   async currentModel(): Promise<string | null> {
     if (this.#model !== null) return this.#model;
     try {
-      const ids = await this.running();
+      const ids = await this.resident();
       if (ids.length > 0) return ids[0]!;
     } catch {
       // A label is not worth failing over; §5.2 carries on with what it knows.
@@ -144,7 +143,7 @@ export class LlamaSwap {
    * same as the VRAM being back. Submitting into that gap is how you get an
    * OOM that reads like a ComfyUI bug (§5.2 step 2).
    */
-  async unload(): Promise<{ was: string | null }> {
+  async release(): Promise<{ was: string | null }> {
     const was = await this.currentModel();
     const path = this.#model === null
       ? "/api/models/unload"
@@ -153,16 +152,21 @@ export class LlamaSwap {
 
     const deadline = Date.now() + this.#unloadTimeoutMs;
     while (Date.now() < deadline) {
-      const ids = await this.running().catch(() => [] as string[]);
+      const ids = await this.resident().catch(() => [] as string[]);
       const stillUp = this.#model === null
         ? ids.length > 0
         : ids.includes(this.#model);
       if (!stillUp) return { was };
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await sleep(250);
     }
     throw new LlamaSwapError(
       `llama-swap still has a model resident ${this.#unloadTimeoutMs}ms after unload; ` +
         `refusing to submit into an OOM`,
     );
+  }
+
+  /** llama-swap loads the model on the next completion by itself. */
+  restore(): Promise<void> {
+    return Promise.resolve();
   }
 }

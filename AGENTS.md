@@ -24,8 +24,9 @@ ComfyUI that `test:comfy` and `test:e2e:comfy` drive
 | `docs/MOCK-REVISIONS.md`         | Decided changes to the mocks; overrides the frames in `docs/mocks/`.                                                                       |
 | `docs/DESIGN-MODEL-SELECTION.md` | **Proposal, not decided.** One model picker across `checkpoints`/`diffusion_models`/`unet`/`Stable-Diffusion`; revises §8.2.               |
 | `docs/DESIGN-AGENT-LOOP.md`      | An LLM drives ForgeUI through `forge mcp`, and they take turns with the GPU. The bridge is built; the batch API and job `origin` are not.  |
-| `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap and a harness together.                                                                            |
+| `docs/MCP-BRIDGE.md`             | Runbook: wiring `forge mcp`, llama-swap or Strata, and a harness together.                                                                 |
 | `docs/DESIGN-MODEL-IMPORT.md`    | `forge models`, the `import/` drop folder, and `source` provenance on imported media. The backend is built; the model page's panel is not. |
+| `docs/DESIGN-LLM-BACKENDS.md`    | `forge mcp` hands the GPU to llama-swap or Strata, chosen by a flag. Built, but for the optional load gate (§5).                           |
 
 ## Layout
 
@@ -86,11 +87,12 @@ those use the npm toolchain. Run both sides before you call something green.
   `forge`'s own dependencies — Cliffy for the command line, the MCP server
   package for `forge mcp`, which speaks a protocol that is not worth
   hand-rolling, and `@huggingface/hub` for `forge models`' Hugging Face lookups.
-  **`deno task test` must never need llama-swap**: the bridge's arbitration goes
-  behind an interface with a fake, as `tests/fake-comfy/` stands in for ComfyUI.
-  Every SQL statement lives in `src/db/queries.ts`, one function per query —
-  with the same rule inside `src/telemetry/queries.ts` for the telemetry
-  database, which is its own file and its own migration chain (§7.1).
+  **`deno task test` must never need llama-swap or Strata**: the bridge's
+  arbitration goes behind an interface (`LlmHost`, `src/mcp/llm.ts`) with a
+  fake, as `tests/fake-comfy/` stands in for ComfyUI. Every SQL statement lives
+  in `src/db/queries.ts`, one function per query — with the same rule inside
+  `src/telemetry/queries.ts` for the telemetry database, which is its own file
+  and its own migration chain (§7.1).
 - **Open SQLite only through `openDatabase()`** (`src/db/db.ts`), and reach the
   driver only through `src/db/sqlite.ts` — the small wrapper over Deno's
   built-in `node:sqlite` that gives back the positional rows the queries are

@@ -145,7 +145,7 @@ async function callTool(
   const handler = createMcpHandler(() =>
     createBridgeServer({
       forge: new ForgeUi({ url: app.url }),
-      llama: null,
+      llm: null,
       freeVram: false,
       progress: false,
       defaultTimeoutMs: 30_000,

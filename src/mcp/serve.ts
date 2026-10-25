@@ -29,7 +29,7 @@ export interface HttpOptions {
 /**
  * `createMcpHandler` builds a fresh server per request rather than sharing
  * one, which is why this takes a factory. The clients it closes over — ForgeUI
- * and llama-swap — are shared; only the protocol object is per-request.
+ * and the LLM server — are shared; only the protocol object is per-request.
  */
 export function serveHttp(
   factory: McpServerFactory,

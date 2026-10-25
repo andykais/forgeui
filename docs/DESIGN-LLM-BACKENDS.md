@@ -1,0 +1,260 @@
+# Design — the bridge hands the GPU to llama-swap *or* Strata
+
+**Status:** built, §1–§4. The load gate (§5) is not.
+**Touches:** DESIGN-AGENT-LOOP §5.2, §5.4, §8, §10, MCP-BRIDGE.md §2–§3,
+AGENTS.md (the "never needs llama-swap" rule). Not DESIGN.md: the choice is
+made on `forge mcp`'s command line, and `config.yaml` is not involved.
+**Inspiration:** [vhotseat](https://github.com/wandermyz/vhotseat), which makes
+[Strata](https://github.com/niko1221/strata) and ComfyUI take turns on one GPU.
+
+---
+
+## The problem
+
+`forge mcp` knows one LLM server. `src/mcp/llama.ts` asks llama-swap what is
+resident (`GET /running`), unloads it (`POST /api/models/unload[/:id]`), polls
+until nothing is running, and lets the harness's next completion reload it.
+The class is passed straight into `runRound` and the `gpu_status` tool, and it
+is turned on by `--llama-swap <url>` on the command line.
+
+Strata is a different kind of server for the same job: one model (a large MoE
+with experts offloaded to RAM), served directly rather than behind a proxy, with
+its own load/unload API. It cannot sit behind llama-swap usefully — llama-swap
+would kill and restart the whole process, throwing away a 1–3 minute cold start
+that Strata's own unload avoids (it ends only the engine; the HTTP server and
+the OS file cache stay). Measured on the target box: `/unload` about 1 s,
+`/load` about 25 s. So the bridge has to
+speak to it directly.
+
+## What Strata gives us
+
+From Strata's `docs/DETAILS.md` and vhotseat's working config for it
+(`config.example.yaml`, `drivers/http.py`):
+
+| Call | Effect |
+| --- | --- |
+| `GET /health` | `{"status":"ok","model":…,"loaded":true,…}` — what is loaded, and its name |
+| `POST /unload` | ends the engine process, releasing its VRAM and RAM; **409** while a request is running |
+| `POST /unload?wait=<s>` | waits up to `s` seconds for the running turn first (`wait=1` means up to 300 s) |
+| `POST /load` | loads ahead of a request; synchronous |
+| any `/v1/chat/completions`, `/v1/messages` | **loads the model if it is not loaded** |
+| `Authorization: Bearer <key>` | only when Strata has an `api_key`. The target box runs without one, so no header is the normal case |
+
+vhotseat treats an unload as done on HTTP 200 with `status` in
+`["unloaded", "not loaded"]`, as busy on 409 or `status: "busy"`, and then
+confirms by watching the process's VRAM reach zero. Strata also has two knobs
+on its side that matter to us: `min_free_vram_mib` (an unloaded model refuses
+to load with **503 + `Retry-After`** unless that much VRAM is free) and
+`before_load` (a command run before every load; with `before_load_strict` a
+non-zero exit refuses the load).
+
+The response bodies of `/load` and `/unload` are not documented beyond what
+vhotseat checks. The client below reads them the way `parseRunning` reads
+llama-swap's — tolerantly — and decides on status codes and `/health` first.
+
+## What vhotseat teaches, and what we take
+
+vhotseat is a general arbiter: a GPU lock file, per-process VRAM via NVML, a
+driver per workload, systemd restarts, a ComfyUI custom node that blocks each
+job until the GPU is switched. Most of that solves a problem the bridge does
+not have — the bridge is already the one place that both submits ComfyUI work
+and knows when the LLM is idle (DESIGN-AGENT-LOOP §2). Four ideas transfer:
+
+1. **A backend is a small contract.** vhotseat's `Workload` is
+   `probe / active / release` plus optional `load / busy / model`, and a new
+   server joins by config rather than by code. We need the same seam with two
+   implementations, chosen by a flag.
+2. **Release means "confirmed free", not "the POST returned".** vhotseat polls
+   until the workload's VRAM is at its floor. We already do this for
+   llama-swap (poll `/running`); Strata gets the same, via `/health`.
+3. **Busy is an answer, not an error to retry blindly.** A 409 means another
+   request is mid-turn. vhotseat waits a bounded time (`?wait=`), then refuses
+   with a message that says why. A round should do exactly that — and submit
+   nothing.
+4. **A gate on the LLM's load closes the hazard we documented and left open.**
+   DESIGN-AGENT-LOOP §10 lists "something else pings the LLM mid-batch → it
+   loads → OOM" as *the main operational hazard*. vhotseat closes it by having
+   the LLM server's pre-load hook ask permission. Strata has that hook
+   (`before_load`); llama-swap does not. This is optional and comes last (§5).
+
+What we do **not** take: the lock file, NVML, systemd management, restarts,
+admission by RAM, or the ComfyUI guard node. ForgeUI never manages the LLM's
+process, and ComfyUI's side is already ours.
+
+---
+
+## 1. The seam — `LlmHost`
+
+`src/mcp/llm.ts` holds the interface; `src/mcp/backends.ts` builds one from
+the flags (§3), kept apart so the two clients can import the error class
+without an import cycle.
+
+```ts
+export type LlmBackend = "llama-swap" | "strata";
+
+export interface LlmHost {
+  readonly backend: LlmBackend;
+  readonly url: string;
+  /** What is resident now — `gpu_status`'s `llm_resident`. May throw. */
+  resident(): Promise<string[]>;
+  /** The name a round is attributed to (`origin.source`, §6.2). Never throws. */
+  currentModel(): Promise<string | null>;
+  /** Make the GPU free and confirm it, or throw `LlmHostError`. */
+  release(): Promise<{ was: string | null }>;
+  /** Called once the round is over. A no-op unless the reload is eager. */
+  restore(): Promise<void>;
+}
+export class LlmHostError extends Error {}
+// backends.ts
+export function createLlmHost(options: LlmOptions | null, fetch?: typeof fetch): LlmHost | null;
+```
+
+- `LlamaSwap` (`src/mcp/llama.ts`) implements it with no behaviour change:
+  `running()` → `resident()`, `unload()` → `release()`, `restore()` empty.
+  `LlamaSwapError` becomes a subclass of `LlmHostError`.
+- `Strata` (`src/mcp/strata.ts`, new) is §2.
+- `RoundDeps.llama` and `BridgeToolOptions.llama` become `llm: LlmHost | null`.
+  `runRound` calls `llm.release()` where it calls `llama.unload()` today, and
+  `llm.restore()` in its `finally`, **after** `free_vram` (order matters — see
+  §2, reload).
+- `gpu_status` gains `llm_backend` beside `llm_resident` and `llm_model`
+  (additive; nothing reads its shape but the model).
+
+`sourceFor` moves to `llm.ts` unchanged: `llm:<model>` regardless of backend.
+
+## 2. The Strata client
+
+`resident()` / `currentModel()`: `GET /health`. Resident is `[model]` when
+`loaded` is true, else `[]`. The model name is `--llm-model` when given (an
+operator label wins, as it does for llama-swap today), else `/health`'s `model`,
+else the last one seen — same fallback rule as `LlamaSwap.#lastSeen`, and for
+the same reason: after an unload there is nothing loaded to ask.
+
+`release()`:
+
+1. Read `currentModel()` first, for the label.
+2. `POST /unload?wait=<--llm-busy-wait>` with an empty JSON body, and the bearer
+   header only if `--llm-api-key` was given. Timeout `wait + 30 s` (vhotseat's rule).
+3. Outcome by status, then body:
+   - 200 and `status` ∈ {`unloaded`, `not loaded`} or no readable body → step 4.
+   - 409, or `status: "busy"` → throw `LlmHostError("Strata is still answering
+     another request after <n>s; nothing was submitted")`. The round has
+     submitted nothing yet, so this costs nothing but the call.
+   - 401/403 → throw: Strata wants a key, and `--llm-api-key` is missing or wrong.
+   - anything else → throw with code and body.
+4. Poll `GET /health` every 250 ms until `loaded` is false, up to
+   `--llm-unload-timeout`. Strata ends the engine process on unload, so this should
+   be immediate; the poll is the same floor llama-swap gets, not a guess.
+
+`restore()`, with `--llm-reload eager`: `POST /load`, timeout
+`--llm-load-timeout` (45 s: a measured load takes about 25 s), errors logged to stderr and never thrown — a failed
+pre-warm still leaves Strata's own load-on-request behind it. The default is
+`lazy`, which matches llama-swap: return the tool result and let the harness's
+next completion load the model.
+
+Why `eager` exists at all: with `min_free_vram_mib` set on Strata's side, a
+completion that arrives while ComfyUI is still letting go gets a 503 with
+`Retry-After`, and whether the harness retries that is the harness's business.
+Loading from the bridge, after `free_vram` has returned, moves that wait to the
+one place that knows the GPU has just been handed back. It costs the tool call
+the ~25 s load and saves the same on the next completion.
+
+## 3. The `forge mcp` flags
+
+No `config.yaml` block: the bridge keeps knowing ForgeUI only by URL, needs no
+data dir, and can run on a different machine from ForgeUI's files. Everything
+about the LLM is on its command line, which the harness launcher (MCP-BRIDGE.md
+§5.3) already owns.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--llm-backend <llama-swap\|strata>` | none | which client to build; absent means the bridge never evicts |
+| `--llm-url <url>` | — | the server's base URL; required with `--llm-backend` |
+| `--llm-model <id>` | — | exists today. llama-swap: the id to unload. Strata: the label for `origin.source` |
+| `--llm-api-key <key>` | `$FORGEUI_LLM_API_KEY`, else none | Strata's bearer token, for a Strata that has one. Without it no `Authorization` header is sent |
+| `--llm-unload-timeout <s>` | 60 | how long a release may take to be confirmed |
+| `--llm-load-timeout <s>` | 45 | Strata only: how long the eager `POST /load` may take |
+| `--llm-busy-wait <s>` | 30 | Strata only: `?wait=` for a turn already running |
+| `--llm-reload <lazy\|eager>` | lazy | Strata only: `POST /load` once the round is over |
+| `--llama-swap <url>` | — | kept: shorthand for `--llm-backend llama-swap --llm-url <url>` |
+| `--strata <url>` | — | new: shorthand for `--llm-backend strata --llm-url <url>` |
+
+Rules, checked before anything listens (exit 2 on a violation):
+
+- `--llama-swap` with `--strata`, or either with a contradicting
+  `--llm-backend`, is an error.
+- `--llm-api-key`, `--llm-busy-wait`, `--llm-load-timeout` and `--llm-reload eager` with llama-swap
+  are an error rather than silently ignored — a flag that does nothing is a
+  mistake worth hearing about.
+
+The flags resolve through one pure function, `resolveLlmOptions(flags, env) →
+LlmOptions | null`, so the rules are tested without starting a process.
+Existing launchers that pass only `--llama-swap` keep working unchanged. The
+startup line names the backend: `…, strata at http://127.0.0.1:2335`.
+
+## 4. Tests — `deno task test` needs neither server
+
+- `tests/unit/mcp_strata_test.ts`, with a scripted fake `fetch` in the style
+  of `mcp_llama_test.ts`: 200 `unloaded`; 200 `not loaded`; 200 with no body;
+  409 → refused with the busy message; `status: "busy"` in a 200; 401 says a
+  key is needed; `/health` still `loaded: true` past the timeout → refused;
+  no `Authorization` header without a key, and the bearer header on every call
+  with one; a `/load` slower than the load timeout is abandoned, not thrown;
+  the model label comes from `--llm-model`, then `/health`, then the last
+  seen; `?wait=` carries the busy wait; eager reload posts `/load` and a
+  failing `/load` does not throw.
+- `tests/integration/mcp_round_test.ts`: a round against a fake Strata
+  unloads it and labels the work with `/health`'s model; a busy Strata
+  submits **nothing**; with eager reload `/load` comes after `free_vram`.
+- `tests/unit/mcp_backends_test.ts` on `resolveLlmOptions`: the shorthands, the
+  env var, the defaults, each conflict.
+- `tests/unit/mcp_llama_test.ts` unchanged apart from the renamed methods —
+  the proof the refactor changed no llama-swap behaviour.
+
+There is no contract test against a real Strata; it needs a GPU and a 30 GB
+model, which is outside what `docs/HARDWARE-CHECKLIST.md` provisions. Instead
+MCP-BRIDGE.md §2.1 has a "check it the way the bridge will" block for Strata
+(`curl /health`, `curl -X POST '/unload?wait=30'`), as §2 has for llama-swap.
+
+## 5. Later, optional — a load gate for Strata
+
+The cheap mitigation §10 asks for, done the vhotseat way. `forge mcp gate`
+(a subcommand, exits 0 to allow, 1 to refuse, in under a second) asks the
+bridge `GET /gate` on its HTTP listener, which answers "refuse" while a round
+is between `release()` and `free_vram`, and — the part the bridge cannot do
+today — asks ForgeUI `GET /api/system/status` and refuses while ComfyUI has
+jobs running or queued, which covers the web-UI row in §10 as well. Wired in
+Strata's model config:
+
+```json
+"before_load": "forge mcp gate --bridge http://127.0.0.1:7801",
+"before_load_timeout_s": 10,
+"before_load_strict": true
+```
+
+A refused load is Strata's 503 with `Retry-After`; the harness retries it. The
+bridge's own `restore()` load bypasses the gate, because the gate allows while
+no round is held and `restore()` runs after the hold ends. This is its own
+change, after 1–4, and stays out of the default path: a gate that fails closed
+on a misconfiguration stops the LLM from loading at all.
+
+Also later: Strata's `POST /v1/vram {"reserve_mib": N}` (partial release, with
+`vram_elastic`) would let a small SDXL round run without unloading the model at
+all. Worth a look once rounds carry a VRAM estimate; not before.
+
+## 6. Order of work
+
+1. ~~DESIGN-AGENT-LOOP takes this doc's decisions.~~ Done: §5.2 and §8 point
+   here.
+2. ~~The `LlmHost` seam; `LlamaSwap` behind it.~~ Done.
+3. ~~The flags and `resolveLlmOptions`; `--llama-swap` stays.~~ Done.
+4. ~~`Strata`, its unit tests, the per-backend round tests.~~ Done.
+5. ~~MCP-BRIDGE.md §2.1 and the AGENTS.md rule.~~ Done.
+6. (Optional) §5, the gate. Not started.
+
+## Open question
+
+- **Default for `--llm-busy-wait`.** 30 s keeps a round from hanging on someone
+  else's long completion; vhotseat lets the caller choose up to 300 s. With one
+  harness and `--parallel 1` the LLM is idle by construction when a tool call
+  arrives (DESIGN-AGENT-LOOP §2), so this only matters with a second client.

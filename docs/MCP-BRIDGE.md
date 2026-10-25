@@ -1,4 +1,4 @@
-# Running `forge mcp` — the bridge, llama-swap, and your harness
+# Running `forge mcp` — the bridge, llama-swap or Strata, and your harness
 
 How to wire the three processes together on one box, and what each one has to
 be told. The design and the reasoning are in `DESIGN-AGENT-LOOP.md`; this is
@@ -20,7 +20,7 @@ the runbook.
 | --- | --- | --- |
 | ForgeUI | `:7860` | ComfyUI (it manages that itself) |
 | llama-swap | `:8080` | starts `llama-server` on a port it picks |
-| `forge mcp` | `:7801` | ForgeUI, llama-swap |
+| `forge mcp` | `:7801` | ForgeUI, llama-swap (or Strata, §2.1) |
 | your harness | — | llama-swap (completions), `forge mcp` (tools) |
 
 Nothing here is authenticated: ForgeUI has no auth, and the bridge adds none.
@@ -74,6 +74,33 @@ configured `--llm-model` and carries on — a label is not worth failing a round
 over — but it is worth looking at that output once, because it is where the
 `source` on every generation comes from.
 
+### 2.1 Or: Strata instead of llama-swap
+
+[Strata](https://github.com/niko1221/strata) serves one model itself, with its
+own load and unload, so it takes llama-swap's place rather than sitting behind
+it (DESIGN-LLM-BACKENDS). Unloading ends only Strata's engine: the HTTP server
+stays up and the next completion loads the model again. On the box this was
+written for an unload takes about a second and a load about 25.
+
+The bridge needs nothing from Strata's own config. It runs without an API key
+by default; if yours has one, give it to the bridge through
+`FORGEUI_LLM_API_KEY` (or `--llm-api-key`, which shows up in `ps`).
+
+Check it the way the bridge will:
+
+```sh
+S=http://127.0.0.1:8080
+curl -s $S/health                                     # "loaded": true, and "model"
+curl -si -X POST -H 'Content-Type: application/json' "$S/unload?wait=30"
+curl -s $S/health                                     # "loaded": false
+time curl -si -X POST -H 'Content-Type: application/json' $S/load
+```
+
+The bridge sends that same `/unload?wait=<--llm-busy-wait>`, then reads
+`/health` until `loaded` is false. A 409, or a `"status": "busy"`, means
+another request was still running when the wait ran out; the round is refused
+and nothing is submitted.
+
 ---
 
 ## 3. The bridge
@@ -86,6 +113,12 @@ deno task mcp \
   --llm-model qwen-vlm
 ```
 
+With Strata in llama-swap's place:
+
+```sh
+deno task mcp --http 127.0.0.1:7801 --strata http://127.0.0.1:8080
+```
+
 Or build a binary once and run that:
 
 ```sh
@@ -96,8 +129,15 @@ deno task compile          # produces ./forge
 | Flag | Why |
 | --- | --- |
 | `--forgeui` | default `http://127.0.0.1:7860` |
-| `--llama-swap` | **omit it and the bridge never evicts anything** — correct when the LLM is not on this GPU (hosted, or another box) |
-| `--llm-model` | the id to unload, and the name recorded as `source`. Without it the bridge asks `/running` and uses whatever it finds |
+| `--llama-swap <url>` | take turns with llama-swap. **Omit it and `--strata` and the bridge never evicts anything** — correct when the LLM is not on this GPU (hosted, or another box) |
+| `--strata <url>` | take turns with Strata instead (§2.1). The two are exclusive |
+| `--llm-backend`, `--llm-url` | the long form of either: `--llm-backend strata --llm-url <url>` |
+| `--llm-model` | the name recorded as `source`; for llama-swap also the id to unload. Without it the bridge asks (`/running`, or Strata's `/health`) and uses whatever it finds |
+| `--llm-unload-timeout` | seconds the LLM may take to let go of the GPU (60) |
+| `--llm-busy-wait` | Strata: seconds to let a request already running finish before refusing the round (30) |
+| `--llm-reload` | Strata: `lazy` (default) leaves loading to the harness's next completion; `eager` has the bridge `POST /load` once ComfyUI has let go |
+| `--llm-load-timeout` | Strata: seconds that eager load may take (45) |
+| `--llm-api-key` | Strata's bearer token, only if it has one. Prefer `FORGEUI_LLM_API_KEY` |
 | `--http host:port` | Streamable HTTP |
 | `--stdio` | the harness launches the bridge as a subprocess instead |
 | `--no-free-vram` | skip asking ComfyUI to unload after a round |
@@ -474,7 +514,11 @@ placeholder, so in pi a take is something to `save_to`, not to listen to.
 | `refusing to submit into an OOM` | llama-swap said it unloaded but `/running` still lists the model after `unloadTimeout`. Raise `unloadTimeout`, or look at whether the model is wedged |
 | ComfyUI OOMs anyway | something reloaded the VLM mid-round. **While a batch is running, nothing else may talk to llama-swap** — one client only |
 | `upstream command exited prematurely` when llama-swap starts the model | the GPU is still full. Check `nvidia-smi`: if ComfyUI is holding the weights, the bridge could not free them — look for `could not free ComfyUI's VRAM` on its stderr, and confirm `POST /api/system/free_vram` answers `{"freed": true}`. As a one-off, `curl -XPOST <comfy>/free -d '{"unload_models":true,"free_memory":true}'` |
-| `source` reads `llm:unknown` | the bridge could not reach llama-swap and had no `--llm-model`. Harmless, but pass `--llm-model` |
+| `source` reads `llm:unknown` | the bridge could not reach llama-swap (or Strata) and had no `--llm-model`. Harmless, but pass `--llm-model` |
+| `Strata is still answering another request after 30s` | something else was mid-completion when the round started. Nothing was submitted; retry, or raise `--llm-busy-wait` |
+| `Strata still has its model loaded … after unload` | `/unload` answered but `/health` kept saying `loaded: true`. Check Strata's log for an engine that would not stop |
+| `Strata did not load again after the round` on stderr | only with `--llm-reload eager`; the next completion tries again. A 503 here usually means ComfyUI is still holding VRAM against Strata's `min_free_vram_mib` |
+| `forge mcp` exits 2 straight away | a flag combination that cannot mean anything — both `--llama-swap` and `--strata`, or a Strata-only flag with llama-swap. The message names it |
 | The model "sees" nothing | `--mmproj` missing from the llama-swap `cmd`, **or** `input: ["text","image"]` missing from `models.json` — both are needed (§5.2, §5.4) |
 | Eviction seems to do nothing | llama-swap is not the thing that started `llama-server` (§5.2) |
 | pi packs a prompt the server rejects | `contextWindow` in `models.json` exceeds `--ctx-size` (§5.4) |

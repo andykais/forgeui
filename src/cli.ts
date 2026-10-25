@@ -25,7 +25,12 @@ import { HuggingFaceUrlError } from "./models/huggingface.ts";
 import { TensorArtUrlError } from "./models/tensorart.ts";
 import { OverwriteError, parseOverwrite } from "./cli/overwrite.ts";
 import { ForgeUi } from "./mcp/forgeui.ts";
-import { LlamaSwap } from "./mcp/llama.ts";
+import {
+  createLlmHost,
+  LLM_API_KEY_ENV,
+  LlmFlagsError,
+  resolveLlmOptions,
+} from "./mcp/backends.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
 import { createBridgeServer } from "./mcp/tools.ts";
 import { APP_VERSION } from "./version.ts";
@@ -165,20 +170,55 @@ const models = new Command()
 const mcp = new Command()
   .description(
     "Run the MCP bridge: the tools an LLM drives ForgeUI with, and the GPU " +
-      "handoff between ForgeUI and llama-swap.",
+      "handoff between ForgeUI and the LLM server (llama-swap or Strata).",
   )
   .option("--forgeui <url:string>", "ForgeUI's base URL.", {
     default: "http://127.0.0.1:7860",
   })
   .option(
     "--llama-swap <url:string>",
-    "llama-swap's base URL. Without it the bridge never evicts anything, " +
-      "which is right when the LLM is not on this GPU.",
+    "Take turns with llama-swap at this URL. Shorthand for " +
+      "--llm-backend llama-swap --llm-url <url>. Without an LLM server the " +
+      "bridge never evicts anything, which is right when the LLM is not on " +
+      "this GPU.",
   )
   .option(
+    "--strata <url:string>",
+    "Take turns with Strata at this URL. Shorthand for " +
+      "--llm-backend strata --llm-url <url>.",
+  )
+  .option(
+    "--llm-backend <backend:string>",
+    "The LLM server to take turns with: llama-swap or strata.",
+  )
+  .option("--llm-url <url:string>", "That server's base URL.")
+  .option(
     "--llm-model <id:string>",
-    "The llama-swap model id to unload, and the name recorded as the " +
-      "generation's source. Defaults to whatever is running.",
+    "The name recorded as the generation's source. For llama-swap it is " +
+      "also the model id to unload; otherwise whatever is running is used.",
+  )
+  .option(
+    "--llm-api-key <key:string>",
+    `Strata's bearer token, if it has one. ${LLM_API_KEY_ENV} keeps it out ` +
+      "of the process list.",
+  )
+  .option(
+    "--llm-unload-timeout <seconds:number>",
+    "How long the LLM may take to let go of the GPU. Default 60.",
+  )
+  .option(
+    "--llm-busy-wait <seconds:number>",
+    "Strata: how long to let a request already running finish before " +
+      "refusing the round. Default 30.",
+  )
+  .option(
+    "--llm-reload <mode:string>",
+    "Strata: lazy (the next completion loads the model) or eager (the " +
+      "bridge loads it once ComfyUI has let go). Default lazy.",
+  )
+  .option(
+    "--llm-load-timeout <seconds:number>",
+    "Strata: how long the eager load may take. Default 45.",
   )
   .option("--http <address:string>", "Serve Streamable HTTP on host:port.")
   .option("--stdio", "Serve on stdio instead (the harness launches us).")
@@ -193,15 +233,23 @@ const mcp = new Command()
   })
   .action(async (options) => {
     const forge = new ForgeUi({ url: options.forgeui });
-    const llama = options.llamaSwap === undefined ? null : new LlamaSwap({
-      url: options.llamaSwap,
-      model: options.llmModel ?? null,
-    });
+    let llmOptions;
+    try {
+      llmOptions = resolveLlmOptions(options);
+    } catch (cause) {
+      if (!(cause instanceof LlmFlagsError)) throw cause;
+      console.error(`forge mcp: ${cause.message}`);
+      Deno.exit(2);
+    }
+    const llm = createLlmHost(llmOptions);
+    const llmLine = llm === null
+      ? "no LLM server"
+      : `${llm.backend} at ${llm.url}`;
 
     const build = () =>
       createBridgeServer({
         forge,
-        llama,
+        llm,
         freeVram: options.freeVram,
         progress: options.progress ?? false,
         defaultTimeoutMs: options.timeout * 1000,
@@ -210,7 +258,7 @@ const mcp = new Command()
     if (options.stdio || options.http === undefined) {
       // stdout belongs to the protocol on stdio; anything chatty goes to
       // stderr or it corrupts the stream.
-      console.error(`forge mcp: stdio, forgeui at ${forge.url}`);
+      console.error(`forge mcp: stdio, forgeui at ${forge.url}, ${llmLine}`);
       await serveStdio(build());
       return;
     }
@@ -221,10 +269,8 @@ const mcp = new Command()
       port,
       onListen: ({ hostname, port }) =>
         console.error(
-          `forge mcp: http://${hostname}:${port}/mcp, forgeui at ${forge.url}` +
-            (llama === null
-              ? ", no llama-swap"
-              : `, llama-swap at ${options.llamaSwap}`),
+          `forge mcp: http://${hostname}:${port}/mcp, forgeui at ${forge.url}, ` +
+            llmLine,
         ),
     });
     await new Promise<void>(() => {});

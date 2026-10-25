@@ -43,7 +43,7 @@ async function callTool<T>(
   const handler = createMcpHandler(() =>
     createBridgeServer({
       forge,
-      llama: null,
+      llm: null,
       freeVram: false,
       progress: false,
       defaultTimeoutMs: 30_000,
