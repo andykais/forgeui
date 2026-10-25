@@ -23,6 +23,7 @@ import {
   type NodeRef,
   resolveScenario,
   type Scenario,
+  SCENARIO_NAMES,
   type ScenarioName,
   type Step,
 } from "./scenarios.ts";
@@ -348,6 +349,11 @@ export class FakeComfy {
     if (req.method === "GET" && path === "/system_stats") {
       return this.#systemStats();
     }
+    // Not ComfyUI's: the visual QA walk (tests/e2e/qa.spec.ts) runs this as a
+    // child process it has no handle on, so it queues a failure this way.
+    if (req.method === "POST" && path === "/__fake/scenario") {
+      return this.#postScenario(url);
+    }
     if (req.method === "GET" && (path === "/" || path === "/index.html")) {
       return new Response(
         "<!doctype html><title>fake ComfyUI</title><body>fake ComfyUI</body>",
@@ -379,6 +385,17 @@ export class FakeComfy {
     socket.onclose = () => this.#sockets.delete(socket);
     socket.onerror = () => this.#sockets.delete(socket);
     return response;
+  }
+
+  #postScenario(url: URL): Response {
+    const name = url.searchParams.get("name") as ScenarioName | null;
+    if (!name || !SCENARIO_NAMES.includes(name)) {
+      return Response.json({ error: "unknown scenario", name }, {
+        status: 400,
+      });
+    }
+    this.queueScenario(name);
+    return Response.json({ queued: name });
   }
 
   async #postPrompt(req: Request): Promise<Response> {

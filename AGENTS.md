@@ -71,6 +71,8 @@ deno task comfy:setup                # once: a pinned ComfyUI, CPU torch, SD 1.5
 deno task comfy:serve                # run that ComfyUI in the foreground
 deno task test:comfy                 # §14.1 contract check + the app-level run
 deno task test:e2e:comfy             # the browser half, including the editor
+
+deno task qa                         # every screen and state as one HTML contact sheet
 ```
 
 `deno check`/`lint`/`fmt` exclude `src/frontend/` and the Playwright specs —
@@ -139,6 +141,11 @@ work with zero hashed models, and anything needing a hash degrades to a `path`
 identity or a disabled control (§8.1). Tests drive the library with
 `app.models.rescan()`; `startTestApp` leaves the boot pass off so fixtures
 cannot race it.
+
+**Every pull request ends with a visual QA pass**: run the `visual-qa` skill
+(`.claude/skills/visual-qa/SKILL.md`) after the last code push, look at what it
+flags, and link the contact sheet in the PR description. A PR that adds a screen
+or a state adds a shot for it to `tests/e2e/qa.spec.ts`.
 
 Prefer a test that goes through the HTTP or WebSocket interface over one that
 pokes the database. When a browser-visible change is involved, look at it:

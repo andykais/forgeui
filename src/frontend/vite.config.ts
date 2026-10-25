@@ -14,7 +14,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": { target: backend, changeOrigin: true },
-      "/comfy": { target: backend, changeOrigin: true, ws: true },
+      // `/comfy/…` only: a bare `/comfy` is the app's ComfyUI screen.
+      "^/comfy/": { target: backend, changeOrigin: true, ws: true },
       "/ws": { target: backend, ws: true },
     },
   },

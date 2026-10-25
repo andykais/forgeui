@@ -113,6 +113,25 @@
     );
   }
 
+  /**
+   * A `bool` with a `switch` bind sets no literal: it moves the link into one
+   * input between two outputs (§4.4). Its row names the node it rewires.
+   */
+  function switchFor(
+    param: Param,
+  ): { node: string; nodeType: string; input: string; on: string; off: string } | null {
+    if (typeof param.bind !== "object" || !("switch" in param.bind)) return null;
+    const { input, on, off } = param.bind.switch;
+    const [node, ...rest] = input.split(".");
+    return {
+      node,
+      nodeType: detail?.api_json[node]?.class_type ?? "?",
+      input: rest.join("."),
+      on,
+      off,
+    };
+  }
+
   function matchesFilter(text: string): boolean {
     const needle = filter.trim().toLowerCase();
     return needle === "" || text.toLowerCase().includes(needle);
@@ -122,8 +141,11 @@
   const exposedRows = $derived(
     (draft?.params ?? []).filter((param) => {
       const input = literalFor(param);
+      const switched = switchFor(param);
       return matchesFilter(
-        `${param.key} ${param.label ?? ""} ${input?.node_type ?? ""} ${input?.input ?? ""}`,
+        `${param.key} ${param.label ?? ""} ${input?.node_type ?? switched?.nodeType ?? ""} ${
+          input?.input ?? switched?.input ?? ""
+        }`,
       );
     }),
   );
@@ -299,8 +321,8 @@
           <span class="label">Exposed inputs</span>
           <span class="mono dim">
             {draft?.params.length ?? 0} params ·
-            {exposedByBind.size} of {inputs.length} literal inputs bound
-            {#if chainParam}, plus the synthetic LoRA chain{/if}
+            {exposedByBind.size} of {inputs.length} literal inputs bound{#if chainParam},
+              plus the synthetic LoRA chain{/if}
           </span>
           <span class="spacer"></span>
           <div class="row bands">
@@ -329,6 +351,7 @@
           <tbody>
             {#each exposedRows as param (param.key)}
               {@const input = literalFor(param)}
+              {@const switched = switchFor(param)}
               <tr
                 class="exposed"
                 class:chain={param.type === "lora_list"}
@@ -353,6 +376,9 @@
                   {#if param.type === "lora_list"}
                     LoRA chain
                     <div class="dim">synthetic · rewrites the graph</div>
+                  {:else if switched}
+                    {switched.node} · {switched.nodeType}
+                    <div class="dim">{switched.input} · switch</div>
                   {:else}
                     {input?.node_id ?? "?"} · {input?.node_type ?? "?"}
                     <div class="dim">
@@ -428,6 +454,9 @@
                     {/if}
                     {#if param.min !== undefined}
                       <span class="dim">· min {param.min} · max {param.max}</span>
+                    {/if}
+                    {#if switched}
+                      <span class="dim">· on {switched.on} · off {switched.off}</span>
                     {/if}
                   {/if}
                   {#if param.required}<span class="req">required</span>{/if}
