@@ -15,6 +15,8 @@ export interface TinyPngOptions {
   height: number;
   /** Solid fill, default a mid grey. */
   color?: [number, number, number];
+  /** Per pixel instead: a mask, say, painted on one side only. */
+  pixel?: (x: number, y: number) => [number, number, number];
 }
 
 function adler32(bytes: Uint8Array): number {
@@ -78,9 +80,10 @@ export function tinyPng(options: TinyPngOptions): Uint8Array {
     rawScanlines[rowStart] = 0; // filter type "none"
     for (let x = 0; x < width; x++) {
       const p = rowStart + 1 + x * 3;
-      rawScanlines[p] = r;
-      rawScanlines[p + 1] = g;
-      rawScanlines[p + 2] = b;
+      const [pr, pg, pb] = options.pixel?.(x, y) ?? [r, g, b];
+      rawScanlines[p] = pr;
+      rawScanlines[p + 1] = pg;
+      rawScanlines[p + 2] = pb;
     }
   }
 

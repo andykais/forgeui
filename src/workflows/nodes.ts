@@ -380,6 +380,51 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     after: { image: "image" },
     outputs: ["IMAGE", "MASK"],
   },
+  /*
+   * The mask set (§10). A painted mask is a PNG the size of its image, read
+   * on the red channel so white means "repaint". It is grown and blurred in
+   * the graph — the softness of the edge is the workflow's business, not the
+   * brush's — and the blur goes through an image because ComfyUI has no
+   * mask blur of its own.
+   */
+  // The editor's upload button comes last here, after `channel` — not
+  // straight after `image` as on `LoadImage` (read off ComfyUI's frontend).
+  LoadImageMask: {
+    widgets: ["image", "channel"],
+    after: { channel: "image" },
+    outputs: ["MASK"],
+  },
+  GrowMask: {
+    inputs: ["mask"],
+    widgets: ["expand", "tapered_corners"],
+    outputs: ["MASK"],
+  },
+  MaskToImage: {
+    inputs: ["mask"],
+    outputs: ["IMAGE"],
+  },
+  ImageBlur: {
+    inputs: ["image"],
+    widgets: ["blur_radius", "sigma"],
+    outputs: ["IMAGE"],
+  },
+  ImageToMask: {
+    inputs: ["image"],
+    widgets: ["channel"],
+    outputs: ["MASK"],
+  },
+  /** Paste the repainted picture back over the original, through the mask. */
+  ImageCompositeMasked: {
+    inputs: ["destination", "source", "mask"],
+    widgets: ["x", "y", "resize_source"],
+    outputs: ["IMAGE"],
+  },
+  /** Lets a soft mask edge be repainted by degrees rather than all or none. */
+  DifferentialDiffusion: {
+    inputs: ["model"],
+    widgets: ["strength"],
+    outputs: ["MODEL"],
+  },
   ImageScale: {
     inputs: ["image"],
     widgets: ["upscale_method", "width", "height", "crop"],

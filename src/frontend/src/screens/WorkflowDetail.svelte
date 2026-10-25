@@ -1,5 +1,8 @@
 <script lang="ts">
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import { escapeGoesBack } from "../lib/back.ts";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
@@ -28,6 +31,9 @@
   }
 
   let { id }: Props = $props();
+
+  /** This workflow's templates (§4.8), linked from its header. */
+  const templates = $derived(app.templates.filter((template) => template.workflow === id));
 
   let detail = $state<WorkflowDetail | null>(null);
   let inputs = $state<LiteralInput[]>([]);
@@ -271,11 +277,16 @@
   }
 </script>
 
+<svelte:window onkeydown={(event) => escapeGoesBack(event, () => navigate("/workflows"))} />
+
 {#if !detail}
   <p class="empty">loading…</p>
 {:else}
   <section class="detail">
     <header>
+      <button class="back" title="Back to workflows (esc)" onclick={() => navigate("/workflows")}>
+        <ArrowLeft size={15} />
+      </button>
       <span class="thumb"></span>
       <div class="titles">
         <div class="row">
@@ -287,6 +298,27 @@
           {detail.id} · {detail.source} · hash {detail.hash.slice(7, 13)} ·
           {Object.keys(detail.api_json).length} nodes, {inputs.length} literal inputs
         </div>
+        <!-- The saved ways into this workflow (§4.8), each a link to its page. -->
+        {#if templates.length > 0}
+          <div class="templates row" data-workflow-templates>
+            <span class="dim">templates</span>
+            {#each templates as template (template.id)}
+              <a
+                class="template-link"
+                href={`/templates/${template.id}`}
+                title={template.description ?? `Open “${template.name}”`}
+                onclick={(event) => {
+                  if (opensElsewhere(event)) return;
+                  event.preventDefault();
+                  navigate(`/templates/${template.id}`);
+                }}
+              >
+                <LayoutTemplate size={11} />
+                {template.name}
+              </a>
+            {/each}
+          </div>
+        {/if}
       </div>
       <span class="spacer"></span>
       <button
@@ -462,7 +494,15 @@
                   {#if param.required}<span class="req">required</span>{/if}
                 </td>
                 <td class="adv">
-                  {#if param.type !== "lora_list"}
+                  {#if param.section}
+                    <!-- In a section rather than Advanced (§4.2); set in the manifest. -->
+                    <span
+                      class="badge section-badge"
+                      title="Shown in this section of the panel; sections are set in manifest.json"
+                      >{draft?.sections?.find((section) => section.id === param.section)
+                        ?.label ?? param.section}</span
+                    >
+                  {:else if param.type !== "lora_list"}
                     <input
                       type="checkbox"
                       checked={param.advanced ?? false}
@@ -548,6 +588,39 @@
 {/if}
 
 <style>
+  .back {
+    background: transparent;
+    color: var(--text-3);
+    padding: 4px;
+    align-self: flex-start;
+  }
+
+  .back:hover {
+    color: var(--text);
+    background: var(--raised);
+  }
+
+  .templates {
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 11px;
+  }
+
+  .template-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: var(--radius-control);
+    background: var(--raised);
+    color: var(--accent);
+  }
+
+  .template-link:hover {
+    background: var(--control);
+  }
+
   .detail {
     flex: 1;
     display: flex;
@@ -677,6 +750,11 @@
   .adv input {
     width: auto;
     accent-color: var(--accent);
+  }
+
+  .section-badge {
+    font-size: 10px;
+    white-space: nowrap;
   }
 
   .node {

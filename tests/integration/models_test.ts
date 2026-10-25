@@ -669,12 +669,14 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(byName.get("unset")?.models, 2);
     // Nothing is Flux.1 any more: the img2img workflow that was, is gone.
     assertEquals(byName.get("flux")?.workflows, 0);
-    // Every other family that can upscale has two, the workflow and its
-    // upscale sibling (§10). The enhancer is a checkbox on the one Krea 2
-    // workflow rather than a third (§7.1).
-    assertEquals(byName.get("flux2")?.workflows, 2);
-    assertEquals(byName.get("krea2")?.workflows, 2);
-    assertEquals(byName.get("sd15")?.workflows, 2);
+    // Every other image family has three: the workflow, its img2img sibling
+    // and its inpaint (§4.6, §10). The enhancer is a checkbox on the one
+    // Krea 2 workflow rather than a fourth (§7.1).
+    for (
+      const family of ["flux2", "krea2", "sd15", "sdxl", "anima", "z-image"]
+    ) {
+      assertEquals(byName.get(family)?.workflows, 3, family);
+    }
     assertEquals(byName.get("sd15")?.models, 0);
     // The video workflow is LTX-2.3 now, and none of these graphs upscale a
     // video — so `ltx` is a family the app still knows and ships nothing for.

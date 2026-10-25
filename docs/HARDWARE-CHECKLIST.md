@@ -33,7 +33,9 @@ failure names the thing the fake got wrong:
 `tests/contract/pipeline_test.ts` then runs the whole app against it: submit
 `sd15`, watch progress and preview frames on the app's own `/ws`, find the
 file in the day directory, read the sidecar back out of the PNG, and
-reproduce it bit-for-bit with **Rerun now**.
+reproduce it bit-for-bit with **Rerun now**. It also runs `sd15-inpaint` with a mask over
+half of a flat picture, and checks that the other half comes back as the
+original's exact pixels while the masked half is repainted (DESIGN §10).
 
 **`deno task test:e2e:comfy`** — the same, from Chrome: a generation from the
 Generate screen, and the embedded editor loading this workflow's graph and
@@ -64,7 +66,8 @@ Verified against **ComfyUI v0.34.0**, python 3.12, torch CPU, on Linux.
 
 ## What is still not covered
 
-- **A GPU, and your own models.** Every bundled workflow except `sd15` names
+- **A GPU, and your own models.** Every bundled workflow except `sd15` and
+  `sd15-inpaint` names
   placeholder model filenames (`workflows/bundled/README.md`), so they load
   and list but cannot run until you point them at real files.
 - **Video.** `ltx` writes a video; nothing here has produced one.

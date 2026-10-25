@@ -13,7 +13,8 @@ CREATE TABLE jobs (
   error_json TEXT,
   origin_source TEXT,             -- ui | llm:<model-id>; NULL on rows older than §6.2's origin block
   origin_project TEXT, origin_note TEXT,
-  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER
+  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+  template_id TEXT, template_name TEXT  -- the template it was made with (§4.8, §6.2); no FK
 );
 
 CREATE TABLE outputs (
@@ -32,11 +33,15 @@ CREATE TABLE outputs (
   notes TEXT,                     -- what a person said about this one afterwards (§6.2); searched with the prompt
   params_json TEXT NOT NULL,
   deleted_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  template_id TEXT, template_name TEXT,  -- from the sidecar's `template` (§6.2); no FK, as for workflows
+  pixel_hash TEXT                 -- PNG pixels, how a paste finds its parent (§9); '' = not a PNG; a cache of the file
 );
 CREATE INDEX outputs_created ON outputs(created_at DESC, id DESC);
 CREATE INDEX outputs_workflow ON outputs(workflow_id, created_at DESC);
 CREATE INDEX outputs_project ON outputs(origin_project, created_at DESC);
+CREATE INDEX outputs_template ON outputs(template_id, created_at DESC);
+CREATE INDEX outputs_pixels ON outputs(pixel_hash) WHERE pixel_hash <> '';
 CREATE VIRTUAL TABLE outputs_fts USING fts5(prompt, notes, content='outputs', content_rowid='rowid');
 
 CREATE TABLE models (
@@ -92,7 +97,8 @@ CREATE TABLE inputs (
   width INTEGER, height INTEGER,  -- null for audio, which has neither
   duration_ms INTEGER,            -- audio only, from ffprobe
   original_name TEXT, derived_from_output TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  pixel_hash TEXT                 -- PNG pixels, for finding the output it came from (§9); '' = not a PNG
 );
 CREATE TABLE output_inputs (
   output_id TEXT NOT NULL, input_sha256 TEXT NOT NULL, param_key TEXT NOT NULL,

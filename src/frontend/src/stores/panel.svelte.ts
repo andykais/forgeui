@@ -1,5 +1,11 @@
 import { api } from "../api.ts";
-import type { LoraRow, Manifest, Param, WorkflowDetail } from "../types.ts";
+import type {
+  LoraRow,
+  Manifest,
+  Param,
+  Template,
+  WorkflowDetail,
+} from "../types.ts";
 import { withInputs } from "../types.ts";
 import { app } from "./app.svelte.ts";
 import { plain } from "../lib/state.svelte.ts";
@@ -79,6 +85,12 @@ class PanelState {
   seedLocked = $state(false);
   /** The seed the last run actually used, shown greyed while unlocked. */
   lastSeed = $state<number | null>(null);
+  /**
+   * The template this panel was filled from (§4.8), while it still applies:
+   * what it asks for is required here. Choosing a workflow, or filling the
+   * panel any other way, drops it.
+   */
+  template = $state<Template | null>(null);
   submitting = $state(false);
   submitError = $state<string | null>(null);
   loading = $state(false);
@@ -89,20 +101,31 @@ class PanelState {
    */
   #touched = new Set<string>();
 
+  /**
+   * The workflow's manifest, with what the applied template asks for marked
+   * required (§4.8) — so the panel badges it and Generate waits for it, by
+   * the same rule as any required field. The server checks the workflow's
+   * own manifest: asking is the panel's rule, not the job's.
+   */
   get manifest(): Manifest | null {
+    const manifest = this.detail?.manifest ?? null;
+    const ask = this.template?.ask ?? [];
+    if (!manifest || ask.length === 0) return manifest;
+    return {
+      ...manifest,
+      params: manifest.params.map((param) =>
+        ask.includes(param.key) ? { ...param, required: true } as Param : param
+      ),
+    };
+  }
+
+  /** The workflow's own manifest, whatever a template asks for. */
+  get workflowManifest(): Manifest | null {
     return this.detail?.manifest ?? null;
   }
 
   get params(): Param[] {
     return this.manifest?.params ?? [];
-  }
-
-  get mainParams(): Param[] {
-    return this.params.filter((param) => !param.advanced);
-  }
-
-  get advancedParams(): Param[] {
-    return this.params.filter((param) => param.advanced);
   }
 
   /** §11.3: blocked while ComfyUI is away or a required param is empty. */
@@ -132,6 +155,7 @@ class PanelState {
 
   async select(id: string): Promise<void> {
     if (this.workflowId === id && this.detail) return;
+    this.template = null;
     this.workflowId = id;
     this.loading = true;
     this.submitError = null;
@@ -162,7 +186,13 @@ class PanelState {
    * parameters from any screen, a failed job's card, an upscale — is asking
    * to edit before generating, which a media layout gives no room to do.
    */
-  async editWith(id: string, params: Record<string, unknown>): Promise<void> {
+  async editWith(
+    id: string,
+    params: Record<string, unknown>,
+    template: Template | null = null,
+  ): Promise<void> {
+    // Reuse parameters fills the panel from a run, not from a template.
+    this.template = template;
     const layout = app.layout("generate");
     if (withInputs(layout) !== layout) {
       app.setLayout("generate", withInputs(layout));
@@ -238,40 +268,93 @@ class PanelState {
   }
 
   /**
-   * Upscale (§10): take one of the app's own outputs into the input store,
-   * then fill this workflow from the run that made it.
+   * Apply a template (§4.8): fill its workflow with what it sets, over
+   * whatever the panel would have held. Given an output, it is Reuse image
+   * with that template (§10) — the run's picture and words under it.
    *
-   * Upscaling is not a special case in the pipeline and is not one here
-   * either — it is `editWith` with the picture attached. What makes it one
-   * click is that the workflow already carries the numbers that matter: a
-   * creativity of 0.4 and a scale of 2 are its manifest defaults, so nothing
-   * has to be preset on the way in and both are there to be changed before
-   * generating.
+   * Nothing about the job is special: the values are ordinary values, there
+   * to be changed before generating.
    */
-  async upscale(
-    workflowId: string,
-    output: { id: string },
-    sourceParams: Record<string, unknown>,
+  async applyTemplate(
+    template: Template,
+    from: { output?: { id: string }; sourceParams?: Record<string, unknown> } =
+      {},
   ): Promise<void> {
-    const media = await api.adoptOutput(output.id);
-    const manifest = (await api.workflow(workflowId)).manifest;
-    const imageKey = manifest?.params.find((param) => param.type === "image")
+    if (from.output) {
+      await this.reuseImage(from.output, {
+        workflow: template.workflow,
+        template,
+        sourceParams: from.sourceParams ?? {},
+        sameFamily: true,
+      });
+      return;
+    }
+    if (!(await api.workflow(template.workflow)).manifest) {
+      throw new Error(`"${template.workflow}" has no inputs to fill`);
+    }
+    await this.editWith(template.workflow, plain(template.values), template);
+  }
+
+  /**
+   * Reuse image (§10): open a workflow — or a template on one — with an
+   * output's picture in its first `image` param, adopted so the lineage
+   * holds, and the run that made it under the rest:
+   *
+   * - its words always: every `text` param the two share by key, which is
+   *   the prompt that otherwise had to be copied across by hand;
+   * - the rest it shares only within the same family, because another
+   *   family's LoRAs are not LoRAs this model can load;
+   * - a template's values over all of that;
+   * - a mask never: it was painted for some other picture, if any.
+   */
+  async reuseImage(
+    output: { id: string },
+    target: {
+      workflow: string;
+      template?: Template | null;
+      sourceParams: Record<string, unknown>;
+      sameFamily: boolean;
+    },
+  ): Promise<void> {
+    const manifest = (await api.workflow(target.workflow)).manifest;
+    if (!manifest) {
+      throw new Error(`"${target.workflow}" has no inputs to fill`);
+    }
+    const imageKey = manifest.params.find((param) => param.type === "image")
       ?.key;
     if (!imageKey) {
-      throw new Error(`"${workflowId}" has no image param to upscale into`);
+      throw new Error(`"${target.workflow}" has no image to put it in`);
     }
     // Only the keys this workflow actually has. `editWith` warns about the
     // rest, which is right when a workflow has changed under a saved run and
-    // wrong here: an upscale workflow has no `size` because it takes that
-    // from the picture, and saying so on every upscale is noise.
-    const shared: Record<string, unknown> = {};
-    for (const param of manifest?.params ?? []) {
-      if (param.key in sourceParams) {
-        shared[param.key] = sourceParams[param.key];
+    // wrong here: an img2img workflow has no `size` because it takes that
+    // from the picture, and saying so on every reuse is noise.
+    const carried: Record<string, unknown> = {};
+    for (const param of manifest.params) {
+      if (!(param.key in target.sourceParams)) continue;
+      if (
+        param.type === "image" ||
+        param.type === "mask" ||
+        param.type === "video" ||
+        param.type === "audio"
+      ) {
+        continue;
+      }
+      if (param.type === "text" || target.sameFamily) {
+        carried[param.key] = target.sourceParams[param.key];
       }
     }
-    // The picture last: it is the one thing the source run cannot supply.
-    await this.editWith(workflowId, { ...shared, [imageKey]: media.filename });
+    const params: Record<string, unknown> = {
+      ...carried,
+      ...(target.template ? plain(target.template.values) : {}),
+    };
+    for (const param of manifest.params) {
+      if (param.type === "mask") params[param.key] = "";
+    }
+    // The picture last: it is the one thing neither the run nor a template
+    // can supply.
+    params[imageKey] = (await api.adoptOutput(output.id)).filename;
+    await this.editWith(target.workflow, params, target.template ?? null);
   }
 
   // --------------------------------------------------------------- the size
@@ -432,7 +515,11 @@ class PanelState {
     this.submitting = true;
     this.submitError = null;
     try {
-      const job = await api.submit(this.workflowId, this.values);
+      // The template the panel was filled from, while it still applies, is
+      // recorded on what this makes (§4.8).
+      const template =
+        this.template?.workflow === this.workflowId ? this.template.id : null;
+      const job = await api.submit(this.workflowId, this.values, template);
       // The resolved seed comes back on the job row (§11.3's greyed hint).
       const manifest = this.manifest;
       if (manifest) {

@@ -1,12 +1,18 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import Copy from "@lucide/svelte/icons/copy";
-  import ImageUpscale from "@lucide/svelte/icons/image-upscale";
+  import ImageUp from "@lucide/svelte/icons/image-up";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import Plus from "@lucide/svelte/icons/plus";
   import { untrack } from "svelte";
-  import type { Lineage, LineageNode, Output, OutputDetail } from "../types.ts";
+  import type {
+    Lineage,
+    LineageNode,
+    Output,
+    OutputDetail,
+  } from "../types.ts";
   import { absoluteTime, duration, relativeTime, shortId } from "../lib/format.ts";
-  import { app } from "../stores/app.svelte.ts";
+  import { app, type ReuseTarget } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
   import { api } from "../api.ts";
   import { toasts } from "../stores/toasts.svelte.ts";
@@ -34,10 +40,11 @@
     onrerun: () => void;
     ondelete: () => void;
     /**
-     * Upscale this output with the named workflow (§10). Absent hides the
-     * action, which is what a screen with nowhere to land does.
+     * Reuse this output's picture in a workflow, or a template on one (§10).
+     * Absent hides the action, which is what a screen with nowhere to land
+     * does.
      */
-    onupscale?: (workflowId: string) => void;
+    onreuse?: (target: ReuseTarget) => void;
     /**
      * Open another output — a lineage node. The screen decides what that
      * means: Generate keeps you in the session when it can, Gallery walks to
@@ -55,7 +62,7 @@
     onedit,
     onrerun,
     ondelete,
-    onupscale,
+    onreuse,
     onopen,
     onnotes,
   }: Props = $props();
@@ -101,14 +108,18 @@
 
   let copied = $state<string | null>(null);
   let promoteOpen = $state(false);
-  let upscaleOpen = $state(false);
+  let reuseOpen = $state(false);
 
   /**
-   * Upscale is the same-family `category: upscale` workflow (§10). One match
-   * runs outright, several offer the choice, none hides the button: an
-   * action with nowhere to go is worse than no action.
+   * Everything that takes a picture, the output's family first (§10). None
+   * hides the button: an action with nowhere to go is worse than no action.
    */
-  const upscalers = $derived(onupscale ? app.upscalersFor(output) : []);
+  const reusable = $derived(onreuse ? app.reuseTargetsFor(output) : []);
+
+  function reuse(target: ReuseTarget) {
+    reuseOpen = false;
+    onreuse?.(target);
+  }
   let promoting = $state(false);
   let checked = $state<Record<string, boolean>>({});
   const sidecar = $derived(output.sidecar);
@@ -321,35 +332,57 @@
   <div class="actions">
     <button class="primary" onclick={onedit}>Reuse parameters →</button>
     <button onclick={onrerun}>Generate again ⟳</button>
-    {#if upscalers.length === 1}
-      <button
-        title={`Upscale with ${upscalers[0]!.name}`}
-        onclick={() => onupscale?.(upscalers[0]!.id)}
-      >
-        <ImageUpscale size={12} /> Upscale
-      </button>
-    {:else if upscalers.length > 1}
+    {#if reusable.length > 0}
       <div class="chip-wrap">
-        <button title="Upscale with…" onclick={() => (upscaleOpen = !upscaleOpen)}>
-          <ImageUpscale size={12} /> Upscale
+        <button
+          aria-expanded={reuseOpen}
+          title="Use this picture in another workflow: img2img, inpaint, upscale…"
+          onclick={() => (reuseOpen = !reuseOpen)}
+        >
+          <ImageUp size={12} /> Reuse image
         </button>
         <Popover
-          open={upscaleOpen}
-          width={240}
-          title="Upscale with"
-          onclose={() => (upscaleOpen = false)}
+          open={reuseOpen}
+          width={300}
+          title="Reuse image in"
+          onclose={() => (reuseOpen = false)}
         >
-          {#each upscalers as workflow (workflow.id)}
-            <button
-              class="option"
-              onclick={() => {
-                upscaleOpen = false;
-                onupscale?.(workflow.id);
-              }}
-            >
-              <span class="option-name">{workflow.name}</span>
-            </button>
-          {/each}
+          <div class="reuse-list" data-reuse-menu>
+            {#each reusable as group, index (group.workflow.id)}
+              {@const family = group.workflow.family ?? "other"}
+              {#if index === 0 || (reusable[index - 1]!.workflow.family ?? "other") !== family}
+                <div class="reuse-family label">
+                  {family}{group.sameFamily ? " · this picture's family" : ""}
+                </div>
+              {/if}
+              <button
+                class="option reuse-option"
+                onclick={() =>
+                  reuse({
+                    workflow: group.workflow,
+                    template: null,
+                    sameFamily: group.sameFamily,
+                  })}
+              >
+                <span class="option-name">{group.workflow.name}</span>
+              </button>
+              {#each group.templates as template (template.id)}
+                <button
+                  class="option reuse-option reuse-template"
+                  title={template.description ?? undefined}
+                  onclick={() =>
+                    reuse({
+                      workflow: group.workflow,
+                      template,
+                      sameFamily: group.sameFamily,
+                    })}
+                >
+                  <LayoutTemplate size={11} />
+                  <span class="option-name">{template.name}</span>
+                </button>
+              {/each}
+            {/each}
+          </div>
         </Popover>
       </div>
     {/if}
@@ -483,6 +516,31 @@
           {/if}
         </div>
       </div>
+      {#if output.template}
+        <!--
+          The template the panel was filled from (§4.8), by the name it had
+          then; a link while it still exists.
+        -->
+        <div class="field">
+          <div class="key">template</div>
+          <div>
+            {#if app.templates.some((template) => template.id === output.template?.id)}
+              <a
+                class="template-link"
+                href={`/templates/${output.template.id}`}
+                onclick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                  event.preventDefault();
+                  navigate(`/templates/${output.template?.id}`);
+                }}>{output.template.name}</a
+              >
+            {:else}
+              {output.template.name}
+              <span class="dim">· since deleted</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
 
       <!-- Only the roles no param already names; the rest appear once, below. -->
       {#each otherModels as model (model.role + model.name)}
@@ -674,6 +732,23 @@
     width: 10px;
     color: var(--accent);
     font-size: 11px;
+  }
+
+  .reuse-list {
+    max-height: min(420px, 60vh);
+    overflow-y: auto;
+  }
+
+  .reuse-family {
+    padding: 6px 7px 2px;
+    font-size: 10px;
+  }
+
+  /* A template is a way into the workflow above it, so it sits under it. */
+  .reuse-template {
+    padding-left: 22px;
+    font-size: 11px;
+    color: var(--text-2);
   }
 
   .option-name {
@@ -988,5 +1063,13 @@
 
   .node-text .dim {
     font-size: 10px;
+  }
+
+  .template-link {
+    color: var(--accent);
+  }
+
+  .template-link:hover {
+    text-decoration: underline;
   }
 </style>

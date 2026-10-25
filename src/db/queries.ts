@@ -53,6 +53,25 @@ export function toOrigin(
   return { source, project, note };
 }
 
+/**
+ * The template a job was submitted from (§4.8, §6.2): its id, and its name
+ * as it was then — a template can be renamed or deleted later, and what it
+ * made must still say where it came from.
+ */
+export interface TemplateRef {
+  id: string;
+  name: string;
+}
+
+/** The two columns as one field, or `null` when no template was used. */
+export function toTemplateRef(
+  id: string | null,
+  name: string | null,
+): TemplateRef | null {
+  if (id === null) return null;
+  return { id, name: name ?? id };
+}
+
 export interface JobRow {
   id: string;
   prompt_id: string | null;
@@ -64,6 +83,8 @@ export interface JobRow {
   progress: Progress | null;
   error: JobError | null;
   origin: Origin | null;
+  /** The template the panel was filled from (§4.8); null when none. */
+  template: TemplateRef | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -76,6 +97,7 @@ export interface NewJob {
   params: Record<string, unknown>;
   api_graph: ApiGraph;
   origin?: Origin | null;
+  template?: TemplateRef | null;
   created_at: number;
 }
 
@@ -108,6 +130,8 @@ export interface OutputRow {
   params: Record<string, unknown>;
   deleted_at: number | null;
   created_at: number;
+  /** From the sidecar's `template` (§6.2), for `?template=`. */
+  template: TemplateRef | null;
 }
 
 export interface SidecarModelRef {
@@ -133,12 +157,15 @@ type JobRecord = [
   number,
   number | null,
   number | null,
+  string | null,
+  string | null,
 ];
 
+// Added columns go at the end: every reader is positional.
 const JOB_COLUMNS = `id, prompt_id, workflow_id, workflow_hash, status,
   params_json, api_graph_json, progress_json, error_json,
   origin_source, origin_project, origin_note,
-  created_at, started_at, finished_at`;
+  created_at, started_at, finished_at, template_id, template_name`;
 
 function parse<T>(value: string | null, fallback: T): T {
   if (value === null) return fallback;
@@ -161,6 +188,7 @@ function toJob(record: JobRecord): JobRow {
     progress: parse<Progress | null>(record[7], null),
     error: parse<JobError | null>(record[8], null),
     origin: toOrigin(record[9], record[10], record[11]),
+    template: toTemplateRef(record[15], record[16]),
     created_at: record[12],
     started_at: record[13],
     finished_at: record[14],
@@ -172,8 +200,8 @@ export function insertJob(db: Database, job: NewJob): void {
   db.prepare(
     `INSERT INTO jobs (id, workflow_id, workflow_hash, status, params_json,
                        api_graph_json, origin_source, origin_project,
-                       origin_note, created_at)
-     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+                       origin_note, created_at, template_id, template_name)
+     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     job.id,
     job.workflow_id,
@@ -184,6 +212,8 @@ export function insertJob(db: Database, job: NewJob): void {
     job.origin?.project ?? null,
     job.origin?.note ?? null,
     job.created_at,
+    job.template?.id ?? null,
+    job.template?.name ?? null,
   );
 }
 
@@ -318,8 +348,9 @@ export function insertOutput(db: Database, output: OutputRow): void {
                           duration_ms, sha256, workflow_id, workflow_hash,
                           family, prompt, tone, origin_source, origin_project,
                           origin_note, source_json, notes, params_json,
-                          deleted_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          deleted_at, created_at, template_id, template_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?)`,
   ).run(
     output.id,
     output.job_id,
@@ -345,6 +376,8 @@ export function insertOutput(db: Database, output: OutputRow): void {
     JSON.stringify(output.params),
     output.deleted_at,
     output.created_at,
+    output.template?.id ?? null,
+    output.template?.name ?? null,
   );
   // `outputs_fts` is an external-content table, so it is filled explicitly.
   indexOutput(db, output.id);
@@ -383,10 +416,11 @@ export function normalizeModelHash(hash: string): string {
   return bare.toLowerCase();
 }
 
+// Added columns go at the end: every reader is positional.
 const OUTPUT_COLUMNS = `id, job_id, path, sidecar_path, kind, width, height,
   duration_ms, sha256, workflow_id, workflow_hash, family, prompt, tone,
   origin_source, origin_project, origin_note, source_json, notes,
-  params_json, deleted_at, created_at`;
+  params_json, deleted_at, created_at, template_id, template_name`;
 
 type OutputRecord = [
   string,
@@ -411,6 +445,8 @@ type OutputRecord = [
   string,
   number | null,
   number,
+  string | null,
+  string | null,
 ];
 
 function toOutput(record: OutputRecord): OutputRow {
@@ -435,6 +471,7 @@ function toOutput(record: OutputRecord): OutputRow {
     params: parse<Record<string, unknown>>(record[19], {}),
     deleted_at: record[20],
     created_at: record[21],
+    template: toTemplateRef(record[22], record[23]),
   };
 }
 
@@ -458,6 +495,8 @@ export interface OutputFilters {
   /** The origin block (§6.2): exact matches, not a search. */
   project?: string;
   source?: string;
+  /** The template it was made with, by id (§4.8). */
+  template?: string;
   /** Soft-deleted rows are hidden unless a caller asks for them. */
   includeDeleted?: boolean;
 }
@@ -503,6 +542,10 @@ export function buildOutputsWhere(filters: OutputFilters = {}): WhereClause {
   if (filters.source) {
     clauses.push("outputs.origin_source = ?");
     params.push(filters.source);
+  }
+  if (filters.template) {
+    clauses.push("outputs.template_id = ?");
+    params.push(filters.template);
   }
   for (const hash of filters.models ?? []) {
     // AND semantics: an output must have used every selected model (§11.2).
@@ -772,6 +815,7 @@ export function jobExists(db: Database, id: string): boolean {
 
 export interface RebuiltJob {
   origin?: Origin | null;
+  template?: TemplateRef | null;
   id: string;
   workflow_id: string | null;
   workflow_hash: string | null;
@@ -791,8 +835,9 @@ export function insertRebuiltJob(db: Database, job: RebuiltJob): void {
   db.prepare(
     `INSERT INTO jobs (id, workflow_id, workflow_hash, status, params_json,
                        api_graph_json, origin_source, origin_project,
-                       origin_note, created_at, started_at, finished_at)
-     VALUES (?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                       origin_note, created_at, started_at, finished_at,
+                       template_id, template_name)
+     VALUES (?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     job.id,
     job.workflow_id,
@@ -805,6 +850,8 @@ export function insertRebuiltJob(db: Database, job: RebuiltJob): void {
     job.created_at,
     job.created_at,
     job.created_at + job.total_ms,
+    job.template?.id ?? null,
+    job.template?.name ?? null,
   );
 }
 
@@ -1466,6 +1513,30 @@ export interface WorkflowUsage {
   last_output_id: string | null;
 }
 
+/**
+ * The newest surviving output each template made (§4.8): what the Generate
+ * picker shows beside a template, as it shows the last output beside a
+ * workflow. Ties on `created_at` go to the larger id, so it is one row.
+ */
+export function latestTemplateOutputs(
+  db: Database,
+): Map<string, { id: string; path: string; kind: string }> {
+  const rows = db.prepare(
+    `SELECT o.template_id, o.id, o.path, o.kind
+       FROM outputs o
+      WHERE o.template_id IS NOT NULL AND o.deleted_at IS NULL
+        AND o.id = (
+          SELECT i.id FROM outputs i
+           WHERE i.template_id = o.template_id AND i.deleted_at IS NULL
+           ORDER BY i.created_at DESC, i.id DESC
+           LIMIT 1)`,
+  ).values<[string, string, string, string]>();
+  return new Map(rows.map(([template, id, path, kind]) => [
+    template,
+    { id, path, kind },
+  ]));
+}
+
 /** Usage figures for the Workflows list and the Generate workflow card. */
 export function workflowUsage(db: Database): Map<string, WorkflowUsage> {
   const usage = new Map<string, WorkflowUsage>();
@@ -1618,4 +1689,113 @@ export function outputChildIds(db: Database, outputId: string): string[] {
         AND o.deleted_at IS NULL
       ORDER BY o.created_at ASC, o.id ASC`,
   ).values<[string]>(outputId, outputId).map(([id]) => id);
+}
+
+// ------------------------------------------------------- pixel hashes §9
+
+/** An output's pixel hash: a hex digest, or '' for media it cannot have one. */
+export function setOutputPixelHash(
+  db: Database,
+  id: string,
+  pixelHash: string,
+): void {
+  db.prepare(`UPDATE outputs SET pixel_hash = ? WHERE id = ?`).run(
+    pixelHash,
+    id,
+  );
+}
+
+/** Image outputs not hashed yet, oldest first: the boot backfill's queue. */
+export function outputsWithoutPixelHash(
+  db: Database,
+  limit: number,
+): { id: string; path: string }[] {
+  return db.prepare(
+    `SELECT id, path FROM outputs
+      WHERE pixel_hash IS NULL AND kind = 'image'
+      ORDER BY created_at ASC, id ASC
+      LIMIT ?`,
+  ).values<[string, string]>(limit).map(([id, path]) => ({ id, path }));
+}
+
+/**
+ * The output a file or picture came from (§9): the earliest surviving one
+ * whose file has these bytes, or failing that whose pixels are these
+ * pixels. Earliest, because a rerun of one seed makes the same picture
+ * again, and the original is the one the rest repeat.
+ */
+export function outputMatching(
+  db: Database,
+  match: { sha256: string; pixelHash: string | null },
+): string | null {
+  const bySha = db.prepare(
+    `SELECT id FROM outputs
+      WHERE sha256 = ? AND deleted_at IS NULL
+      ORDER BY created_at ASC, id ASC LIMIT 1`,
+  ).value<[string]>(match.sha256)?.[0];
+  if (bySha) return bySha;
+  if (!match.pixelHash) return null;
+  return db.prepare(
+    `SELECT id FROM outputs
+      WHERE pixel_hash = ? AND deleted_at IS NULL
+      ORDER BY created_at ASC, id ASC LIMIT 1`,
+  ).value<[string]>(match.pixelHash)?.[0] ?? null;
+}
+
+export function setInputPixelHash(
+  db: Database,
+  sha256: string,
+  pixelHash: string,
+): void {
+  db.prepare(`UPDATE inputs SET pixel_hash = ? WHERE sha256 = ?`).run(
+    pixelHash,
+    sha256,
+  );
+}
+
+/**
+ * Name the output an input came from, if nothing has yet. A parent already
+ * recorded — an adopted output — is never overwritten by a guess.
+ */
+export function setInputParent(
+  db: Database,
+  sha256: string,
+  outputId: string,
+): void {
+  db.prepare(
+    `UPDATE inputs SET derived_from_output = ?
+      WHERE sha256 = ? AND derived_from_output IS NULL`,
+  ).run(outputId, sha256);
+}
+
+/** Image inputs not hashed yet: the second half of the boot backfill. */
+export function inputsWithoutPixelHash(
+  db: Database,
+  limit: number,
+): { sha256: string; path: string }[] {
+  return db.prepare(
+    `SELECT sha256, path FROM inputs
+      WHERE pixel_hash IS NULL AND kind <> 'audio'
+      ORDER BY created_at ASC
+      LIMIT ?`,
+  ).values<[string, string]>(limit).map(([sha256, path]) => ({
+    sha256,
+    path,
+  }));
+}
+
+/**
+ * Inputs with no parent yet, with what they could be matched on: once the
+ * outputs are hashed, every one of these is asked again.
+ */
+export function orphanInputs(
+  db: Database,
+): { sha256: string; pixelHash: string | null }[] {
+  return db.prepare(
+    `SELECT sha256, pixel_hash FROM inputs
+      WHERE derived_from_output IS NULL AND kind <> 'audio'`,
+  ).values<[string, string | null]>().map(([sha256, pixelHash]) => ({
+    sha256,
+    pixelHash: pixelHash || null,
+  }));
 }

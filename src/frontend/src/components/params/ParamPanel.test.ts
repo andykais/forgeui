@@ -2,8 +2,15 @@ import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { tick } from "svelte";
 import ParamPanel from "./ParamPanel.svelte";
-import type { Manifest, ModelEntry, Param } from "../../types.ts";
+import type {
+  InputMedia,
+  Manifest,
+  ManifestSection,
+  ModelEntry,
+  Param,
+} from "../../types.ts";
 import { fillValues } from "../../stores/panel.svelte.ts";
+import { api } from "../../api.ts";
 
 /**
  * §14.1: one test per param type rendering from a manifest, the
@@ -11,8 +18,9 @@ import { fillValues } from "../../stores/panel.svelte.ts";
  * reorder, and the seed's 🎲 / 🔒 behaviour.
  */
 
-function manifestWith(params: Param[]): Manifest {
+function manifestWith(params: Param[], sections?: ManifestSection[]): Manifest {
   return {
+    ...(sections ? { sections } : {}),
     id: "fixture",
     name: "Fixture",
     family: "flux",
@@ -147,6 +155,7 @@ function mount(
     checkpoints: ModelEntry[];
     byClass: Record<string, ModelEntry[]>;
     loraFiles: boolean;
+    sections: ManifestSection[];
   }> = {},
 ) {
   const handlers: Handlers = {
@@ -160,7 +169,7 @@ function mount(
   };
   const result = render(ParamPanel, {
     props: {
-      manifest: manifestWith(params),
+      manifest: manifestWith(params, extra.sections),
       values,
       seedLocked: extra.seedLocked ?? false,
       lastSeed: extra.lastSeed ?? null,
@@ -434,9 +443,69 @@ describe("each param type renders from the manifest", () => {
     expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
   });
 
-  test("mask and video still say why they cannot run yet", () => {
-    mount([{ key: "mask", label: "Mask", type: "mask", bind: "11.mask" }]);
+  test("video still says why it cannot run yet", () => {
+    mount([{ key: "clip", label: "Clip", type: "video", bind: "11.video" }]);
     expect(screen.getByText(/arrive in a later phase/)).toBeTruthy();
+  });
+
+  const maskParams: Param[] = [
+    { key: "image", label: "Image", type: "image", required: true, bind: "25.image" },
+    { key: "mask", label: "Mask", type: "mask", of: "image", required: true, bind: "40.image" },
+  ];
+  const picture = `${"a".repeat(64)}.png`;
+  const painted = `${"b".repeat(64)}.png`;
+
+  test("a mask waits for its picture, naming it", () => {
+    mount(maskParams);
+    expect(screen.getByText(/Attach the image first/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /paint the mask/ })).toBeNull();
+    expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
+  });
+
+  test("with the picture attached, the mask is painted over it", () => {
+    mount(maskParams, { image: picture });
+    const button = screen.getByRole("button", { name: "Mask: paint the mask" });
+    expect(button.textContent).toContain("Paint mask");
+    // The picture it is painted over, from the store (§9).
+    expect(button.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/media/inputs/aa/${picture}`,
+    );
+    expect(button.querySelector("[data-mask-tint]")).toBeNull();
+  });
+
+  /** The store's word on each input's size, as `GET /api/inputs/:sha` gives it. */
+  function sized(byName: Record<string, [number, number]>) {
+    return vi.spyOn(api, "input").mockImplementation(async (sha256: string) => {
+      const name = Object.keys(byName).find((key) => key.startsWith(sha256))!;
+      const [width, height] = byName[name]!;
+      return { filename: name, width, height } as InputMedia;
+    });
+  }
+
+  test("a painted mask is tinted over the picture, and can be taken off", async () => {
+    const spy = sized({ [picture]: [64, 48], [painted]: [64, 48] });
+    const { handlers } = mount(maskParams, { image: picture, mask: painted });
+    const button = screen.getByRole("button", { name: "Mask: edit the mask" });
+    expect(button.textContent).toContain("Edit mask");
+    // Drawn once the two are known to fit, never before (§10).
+    await vi.waitFor(() =>
+      expect(
+        (button.querySelector("[data-mask-tint]") as HTMLElement).getAttribute("style"),
+      ).toContain(`/api/media/inputs/bb/${painted}`),
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Remove the mask" }));
+    expect(handlers.onchange).toHaveBeenCalledWith("mask", "");
+    spy.mockRestore();
+  });
+
+  test("a mask from a picture of another size is cleared, and says why", async () => {
+    const spy = sized({ [picture]: [96, 64], [painted]: [64, 64] });
+    const { handlers } = mount(maskParams, { image: picture, mask: painted });
+    await vi.waitFor(() => expect(handlers.onchange).toHaveBeenCalledWith("mask", ""));
+    expect(screen.getByText(/painted on a 64×64 picture and this one is 96×64/)).toBeTruthy();
+    // Never drawn stretched over the wrong picture on the way.
+    expect(document.querySelector("[data-mask-tint]")).toBeNull();
+    spy.mockRestore();
   });
 });
 
@@ -762,6 +831,77 @@ describe("the panel header and the prompt", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));
+  });
+});
+
+describe("sections (§4.2)", () => {
+  const params: Param[] = [
+    { key: "prompt", label: "Prompt", type: "text", required: true, bind: "6.text" },
+    { key: "grow", label: "Grow", type: "int", section: "mask", bind: "41.expand" },
+    { key: "steps", label: "Steps", type: "int", advanced: true, bind: "3.steps" },
+    {
+      key: "mask",
+      label: "Mask",
+      type: "text",
+      required: true,
+      section: "mask",
+      bind: "40.image",
+    },
+    { key: "feather", label: "Feather", type: "int", section: "mask", bind: "43.r" },
+  ];
+  const mask: ManifestSection = { id: "mask", label: "Mask", description: "Where" };
+
+  /** Each field and group head, top to bottom, as the panel shows them. */
+  function layout(): string[] {
+    return [
+      ...document.querySelectorAll<HTMLElement>("[data-param], [data-group]"),
+    ].map((element) =>
+      element.dataset.group ? `[${element.dataset.group}]` : element.dataset.param!,
+    );
+  }
+
+  test("a section sits between the main params and Advanced, in manifest order", () => {
+    mount(params, { prompt: "figs", mask: "m" }, { sections: [mask] });
+    expect(layout()).toEqual([
+      "prompt",
+      "[section:mask]",
+      "grow",
+      "mask",
+      "feather",
+      "[advanced]",
+    ]);
+    const head = screen.getByRole("button", { name: /^Mask/ });
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.textContent).toContain("grow · mask · feather");
+    expect(head.getAttribute("title")).toBe("Where");
+  });
+
+  test("it collapses, and can start collapsed", async () => {
+    mount(params, { prompt: "figs", mask: "m" }, { sections: [mask] });
+    await fireEvent.click(screen.getByRole("button", { name: /^Mask/ }));
+    expect(layout()).toEqual(["prompt", "[section:mask]", "[advanced]"]);
+
+    document.body.innerHTML = "";
+    mount(params, { prompt: "figs", mask: "m" }, {
+      sections: [{ ...mask, collapsed: true }],
+    });
+    expect(screen.getByRole("button", { name: /^Mask/ }).getAttribute("aria-expanded"))
+      .toBe("false");
+  });
+
+  test("a collapsed section opens itself for a required field left empty", async () => {
+    mount(params, { prompt: "figs", mask: "" }, {
+      sections: [{ ...mask, collapsed: true }],
+    });
+    await tick();
+    const head = screen.getByRole("button", { name: /^Mask/ });
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.querySelector(".problems")?.textContent).toContain("1");
+  });
+
+  test("a section the manifest does not list leaves its params where they were", () => {
+    mount(params, { prompt: "figs", mask: "m" });
+    expect(layout()).toEqual(["prompt", "mask", "grow", "feather", "[advanced]"]);
   });
 });
 

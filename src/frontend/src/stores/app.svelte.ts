@@ -9,6 +9,7 @@ import {
   type ModelEntry,
   type Output,
   type RescanProgress,
+  type Template,
   type TileSize,
   type UiScreen,
   type WorkflowSummary,
@@ -38,6 +39,8 @@ class AppState {
    */
   startedAt = $state<number>(0);
   workflows = $state<WorkflowSummary[]>([]);
+  /** Every template (§4.8); the Upscale action reads it. */
+  templates = $state<Template[]>([]);
   loras = $state<ModelEntry[]>([]);
   /** Everything that can drive a generation, from every diffusion folder. */
   checkpoints = $state<ModelEntry[]>([]);
@@ -108,24 +111,50 @@ class AppState {
   }
 
   /**
-   * The upscale workflows that could take this output (§10): same family,
-   * `category: upscale`, and images only — an upscale of a video is not what
-   * any of these graphs do.
-   *
-   * A list rather than one answer, because a user may keep several: the
-   * caller runs the only match outright and offers a choice when there are
-   * more.
+   * Everything an output's picture can be reused in (§10): each runnable
+   * workflow with an `image` param, with its templates under it — the
+   * Generate picker's own shape. The output's family comes first, then the
+   * rest by family and name, so its img2img, inpaint and Upscale 2× are at
+   * the top and nothing else is out of reach. Images only: none of these
+   * graphs take a video.
    */
-  upscalersFor(
+  reuseTargetsFor(
     output: { family: string | null; kind: string } | null,
-  ): WorkflowSummary[] {
+  ): ReuseGroup[] {
     if (!output || output.kind !== "image") return [];
-    return this.workflows.filter(
-      (workflow) =>
-        workflow.category === "upscale" &&
-        workflow.family === output.family &&
-        workflow.runnable,
+    const takers = this.workflows.filter(
+      (workflow) => workflow.runnable && workflow.image_param !== null,
     );
+    const byWorkflow = new Map<string, Template[]>();
+    for (const template of this.templates) {
+      if (template.problems.length > 0) continue;
+      byWorkflow.set(template.workflow, [
+        ...(byWorkflow.get(template.workflow) ?? []),
+        template,
+      ]);
+    }
+    const rank = (workflow: WorkflowSummary) =>
+      output.family !== null && workflow.family === output.family ? 0 : 1;
+    return [...takers]
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          // A workflow nobody filed under a family goes after those that are.
+          Number(a.family === null) - Number(b.family === null) ||
+          (a.family ?? "").localeCompare(b.family ?? "") ||
+          a.name.localeCompare(b.name),
+      )
+      .map((workflow) => ({
+        workflow,
+        sameFamily: rank(workflow) === 0,
+        // An upscale first under its workflow: it is what Reuse image was
+        // called before it took everything else in (§10).
+        templates: [...(byWorkflow.get(workflow.id) ?? [])].sort(
+          (a, b) =>
+            Number(b.action === "upscale") - Number(a.action === "upscale") ||
+            a.name.localeCompare(b.name),
+        ),
+      }));
   }
 
   jobOutputs(job: Job): Output[] {
@@ -139,10 +168,13 @@ class AppState {
 
   async load(): Promise<void> {
     try {
-      const [config, status, workflows, jobs, outputs] = await Promise.all([
+      const [config, status, workflows, templates, jobs, outputs] = await Promise
+        .all([
         api.config(),
         api.systemStatus(),
         api.workflows(),
+        // A failure here costs the Upscale button, not the app.
+        api.templates().catch(() => []),
         // A session's worth, because the results grid is now scoped to the
         // session and its count is shown beside the time it began (§11.2):
         // forty would have made a busy session read as forty jobs for ever.
@@ -154,6 +186,7 @@ class AppState {
       this.dataDir = status.data_dir;
       this.startedAt = status.started_at ?? 0;
       this.workflows = workflows;
+      this.templates = templates;
       this.jobs = jobs;
       this.outputs = Object.fromEntries(
         outputs.outputs.map((output) => [output.id, output]),
@@ -296,6 +329,11 @@ class AppState {
     const model = this.model(hash);
     if (model) return model.display_name;
     return hash ? `${hash.slice(0, 8)}…` : "unknown";
+  }
+
+  /** After a template is saved or deleted anywhere in this tab (§4.8). */
+  async refreshTemplates(): Promise<void> {
+    this.templates = await api.templates();
   }
 
   async refreshWorkflows(): Promise<void> {
@@ -535,6 +573,17 @@ class AppState {
     void this.refreshModels();
   }
 
+  /** How a painted mask is drawn, in the editor and the panel (§10). */
+  get maskView(): Config["ui"]["mask_view"] {
+    return this.config?.ui.mask_view ?? "tint";
+  }
+
+  setMaskView(view: Config["ui"]["mask_view"]): void {
+    this.#patchUi({ mask_view: view }, (ui) => {
+      ui.mask_view = view;
+    });
+  }
+
   /** Optimistic locally, then persisted: Settings has no save button (§11.2). */
   #patchUi(patch: unknown, apply: (ui: Config["ui"]) => void): void {
     if (!this.config) return;
@@ -562,6 +611,21 @@ class AppState {
     }
     return null;
   }
+}
+
+/** What a Reuse image row opens (§10): a workflow, or a template on it. */
+export interface ReuseTarget {
+  workflow: WorkflowSummary;
+  template: Template | null;
+  sameFamily: boolean;
+}
+
+/** One workflow Reuse image offers, with its templates (§10). */
+export interface ReuseGroup {
+  workflow: WorkflowSummary;
+  /** The output's own family: its runs' seeds and LoRAs carry over. */
+  sameFamily: boolean;
+  templates: Template[];
 }
 
 export const app = new AppState();

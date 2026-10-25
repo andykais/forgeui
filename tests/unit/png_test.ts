@@ -1,9 +1,13 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { deflateSync } from "node:zlib";
 import {
+  decodePng,
+  pixelHash,
   PngError,
   readChunks,
   readPngSize,
   readTextChunks,
+  serializeChunks,
   SIDECAR_KEYWORD,
   withTextChunk,
 } from "../../src/jobs/png.ts";
@@ -85,4 +89,67 @@ Deno.test("tEXt keywords are length-checked", () => {
   const png = tinyPng({ width: 2, height: 2 });
   assertThrows(() => withTextChunk(png, "", "x"), PngError, "1–79");
   assertThrows(() => withTextChunk(png, "k".repeat(80), "x"), PngError);
+});
+
+/** A 2×1 picture written as `colour` type with `depth` bits, unfiltered. */
+function encoded(
+  colour: number,
+  depth: number,
+  row: number[],
+  extra: { type: string; data: Uint8Array }[] = [],
+): Uint8Array {
+  const header = new Uint8Array(13);
+  new DataView(header.buffer).setUint32(0, 2);
+  new DataView(header.buffer).setUint32(4, 1);
+  header[8] = depth;
+  header[9] = colour;
+  return serializeChunks([
+    { type: "IHDR", data: header },
+    ...extra,
+    {
+      type: "IDAT",
+      data: new Uint8Array(deflateSync(Uint8Array.from([0, ...row]))),
+    },
+    { type: "IEND", data: new Uint8Array(0) },
+  ]);
+}
+
+Deno.test("one picture hashes the same however the PNG stores it (§9)", async () => {
+  // Two grey pixels, 0x40 and 0xc0, opaque, written five different ways.
+  const forms = [
+    encoded(0, 8, [0x40, 0xc0]),
+    encoded(0, 16, [0x40, 0x11, 0xc0, 0x22]),
+    encoded(2, 8, [0x40, 0x40, 0x40, 0xc0, 0xc0, 0xc0]),
+    encoded(6, 8, [0x40, 0x40, 0x40, 255, 0xc0, 0xc0, 0xc0, 255]),
+    encoded(3, 8, [1, 0], [{
+      type: "PLTE",
+      data: Uint8Array.from([0xc0, 0xc0, 0xc0, 0x40, 0x40, 0x40]),
+    }]),
+  ];
+  const decoded = await decodePng(forms[3]!);
+  assertEquals(decoded?.width, 2);
+  assertEquals([...decoded!.rgba], [
+    0x40,
+    0x40,
+    0x40,
+    255,
+    0xc0,
+    0xc0,
+    0xc0,
+    255,
+  ]);
+  const hashes = await Promise.all(forms.map((png) => pixelHash(png)));
+  assertEquals(new Set(hashes).size, 1, JSON.stringify(hashes));
+  assert(/^[0-9a-f]{64}$/.test(hashes[0]!));
+
+  // Another pixel, or another shape, is another picture.
+  assert(await pixelHash(encoded(0, 8, [0x40, 0xc1])) !== hashes[0]);
+  // Not a PNG at all, or one this does not read: no hash, never a guess.
+  assertEquals(
+    await pixelHash(new TextEncoder().encode("not a png at all")),
+    null,
+  );
+  const interlaced = encoded(0, 8, [0x40, 0xc0]);
+  interlaced[8 + 8 + 12] = 1;
+  assertEquals(await pixelHash(interlaced), null);
 });

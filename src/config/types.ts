@@ -16,6 +16,11 @@ export const KEY_ACTIONS = [
   "select_down",
   "fullscreen",
   "close",
+  // The mask editor's, live only while it is open (§10).
+  "brush_smaller",
+  "brush_larger",
+  "undo",
+  "redo",
 ] as const;
 export type KeyAction = typeof KEY_ACTIONS[number];
 
@@ -84,6 +89,14 @@ export const MODEL_THUMBNAILS = ["first_sample", "latest_generated"] as const;
 export type ModelThumbnail = typeof MODEL_THUMBNAILS[number];
 
 /**
+ * How a painted mask is drawn over its picture (§10): the accent at half
+ * strength, which lets the picture show through, or solid white, which
+ * reads at a glance on a small or busy picture.
+ */
+export const MASK_VIEWS = ["tint", "white"] as const;
+export type MaskView = typeof MASK_VIEWS[number];
+
+/**
  * How a screen arranges its three pieces: the inputs, the media, and the
  * metadata (§11.3).
  *
@@ -150,6 +163,8 @@ export interface UiConfig {
    * given machine simply does not run.
    */
   hidden_families: string[];
+  /** How the mask editor and the panel draw a painted mask (§10). */
+  mask_view: MaskView;
 }
 
 /**
@@ -253,4 +268,5 @@ export interface PartialUiConfig {
   workflow_order?: string[];
   model_thumbnail?: ModelThumbnail;
   hidden_families?: string[];
+  mask_view?: MaskView;
 }

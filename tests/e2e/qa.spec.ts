@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The visual QA walk: every screen, and the states of it worth looking at,
@@ -383,6 +384,110 @@ test("Workflows", async ({ page }) => {
     page.goto("/workflows/does-not-exist"), true);
 });
 
+test("Templates", async ({ page }) => {
+  watchConsole(page);
+  const group = "Templates";
+  await shot(page, group, "List", "The bundled Upscale 2× templates, one per family.", async () => {
+    await connected(page, "/templates");
+    await expect(page.getByRole("heading", { name: "Templates" })).toBeVisible();
+  });
+  await shot(page, group, "Bundled template", "Upscale 2×: what it sets, asks for and leaves open.", async () => {
+    await page.getByRole("row", { name: /Krea 2 Turbo \(img2img\)/ }).click();
+    await expect(page.getByLabel("Template name")).toHaveValue("Upscale 2×");
+  });
+
+  await shot(page, group, "Save as template", "Saving the panel: each input saved, asked or open.", async () => {
+    await connected(page, "/generate");
+    await pickWorkflow(page, /^Krea 2 Turbo prompt/);
+    await page.getByRole("button", { name: "Reset to defaults" }).click();
+    await page.locator('[data-param="prompt"] textarea').fill("a heron in reeds");
+    await page.getByRole("button", { name: "Save as template" }).click();
+    await page.getByLabel("Template name").fill("Quiet herons");
+  });
+  await shot(page, group, "Applied template", "The panel follows it: its strip says what it asks for.", async () => {
+    await page.getByRole("button", { name: "Save template" }).click();
+    await expect(page.locator(".from-template")).toContainText("Quiet herons");
+  });
+  await shot(page, group, "Picker with templates", "Templates as smaller rows under their workflow.", async () => {
+    await page.locator(".workflow-card").click();
+    await page.locator(".popover .template-option").filter({ hasText: "Quiet herons" })
+      .scrollIntoViewIfNeeded();
+  });
+  await closePopovers(page);
+
+  await shot(page, group, "Workflow's templates", "A workflow's page links each of its templates.", async () => {
+    await page.goto("/workflows/krea2-img2img");
+    await expect(page.locator("[data-workflow-templates]")).toBeVisible();
+  });
+  await shot(page, group, "User template", "One the user saved: deletable, linked to its workflow.", async () => {
+    await page.goto("/templates");
+    await page.getByRole("cell", { name: "Quiet herons" }).click();
+    await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
+  });
+  await shot(page, group, "Not found", "A template id that does not exist.", () =>
+    page.goto("/templates/does-not-exist"), true);
+});
+
+test("Inpaint", async ({ page }) => {
+  watchConsole(page);
+  const group = "Inpaint";
+  await shot(page, group, "Reuse image", "Everything that takes a picture, its own family first.", async () => {
+    await connected(page, "/generate");
+    await page.locator(".tile .surface").first().click();
+    await page.getByRole("button", { name: "Reuse image" }).click();
+    await expect(page.locator("[data-reuse-menu]")).toBeVisible();
+  });
+  await shot(page, group, "Inpaint panel", "Reused into Illustrious XL (inpaint): the picture, the prompt, the Mask section.", async () => {
+    await page.locator("[data-reuse-menu] .reuse-option", {
+      hasText: "Illustrious XL (inpaint)",
+    }).click();
+    await expect(page.locator(".workflow-card")).toContainText("Illustrious XL (inpaint)");
+    await page.locator('[data-group="section:mask"]').scrollIntoViewIfNeeded();
+  });
+
+  const canvas = page.locator("[data-mask-canvas]");
+  const stroke = async () => {
+    await expect(canvas).toHaveAttribute("data-ready", "true");
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.6);
+    await page.mouse.down();
+    for (let i = 1; i <= 12; i++) {
+      await page.mouse.move(
+        box.x + box.width * (0.3 + 0.4 * (i / 12)),
+        box.y + box.height * (0.6 - 0.15 * Math.sin(i / 2)),
+      );
+    }
+    await page.mouse.up();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.3);
+  };
+  await shot(page, group, "Mask editor", "A stroke in the tint; the brush ring follows the pointer.", async () => {
+    await page.getByRole("button", { name: "Mask: paint the mask" }).click();
+    await stroke();
+  });
+  await shot(page, group, "Mask editor, white", "The same mask drawn solid white.", () =>
+    page.getByRole("dialog").getByRole("radio", { name: "White" }).click());
+  await shot(page, group, "Mask painted", "Done: the panel's thumbnail follows the White view.", async () => {
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    await expect(page.getByRole("button", { name: "Mask: edit the mask" })).toBeVisible();
+    await page.locator('[data-group="section:mask"]').scrollIntoViewIfNeeded();
+  });
+  // Back to the tint, which is the default every other shot assumes.
+  await page.getByRole("button", { name: "Mask: edit the mask" }).click().catch(() => {});
+  await page.getByRole("dialog").getByRole("radio", { name: "Tint" }).click().catch(() => {});
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click().catch(() => {});
+
+  await shot(page, group, "Mask section collapsed", "Mask, grow and feather folded under one head.", () =>
+    page.locator('[data-group="section:mask"] button.group-head').click());
+  await page.locator('[data-group="section:mask"] button.group-head').click().catch(() => {});
+  await shot(page, group, "Mask cleared", "A picture of another size: the mask goes, and says why.", async () => {
+    await page.locator('[data-param="image"] input[type="file"]').setInputFiles(
+      // Any picture of another size than the run's: a screenshot from docs/.
+      join(dirname(fileURLToPath(import.meta.url)), "../../docs/screenshots/phase-1/gallery-table.png"),
+    );
+    await expect(page.locator('[data-param="mask"]')).toContainText("so it was cleared");
+  });
+});
+
 test("ComfyUI, Telemetry, Settings", async ({ page }) => {
   watchConsole(page);
   // Loaded directly rather than through the rail: a bare /comfy is the app's
@@ -449,6 +554,7 @@ test("half a screen", async ({ page }) => {
     ["Gallery", "/gallery"],
     ["Models", "/models"],
     ["Workflows", "/workflows"],
+    ["Templates", "/templates"],
     ["Telemetry", "/telemetry"],
     ["Settings", "/settings"],
   ];

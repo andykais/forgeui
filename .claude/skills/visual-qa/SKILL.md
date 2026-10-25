@@ -50,11 +50,27 @@ changes anything under `src/frontend/` or `src/http/`.
      clean sheet.
    - **Pre-existing** → leave it and say so in the PR.
 
-3. **Keep the walk complete.** If the PR adds a screen, a popover, a mode or a
-   state a reviewer would want to see, add a `shot()` for it in
-   `tests/e2e/qa.spec.ts` in the same PR. `shot()` runs its `setup` to reach the
-   state, then photographs it whatever happened. Pass `true` last when the state
-   is an error on purpose. The fake ComfyUI fails the next prompt on request:
+3. **Keep the walk complete.** What it covers today, one `test()` per group: an
+   empty install; Generate (picker, panel, LoRAs, running/queued/failed, session
+   grid, viewer, layouts); Gallery; Models; Workflows; **Templates** (the list,
+   a bundled and a user template, Save as template, the applied strip, the
+   picker's template rows, a workflow's template links); **Inpaint** (Reuse
+   image, the inpaint panel and its Mask section, the mask editor in tint and
+   white, a painted mask, the section collapsed, a mask cleared by a picture of
+   another size); ComfyUI, Telemetry, Settings; edge states; and every screen
+   again at half a screen.
+
+   The mask editor takes paint only once its picture has loaded: wait for
+   `[data-mask-canvas][data-ready="true"]` before a stroke, or the stroke is
+   dropped and the shot shows an empty mask. The Inpaint group reaches its
+   picture through Reuse image on a Generate output, so it runs after the
+   Generate group has made some.
+
+   If the PR adds a screen, a popover, a mode or a state a reviewer would want
+   to see, add a `shot()` for it in `tests/e2e/qa.spec.ts` in the same PR.
+   `shot()` runs its `setup` to reach the state, then photographs it whatever
+   happened. Pass `true` last when the state is an error on purpose. The fake
+   ComfyUI fails the next prompt on request:
    `POST http://127.0.0.1:8296/__fake/scenario?name=error-mid-graph`.
 
 4. **Publish the sheet.** With the Artifact tool, publish
@@ -69,7 +85,7 @@ changes anything under `src/frontend/` or `src/http/`.
    ```md
    ## Visual QA
 
-   [Contact sheet](artifact url) — 70 shots, 0 failed, 0 with console errors, at
+   [Contact sheet](artifact url) — 87 shots, 0 failed, 0 with console errors, at
    <short sha>.
 
    - <anything failed or noisy, and whether this PR caused it>
