@@ -47,10 +47,16 @@ function png(width: number, height: number, rgb: [number, number, number]): Buff
   ]);
 }
 
-/** How much of the editor's canvas is painted, 0 to 1. */
+/**
+ * How much of the editor's canvas is painted, 0 to 1. Nothing, until the
+ * picture has loaded and sized it: an editor just opened has a 0×0 canvas,
+ * and reading one throws — which ends a poll on the spot instead of letting
+ * it wait, and on a slow runner the poll gets there first.
+ */
 function painted(page: Page): Promise<number> {
   return page.locator("[data-mask-canvas]").evaluate((element) => {
     const canvas = element as HTMLCanvasElement;
+    if (canvas.width === 0 || canvas.height === 0) return 0;
     const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height)
       .data;
     let covered = 0;
@@ -60,7 +66,17 @@ function painted(page: Page): Promise<number> {
 }
 
 /** A stroke across the middle third of the picture, left to right. */
+/**
+ * The editor takes paint once its picture, and any mask being edited, have
+ * loaded; a stroke before that is dropped. A test that does not wait for it
+ * paints nothing on a slow runner and saves an empty mask.
+ */
+async function editorReady(page: Page) {
+  await expect(page.locator("[data-mask-canvas]")).toHaveAttribute("data-ready", "true");
+}
+
 async function strokeAcross(page: Page) {
+  await editorReady(page);
   const box = (await page.locator("[data-mask-canvas]").boundingBox())!;
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width / 3, y);
@@ -148,6 +164,7 @@ test("a mask is painted over its picture, and the run takes it", async ({ page, 
 
   // Reopened, it paints on top of what is there.
   await edit.click();
+  await editorReady(page);
   await expect.poll(() => painted(page)).toBeGreaterThan(0.02);
 
   // White draws the mask solid, for a picture the tint blurs into (§10).

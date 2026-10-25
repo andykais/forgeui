@@ -428,6 +428,7 @@
           class:hidden
           class:white={view === "white"}
           data-mask-canvas
+          data-ready={ready}
           onpointerdown={onPointerDown}
           onpointermove={onPointerMove}
           onpointerup={onPointerUp}
