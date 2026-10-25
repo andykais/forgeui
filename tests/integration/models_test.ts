@@ -657,6 +657,7 @@ Deno.test("families come back with model and workflow counts", async () => {
         "krea2",
         "ltx",
         "ltx-2",
+        "minimax-h3",
         "qwen-image",
         "sd15",
         "sdxl",
@@ -684,6 +685,8 @@ Deno.test("families come back with model and workflow counts", async () => {
     // Two LTX-2.3 workflows: one that imagines its own sound, one that
     // lip-syncs to a take you supply (DESIGN-AUDIO §3).
     assertEquals(byName.get("ltx-2")?.workflows, 2);
+    // And the same pair on MiniMax H3.
+    assertEquals(byName.get("minimax-h3")?.workflows, 2);
   });
 });
 

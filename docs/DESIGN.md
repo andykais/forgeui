@@ -194,7 +194,7 @@ Field notes:
 | `bool` | toggle | scalar, or `switch` (graph rewrite, §4.4) |
 | `enum` | dropdown; `options` in manifest, or `source: "checkpoints"` etc. | scalar |
 | `seed` | number + 🎲 + "lock" | scalar; `-1` → random at submit |
-| `size` | width×height with ratio presets/aspect lock; `default` is the workflow's base resolution, optional `step` (16 or 64) snaps ratio results to the model's grid | `{w, h}` |
+| `size` | width×height with ratio presets/aspect lock; `default` is the workflow's base resolution, optional `step` (8, 16, 32 or 64) snaps ratio results to the model's grid | `{w, h}` |
 | `checkpoint` | model picker (filtered by family) | scalar (filename) |
 | `lora_list` | repeatable rows: lora picker + strength(s) | `chain` (graph rewrite, §4.4) |
 | `image` | file picker / drop / paste, thumbnail with the stored size | scalar (`LoadImage.image`), content-addressed (§9) |
@@ -331,6 +331,8 @@ Initial set:
 | `krea2` | krea2 | image | prompt, enhance, model, seed, size, loras; steps/cfg/clip/vae/enhancer length advanced. `enhance` is a `switch` bind (§4.4): the prompt enhancer is a checkbox on this workflow, not a second copy of it |
 | `illustrious` | sdxl | image | prompt, negative, seed, size, steps/cfg (adv), loras |
 | `ltx2-i2v` | ltx-2 | video | the official Comfy-Org LTX-2.3 image-to-video template, flattened out of its subgraph: image (required), prompt, negative, size, duration (seconds — the graph makes `duration * fps + 1` frames), fps, seed, loras, enhance; the models, the distilled LoRA and its strength, the latent upscaler, the sampler and the refine sigmas advanced. Two sampling passes either side of a spatial latent upsample, with an audio latent carried alongside, so it writes a video with sound. `model` binds three loaders at once (§4.4) |
+| `minimax-h3-i2v` | minimax-h3 | video | the official Comfy-Org MiniMax H3 image-to-video template, flattened out of its subgraph: image (required), prompt, size (step 32), duration (seconds at 24 fps, rounded up to the model's 17k + 5 frame grid), seed, loras, use_turbo; the model, text encoder, both VAEs, steps, the turbo LoRA, its strength and steps, and the sampler advanced. One pass, video and stereo audio generated together |
+| `minimax-h3-ia2v` | minimax-h3 | video | `minimax-h3-i2v` plus an audio take (required) and a start offset; `duration` follows the clip (§11.3). The trimmed clip is anchored at frame 0 by `MiniMaxH3AddGuide`, so the sampler keeps it and draws a picture to fit it |
 | `anima` | anima | image | as above; family-filtered loras |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
@@ -2084,4 +2086,4 @@ If it fails, update the fake; never make the default suite depend on it.
    excluded from `q`? Proposed: a "search notes" toggle on the Models page
    only.
 4. *(Resolved)* Ratio presets resolve against the `size` param's `default`;
-   optional `step` (16|64) snaps results to the model's grid (§4.3).
+   optional `step` (8|16|32|64) snaps results to the model's grid (§4.3).

@@ -588,6 +588,7 @@ export const FAMILIES = [
   "anima",
   "ltx",
   "ltx-2",
+  "minimax-h3",
   "z-image",
   "wan2",
   "qwen-image",

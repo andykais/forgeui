@@ -93,6 +93,7 @@ Deno.test("family: baseModel onto §8.1's list, and no guess otherwise", () => {
   assertEquals(familyOf("Wan Video 14B t2v"), "wan2");
   assertEquals(familyOf("Qwen"), "qwen-image");
   assertEquals(familyOf("LTXV 2"), "ltx-2");
+  assertEquals(familyOf("MiniMax H3"), "minimax-h3");
   assertEquals(familyOf("ZImageBase"), "z-image");
   assertEquals(familyOf("ZImageTurbo"), "z-image");
   // Krea 2 is its own family; Flux.1 Krea is a Flux.

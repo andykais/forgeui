@@ -315,6 +315,67 @@ Deno.test("image plus audio to video pins the take and sets the length", async (
 });
 
 /**
+ * The same thing on MiniMax H3, by a different mechanism. H3 has no noise
+ * mask to hold the audio still: a clip to keep is a guide in the
+ * conditioning, anchored at a frame, and the model never denoises it. Frame
+ * 0 is what makes it the soundtrack rather than a sound somewhere in it.
+ */
+Deno.test("MiniMax H3 image plus audio guides on the take from frame 0", async () => {
+  await withTestApp(async (app) => {
+    const clip = await uploadClip(app);
+    const frame = new FormData();
+    frame.set(
+      "file",
+      new File(
+        [tinyPng({ width: 64, height: 64 }).buffer as ArrayBuffer],
+        "frame.png",
+      ),
+    );
+    const picture = await app.json<{ filename: string }>("/api/inputs", {
+      method: "POST",
+      body: frame,
+    });
+
+    const done = await settle(
+      app,
+      (await submit(app, "minimax-h3-ia2v", {
+        image: picture.filename,
+        audio: clip,
+        prompt: "the cactus creature from <Picture 1> talks to the camera",
+        duration: 6,
+        start: 1.5,
+      })).id,
+    );
+    assertEquals(done.status, "done");
+
+    assertEquals(done.api_graph["24"]!.inputs.audio, clip);
+    assertEquals(done.api_graph["23"]!.inputs.image, picture.filename);
+    assertEquals(done.api_graph["13"]!.inputs.first_frame, ["23", 0]);
+
+    // The guide sits between the conditioning and the guider, and reads the
+    // trimmed clip through the audio VAE.
+    const guide = done.api_graph["26"]!;
+    assertEquals(guide.class_type, "MiniMaxH3AddGuide");
+    assertEquals(guide.inputs.frame_idx, 0);
+    assertEquals(guide.inputs.audio, ["25", 0]);
+    assertEquals(guide.inputs.audio_vae, ["11", 0]);
+    assertEquals(guide.inputs.positive, ["13", 0]);
+    assertEquals(guide.inputs.latent, ["13", 1]);
+    assertEquals(done.api_graph["8"]!.inputs.conditioning, ["26", 0]);
+
+    // One duration trims the clip and sets the frame count.
+    assertEquals(done.api_graph["15"]!.inputs.value, 6);
+    assertEquals(done.api_graph["25"]!.inputs.duration, ["15", 0]);
+    assertEquals(done.api_graph["25"]!.inputs.start_index, 1.5);
+    assertEquals(done.api_graph["14"]!.inputs["values.a"], ["15", 0]);
+    assertEquals(done.api_graph["13"]!.inputs.length, ["14", 1]);
+
+    const output = await latestOutput(app);
+    assertEquals(output.kind, "video");
+  }, { comfy: true });
+});
+
+/**
  * The middle of the three (§4.6): the graph itself asks its loader not to
  * fetch anything. With this off the pack raises a `FileNotFoundError` that
  * lists every directory it searched — which is the error a missing file

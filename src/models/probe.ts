@@ -161,6 +161,13 @@ export function detectFamily(header: Header): string | null {
     return has("audio_adaln_single.linear.weight") ? "ltx-2" : "ltx";
   }
 
+  // MiniMax H3 projects its video and audio patches separately, and is the
+  // only joint audio-video model here that does it this way
+  // (`comfy/model_detection.py`).
+  if (has("video_patch_proj.weight") && has("audio_patch_proj.weight")) {
+    return "minimax-h3";
+  }
+
   // Anima is a Cosmos-Predict2 graph with an LLM adapter bolted on.
   if (
     has("blocks.0.mlp.layer1.weight") &&
@@ -239,6 +246,7 @@ const DECLARED_ARCHITECTURES: readonly [RegExp, string][] = [
   [/flux/, "flux"],
   [/ltx[\W_]?(video[\W_]?)?2/, "ltx-2"],
   [/ltx/, "ltx"],
+  [/minimax|hailuo/, "minimax-h3"],
   [/z[\W_]?image/, "z-image"],
   [/wan[\W_]?(video|x)?[\W_]?2|wan[\W_]?(video|x)/, "wan2"],
   [/qwen/, "qwen-image"],

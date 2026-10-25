@@ -460,15 +460,15 @@ function validateParam(
       const step = raw.step === undefined
         ? undefined
         : num(raw.step, `${at}.step`);
-      if (step !== undefined && ![8, 16, 64].includes(step)) {
-        fail(`${at}.step`, "8, 16 or 64");
+      if (step !== undefined && ![8, 16, 32, 64].includes(step)) {
+        fail(`${at}.step`, "8, 16, 32 or 64");
       }
       return {
         ...common,
         type,
         bind: { w, h },
         default: [width, height],
-        ...(step !== undefined ? { step: step as 8 | 16 | 64 } : {}),
+        ...(step !== undefined ? { step: step as 8 | 16 | 32 | 64 } : {}),
       };
     }
     case "model":
