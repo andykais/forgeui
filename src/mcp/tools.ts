@@ -305,7 +305,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "has (get_model_samples shows them) and how many outputs it has made. " +
       "`summary` says what a model is and `notes` what was learned using " +
       "it; set_model_summary and set_model_notes write them. " +
-      "Pass the `name` back in a workflow's lora list, not the display name.",
+      "Pass the `name` back in a workflow's lora list, not the display " +
+      'name, as {"name": …, "strength": 0.7} with a strength from that ' +
+      "range.",
     strengths: true,
   });
 
@@ -653,7 +655,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "the next round can attach one. `params` are checked against the " +
       "workflow as describe_workflow gives it: a key it does not list, or " +
       "a number outside its min/max, refuses the round with what it takes " +
-      "— nothing is renamed, dropped or clamped for you.",
+      "— nothing is renamed, dropped or clamped for you. e.g. params " +
+      '{"prompt": "…", "steps": 24, "loras": [{"name": ' +
+      '"film-grain.safetensors", "strength": 0.7}]}: `strength` is the ' +
+      "LoRA's one weight, and what to pass unless you mean to set its model " +
+      "and clip halves apart.",
     inputSchema: z.strictObject({
       jobs: z.array(z.strictObject({
         workflow_id: z.string(),

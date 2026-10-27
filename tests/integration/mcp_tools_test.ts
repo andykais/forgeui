@@ -539,3 +539,43 @@ Deno.test("describe_workflow says what a LoRA row takes", async () => {
     assertStringIncludes(loras.supply ?? "", "list_loras");
   });
 });
+
+/** Everywhere a model forms a LoRA row, the short form is the one shown. */
+Deno.test("the tools that lead to a LoRA row show it with `strength`", async () => {
+  await withTestApp(async (app) => {
+    const handler = createMcpHandler(() =>
+      createBridgeServer({
+        forge: new ForgeUi({ url: app.url }),
+        llm: null,
+        freeVram: false,
+        progress: false,
+        defaultTimeoutMs: 30_000,
+      })
+    );
+    try {
+      const response = await handler.fetch(
+        new Request("http://bridge/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        }),
+      );
+      const body = await response.text();
+      const data = body.split("\n").find((line) => line.startsWith("data:"))!;
+      const { result } = JSON.parse(data.slice("data:".length)) as {
+        result: { tools: { name: string; description: string }[] };
+      };
+      const described = new Map(
+        result.tools.map((tool) => [tool.name, tool.description]),
+      );
+      for (const name of ["generate", "list_loras"]) {
+        assertStringIncludes(described.get(name)!, '"strength": 0.7');
+      }
+    } finally {
+      await handler.close();
+    }
+  });
+});
