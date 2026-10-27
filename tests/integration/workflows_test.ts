@@ -60,6 +60,8 @@ const BUNDLED = [
   ["krea2-inpaint", "Krea 2 Turbo (inpaint)"],
   ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
+  ["minimax-h3-ia2v", "MiniMax H3 Image + Audio to Video"],
+  ["minimax-h3-i2v", "MiniMax H3 Image to Video"],
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-img2img", "Stable Diffusion 1.5 (img2img)"],
   ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
@@ -333,6 +335,10 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         // inpaint: a mask on the first frame says nothing about the rest.
         "ltx-2",
         "ltx-2",
+        // MiniMax H3 mirrors the LTX-2.3 pair: one imagining its own sound,
+        // one pinned to a take.
+        "minimax-h3",
+        "minimax-h3",
         "sd15",
         "sd15",
         "sd15",

@@ -1,0 +1,197 @@
+{
+  "id": "minimax-h3-i2v",
+  "name": "MiniMax H3 Image to Video",
+  "family": "minimax-h3",
+  "kind": "video",
+  "category": null,
+  "description": "The official Comfy-Org MiniMax H3 image-to-video graph: a first frame and a prompt become a video with stereo sound, generated together in one pass. Length is duration in seconds at 24 fps, rounded up to the model's frame grid.",
+  "params": [
+    {
+      "key": "image",
+      "label": "First frame",
+      "type": "image",
+      "required": true,
+      "bind": "23.image"
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "bind": "13.prompt",
+      "description": "H3 reads the attached picture as <Picture 1>, and does best with a scene, a timeline and a line on the sound."
+    },
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "size",
+      "default": [
+        1344,
+        768
+      ],
+      "step": 32,
+      "bind": {
+        "w": "13.width",
+        "h": "13.height"
+      },
+      "description": "The first frame is stretched to this, so it follows the attached picture. 1344x768 is the largest the model was trained at."
+    },
+    {
+      "key": "duration",
+      "label": "Duration (s)",
+      "type": "float",
+      "default": 5.0,
+      "min": 1.0,
+      "max": 15.0,
+      "step": 0.5,
+      "bind": "15.value",
+      "description": "Length in seconds at 24 fps. The graph rounds the frame count up to the model's 17k + 5 grid, so 5 s is 124 frames. H3 was trained on 5 to 15 seconds."
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "7.noise_seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "minimax-h3"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "17.output",
+          "clip_from": null,
+          "model_to": [
+            "2.model",
+            "8.model"
+          ],
+          "clip_to": null
+        }
+      }
+    },
+    {
+      "key": "use_turbo",
+      "label": "Turbo LoRA",
+      "type": "bool",
+      "default": false,
+      "bind": "21.value",
+      "description": "MiniMax's 8-step turbo LoRA: 8 steps instead of 20, for a faster and somewhat looser result. Off, the file is not even opened."
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "family": "minimax-h3"
+      },
+      "bind": "1.unet_name",
+      "description": "The FL2VA checkpoint — first and last frame to video with audio. The Ref2VA one is a different task and will not take a first frame."
+    },
+    {
+      "key": "clip",
+      "label": "Text encoder",
+      "type": "text_encoder",
+      "advanced": true,
+      "bind": "5.clip_name"
+    },
+    {
+      "key": "vae",
+      "label": "Video VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "4.vae_name"
+    },
+    {
+      "key": "audio_vae",
+      "label": "Audio VAE",
+      "type": "vae",
+      "advanced": true,
+      "bind": "11.vae_name"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "advanced": true,
+      "default": 20,
+      "min": 1,
+      "max": 100,
+      "bind": "19.value",
+      "when": {
+        "param": "use_turbo",
+        "is": false
+      }
+    },
+    {
+      "key": "turbo_lora",
+      "label": "Turbo LoRA",
+      "type": "model",
+      "advanced": true,
+      "filter": {
+        "class": "lora"
+      },
+      "bind": "16.lora_name",
+      "when": {
+        "param": "use_turbo",
+        "is": true
+      }
+    },
+    {
+      "key": "turbo_strength",
+      "label": "Turbo strength",
+      "type": "float",
+      "advanced": true,
+      "default": 1.0,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "bind": "16.strength_model",
+      "when": {
+        "param": "use_turbo",
+        "is": true
+      }
+    },
+    {
+      "key": "turbo_steps",
+      "label": "Turbo steps",
+      "type": "int",
+      "advanced": true,
+      "default": 8,
+      "min": 1,
+      "max": 50,
+      "bind": "20.value",
+      "when": {
+        "param": "use_turbo",
+        "is": true
+      },
+      "description": "The LoRA is trained for 8."
+    },
+    {
+      "key": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "advanced": true,
+      "default": "res_multistep",
+      "bind": "9.sampler_name",
+      "options": [
+        "res_multistep",
+        "euler",
+        "euler_ancestral",
+        "dpmpp_2m",
+        "dpmpp_sde",
+        "ddim"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "node": "22",
+      "kind": "video"
+    }
+  ]
+}

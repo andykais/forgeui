@@ -247,7 +247,7 @@ Deno.test("numbers, enums and sizes are sanity-checked", () => {
       step: 12,
       bind: { w: "5.width", h: "5.height" },
     }],
-    "8, 16 or 64",
+    "8, 16, 32 or 64",
   );
 });
 
@@ -255,7 +255,7 @@ Deno.test("workflow-level fields are checked", () => {
   assertThrows(
     () => validateManifest(manifest([], { family: "pony" }), { graph }),
     ManifestError,
-    "one of flux, flux2, krea2, chroma, sdxl, anima, ltx, ltx-2, z-image, " +
+    "one of flux, flux2, krea2, chroma, sdxl, anima, ltx, ltx-2, minimax-h3, z-image, " +
       "wan2, qwen-image, sd15",
   );
   assertThrows(

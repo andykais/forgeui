@@ -161,6 +161,7 @@ const REPO_FAMILIES: [RegExp, string][] = [
   [/chroma/i, "chroma"],
   [/ltx-?2/i, "ltx-2"],
   [/ltx/i, "ltx"],
+  [/minimax-?h3/i, "minimax-h3"],
   [/z-?image/i, "z-image"],
   [/wan-?2|\bwan\b/i, "wan2"],
   [/qwen-?image/i, "qwen-image"],

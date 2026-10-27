@@ -136,6 +136,7 @@ const BASE_MODEL_FAMILIES: [RegExp, string][] = [
   [/^chroma/i, "chroma"],
   [/^ltxv?\s*2/i, "ltx-2"],
   [/^ltx/i, "ltx"],
+  [/^minimax\s*h3/i, "minimax-h3"],
   [/^z[\s-]?image/i, "z-image"],
   [/^wan/i, "wan2"],
   [/^qwen/i, "qwen-image"],

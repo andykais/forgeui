@@ -353,6 +353,39 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["fps", "bit_depth", "color_space"],
     outputs: ["VIDEO"],
   },
+
+  // --------------------------------------------------- MiniMax H3 (§4.6)
+  //
+  // `comfy_extras/nodes_minimax_h3.py`. H3 is an audio-video model like
+  // LTX-2.3, but its latent is one nested pair from the start: the conditioning
+  // node hands back both the prompt and the empty AV latent, and a keyframe or
+  // a clip to keep rides in the conditioning, not in a noise mask.
+  /** Prompt plus optional first/last frames into conditioning and the AV latent. */
+  MiniMaxH3ImageToVideo: {
+    inputs: ["clip", "vae", "first_frame", "last_frame"],
+    widgets: ["prompt", "width", "height", "length"],
+    outputs: ["positive", "LATENT"],
+  },
+  /**
+   * Pins an image, a clip or a sound at a frame of the target. `minimax-h3-ia2v`
+   * pins the supplied audio at frame 0, which is the H3 way of saying what
+   * `ltx2-ia2v`'s zero noise mask says: keep this sound, draw a picture to it.
+   */
+  MiniMaxH3AddGuide: {
+    inputs: ["positive", "vae", "audio_vae", "latent", "image", "audio"],
+    widgets: ["frame_idx"],
+    outputs: ["positive"],
+  },
+  /** No CFG and no negative: H3's distilled schedule samples on the prompt alone. */
+  BasicGuider: {
+    inputs: ["model", "conditioning"],
+    outputs: ["GUIDER"],
+  },
+  ImageScaleToTotalPixels: {
+    inputs: ["image"],
+    widgets: ["upscale_method", "megapixels", "resolution_steps"],
+    outputs: ["IMAGE"],
+  },
   KSampler: {
     inputs: ["model", "positive", "negative", "latent_image"],
     widgets: ["seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"],

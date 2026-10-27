@@ -31,6 +31,10 @@ export type ApiLink = [string, number];
  * encoder and latent nodes, so a graph written for one cannot load the
  * other.
  *
+ * `minimax-h3` is the open-weights MiniMax H3, an audio-video model on a
+ * Qwen3-VL text encoder: nothing else here shares its latent or its
+ * conditioning, so it is a family of one.
+ *
  * Since the picker orders by family (§5), this is no longer decoration: it
  * is what tells a user which of their models a workflow can actually use.
  */
@@ -43,6 +47,7 @@ export const FAMILIES = [
   "anima",
   "ltx",
   "ltx-2",
+  "minimax-h3",
   "z-image",
   "wan2",
   "qwen-image",
@@ -220,7 +225,7 @@ export interface SizeParam extends ParamCommon {
   /** The workflow's base resolution; ratio presets resolve against it. */
   default: [number, number];
   /** Snaps ratio results to the model's grid. */
-  step?: 8 | 16 | 64;
+  step?: 8 | 16 | 32 | 64;
 }
 
 export interface ModelFilter {

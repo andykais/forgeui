@@ -70,6 +70,17 @@ Deno.test("LTX-2 is told from LTX-Video by its audio conditioning", () => {
   );
 });
 
+Deno.test("MiniMax H3 is read off its two patch projections", () => {
+  assertEquals(
+    detectFamily(
+      header(["video_patch_proj.weight", "audio_patch_proj.weight"]),
+    ),
+    "minimax-h3",
+  );
+  // One projection alone is not H3: the pair is the tell.
+  assertEquals(detectFamily(header(["video_patch_proj.weight"])), null);
+});
+
 Deno.test("Z-Image is Lumina 2 at a wider hidden size", () => {
   const lumina = {
     "cap_embedder.1.weight": [3840, 2048],

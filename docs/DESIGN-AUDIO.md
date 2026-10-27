@@ -23,6 +23,7 @@ Four workflows ship:
 | `breeze-tts-design` | Speech in a voice described in words — no reference clip. | `ComfyUI-Breeze-TTS-2` | `Breeze-TTS-2-int8-hybrid` |
 | `ace-step-song` | A song: style tags plus lyrics, sung, with backing. | none — core nodes | `acestep_v1.5_xl_turbo_bf16`, `qwen_0.6b_ace15`, `qwen_4b_ace15`, `ace_1.5_vae` |
 | `ltx2-ia2v` | An image plus an audio take, returning video lip-synced to it. | none — core nodes | `ltx-2.3-22b-dev-fp8`, `gemma_3_12B_it_fp4_mixed`, `ltx_2.3_22b_distilled_1.1_lora`, `ltx-2.3-spatial-upscaler-x2-1.1` |
+| `minimax-h3-ia2v` | The same, on MiniMax H3: the take is pinned at frame 0 as a guide rather than masked into the latent. | none — core nodes | `minimax_h3_fl2va_pruned_int8_convrot`, `qwen3vl_32b_minimax_h3_nvfp4_awq`, `minimax_h3_video_vae_int8_convrot`, `minimax_h3_audio_vae_fp32` (+ the optional `minimax_h3_fl2v_turbo_8step` LoRA) |
 
 The first two are text-to-speech and differ only in where the voice comes
 from. The third sings. The fourth is the point of the other three: it takes a
