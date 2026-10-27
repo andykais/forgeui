@@ -169,7 +169,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     description:
       "Every workflow ForgeUI can run: id, name, family and kind. Start here — " +
       "the id is what `generate` takes.",
-    inputSchema: z.object({}),
+    inputSchema: z.strictObject({}),
   }, async () => {
     try {
       return text(await forge.get("/api/workflows"));
@@ -184,7 +184,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "and when it applies, and how to supply any media it takes. Read this " +
       "before writing a prompt — what Illustrious wants is not what Krea " +
       "wants.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       workflow_id: z.string().describe("id from list_workflows"),
     }),
   }, async ({ workflow_id }) => {
@@ -223,7 +223,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "returned, attached whole, at full quality, never the downscaled copy " +
       "`get_output_preview` shows you — or `file`, a path on the machine " +
       "running this bridge, for media you did not make here.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string().optional().describe(
         "an output id from generate or search_gallery",
       ),
@@ -322,7 +322,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "followed by a small " +
       "preview of the first `limit` of them. Name the model as the listings " +
       "do (`name`), or by its hash.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       model: z.string().describe(
         "the `name` from list_checkpoints or list_loras, or the model's hash",
       ),
@@ -466,7 +466,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "person wrote about a picture after looking at it, which is the " +
       "feedback worth reading before making another one. This is the loop's " +
       "memory: it survives you being unloaded and the harness restarting.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       q: z.string().optional().describe(
         "free text over the prompts and the notes written about an output",
       ),
@@ -496,7 +496,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "notes on what you made last time before deciding what to make next. " +
       "Metadata only: to see the output use get_output_preview, and for the " +
       "file itself get_output_file.",
-    inputSchema: z.object({ output_id: z.string() }),
+    inputSchema: z.strictObject({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
       return text(
@@ -517,7 +517,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "matches what was asked, at a fraction of the tokens. Never for " +
       "chaining or keeping: attach_input and get_output_file work from the " +
       "full-quality original. Audio has no smaller copy; use get_output_file.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string(),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
         "longest edge in pixels, default 768; smaller is cheaper and enough " +
@@ -576,7 +576,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "this bridge and the path handed back instead of the bytes — the way " +
       "to pass a result to another program. Inline stops at " +
       `${INLINE_LIMIT_MB} MB; past that, save_to is the way.`,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string(),
       save_to: z.string().optional().describe(
         "absolute path of a file to write, or of an existing directory to " +
@@ -624,7 +624,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     description:
       "What is on the GPU right now and how much VRAM is free. Ask before a " +
       "big job: a video workflow needs far more room than an SDXL one.",
-    inputSchema: z.object({}),
+    inputSchema: z.strictObject({}),
   }, async () => {
     try {
       const status = await forge.get("/api/system/status").catch(() => null);
@@ -650,11 +650,17 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "note is what search_gallery finds later. A param that takes media — " +
       "an image, a clip — wants a value from attach_input, not a filename " +
       "or an id. Every finished job comes back with its outputs named, so " +
-      "the next round can attach one.",
-    inputSchema: z.object({
-      jobs: z.array(z.object({
+      "the next round can attach one. `params` are checked against the " +
+      "workflow as describe_workflow gives it: a key it does not list, or " +
+      "a number outside its min/max, refuses the round with what it takes " +
+      "— nothing is renamed, dropped or clamped for you.",
+    inputSchema: z.strictObject({
+      jobs: z.array(z.strictObject({
         workflow_id: z.string(),
-        params: z.record(z.string(), z.unknown()),
+        params: z.record(z.string(), z.unknown()).describe(
+          "keyed by the param keys describe_workflow lists; leave one out " +
+            "for its default",
+        ),
         note: z.string().optional().describe(
           "what is different about this one",
         ),
@@ -722,7 +728,7 @@ function registerLibraryTool(
 ): void {
   server.registerTool(tool.name, {
     description: tool.description,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       family: z.string().optional().describe(
         "exact family, e.g. krea2 or sdxl; list_workflows names the " +
           "family each workflow wants",
@@ -797,7 +803,7 @@ function registerModelTextTool(
 ): void {
   server.registerTool(tool.name, {
     description: tool.description,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       model: z.string().describe(
         "the `name` from list_checkpoints or list_loras, or the model's hash",
       ),
@@ -866,6 +872,12 @@ interface ManifestParam {
  * silently gets wrong — the default trims the take instead.
  */
 function supplyHint(param: ManifestParam): string | undefined {
+  if (param.type === "lora_list") {
+    return `a list of rows, {name, strength}: \`name\` from list_loras, ` +
+      `\`strength\` for the LoRA as a whole (default 1). Only to split it, ` +
+      `strength_model and strength_clip override either half. Nothing else ` +
+      `goes in a row; [] for none.`;
+  }
   if (["image", "mask", "video", "audio"].includes(param.type)) {
     return `attach_input first (by output_id, or by file), then pass the ` +
       `\`value\` it returns`;

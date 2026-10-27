@@ -28,7 +28,8 @@ async function submit(
     method: "POST",
     body: JSON.stringify({
       workflow_id: workflow,
-      params: { prompt: PROMPT, ...params },
+      // krea2's one required param; any other workflow is given what it takes.
+      params: workflow === "krea2" ? { prompt: PROMPT, ...params } : params,
     }),
   });
 }

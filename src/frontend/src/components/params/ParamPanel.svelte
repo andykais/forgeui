@@ -165,6 +165,20 @@
     return Number((event.currentTarget as HTMLInputElement).value);
   }
 
+  /**
+   * A typed number lands inside the field's range once it is committed, not
+   * on every keystroke (typing "50" into 4–100 passes through "5"). The
+   * server refuses an out-of-range value rather than clamping it (§4.3), so
+   * the field is where it is brought into range, in front of the user.
+   */
+  function inRange(param: { min?: number; max?: number }, value: number): number {
+    if (!Number.isFinite(value)) return value;
+    let out = value;
+    if (param.min !== undefined) out = Math.max(out, param.min);
+    if (param.max !== undefined) out = Math.min(out, param.max);
+    return out;
+  }
+
   function isModelParam(param: Param): boolean {
     return (
       param.type === "model" || param.type === "text_encoder" || param.type === "vae"
@@ -468,6 +482,14 @@
             value={(values[param.key] as number) ?? 0}
             aria-label={`${label(param)} value`}
             oninput={(event) => onchange(param.key, number(event))}
+            onchange={(event) => {
+              const typed = number(event);
+              const kept = inRange(param, typed);
+              if (kept !== typed) {
+                (event.currentTarget as HTMLInputElement).value = String(kept);
+                onchange(param.key, kept);
+              }
+            }}
           />
         </div>
       {:else if param.type === "bool"}

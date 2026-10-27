@@ -448,3 +448,94 @@ Deno.test("generate runs the user copy's graph, text encoder included", async ()
     );
   }, { comfy: true });
 });
+
+/**
+ * The case that started it: a model wrote `strength` on a LoRA row, the API
+ * dropped the key it did not know, and every job in the sweep ran at 1.0.
+ * `strength` is now the row's own shorthand for the linked slider (§4.3).
+ */
+Deno.test("generate takes `strength` on a LoRA row as both halves", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: {
+          prompt: "a fox in snow",
+          loras: [{ name: "grain.safetensors", strength: 0.6 }],
+        },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+    const lora = Object.values(app.fake!.prompts.at(-1)!.graph).find((node) =>
+      node.class_type === "LoraLoader"
+    );
+    assertEquals(lora?.inputs.strength_model, 0.6);
+    assertEquals(lora?.inputs.strength_clip, 0.6);
+  }, { comfy: true });
+});
+
+Deno.test("generate refuses what the workflow does not take, and says which job", async () => {
+  await withTestApp(async (app) => {
+    const typo = await callTool<string>(app, "generate", {
+      jobs: [
+        { workflow_id: "sd15", params: { prompt: "a fox" } },
+        {
+          workflow_id: "sd15",
+          params: {
+            prompt: "a fox",
+            loras: [{ name: "grain.safetensors", weight: 0.6 }],
+          },
+        },
+      ],
+    }, { expectError: true });
+    assertStringIncludes(typo, "job 2 of 2 (sd15)");
+    assertStringIncludes(typo, 'row 0 has no "weight"');
+    assertStringIncludes(typo, "strength_model");
+
+    const unknown = await callTool<string>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: { prompt: "a fox", cfg_scale: 7 },
+      }],
+    }, { expectError: true });
+    assertStringIncludes(unknown, 'no param "cfg_scale"');
+    assertStringIncludes(unknown, "cfg");
+
+    const range = await callTool<string>(app, "generate", {
+      jobs: [{ workflow_id: "sd15", params: { prompt: "a fox", steps: 5000 } }],
+    }, { expectError: true });
+    assertStringIncludes(range, "steps: 5000 is out of range");
+
+    // Nothing from the refused rounds was left to run.
+    const active = await app.json<{ jobs: unknown[] }>(
+      "/api/jobs?status=active",
+    );
+    assertEquals(active.jobs.length, 0);
+  }, { comfy: true });
+});
+
+Deno.test("a tool argument the tool does not take is an error, not ignored", async () => {
+  await withTestApp(async (app) => {
+    const answer = await callTool<string>(app, "describe_workflow", {
+      workflow_id: "sd15",
+      verbose: true,
+    }, { expectError: true });
+    assertStringIncludes(answer, "verbose");
+
+    const job = await callTool<string>(app, "generate", {
+      jobs: [{ workflow_id: "sd15", parameters: { prompt: "a fox" } }],
+    }, { expectError: true });
+    assertStringIncludes(job, "parameters");
+  });
+});
+
+Deno.test("describe_workflow says what a LoRA row takes", async () => {
+  await withTestApp(async (app) => {
+    const detail = await callTool<{
+      params: { key: string; supply?: string }[];
+    }>(app, "describe_workflow", { workflow_id: "sd15" });
+    const loras = detail.params.find((param) => param.key === "loras")!;
+    assertStringIncludes(loras.supply ?? "", "{name, strength}");
+    assertStringIncludes(loras.supply ?? "", "list_loras");
+  });
+});

@@ -220,6 +220,41 @@ value is exactly the bundled graph's, and the user copy's own graph has since
 been changed to something else. The file is not rewritten; its next save
 from the workflow page writes it without them.
 
+**What a job's params are checked against** (`coerceParams`, for the panel,
+`POST /api/jobs`, a `forge mcp` round and a template alike). A value the
+submitter names is either used as given or refused with a message that names
+the key and what it takes. It is never quietly changed into something else:
+the submitter would see a result and believe it came from the value they
+sent. That matters most for an agent, which has no field to look at
+afterwards.
+
+- **A key the manifest does not have is refused**, and the message lists the
+  keys it does have. *Amended:* an earlier build dropped such keys without
+  saying, and an agent that wrote `strength` for `strength_model` ran a
+  whole sweep at 1.0. Reuse Parameters' "keys missing from the current
+  manifest" (§6.4) is about filling the panel, which takes what it can and
+  warns. The panel never submits a key that is not in its manifest.
+- **A number outside `min`/`max` is refused**, with the range. Rounding an
+  `int` and snapping to `step` are not refusals, because they never take a
+  value further than one step. The same holds for a `seed` outside the
+  workflow's own range (`-1` stays random). A default that is not the
+  submitter's, from the manifest or the graph, is still clamped, because
+  nobody asked for it.
+- **A `bool` takes `true`/`false`** (or `"true"`/`"false"`, `1`/`0`, from a
+  form). Anything else is refused rather than read as false.
+- **A model param takes a filename string.**
+- **A `lora_list` row takes `name`, `strength`, `strength_model` and
+  `strength_clip`, and nothing else.** `strength` sets both halves. This is
+  the panel's linked slider, and almost always what is meant.
+  `strength_model` or `strength_clip` overrides that half. Without
+  `strength`, clip follows `strength_model`. With none of them the row is
+  1.0/1.0. The resolved row always records both
+  (`{name, strength_model, strength_clip}`), so `strength` never reaches the
+  sidecar. A row whose `name` is empty is a picker nobody filled in and is
+  dropped. A `name` that is not a string is refused. A LoRA's
+  `strength_min`/`strength_max` is advice about where it is useful, not a
+  limit, so it is not checked here.
+
 #### `when`: a param that only sometimes applies
 
 Any param may carry `"when": { "param": "<key>", "is": <value> }`, and it
@@ -1885,7 +1920,8 @@ PUT  /api/templates/:id                 replace name/description/values/ask/acti
 DELETE /api/templates/:id               user templates and user copies; 409 for a bundled template with no copy
 POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
                                         the id of the template the panel was filled from (§4.8), which must
-                                        exist and fill this workflow
+                                        exist and fill this workflow; 400 for a param the manifest lacks or a
+                                        value it refuses (§4.3), never a silent change
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
                                         keeps the repeated run's template
 POST /api/jobs/:id/cancel
