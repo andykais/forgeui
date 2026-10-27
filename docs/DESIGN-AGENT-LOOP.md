@@ -162,7 +162,8 @@ bindings; the protocol is identical either way.
 | `set_model_notes` | writes a model's **notes** (§8.1): annotations, what was learned *using* it; read first, then add | fast |
 | `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first few | fast |
 | `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
-| `get_output` | the sidecar: params, seed, models, timings, origin | fast |
+| `get_output` | what a round needs: the params (seed resolved, LoRAs as `{name, strength}` unless the halves differ), the job (workflow, when, how long, origin), the file, the notes | fast |
+| `get_output_details` | for debugging: the whole `GET /api/outputs/:id` — the sidecar with its queued graph, model hashes and per-node timings. Hundreds of lines with a few LoRAs, so never the default | fast |
 | `get_output_preview` | the convenient look: a picture as an **image block** or a video as a small MP4, downscaled to `max_edge` (768) | fast |
 | `get_output_file` | the file itself, byte for byte — image, audio or video block, or written to a path on the bridge's disk (`save_to`) | size of the file |
 | `attach_input` | an output, or a file on the bridge's disk, into the input store (§9) | fast |

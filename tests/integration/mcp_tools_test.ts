@@ -579,3 +579,51 @@ Deno.test("the tools that lead to a LoRA row show it with `strength`", async () 
     }
   });
 });
+
+/**
+ * get_output is read every round, so it is what a round needs and no more;
+ * the sidecar whole, queued graph and all, is get_output_details.
+ */
+Deno.test("get_output is the params, the job and the file; details has the rest", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: {
+          prompt: "a fox in snow",
+          seed: 7,
+          loras: [{ name: "grain.safetensors", strength: 0.6 }],
+        },
+      }],
+      project: "foxes",
+    });
+    const id = round.jobs[0]!.outputs[0]!.id;
+
+    const summary = await callTool<{
+      id: string;
+      file: string;
+      job: { workflow_id: string; origin?: { project?: string } };
+      params: { seed: number; loras: Record<string, unknown>[] };
+      sidecar?: unknown;
+      api_graph?: unknown;
+    }>(app, "get_output", { output_id: id });
+    assertEquals(summary.id, id);
+    assert(summary.file.endsWith(".png"), summary.file);
+    assertEquals(summary.job.workflow_id, "sd15");
+    assertEquals(summary.job.origin?.project, "foxes");
+    assertEquals(summary.params.seed, 7);
+    // In the shape generate is told to send, without the library's hash.
+    assertEquals(summary.params.loras, [
+      { name: "grain.safetensors", strength: 0.6 },
+    ]);
+    assertEquals(summary.sidecar, undefined);
+    assertEquals(summary.api_graph, undefined);
+
+    const details = await callTool<{ sidecar: { api_graph: unknown } }>(
+      app,
+      "get_output_details",
+      { output_id: id },
+    );
+    assert(details.sidecar.api_graph, "details carries the queued graph");
+  }, { comfy: true });
+});

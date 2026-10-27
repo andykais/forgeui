@@ -492,12 +492,32 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
 
   server.registerTool("get_output", {
     description:
-      "Everything recorded about one output: the exact params, seed, models " +
-      "and timings that produced it, the origin saying who asked for it and " +
-      "why, and `notes` — what a person said about it afterwards. Read the " +
-      "notes on what you made last time before deciding what to make next. " +
-      "Metadata only: to see the output use get_output_preview, and for the " +
-      "file itself get_output_file.",
+      "What one output is and what made it: the params it was generated " +
+      "with (seed resolved, LoRAs with their strengths), its job — " +
+      "workflow, when, how long, and the origin saying who asked for it " +
+      "and why — the file, and `notes`: what a person said about it " +
+      "afterwards. Read the notes on what you made last time before " +
+      "deciding what to make next. Metadata only: to see the output use " +
+      "get_output_preview, and for the file itself get_output_file.",
+    inputSchema: z.strictObject({ output_id: z.string() }),
+  }, async ({ output_id }) => {
+    try {
+      const detail = await forge.get<OutputDetail>(
+        `/api/outputs/${encodeURIComponent(output_id)}`,
+      );
+      return text(outputSummary(detail));
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("get_output_details", {
+    description:
+      "For debugging a result, not for choosing what to make next: " +
+      "everything ForgeUI recorded about one output, including the " +
+      "rewritten ComfyUI graph that was queued, every model with its hash, " +
+      "and per-node timings. Hundreds of lines for a run with a few LoRAs. " +
+      "get_output has what a round needs.",
     inputSchema: z.strictObject({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
@@ -897,6 +917,78 @@ function supplyHint(param: ManifestParam): string | undefined {
       `the take off mid-word; long leaves padding the model fills.`;
   }
   return undefined;
+}
+
+/** `GET /api/outputs/:id`, narrowed to what {@link outputSummary} reads. */
+interface OutputDetail {
+  id: string;
+  job_id: string | null;
+  path: string;
+  kind: string;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  workflow_id: string | null;
+  notes: string | null;
+  params: Record<string, unknown>;
+  origin: unknown;
+  source: unknown;
+  generation_ms: number | null;
+  sidecar: {
+    created_at?: string;
+    workflow?: { id?: string; name?: string } | null;
+    params?: Record<string, unknown>;
+    template?: { name?: string } | null;
+  } | null;
+}
+
+/**
+ * One output as a round needs it: the params, the job, the file. Not the
+ * route body, which carries the sidecar whole — the queued graph repeats
+ * every model and LoRA the params already name, and with five LoRAs that
+ * is six hundred lines of which the model can act on twenty. That is what
+ * get_output_details is for.
+ */
+function outputSummary(detail: OutputDetail) {
+  const sidecar = detail.sidecar;
+  const params = { ...(sidecar?.params ?? detail.params) };
+  // A LoRA's hash is the library's business; name and strength are the
+  // round's, in the shape generate is told to send. A model copies what it
+  // is shown, so linked halves come back as the one `strength`.
+  for (const [key, value] of Object.entries(params)) {
+    if (!Array.isArray(value)) continue;
+    params[key] = value.map((row) => {
+      if (typeof row !== "object" || row === null) return row;
+      const { hash: _hash, ...rest } = row as Record<string, unknown>;
+      if (
+        "strength_model" in rest && rest.strength_model === rest.strength_clip
+      ) {
+        const { strength_model, strength_clip: _clip, ...named } = rest;
+        return { ...named, strength: strength_model };
+      }
+      return rest;
+    });
+  }
+  return {
+    id: detail.id,
+    kind: detail.kind,
+    file: detail.path,
+    width: detail.width ?? undefined,
+    height: detail.height ?? undefined,
+    duration_s: seconds(detail.duration_ms),
+    notes: detail.notes ?? undefined,
+    job: {
+      id: detail.job_id,
+      workflow_id: sidecar?.workflow?.id ?? detail.workflow_id,
+      workflow_name: sidecar?.workflow?.name,
+      created_at: sidecar?.created_at,
+      took_s: seconds(detail.generation_ms),
+      origin: detail.origin ?? undefined,
+      template: sidecar?.template?.name,
+    },
+    source: detail.source ?? undefined,
+    params,
+  };
 }
 
 /** What a picker shows: enough to choose with, and nothing the screen needs. */
