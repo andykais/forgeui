@@ -737,3 +737,91 @@ Deno.test("search_gallery finds what a LoRA made by the LoRA's name, a page at a
     await Deno.remove(folders.dir, { recursive: true });
   }
 });
+
+interface TemplateEntry {
+  id: string;
+  name: string;
+  workflow_id: string;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: string;
+}
+
+Deno.test("templates are listed, saved, updated and run through the bridge", async () => {
+  await withTestApp(async (app) => {
+    const { templates } = await callTool<{ templates: TemplateEntry[] }>(
+      app,
+      "list_templates",
+      { workflow_id: "sd15-img2img" },
+    );
+    assertEquals(templates.map((template) => template.id), ["sd15-upscale"]);
+    assertEquals(templates[0]!.ask, ["image"]);
+
+    // A new one, from what worked.
+    const saved = await callTool<TemplateEntry>(app, "save_template", {
+      workflow_id: "sd15",
+      name: "Foxes at dusk",
+      values: { steps: 30, cfg: 6.5 },
+      ask: ["prompt"],
+    });
+    assertEquals(saved.id, "foxes-at-dusk");
+    assertEquals(saved.source, "user");
+
+    // Updating replaces only what is passed.
+    const updated = await callTool<TemplateEntry>(app, "save_template", {
+      template_id: "foxes-at-dusk",
+      values: { steps: 24, cfg: 6.5 },
+    });
+    assertEquals(updated.name, "Foxes at dusk");
+    assertEquals(updated.values, { steps: 24, cfg: 6.5 });
+    assertEquals(updated.ask, ["prompt"]);
+
+    // Checked as a job's values are.
+    const bad = await callTool<string>(app, "save_template", {
+      template_id: "foxes-at-dusk",
+      values: { steps: 5000 },
+    }, { expectError: true });
+    assertStringIncludes(bad, "out of range");
+
+    // Run: the template's values, the job's params over them, recorded.
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        template: "foxes-at-dusk",
+        params: { prompt: "a fox at dusk", cfg: 5 },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+    const graph = app.fake!.prompts.at(-1)!.graph;
+    const sampler = Object.values(graph).find((node) =>
+      node.class_type === "KSampler"
+    )!;
+    assertEquals(sampler.inputs.steps, 24);
+    assertEquals(sampler.inputs.cfg, 5);
+    const output = await callTool<{ job: { template?: string } }>(
+      app,
+      "get_output",
+      { output_id: round.jobs[0]!.outputs[0]!.id },
+    );
+    assertEquals(output.job.template, "Foxes at dusk");
+
+    // What it asks for is the job's to give, before any GPU changes hands.
+    const asked = await callTool<string>(app, "generate", {
+      jobs: [{ template: "foxes-at-dusk", params: {} }],
+    }, { expectError: true });
+    assertStringIncludes(asked, 'template "foxes-at-dusk" asks for prompt');
+
+    const elsewhere = await callTool<string>(app, "generate", {
+      jobs: [{
+        template: "foxes-at-dusk",
+        workflow_id: "krea2",
+        params: { prompt: "x" },
+      }],
+    }, { expectError: true });
+    assertStringIncludes(elsewhere, "fills sd15, not krea2");
+
+    const unknown = await callTool<string>(app, "generate", {
+      jobs: [{ template: "nope", params: {} }],
+    }, { expectError: true });
+    assertStringIncludes(unknown, "list_templates");
+  }, { comfy: true });
+});

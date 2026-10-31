@@ -156,19 +156,21 @@ bindings; the protocol is identical either way.
 | --- | --- | --- |
 | `list_workflows` | proxies `GET /api/workflows` | fast |
 | `describe_workflow` | params with types, ranges, defaults, **and the prompting guide** (§6.4) | fast |
-| `list_checkpoints` | the diffusion class across every folder holding one, filterable by family | fast |
-| `list_loras` | LoRAs, filterable by family, each with its strength range (§8.1) | fast |
+| `list_checkpoints` | the diffusion class across every folder holding one, filtered by `family` or by the `workflow_id` being filled in | fast |
+| `list_loras` | LoRAs, filtered by `family` or `workflow_id`, each with its strength range (§8.1) | fast |
 | `set_model_summary` | writes a model's **summary** (DESIGN.md §8.1): one or two sentences, what it *is*; replaces | fast |
 | `set_model_notes` | writes a model's **notes** (§8.1): annotations, what was learned *using* it; read first, then add | fast |
-| `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first few | fast |
-| `search_gallery` | outputs under the §11.2 filters, including `project` and `source` | fast |
+| `get_model_samples` | a model's samples (§8.3): each one's origin and prompt, then small previews of the first `previews` | fast |
+| `search_gallery` | outputs under the §11.2 filters, including `project`, `source` and `model` (a listing's name), a page at a time by `cursor` | fast |
+| `list_templates` | templates (DESIGN.md §4.8): the workflow each fills, its `values`, what it `ask`s, and `problems` | fast |
+| `save_template` | a new template from a name, workflow, values and asks; or, by `template_id`, an update of only the fields passed (a bundled one gains a user copy) | fast |
 | `get_output` | what a round needs: the params (seed resolved, LoRAs as `{name, strength}` unless the halves differ), the job (workflow, when, how long, origin), the file, the notes | fast |
 | `get_output_details` | for debugging: the whole `GET /api/outputs/:id` — the sidecar with its queued graph, model hashes and per-node timings. Hundreds of lines with a few LoRAs, so never the default | fast |
 | `get_output_preview` | the convenient look: a picture as an **image block** or a video as a small MP4, downscaled to `max_edge` (768) | fast |
 | `get_output_file` | the file itself, byte for byte — image, audio or video block, or written to a path on the bridge's disk (`save_to`) | size of the file |
 | `attach_input` | an output, or a file on the bridge's disk, into the input store (§9) | fast |
 | `gpu_status` | what is resident, and how much VRAM is free | fast |
-| **`generate`** | the round: evict, submit the batch, wait, free, report | **minutes** |
+| **`generate`** | the round: evict, submit the batch, wait, free, report. A job may name a `template`: the bridge applies it as the panel does — its values, the job's params over them, its asks required — before the round starts, and the output records it | **minutes** |
 
 Only the last one is special, and only in how long it takes.
 

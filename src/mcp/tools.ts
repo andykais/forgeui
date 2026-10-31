@@ -21,6 +21,7 @@ import type {
   ModelRow,
   SampleRow,
   StoredInputView,
+  SubmitJob,
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
 import { runRound } from "./round.ts";
@@ -672,6 +673,92 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
+  server.registerTool("list_templates", {
+    description:
+      "Templates: saved ways to fill a workflow's params — a combination " +
+      "of LoRAs that works, the settings that turn an img2img workflow " +
+      "into an upscale. Each names one workflow, the `values` it sets and " +
+      "the params it `ask`s whoever uses it to fill in. Pass its id as a " +
+      "job's `template` in generate. `problems` says what no longer fits " +
+      "its workflow.",
+    inputSchema: z.strictObject({
+      workflow_id: z.string().optional().describe(
+        "only the templates for this workflow",
+      ),
+    }),
+  }, async ({ workflow_id }) => {
+    try {
+      const { templates } = await forge.get<{ templates: TemplateView[] }>(
+        "/api/templates",
+      );
+      return text({
+        templates: templates
+          .filter((template) =>
+            workflow_id === undefined || template.workflow === workflow_id
+          )
+          .map(templateEntry),
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("save_template", {
+    description:
+      "Save a template: a workflow, the param `values` it sets and the " +
+      "params it `ask`s for (a prompt, an image) — what worked, kept so it " +
+      "can be run again by you or the owner, who sees it in ForgeUI. " +
+      "Without `template_id` it is a new template, its id made from the " +
+      "name. With one it updates that template, replacing only the fields " +
+      "you pass: `values` and `ask` replace the whole of what was there, " +
+      "so read it first (list_templates) and pass back what should stay. " +
+      "Updating a bundled template saves a copy that takes its place. " +
+      "Values are checked against the workflow as a job's are.",
+    inputSchema: z.strictObject({
+      template_id: z.string().optional().describe(
+        "the template to update; leave out to make a new one",
+      ),
+      workflow_id: z.string().optional().describe(
+        "the workflow it fills; required for a new template, fixed after",
+      ),
+      name: z.string().optional().describe("required for a new template"),
+      description: z.string().optional(),
+      values: z.record(z.string(), z.unknown()).optional().describe(
+        "param key → value, as generate takes them; seed -1 stays random",
+      ),
+      ask: z.array(z.string()).optional().describe(
+        'param keys whoever uses it must give, e.g. ["prompt"]',
+      ),
+    }),
+  }, async ({ template_id, workflow_id, name, ...fields }) => {
+    try {
+      let saved: TemplateView;
+      if (template_id === undefined) {
+        if (name === undefined || workflow_id === undefined) {
+          return failure(
+            "a new template needs `name` and `workflow_id`; pass " +
+              "`template_id` to update one instead",
+          );
+        }
+        saved = await forge.post("/api/templates", {
+          name,
+          workflow: workflow_id,
+          values: fields.values ?? {},
+          ask: fields.ask ?? [],
+          description: fields.description,
+        }) as TemplateView;
+      } else {
+        saved = await forge.put(
+          `/api/templates/${encodeURIComponent(template_id)}`,
+          { name, workflow: workflow_id, ...fields },
+        ) as TemplateView;
+      }
+      return text(templateEntry(saved));
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
   server.registerTool("gpu_status", {
     description:
       "What is on the GPU right now and how much VRAM is free. Ask before a " +
@@ -701,8 +788,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "when it returns. Name the project and say what you are testing: that " +
       "note is what search_gallery finds later. A param that takes media — " +
       "an image, a clip — wants a value from attach_input, not a filename " +
-      "or an id. Every finished job comes back with its outputs named, so " +
-      "the next round can attach one. `params` are checked against the " +
+      "or an id. A job can start from a template (list_templates): name it " +
+      "and its values fill the params, yours on top, and the params it " +
+      "asks for are yours to give. Every finished job comes back with its " +
+      "outputs named, so the next round can attach one. `params` are checked against the " +
       "workflow as describe_workflow gives it: a key it does not list, or " +
       "a number outside its min/max, refuses the round with what it takes " +
       "— nothing is renamed, dropped or clamped for you. e.g. params " +
@@ -712,10 +801,16 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "and clip halves apart.",
     inputSchema: z.strictObject({
       jobs: z.array(z.strictObject({
-        workflow_id: z.string(),
-        params: z.record(z.string(), z.unknown()).describe(
+        workflow_id: z.string().optional().describe(
+          "the workflow to run; may be left out when `template` names one",
+        ),
+        template: z.string().optional().describe(
+          "a template id from list_templates: its values fill the params " +
+            "first, and the output records it",
+        ),
+        params: z.record(z.string(), z.unknown()).optional().describe(
           "keyed by the param keys describe_workflow lists; leave one out " +
-            "for its default",
+            "for its default (or the template's value)",
         ),
         note: z.string().optional().describe(
           "what is different about this one",
@@ -729,7 +824,17 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       ),
       timeout_s: z.number().int().min(30).max(7200).optional(),
     }),
-  }, async ({ jobs, project, note, timeout_s }, ctx) => {
+  }, async ({ jobs: requested, project, note, timeout_s }, ctx) => {
+    // Templates are applied here, as the panel applies them (§4.8): their
+    // values are ordinary job values once filled in. Before the round, so a
+    // job that names a missing template or skips what it asks for costs no
+    // GPU handover.
+    let jobs: SubmitJob[];
+    try {
+      jobs = await applyTemplates(forge, requested);
+    } catch (cause) {
+      return failure(cause);
+    }
     // Only when the client asked for progress: a notification against a token
     // it never issued is one the spec says not to send, and the model cannot
     // see these anyway — it is unloaded for the whole call (§5.3).
@@ -989,6 +1094,99 @@ function supplyHint(param: ManifestParam): string | undefined {
       `the take off mid-word; long leaves padding the model fills.`;
   }
   return undefined;
+}
+
+/** A template as `GET /api/templates` serves it, narrowed (§4.8). */
+interface TemplateView {
+  id: string;
+  name: string;
+  description: string | null;
+  workflow: string;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: "bundled" | "user";
+  problems: string[];
+}
+
+/** What choosing and using a template takes; not its thumbnail or flags. */
+function templateEntry(template: TemplateView) {
+  return {
+    id: template.id,
+    name: template.name,
+    description: template.description ?? undefined,
+    workflow_id: template.workflow,
+    values: template.values,
+    ask: template.ask,
+    source: template.source,
+    problems: template.problems.length > 0 ? template.problems : undefined,
+  };
+}
+
+interface RequestedJob {
+  workflow_id?: string;
+  template?: string;
+  params?: Record<string, unknown>;
+  note?: string;
+}
+
+/**
+ * A round's jobs with their templates applied: the template's values, then
+ * the job's own params over them (§4.8). What it asks for must be among
+ * them — the panel holds the Generate button until it is, and this is that
+ * button.
+ */
+async function applyTemplates(
+  forge: ForgeUi,
+  jobs: RequestedJob[],
+): Promise<SubmitJob[]> {
+  const cache = new Map<string, Promise<TemplateView>>();
+  const fetchTemplate = (id: string) => {
+    if (!cache.has(id)) {
+      cache.set(
+        id,
+        forge.get<TemplateView>(`/api/templates/${encodeURIComponent(id)}`)
+          .catch(() => {
+            throw new Error(
+              `no template "${id}"; list_templates gives the ids to use`,
+            );
+          }),
+      );
+    }
+    return cache.get(id)!;
+  };
+  return await Promise.all(jobs.map(async (job, index) => {
+    const at = `job ${index + 1} of ${jobs.length}`;
+    const params = job.params ?? {};
+    if (job.template === undefined) {
+      if (job.workflow_id === undefined) {
+        throw new Error(`${at}: name a workflow_id, or a template`);
+      }
+      return { workflow_id: job.workflow_id, params, note: job.note };
+    }
+    const template = await fetchTemplate(job.template);
+    if (
+      job.workflow_id !== undefined && job.workflow_id !== template.workflow
+    ) {
+      throw new Error(
+        `${at}: template "${template.id}" fills ${template.workflow}, ` +
+          `not ${job.workflow_id}`,
+      );
+    }
+    const missing = template.ask.filter((key) =>
+      params[key] === undefined || params[key] === null || params[key] === ""
+    );
+    if (missing.length > 0) {
+      throw new Error(
+        `${at}: template "${template.id}" asks for ${missing.join(", ")}`,
+      );
+    }
+    return {
+      workflow_id: template.workflow,
+      params: { ...template.values, ...params },
+      note: job.note,
+      template: template.id,
+    };
+  }));
 }
 
 /** `GET /api/outputs/:id`, narrowed to what {@link outputSummary} reads. */

@@ -132,6 +132,8 @@ export interface SubmitJob {
   workflow_id: string;
   params: Record<string, unknown>;
   note?: string;
+  /** The template the params were filled from, recorded on the output (§4.8). */
+  template?: string;
 }
 
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
@@ -197,6 +199,13 @@ export class ForgeUi {
     return this.request(path) as Promise<T>;
   }
 
+  put(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
   patch(path: string, body: unknown): Promise<unknown> {
     return this.request(path, {
       method: "PATCH",
@@ -223,6 +232,7 @@ export class ForgeUi {
     return await this.post("/api/jobs", {
       workflow_id: job.workflow_id,
       params: job.params,
+      template: job.template,
       origin: { ...origin, note: note.length > 0 ? note : undefined },
     }) as JobRow;
   }
