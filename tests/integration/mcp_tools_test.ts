@@ -194,6 +194,30 @@ Deno.test("list_loras lists only LoRAs, with the range its owner set", async () 
   });
 });
 
+Deno.test("either listing takes the family from the workflow being filled in", async () => {
+  await withModels(async (app) => {
+    const loras = await callTool<Listing>(app, "list_loras", {
+      workflow_id: "illustrious",
+    });
+    assertEquals(loras.family, "sdxl");
+    assertEquals(loras.models.map((model) => model.name), [
+      "film-grain-35mm.safetensors",
+    ]);
+    const checkpoints = await callTool<Listing>(app, "list_checkpoints", {
+      workflow_id: "illustrious",
+    });
+    assertEquals(checkpoints.models.map((model) => model.name), [
+      "someSDXL.safetensors",
+    ]);
+
+    const clash = await callTool<string>(app, "list_loras", {
+      workflow_id: "illustrious",
+      family: "flux",
+    }, { expectError: true });
+    assertStringIncludes(clash, 'wants family "sdxl"');
+  });
+});
+
 Deno.test("either listing filters by family, and counts the ones there are", async () => {
   await withModels(async (app) => {
     const loras = await callTool<Listing>(app, "list_loras", {
@@ -245,6 +269,26 @@ Deno.test("an empty class says which folders exist, not just nothing", async () 
       assertStringIncludes(listing.note ?? "", "lora (other)");
       assertStringIncludes(listing.note ?? "", "model_classes");
     }, { argv: ["--models-dir", `lora=${join(dir, "lora")}`] });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("an empty folder of the right class says so, not that it is misfiled", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-empty-loras-" });
+  try {
+    await Deno.mkdir(join(dir, "loras"));
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const listing = await callTool<Listing>(app, "list_loras");
+      assertEquals(listing.total, 0);
+      assertStringIncludes(
+        listing.note ?? "",
+        "the loras folder holds no LoRAs",
+      );
+      assertEquals(listing.note?.includes("model_classes"), false);
+    }, { argv: ["--models-dir", `loras=${join(dir, "loras")}`] });
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -446,5 +490,338 @@ Deno.test("generate runs the user copy's graph, text encoder included", async ()
       app.fake!.prompts.at(-1)!.graph["1"]!.inputs.clip_name,
       "qwen_3_600m.safetensors",
     );
+  }, { comfy: true });
+});
+
+/**
+ * The case that started it: a model wrote `strength` on a LoRA row, the API
+ * dropped the key it did not know, and every job in the sweep ran at 1.0.
+ * `strength` is now the row's own shorthand for the linked slider (§4.3).
+ */
+Deno.test("generate takes `strength` on a LoRA row as both halves", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: {
+          prompt: "a fox in snow",
+          loras: [{ name: "grain.safetensors", strength: 0.6 }],
+        },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+    const lora = Object.values(app.fake!.prompts.at(-1)!.graph).find((node) =>
+      node.class_type === "LoraLoader"
+    );
+    assertEquals(lora?.inputs.strength_model, 0.6);
+    assertEquals(lora?.inputs.strength_clip, 0.6);
+  }, { comfy: true });
+});
+
+Deno.test("generate refuses what the workflow does not take, and says which job", async () => {
+  await withTestApp(async (app) => {
+    const typo = await callTool<string>(app, "generate", {
+      jobs: [
+        { workflow_id: "sd15", params: { prompt: "a fox" } },
+        {
+          workflow_id: "sd15",
+          params: {
+            prompt: "a fox",
+            loras: [{ name: "grain.safetensors", weight: 0.6 }],
+          },
+        },
+      ],
+    }, { expectError: true });
+    assertStringIncludes(typo, "job 2 of 2 (sd15)");
+    assertStringIncludes(typo, 'row 0 has no "weight"');
+    assertStringIncludes(typo, "strength_model");
+
+    const unknown = await callTool<string>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: { prompt: "a fox", cfg_scale: 7 },
+      }],
+    }, { expectError: true });
+    assertStringIncludes(unknown, 'no param "cfg_scale"');
+    assertStringIncludes(unknown, "cfg");
+
+    const range = await callTool<string>(app, "generate", {
+      jobs: [{ workflow_id: "sd15", params: { prompt: "a fox", steps: 5000 } }],
+    }, { expectError: true });
+    assertStringIncludes(range, "steps: 5000 is out of range");
+
+    // Nothing from the refused rounds was left to run.
+    const active = await app.json<{ jobs: unknown[] }>(
+      "/api/jobs?status=active",
+    );
+    assertEquals(active.jobs.length, 0);
+  }, { comfy: true });
+});
+
+Deno.test("a tool argument the tool does not take is an error, not ignored", async () => {
+  await withTestApp(async (app) => {
+    const answer = await callTool<string>(app, "describe_workflow", {
+      workflow_id: "sd15",
+      verbose: true,
+    }, { expectError: true });
+    assertStringIncludes(answer, "verbose");
+
+    const job = await callTool<string>(app, "generate", {
+      jobs: [{ workflow_id: "sd15", parameters: { prompt: "a fox" } }],
+    }, { expectError: true });
+    assertStringIncludes(job, "parameters");
+  });
+});
+
+Deno.test("describe_workflow says what a LoRA row takes, and where its values come from", async () => {
+  await withTestApp(async (app) => {
+    const describe = async (workflow_id: string) => {
+      const detail = await callTool<{
+        params: { key: string; supply?: string }[];
+      }>(app, "describe_workflow", { workflow_id });
+      return new Map(detail.params.map((param) => [param.key, param.supply]));
+    };
+    const sd15 = await describe("sd15");
+    assertStringIncludes(sd15.get("loras") ?? "", "{name, strength}");
+    assertStringIncludes(
+      sd15.get("loras") ?? "",
+      'list_loras with family "sd15"',
+    );
+    assertStringIncludes(sd15.get("seed") ?? "", "-1 rolls a new seed");
+
+    const illustrious = await describe("illustrious");
+    assertStringIncludes(
+      illustrious.get("model") ?? "",
+      'list_checkpoints with family "sdxl"',
+    );
+  });
+});
+
+/** Everywhere a model forms a LoRA row, the short form is the one shown. */
+Deno.test("the tools that lead to a LoRA row show it with `strength`", async () => {
+  await withTestApp(async (app) => {
+    const handler = createMcpHandler(() =>
+      createBridgeServer({
+        forge: new ForgeUi({ url: app.url }),
+        llm: null,
+        freeVram: false,
+        progress: false,
+        defaultTimeoutMs: 30_000,
+      })
+    );
+    try {
+      const response = await handler.fetch(
+        new Request("http://bridge/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        }),
+      );
+      const body = await response.text();
+      const data = body.split("\n").find((line) => line.startsWith("data:"))!;
+      const { result } = JSON.parse(data.slice("data:".length)) as {
+        result: { tools: { name: string; description: string }[] };
+      };
+      const described = new Map(
+        result.tools.map((tool) => [tool.name, tool.description]),
+      );
+      for (const name of ["generate", "list_loras"]) {
+        assertStringIncludes(described.get(name)!, '"strength": 0.7');
+      }
+    } finally {
+      await handler.close();
+    }
+  });
+});
+
+/**
+ * get_output is read every round, so it is what a round needs and no more;
+ * the sidecar whole, queued graph and all, is get_output_details.
+ */
+Deno.test("get_output is the params, the job and the file; details has the rest", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15",
+        params: {
+          prompt: "a fox in snow",
+          seed: 7,
+          loras: [{ name: "grain.safetensors", strength: 0.6 }],
+        },
+      }],
+      project: "foxes",
+    });
+    const id = round.jobs[0]!.outputs[0]!.id;
+
+    const summary = await callTool<{
+      id: string;
+      file: string;
+      job: { workflow_id: string; origin?: { project?: string } };
+      params: { seed: number; loras: Record<string, unknown>[] };
+      sidecar?: unknown;
+      api_graph?: unknown;
+    }>(app, "get_output", { output_id: id });
+    assertEquals(summary.id, id);
+    assert(summary.file.endsWith(".png"), summary.file);
+    assertEquals(summary.job.workflow_id, "sd15");
+    assertEquals(summary.job.origin?.project, "foxes");
+    assertEquals(summary.params.seed, 7);
+    // In the shape generate is told to send, without the library's hash.
+    assertEquals(summary.params.loras, [
+      { name: "grain.safetensors", strength: 0.6 },
+    ]);
+    assertEquals(summary.sidecar, undefined);
+    assertEquals(summary.api_graph, undefined);
+
+    const details = await callTool<{ sidecar: { api_graph: unknown } }>(
+      app,
+      "get_output_details",
+      { output_id: id },
+    );
+    assert(details.sidecar.api_graph, "details carries the queued graph");
+  }, { comfy: true });
+});
+
+Deno.test("search_gallery finds what a LoRA made by the LoRA's name, a page at a time", async () => {
+  const folders = await modelFolders();
+  try {
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const round = await callTool<RoundResult>(app, "generate", {
+        jobs: [0, 1, 2].map((seed) => ({
+          workflow_id: "sd15",
+          params: {
+            prompt: "a fox in snow",
+            seed,
+            loras: [{ name: "film-grain-35mm.safetensors", strength: 0.6 }],
+          },
+        })).concat([{
+          workflow_id: "sd15",
+          params: { prompt: "a fox in snow", seed: 3, loras: [] },
+        }]),
+      });
+      assertEquals(round.counts.done, 4, round.jobs[0]?.error);
+
+      interface Page {
+        outputs: { id: string }[];
+        cursor: string | null;
+      }
+      const first = await callTool<Page>(app, "search_gallery", {
+        model: "film-grain-35mm.safetensors",
+        limit: 2,
+      });
+      assertEquals(first.outputs.length, 2);
+      assert(first.cursor, "a full page says there may be more");
+      const second = await callTool<Page>(app, "search_gallery", {
+        model: "film-grain-35mm.safetensors",
+        limit: 2,
+        cursor: first.cursor,
+      });
+      // Three made with it; the fourth, without, is not among them.
+      assertEquals(second.outputs.length, 1);
+      assertEquals(
+        new Set([...first.outputs, ...second.outputs].map((o) => o.id)).size,
+        3,
+      );
+
+      const unknown = await callTool<string>(app, "search_gallery", {
+        model: "no-such.safetensors",
+      }, { expectError: true });
+      assertStringIncludes(unknown, "list_loras");
+    }, { comfy: true, argv: folders.argv });
+  } finally {
+    await Deno.remove(folders.dir, { recursive: true });
+  }
+});
+
+interface TemplateEntry {
+  id: string;
+  name: string;
+  workflow_id: string;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: string;
+}
+
+Deno.test("templates are listed, saved, updated and run through the bridge", async () => {
+  await withTestApp(async (app) => {
+    const { templates } = await callTool<{ templates: TemplateEntry[] }>(
+      app,
+      "list_templates",
+      { workflow_id: "sd15-img2img" },
+    );
+    assertEquals(templates.map((template) => template.id), ["sd15-upscale"]);
+    assertEquals(templates[0]!.ask, ["image"]);
+
+    // A new one, from what worked.
+    const saved = await callTool<TemplateEntry>(app, "save_template", {
+      workflow_id: "sd15",
+      name: "Foxes at dusk",
+      values: { steps: 30, cfg: 6.5 },
+      ask: ["prompt"],
+    });
+    assertEquals(saved.id, "foxes-at-dusk");
+    assertEquals(saved.source, "user");
+
+    // Updating replaces only what is passed.
+    const updated = await callTool<TemplateEntry>(app, "save_template", {
+      template_id: "foxes-at-dusk",
+      values: { steps: 24, cfg: 6.5 },
+    });
+    assertEquals(updated.name, "Foxes at dusk");
+    assertEquals(updated.values, { steps: 24, cfg: 6.5 });
+    assertEquals(updated.ask, ["prompt"]);
+
+    // Checked as a job's values are.
+    const bad = await callTool<string>(app, "save_template", {
+      template_id: "foxes-at-dusk",
+      values: { steps: 5000 },
+    }, { expectError: true });
+    assertStringIncludes(bad, "out of range");
+
+    // Run: the template's values, the job's params over them, recorded.
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        template: "foxes-at-dusk",
+        params: { prompt: "a fox at dusk", cfg: 5 },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+    const graph = app.fake!.prompts.at(-1)!.graph;
+    const sampler = Object.values(graph).find((node) =>
+      node.class_type === "KSampler"
+    )!;
+    assertEquals(sampler.inputs.steps, 24);
+    assertEquals(sampler.inputs.cfg, 5);
+    const output = await callTool<{ job: { template?: string } }>(
+      app,
+      "get_output",
+      { output_id: round.jobs[0]!.outputs[0]!.id },
+    );
+    assertEquals(output.job.template, "Foxes at dusk");
+
+    // What it asks for is the job's to give, before any GPU changes hands.
+    const asked = await callTool<string>(app, "generate", {
+      jobs: [{ template: "foxes-at-dusk", params: {} }],
+    }, { expectError: true });
+    assertStringIncludes(asked, 'template "foxes-at-dusk" asks for prompt');
+
+    const elsewhere = await callTool<string>(app, "generate", {
+      jobs: [{
+        template: "foxes-at-dusk",
+        workflow_id: "krea2",
+        params: { prompt: "x" },
+      }],
+    }, { expectError: true });
+    assertStringIncludes(elsewhere, "fills sd15, not krea2");
+
+    const unknown = await callTool<string>(app, "generate", {
+      jobs: [{ template: "nope", params: {} }],
+    }, { expectError: true });
+    assertStringIncludes(unknown, "list_templates");
   }, { comfy: true });
 });

@@ -21,6 +21,7 @@ import type {
   ModelRow,
   SampleRow,
   StoredInputView,
+  SubmitJob,
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
 import { runRound } from "./round.ts";
@@ -169,7 +170,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     description:
       "Every workflow ForgeUI can run: id, name, family and kind. Start here — " +
       "the id is what `generate` takes.",
-    inputSchema: z.object({}),
+    inputSchema: z.strictObject({}),
   }, async () => {
     try {
       return text(await forge.get("/api/workflows"));
@@ -184,7 +185,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "and when it applies, and how to supply any media it takes. Read this " +
       "before writing a prompt — what Illustrious wants is not what Krea " +
       "wants.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       workflow_id: z.string().describe("id from list_workflows"),
     }),
   }, async ({ workflow_id }) => {
@@ -223,7 +224,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "returned, attached whole, at full quality, never the downscaled copy " +
       "`get_output_preview` shows you — or `file`, a path on the machine " +
       "running this bridge, for media you did not make here.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string().optional().describe(
         "an output id from generate or search_gallery",
       ),
@@ -277,9 +278,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     noun: "checkpoint",
     description:
       "Checkpoints — the base models a workflow generates with, across every " +
-      "folder that holds one. Filter by family to see only the ones a " +
-      "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
-      "else. Each carries its trigger words and base model where they are " +
+      "folder that holds one. Call it with `family` or `workflow_id` to see " +
+      "only the ones a workflow can use: a krea2 workflow takes a krea2 " +
+      "checkpoint and nothing else. Each carries its trigger words and base model where they are " +
       "known; `descriptions: true` adds the author's Markdown description " +
       "and overview. Each carries `sample_count` (pictures of what it does, which " +
       "get_model_samples shows) and `output_count` (what it has made here). " +
@@ -293,9 +294,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     modelClass: "lora",
     noun: "LoRA",
     description:
-      "LoRAs in the library. Filter by family — a LoRA trained for one base " +
-      "model does nothing for another, and mixing families is the usual " +
-      "cause of a result that ignores the prompt. Each one carries the " +
+      "LoRAs in the library. Call it with `family` or `workflow_id`: a LoRA " +
+      "trained for one base model does nothing for another, and mixing " +
+      "families is the usual cause of a result that ignores the prompt. " +
+      "Each one carries the " +
       "strength range its owner set, which is the range worth exploring, " +
       "its trigger words — the words a prompt needs for it to do anything — " +
       "and with `descriptions: true` the author's Markdown description and " +
@@ -305,7 +307,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "has (get_model_samples shows them) and how many outputs it has made. " +
       "`summary` says what a model is and `notes` what was learned using " +
       "it; set_model_summary and set_model_notes write them. " +
-      "Pass the `name` back in a workflow's lora list, not the display name.",
+      "Pass the `name` back in a workflow's lora list, not the display " +
+      'name, as {"name": …, "strength": 0.7} with a strength from that ' +
+      "range.",
     strengths: true,
   });
 
@@ -320,20 +324,21 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "seed, steps, cfg, sampler, the checkpoint, and the LoRAs with their " +
       "weights, which is the best guide to a LoRA's useful strength — " +
       "followed by a small " +
-      "preview of the first `limit` of them. Name the model as the listings " +
+      "preview of the first `previews` of them. Name the model as the listings " +
       "do (`name`), or by its hash.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       model: z.string().describe(
         "the `name` from list_checkpoints or list_loras, or the model's hash",
       ),
-      limit: z.number().int().min(0).max(24).optional().describe(
-        "how many previews to include, default 4; 0 for the list alone",
+      previews: z.number().int().min(0).max(24).optional().describe(
+        "how many of the samples to attach a picture of, default 4; every " +
+          "sample is listed either way, and 0 attaches none",
       ),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
         "longest edge of each preview in pixels, default 512",
       ),
     }),
-  }, async ({ model, limit, max_edge }) => {
+  }, async ({ model, previews, max_edge }) => {
     try {
       const row = await findModel(forge, model);
       if (!row) {
@@ -368,8 +373,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         note: samples.length === 0
           ? row.hash === null
             ? "this model is still being hashed; samples belong to a hash"
-            : "no samples yet — search_gallery by this model's name finds " +
-              "what it has made here instead"
+            : "no samples yet — search_gallery with `model` set to this " +
+              "name finds what it has made here instead"
           : undefined,
         samples: samples.map((sample) => ({
           id: sample.id,
@@ -393,7 +398,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           generation: generationOf(sample),
         })),
       };
-      const shown = samples.slice(0, limit ?? DEFAULT_SAMPLE_PREVIEWS);
+      const shown = samples.slice(0, previews ?? DEFAULT_SAMPLE_PREVIEWS);
       const content: ReturnType<typeof mediaBlock | typeof textBlock>[] = [
         textBlock(JSON.stringify(listing, null, 2)),
       ];
@@ -464,23 +469,51 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "earlier rounds, or by source to see what was made by a model rather " +
       "than by hand. `q` searches the prompts **and the notes** — what a " +
       "person wrote about a picture after looking at it, which is the " +
-      "feedback worth reading before making another one. This is the loop's " +
-      "memory: it survives you being unloaded and the harness restarting.",
-    inputSchema: z.object({
+      "feedback worth reading before making another one. `model` finds " +
+      "what a checkpoint or LoRA has made here. This is the loop's " +
+      "memory: it survives you being unloaded and the harness restarting. " +
+      "A page that is not the last comes with a `cursor`; pass it back for " +
+      "the next one.",
+    inputSchema: z.strictObject({
       q: z.string().optional().describe(
         "free text over the prompts and the notes written about an output",
+      ),
+      model: z.string().optional().describe(
+        "only outputs made with this checkpoint or LoRA: the `name` from " +
+          "list_checkpoints or list_loras, or its hash",
       ),
       project: z.string().optional(),
       source: z.string().optional(),
       workflow: z.string().optional(),
       kind: z.enum(["image", "video", "audio"]).optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().optional().describe(
+        "the `cursor` of the previous page, for the one after it",
+      ),
     }),
-  }, async (args) => {
+  }, async ({ model, ...args }) => {
     try {
       const query = new URLSearchParams();
       for (const [key, value] of Object.entries(args)) {
         if (value !== undefined) query.set(key, String(value));
+      }
+      if (model !== undefined) {
+        // The gallery knows a model by its hash (§8.1); the model knows it by
+        // the name the listings gave it.
+        const row = await findModel(forge, model);
+        if (!row) {
+          return failure(
+            `no model is named "${model}"; list_checkpoints and list_loras ` +
+              `give the names to use`,
+          );
+        }
+        if (row.hash === null) {
+          return failure(
+            `"${row.name}" is still being hashed, and the gallery finds a ` +
+              `model's outputs by its hash; try again in a moment`,
+          );
+        }
+        query.set("models", row.hash);
       }
       return text(await forge.get(`/api/outputs?${query}`));
     } catch (cause) {
@@ -490,13 +523,33 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
 
   server.registerTool("get_output", {
     description:
-      "Everything recorded about one output: the exact params, seed, models " +
-      "and timings that produced it, the origin saying who asked for it and " +
-      "why, and `notes` — what a person said about it afterwards. Read the " +
-      "notes on what you made last time before deciding what to make next. " +
-      "Metadata only: to see the output use get_output_preview, and for the " +
-      "file itself get_output_file.",
-    inputSchema: z.object({ output_id: z.string() }),
+      "What one output is and what made it: the params it was generated " +
+      "with (seed resolved, LoRAs with their strengths), its job — " +
+      "workflow, when, how long, and the origin saying who asked for it " +
+      "and why — the file, and `notes`: what a person said about it " +
+      "afterwards. Read the notes on what you made last time before " +
+      "deciding what to make next. Metadata only: to see the output use " +
+      "get_output_preview, and for the file itself get_output_file.",
+    inputSchema: z.strictObject({ output_id: z.string() }),
+  }, async ({ output_id }) => {
+    try {
+      const detail = await forge.get<OutputDetail>(
+        `/api/outputs/${encodeURIComponent(output_id)}`,
+      );
+      return text(outputSummary(detail));
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("get_output_details", {
+    description:
+      "For debugging a result, not for choosing what to make next: " +
+      "everything ForgeUI recorded about one output, including the " +
+      "rewritten ComfyUI graph that was queued, every model with its hash, " +
+      "and per-node timings. Hundreds of lines for a run with a few LoRAs. " +
+      "get_output has what a round needs.",
+    inputSchema: z.strictObject({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
       return text(
@@ -517,7 +570,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "matches what was asked, at a fraction of the tokens. Never for " +
       "chaining or keeping: attach_input and get_output_file work from the " +
       "full-quality original. Audio has no smaller copy; use get_output_file.",
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string(),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
         "longest edge in pixels, default 768; smaller is cheaper and enough " +
@@ -576,7 +629,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "this bridge and the path handed back instead of the bytes — the way " +
       "to pass a result to another program. Inline stops at " +
       `${INLINE_LIMIT_MB} MB; past that, save_to is the way.`,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       output_id: z.string(),
       save_to: z.string().optional().describe(
         "absolute path of a file to write, or of an existing directory to " +
@@ -620,11 +673,97 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
+  server.registerTool("list_templates", {
+    description:
+      "Templates: saved ways to fill a workflow's params — a combination " +
+      "of LoRAs that works, the settings that turn an img2img workflow " +
+      "into an upscale. Each names one workflow, the `values` it sets and " +
+      "the params it `ask`s whoever uses it to fill in. Pass its id as a " +
+      "job's `template` in generate. `problems` says what no longer fits " +
+      "its workflow.",
+    inputSchema: z.strictObject({
+      workflow_id: z.string().optional().describe(
+        "only the templates for this workflow",
+      ),
+    }),
+  }, async ({ workflow_id }) => {
+    try {
+      const { templates } = await forge.get<{ templates: TemplateView[] }>(
+        "/api/templates",
+      );
+      return text({
+        templates: templates
+          .filter((template) =>
+            workflow_id === undefined || template.workflow === workflow_id
+          )
+          .map(templateEntry),
+      });
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("save_template", {
+    description:
+      "Save a template: a workflow, the param `values` it sets and the " +
+      "params it `ask`s for (a prompt, an image) — what worked, kept so it " +
+      "can be run again by you or the owner, who sees it in ForgeUI. " +
+      "Without `template_id` it is a new template, its id made from the " +
+      "name. With one it updates that template, replacing only the fields " +
+      "you pass: `values` and `ask` replace the whole of what was there, " +
+      "so read it first (list_templates) and pass back what should stay. " +
+      "Updating a bundled template saves a copy that takes its place. " +
+      "Values are checked against the workflow as a job's are.",
+    inputSchema: z.strictObject({
+      template_id: z.string().optional().describe(
+        "the template to update; leave out to make a new one",
+      ),
+      workflow_id: z.string().optional().describe(
+        "the workflow it fills; required for a new template, fixed after",
+      ),
+      name: z.string().optional().describe("required for a new template"),
+      description: z.string().optional(),
+      values: z.record(z.string(), z.unknown()).optional().describe(
+        "param key → value, as generate takes them; seed -1 stays random",
+      ),
+      ask: z.array(z.string()).optional().describe(
+        'param keys whoever uses it must give, e.g. ["prompt"]',
+      ),
+    }),
+  }, async ({ template_id, workflow_id, name, ...fields }) => {
+    try {
+      let saved: TemplateView;
+      if (template_id === undefined) {
+        if (name === undefined || workflow_id === undefined) {
+          return failure(
+            "a new template needs `name` and `workflow_id`; pass " +
+              "`template_id` to update one instead",
+          );
+        }
+        saved = await forge.post("/api/templates", {
+          name,
+          workflow: workflow_id,
+          values: fields.values ?? {},
+          ask: fields.ask ?? [],
+          description: fields.description,
+        }) as TemplateView;
+      } else {
+        saved = await forge.put(
+          `/api/templates/${encodeURIComponent(template_id)}`,
+          { name, workflow: workflow_id, ...fields },
+        ) as TemplateView;
+      }
+      return text(templateEntry(saved));
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
   server.registerTool("gpu_status", {
     description:
       "What is on the GPU right now and how much VRAM is free. Ask before a " +
       "big job: a video workflow needs far more room than an SDXL one.",
-    inputSchema: z.object({}),
+    inputSchema: z.strictObject({}),
   }, async () => {
     try {
       const status = await forge.get("/api/system/status").catch(() => null);
@@ -649,12 +788,30 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "when it returns. Name the project and say what you are testing: that " +
       "note is what search_gallery finds later. A param that takes media — " +
       "an image, a clip — wants a value from attach_input, not a filename " +
-      "or an id. Every finished job comes back with its outputs named, so " +
-      "the next round can attach one.",
-    inputSchema: z.object({
-      jobs: z.array(z.object({
-        workflow_id: z.string(),
-        params: z.record(z.string(), z.unknown()),
+      "or an id. A job can start from a template (list_templates): name it " +
+      "and its values fill the params, yours on top, and the params it " +
+      "asks for are yours to give. Every finished job comes back with its " +
+      "outputs named, so the next round can attach one. `params` are checked against the " +
+      "workflow as describe_workflow gives it: a key it does not list, or " +
+      "a number outside its min/max, refuses the round with what it takes " +
+      "— nothing is renamed, dropped or clamped for you. e.g. params " +
+      '{"prompt": "…", "steps": 24, "loras": [{"name": ' +
+      '"film-grain.safetensors", "strength": 0.7}]}: `strength` is the ' +
+      "LoRA's one weight, and what to pass unless you mean to set its model " +
+      "and clip halves apart.",
+    inputSchema: z.strictObject({
+      jobs: z.array(z.strictObject({
+        workflow_id: z.string().optional().describe(
+          "the workflow to run; may be left out when `template` names one",
+        ),
+        template: z.string().optional().describe(
+          "a template id from list_templates: its values fill the params " +
+            "first, and the output records it",
+        ),
+        params: z.record(z.string(), z.unknown()).optional().describe(
+          "keyed by the param keys describe_workflow lists; leave one out " +
+            "for its default (or the template's value)",
+        ),
         note: z.string().optional().describe(
           "what is different about this one",
         ),
@@ -667,7 +824,17 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       ),
       timeout_s: z.number().int().min(30).max(7200).optional(),
     }),
-  }, async ({ jobs, project, note, timeout_s }, ctx) => {
+  }, async ({ jobs: requested, project, note, timeout_s }, ctx) => {
+    // Templates are applied here, as the panel applies them (§4.8): their
+    // values are ordinary job values once filled in. Before the round, so a
+    // job that names a missing template or skips what it asks for costs no
+    // GPU handover.
+    let jobs: SubmitJob[];
+    try {
+      jobs = await applyTemplates(forge, requested);
+    } catch (cause) {
+      return failure(cause);
+    }
     // Only when the client asked for progress: a notification against a token
     // it never issued is one the spec says not to send, and the model cannot
     // see these anyway — it is unloaded for the whole call (§5.3).
@@ -722,10 +889,14 @@ function registerLibraryTool(
 ): void {
   server.registerTool(tool.name, {
     description: tool.description,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       family: z.string().optional().describe(
         "exact family, e.g. krea2 or sdxl; list_workflows names the " +
           "family each workflow wants",
+      ),
+      workflow_id: z.string().optional().describe(
+        "instead of family: the workflow you are filling in, whose family " +
+          "is used",
       ),
       q: z.string().optional().describe("substring of the name or a tag"),
       tags: z.string().optional().describe("comma-separated; all must match"),
@@ -736,8 +907,25 @@ function registerLibraryTool(
           "narrow with q or family first",
       ),
     }),
-  }, async ({ family, q, tags, descriptions }) => {
+  }, async ({ family: named, workflow_id, q, tags, descriptions }) => {
     try {
+      let family = named;
+      if (workflow_id !== undefined) {
+        const wanted = await familyFor(forge, workflow_id, tool.modelClass);
+        if (wanted === null) {
+          return failure(
+            `${workflow_id} names no family, so nothing narrows by it; ` +
+              `leave workflow_id out to list them all`,
+          );
+        }
+        if (named !== undefined && named !== wanted) {
+          return failure(
+            `${workflow_id} wants family "${wanted}", not "${named}"; ` +
+              `pass one or the other`,
+          );
+        }
+        family = wanted;
+      }
       // The family is filtered here rather than by the server, so that an
       // answer of "none" can carry the families this class *does* have. A
       // filter that matched nothing and says nothing is what sends a model
@@ -762,7 +950,15 @@ function registerLibraryTool(
         families: [...counts]
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .map(([name, count]) => ({ family: name, count })),
-        note: emptyNote(tool, listing, all.length, matched.length, family),
+        note: emptyNote(
+          tool,
+          listing,
+          all.length,
+          matched.length,
+          family,
+          // Only when the class is empty: the one case a stray folder explains.
+          all.length === 0 ? await strayFolders(forge) : [],
+        ),
         // Every one of them. A library is a closed set the owner curated, and
         // a page of it is worse than useless here: the model cannot tell a
         // truncated list from the whole shelf, so it picks from the first
@@ -797,7 +993,7 @@ function registerModelTextTool(
 ): void {
   server.registerTool(tool.name, {
     description: tool.description,
-    inputSchema: z.object({
+    inputSchema: z.strictObject({
       model: z.string().describe(
         "the `name` from list_checkpoints or list_loras, or the model's hash",
       ),
@@ -866,6 +1062,25 @@ interface ManifestParam {
  * silently gets wrong — the default trims the take instead.
  */
 function supplyHint(param: ManifestParam): string | undefined {
+  const filter = (param.filter ?? {}) as { class?: string; family?: string };
+  const narrowed = filter.family ? ` with family "${filter.family}"` : "";
+  if (param.type === "lora_list") {
+    return `a list of rows, {name, strength}: \`name\` from list_loras` +
+      `${narrowed}, \`strength\` for the LoRA as a whole (default 1). Only ` +
+      `to split it, strength_model and strength_clip override either half. ` +
+      `Nothing else goes in a row; [] for none.`;
+  }
+  if (param.type === "seed") {
+    return `-1 rolls a new seed each run (get_output shows the one used); ` +
+      `a number repeats a result exactly, all else equal`;
+  }
+  if (param.type === "model" && filter.class === "diffusion") {
+    return `a \`name\` from list_checkpoints${narrowed}; leave it out for ` +
+      `the default`;
+  }
+  if (param.type === "model" && filter.class === "lora") {
+    return `a \`name\` from list_loras; leave it out for the default`;
+  }
   if (["image", "mask", "video", "audio"].includes(param.type)) {
     return `attach_input first (by output_id, or by file), then pass the ` +
       `\`value\` it returns`;
@@ -879,6 +1094,171 @@ function supplyHint(param: ManifestParam): string | undefined {
       `the take off mid-word; long leaves padding the model fills.`;
   }
   return undefined;
+}
+
+/** A template as `GET /api/templates` serves it, narrowed (§4.8). */
+interface TemplateView {
+  id: string;
+  name: string;
+  description: string | null;
+  workflow: string;
+  values: Record<string, unknown>;
+  ask: string[];
+  source: "bundled" | "user";
+  problems: string[];
+}
+
+/** What choosing and using a template takes; not its thumbnail or flags. */
+function templateEntry(template: TemplateView) {
+  return {
+    id: template.id,
+    name: template.name,
+    description: template.description ?? undefined,
+    workflow_id: template.workflow,
+    values: template.values,
+    ask: template.ask,
+    source: template.source,
+    problems: template.problems.length > 0 ? template.problems : undefined,
+  };
+}
+
+interface RequestedJob {
+  workflow_id?: string;
+  template?: string;
+  params?: Record<string, unknown>;
+  note?: string;
+}
+
+/**
+ * A round's jobs with their templates applied: the template's values, then
+ * the job's own params over them (§4.8). What it asks for must be among
+ * them — the panel holds the Generate button until it is, and this is that
+ * button.
+ */
+async function applyTemplates(
+  forge: ForgeUi,
+  jobs: RequestedJob[],
+): Promise<SubmitJob[]> {
+  const cache = new Map<string, Promise<TemplateView>>();
+  const fetchTemplate = (id: string) => {
+    if (!cache.has(id)) {
+      cache.set(
+        id,
+        forge.get<TemplateView>(`/api/templates/${encodeURIComponent(id)}`)
+          .catch(() => {
+            throw new Error(
+              `no template "${id}"; list_templates gives the ids to use`,
+            );
+          }),
+      );
+    }
+    return cache.get(id)!;
+  };
+  return await Promise.all(jobs.map(async (job, index) => {
+    const at = `job ${index + 1} of ${jobs.length}`;
+    const params = job.params ?? {};
+    if (job.template === undefined) {
+      if (job.workflow_id === undefined) {
+        throw new Error(`${at}: name a workflow_id, or a template`);
+      }
+      return { workflow_id: job.workflow_id, params, note: job.note };
+    }
+    const template = await fetchTemplate(job.template);
+    if (
+      job.workflow_id !== undefined && job.workflow_id !== template.workflow
+    ) {
+      throw new Error(
+        `${at}: template "${template.id}" fills ${template.workflow}, ` +
+          `not ${job.workflow_id}`,
+      );
+    }
+    const missing = template.ask.filter((key) =>
+      params[key] === undefined || params[key] === null || params[key] === ""
+    );
+    if (missing.length > 0) {
+      throw new Error(
+        `${at}: template "${template.id}" asks for ${missing.join(", ")}`,
+      );
+    }
+    return {
+      workflow_id: template.workflow,
+      params: { ...template.values, ...params },
+      note: job.note,
+      template: template.id,
+    };
+  }));
+}
+
+/** `GET /api/outputs/:id`, narrowed to what {@link outputSummary} reads. */
+interface OutputDetail {
+  id: string;
+  job_id: string | null;
+  path: string;
+  kind: string;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  workflow_id: string | null;
+  notes: string | null;
+  params: Record<string, unknown>;
+  origin: unknown;
+  source: unknown;
+  generation_ms: number | null;
+  sidecar: {
+    created_at?: string;
+    workflow?: { id?: string; name?: string } | null;
+    params?: Record<string, unknown>;
+    template?: { name?: string } | null;
+  } | null;
+}
+
+/**
+ * One output as a round needs it: the params, the job, the file. Not the
+ * route body, which carries the sidecar whole — the queued graph repeats
+ * every model and LoRA the params already name, and with five LoRAs that
+ * is six hundred lines of which the model can act on twenty. That is what
+ * get_output_details is for.
+ */
+function outputSummary(detail: OutputDetail) {
+  const sidecar = detail.sidecar;
+  const params = { ...(sidecar?.params ?? detail.params) };
+  // A LoRA's hash is the library's business; name and strength are the
+  // round's, in the shape generate is told to send. A model copies what it
+  // is shown, so linked halves come back as the one `strength`.
+  for (const [key, value] of Object.entries(params)) {
+    if (!Array.isArray(value)) continue;
+    params[key] = value.map((row) => {
+      if (typeof row !== "object" || row === null) return row;
+      const { hash: _hash, ...rest } = row as Record<string, unknown>;
+      if (
+        "strength_model" in rest && rest.strength_model === rest.strength_clip
+      ) {
+        const { strength_model, strength_clip: _clip, ...named } = rest;
+        return { ...named, strength: strength_model };
+      }
+      return rest;
+    });
+  }
+  return {
+    id: detail.id,
+    kind: detail.kind,
+    file: detail.path,
+    width: detail.width ?? undefined,
+    height: detail.height ?? undefined,
+    duration_s: seconds(detail.duration_ms),
+    notes: detail.notes ?? undefined,
+    job: {
+      id: detail.job_id,
+      workflow_id: sidecar?.workflow?.id ?? detail.workflow_id,
+      workflow_name: sidecar?.workflow?.name,
+      created_at: sidecar?.created_at,
+      took_s: seconds(detail.generation_ms),
+      origin: detail.origin ?? undefined,
+      template: sidecar?.template?.name,
+    },
+    source: detail.source ?? undefined,
+    params,
+  };
 }
 
 /** What a picker shows: enough to choose with, and nothing the screen needs. */
@@ -933,23 +1313,74 @@ function entry(model: ModelRow, strengths: boolean, descriptions: boolean) {
  * not know lands in `other`. Both cases end with a model that concludes the
  * bridge is broken and goes looking for ForgeUI's REST API.
  */
+/**
+ * The family a workflow wants for this class of model: the one its own
+ * picker filters by (a `lora_list`'s or a diffusion model param's
+ * `filter.family`), else the workflow's.
+ */
+async function familyFor(
+  forge: ForgeUi,
+  workflowId: string,
+  modelClass: LibraryTool["modelClass"],
+): Promise<string | null> {
+  const detail = await forge.get<WorkflowDetail>(
+    `/api/workflows/${encodeURIComponent(workflowId)}`,
+  );
+  const picker = (detail.manifest?.params ?? []).find((param) => {
+    const filter = param.filter as { class?: string } | undefined;
+    return modelClass === "lora"
+      ? param.type === "lora_list"
+      : param.type === "model" && filter?.class === "diffusion";
+  });
+  const filtered = (picker?.filter as { family?: string } | undefined)?.family;
+  return filtered ?? detail.family ?? null;
+}
+
+/**
+ * Folders filed as `other` that hold files: what a folder of LoRAs under a
+ * name the default table does not know looks like from here.
+ */
+async function strayFolders(forge: ForgeUi): Promise<string[]> {
+  const other = await forge.get<ModelListing>("/api/models?class=other")
+    .catch(() => null);
+  return [...new Set((other?.models ?? []).map((model) => model.kind))];
+}
+
 function emptyNote(
   tool: LibraryTool,
   listing: ModelListing,
   inClass: number,
   matched: number,
-  family?: string,
+  family: string | undefined,
+  strays: string[],
 ): string | undefined {
   if (matched > 0) return undefined;
   if (inClass > 0) {
     return `no ${tool.noun} has family "${family}" — \`families\` lists the ` +
       `ones that do, and leaving family out lists all ${inClass}.`;
   }
-  const folders = Object.entries(listing.classes ?? {})
+  const classes = Object.entries(listing.classes ?? {});
+  const folders = classes
     .map(([kind, modelClass]) => `${kind} (${modelClass})`)
     .join(", ");
   if (!folders) return `no model folders are configured at all.`;
-  return `nothing in this library is classed \`${tool.modelClass}\`. The ` +
+  // A folder of the right class that is simply empty is not a filing
+  // problem, and saying it is sends someone off to edit config.yaml — unless
+  // files are sitting in a folder nothing claims, which is the misfiling.
+  const own = classes
+    .filter(([, modelClass]) => modelClass === tool.modelClass)
+    .map(([kind]) => kind);
+  if (own.length > 0 && strays.length === 0) {
+    return `the ${own.join(", ")} folder${
+      own.length > 1 ? "s hold" : " holds"
+    } ` +
+      `no ${tool.noun}s yet. Nothing here can be generated with until one is ` +
+      `added and the library rescanned.`;
+  }
+  const stray = strays.length > 0
+    ? ` Files sit in ${strays.join(", ")}, which nothing claims (other).`
+    : "";
+  return `nothing in this library is classed \`${tool.modelClass}\`.${stray} The ` +
     `configured folders are: ${folders}. A folder that holds ${tool.noun}s ` +
     `but is filed under another class has to be named by \`model_classes\` ` +
     `in config.yaml before anything will list it.`;
