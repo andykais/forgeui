@@ -251,7 +251,10 @@ afterwards.
   1.0/1.0. The resolved row always records both
   (`{name, strength_model, strength_clip}`), so `strength` never reaches the
   sidecar. A row whose `name` is empty is a picker nobody filled in and is
-  dropped. A `name` that is not a string is refused. A LoRA's
+  dropped. A `name` that is not a string is refused. So is a `name` that
+  is not a LoRA in the model folders, the same check a model, text encoder
+  or VAE param gets at submit. It is skipped when no LoRA has been scanned
+  at all, because then the app cannot see the library. A LoRA's
   `strength_min`/`strength_max` is advice about where it is useful, not a
   limit, so it is not checked here.
 

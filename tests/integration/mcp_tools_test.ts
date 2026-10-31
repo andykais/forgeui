@@ -194,6 +194,30 @@ Deno.test("list_loras lists only LoRAs, with the range its owner set", async () 
   });
 });
 
+Deno.test("either listing takes the family from the workflow being filled in", async () => {
+  await withModels(async (app) => {
+    const loras = await callTool<Listing>(app, "list_loras", {
+      workflow_id: "illustrious",
+    });
+    assertEquals(loras.family, "sdxl");
+    assertEquals(loras.models.map((model) => model.name), [
+      "film-grain-35mm.safetensors",
+    ]);
+    const checkpoints = await callTool<Listing>(app, "list_checkpoints", {
+      workflow_id: "illustrious",
+    });
+    assertEquals(checkpoints.models.map((model) => model.name), [
+      "someSDXL.safetensors",
+    ]);
+
+    const clash = await callTool<string>(app, "list_loras", {
+      workflow_id: "illustrious",
+      family: "flux",
+    }, { expectError: true });
+    assertStringIncludes(clash, 'wants family "sdxl"');
+  });
+});
+
 Deno.test("either listing filters by family, and counts the ones there are", async () => {
   await withModels(async (app) => {
     const loras = await callTool<Listing>(app, "list_loras", {
@@ -245,6 +269,26 @@ Deno.test("an empty class says which folders exist, not just nothing", async () 
       assertStringIncludes(listing.note ?? "", "lora (other)");
       assertStringIncludes(listing.note ?? "", "model_classes");
     }, { argv: ["--models-dir", `lora=${join(dir, "lora")}`] });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("an empty folder of the right class says so, not that it is misfiled", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-empty-loras-" });
+  try {
+    await Deno.mkdir(join(dir, "loras"));
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const listing = await callTool<Listing>(app, "list_loras");
+      assertEquals(listing.total, 0);
+      assertStringIncludes(
+        listing.note ?? "",
+        "the loras folder holds no LoRAs",
+      );
+      assertEquals(listing.note?.includes("model_classes"), false);
+    }, { argv: ["--models-dir", `loras=${join(dir, "loras")}`] });
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -529,14 +573,27 @@ Deno.test("a tool argument the tool does not take is an error, not ignored", asy
   });
 });
 
-Deno.test("describe_workflow says what a LoRA row takes", async () => {
+Deno.test("describe_workflow says what a LoRA row takes, and where its values come from", async () => {
   await withTestApp(async (app) => {
-    const detail = await callTool<{
-      params: { key: string; supply?: string }[];
-    }>(app, "describe_workflow", { workflow_id: "sd15" });
-    const loras = detail.params.find((param) => param.key === "loras")!;
-    assertStringIncludes(loras.supply ?? "", "{name, strength}");
-    assertStringIncludes(loras.supply ?? "", "list_loras");
+    const describe = async (workflow_id: string) => {
+      const detail = await callTool<{
+        params: { key: string; supply?: string }[];
+      }>(app, "describe_workflow", { workflow_id });
+      return new Map(detail.params.map((param) => [param.key, param.supply]));
+    };
+    const sd15 = await describe("sd15");
+    assertStringIncludes(sd15.get("loras") ?? "", "{name, strength}");
+    assertStringIncludes(
+      sd15.get("loras") ?? "",
+      'list_loras with family "sd15"',
+    );
+    assertStringIncludes(sd15.get("seed") ?? "", "-1 rolls a new seed");
+
+    const illustrious = await describe("illustrious");
+    assertStringIncludes(
+      illustrious.get("model") ?? "",
+      'list_checkpoints with family "sdxl"',
+    );
   });
 });
 
@@ -626,4 +683,57 @@ Deno.test("get_output is the params, the job and the file; details has the rest"
     );
     assert(details.sidecar.api_graph, "details carries the queued graph");
   }, { comfy: true });
+});
+
+Deno.test("search_gallery finds what a LoRA made by the LoRA's name, a page at a time", async () => {
+  const folders = await modelFolders();
+  try {
+    await withTestApp(async (app) => {
+      await app.models.rescan();
+      await app.models.idle();
+      const round = await callTool<RoundResult>(app, "generate", {
+        jobs: [0, 1, 2].map((seed) => ({
+          workflow_id: "sd15",
+          params: {
+            prompt: "a fox in snow",
+            seed,
+            loras: [{ name: "film-grain-35mm.safetensors", strength: 0.6 }],
+          },
+        })).concat([{
+          workflow_id: "sd15",
+          params: { prompt: "a fox in snow", seed: 3, loras: [] },
+        }]),
+      });
+      assertEquals(round.counts.done, 4, round.jobs[0]?.error);
+
+      interface Page {
+        outputs: { id: string }[];
+        cursor: string | null;
+      }
+      const first = await callTool<Page>(app, "search_gallery", {
+        model: "film-grain-35mm.safetensors",
+        limit: 2,
+      });
+      assertEquals(first.outputs.length, 2);
+      assert(first.cursor, "a full page says there may be more");
+      const second = await callTool<Page>(app, "search_gallery", {
+        model: "film-grain-35mm.safetensors",
+        limit: 2,
+        cursor: first.cursor,
+      });
+      // Three made with it; the fourth, without, is not among them.
+      assertEquals(second.outputs.length, 1);
+      assertEquals(
+        new Set([...first.outputs, ...second.outputs].map((o) => o.id)).size,
+        3,
+      );
+
+      const unknown = await callTool<string>(app, "search_gallery", {
+        model: "no-such.safetensors",
+      }, { expectError: true });
+      assertStringIncludes(unknown, "list_loras");
+    }, { comfy: true, argv: folders.argv });
+  } finally {
+    await Deno.remove(folders.dir, { recursive: true });
+  }
 });

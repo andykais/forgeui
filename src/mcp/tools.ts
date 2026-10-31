@@ -277,9 +277,9 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     noun: "checkpoint",
     description:
       "Checkpoints — the base models a workflow generates with, across every " +
-      "folder that holds one. Filter by family to see only the ones a " +
-      "workflow can use: a krea2 workflow takes a krea2 checkpoint and nothing " +
-      "else. Each carries its trigger words and base model where they are " +
+      "folder that holds one. Call it with `family` or `workflow_id` to see " +
+      "only the ones a workflow can use: a krea2 workflow takes a krea2 " +
+      "checkpoint and nothing else. Each carries its trigger words and base model where they are " +
       "known; `descriptions: true` adds the author's Markdown description " +
       "and overview. Each carries `sample_count` (pictures of what it does, which " +
       "get_model_samples shows) and `output_count` (what it has made here). " +
@@ -293,9 +293,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     modelClass: "lora",
     noun: "LoRA",
     description:
-      "LoRAs in the library. Filter by family — a LoRA trained for one base " +
-      "model does nothing for another, and mixing families is the usual " +
-      "cause of a result that ignores the prompt. Each one carries the " +
+      "LoRAs in the library. Call it with `family` or `workflow_id`: a LoRA " +
+      "trained for one base model does nothing for another, and mixing " +
+      "families is the usual cause of a result that ignores the prompt. " +
+      "Each one carries the " +
       "strength range its owner set, which is the range worth exploring, " +
       "its trigger words — the words a prompt needs for it to do anything — " +
       "and with `descriptions: true` the author's Markdown description and " +
@@ -322,20 +323,21 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "seed, steps, cfg, sampler, the checkpoint, and the LoRAs with their " +
       "weights, which is the best guide to a LoRA's useful strength — " +
       "followed by a small " +
-      "preview of the first `limit` of them. Name the model as the listings " +
+      "preview of the first `previews` of them. Name the model as the listings " +
       "do (`name`), or by its hash.",
     inputSchema: z.strictObject({
       model: z.string().describe(
         "the `name` from list_checkpoints or list_loras, or the model's hash",
       ),
-      limit: z.number().int().min(0).max(24).optional().describe(
-        "how many previews to include, default 4; 0 for the list alone",
+      previews: z.number().int().min(0).max(24).optional().describe(
+        "how many of the samples to attach a picture of, default 4; every " +
+          "sample is listed either way, and 0 attaches none",
       ),
       max_edge: z.number().int().min(128).max(2048).optional().describe(
         "longest edge of each preview in pixels, default 512",
       ),
     }),
-  }, async ({ model, limit, max_edge }) => {
+  }, async ({ model, previews, max_edge }) => {
     try {
       const row = await findModel(forge, model);
       if (!row) {
@@ -370,8 +372,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         note: samples.length === 0
           ? row.hash === null
             ? "this model is still being hashed; samples belong to a hash"
-            : "no samples yet — search_gallery by this model's name finds " +
-              "what it has made here instead"
+            : "no samples yet — search_gallery with `model` set to this " +
+              "name finds what it has made here instead"
           : undefined,
         samples: samples.map((sample) => ({
           id: sample.id,
@@ -395,7 +397,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
           generation: generationOf(sample),
         })),
       };
-      const shown = samples.slice(0, limit ?? DEFAULT_SAMPLE_PREVIEWS);
+      const shown = samples.slice(0, previews ?? DEFAULT_SAMPLE_PREVIEWS);
       const content: ReturnType<typeof mediaBlock | typeof textBlock>[] = [
         textBlock(JSON.stringify(listing, null, 2)),
       ];
@@ -466,23 +468,51 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "earlier rounds, or by source to see what was made by a model rather " +
       "than by hand. `q` searches the prompts **and the notes** — what a " +
       "person wrote about a picture after looking at it, which is the " +
-      "feedback worth reading before making another one. This is the loop's " +
-      "memory: it survives you being unloaded and the harness restarting.",
+      "feedback worth reading before making another one. `model` finds " +
+      "what a checkpoint or LoRA has made here. This is the loop's " +
+      "memory: it survives you being unloaded and the harness restarting. " +
+      "A page that is not the last comes with a `cursor`; pass it back for " +
+      "the next one.",
     inputSchema: z.strictObject({
       q: z.string().optional().describe(
         "free text over the prompts and the notes written about an output",
+      ),
+      model: z.string().optional().describe(
+        "only outputs made with this checkpoint or LoRA: the `name` from " +
+          "list_checkpoints or list_loras, or its hash",
       ),
       project: z.string().optional(),
       source: z.string().optional(),
       workflow: z.string().optional(),
       kind: z.enum(["image", "video", "audio"]).optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().optional().describe(
+        "the `cursor` of the previous page, for the one after it",
+      ),
     }),
-  }, async (args) => {
+  }, async ({ model, ...args }) => {
     try {
       const query = new URLSearchParams();
       for (const [key, value] of Object.entries(args)) {
         if (value !== undefined) query.set(key, String(value));
+      }
+      if (model !== undefined) {
+        // The gallery knows a model by its hash (§8.1); the model knows it by
+        // the name the listings gave it.
+        const row = await findModel(forge, model);
+        if (!row) {
+          return failure(
+            `no model is named "${model}"; list_checkpoints and list_loras ` +
+              `give the names to use`,
+          );
+        }
+        if (row.hash === null) {
+          return failure(
+            `"${row.name}" is still being hashed, and the gallery finds a ` +
+              `model's outputs by its hash; try again in a moment`,
+          );
+        }
+        query.set("models", row.hash);
       }
       return text(await forge.get(`/api/outputs?${query}`));
     } catch (cause) {
@@ -759,6 +789,10 @@ function registerLibraryTool(
         "exact family, e.g. krea2 or sdxl; list_workflows names the " +
           "family each workflow wants",
       ),
+      workflow_id: z.string().optional().describe(
+        "instead of family: the workflow you are filling in, whose family " +
+          "is used",
+      ),
       q: z.string().optional().describe("substring of the name or a tag"),
       tags: z.string().optional().describe("comma-separated; all must match"),
       descriptions: z.boolean().optional().describe(
@@ -768,8 +802,25 @@ function registerLibraryTool(
           "narrow with q or family first",
       ),
     }),
-  }, async ({ family, q, tags, descriptions }) => {
+  }, async ({ family: named, workflow_id, q, tags, descriptions }) => {
     try {
+      let family = named;
+      if (workflow_id !== undefined) {
+        const wanted = await familyFor(forge, workflow_id, tool.modelClass);
+        if (wanted === null) {
+          return failure(
+            `${workflow_id} names no family, so nothing narrows by it; ` +
+              `leave workflow_id out to list them all`,
+          );
+        }
+        if (named !== undefined && named !== wanted) {
+          return failure(
+            `${workflow_id} wants family "${wanted}", not "${named}"; ` +
+              `pass one or the other`,
+          );
+        }
+        family = wanted;
+      }
       // The family is filtered here rather than by the server, so that an
       // answer of "none" can carry the families this class *does* have. A
       // filter that matched nothing and says nothing is what sends a model
@@ -794,7 +845,15 @@ function registerLibraryTool(
         families: [...counts]
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .map(([name, count]) => ({ family: name, count })),
-        note: emptyNote(tool, listing, all.length, matched.length, family),
+        note: emptyNote(
+          tool,
+          listing,
+          all.length,
+          matched.length,
+          family,
+          // Only when the class is empty: the one case a stray folder explains.
+          all.length === 0 ? await strayFolders(forge) : [],
+        ),
         // Every one of them. A library is a closed set the owner curated, and
         // a page of it is worse than useless here: the model cannot tell a
         // truncated list from the whole shelf, so it picks from the first
@@ -898,11 +957,24 @@ interface ManifestParam {
  * silently gets wrong — the default trims the take instead.
  */
 function supplyHint(param: ManifestParam): string | undefined {
+  const filter = (param.filter ?? {}) as { class?: string; family?: string };
+  const narrowed = filter.family ? ` with family "${filter.family}"` : "";
   if (param.type === "lora_list") {
-    return `a list of rows, {name, strength}: \`name\` from list_loras, ` +
-      `\`strength\` for the LoRA as a whole (default 1). Only to split it, ` +
-      `strength_model and strength_clip override either half. Nothing else ` +
-      `goes in a row; [] for none.`;
+    return `a list of rows, {name, strength}: \`name\` from list_loras` +
+      `${narrowed}, \`strength\` for the LoRA as a whole (default 1). Only ` +
+      `to split it, strength_model and strength_clip override either half. ` +
+      `Nothing else goes in a row; [] for none.`;
+  }
+  if (param.type === "seed") {
+    return `-1 rolls a new seed each run (get_output shows the one used); ` +
+      `a number repeats a result exactly, all else equal`;
+  }
+  if (param.type === "model" && filter.class === "diffusion") {
+    return `a \`name\` from list_checkpoints${narrowed}; leave it out for ` +
+      `the default`;
+  }
+  if (param.type === "model" && filter.class === "lora") {
+    return `a \`name\` from list_loras; leave it out for the default`;
   }
   if (["image", "mask", "video", "audio"].includes(param.type)) {
     return `attach_input first (by output_id, or by file), then pass the ` +
@@ -1043,23 +1115,74 @@ function entry(model: ModelRow, strengths: boolean, descriptions: boolean) {
  * not know lands in `other`. Both cases end with a model that concludes the
  * bridge is broken and goes looking for ForgeUI's REST API.
  */
+/**
+ * The family a workflow wants for this class of model: the one its own
+ * picker filters by (a `lora_list`'s or a diffusion model param's
+ * `filter.family`), else the workflow's.
+ */
+async function familyFor(
+  forge: ForgeUi,
+  workflowId: string,
+  modelClass: LibraryTool["modelClass"],
+): Promise<string | null> {
+  const detail = await forge.get<WorkflowDetail>(
+    `/api/workflows/${encodeURIComponent(workflowId)}`,
+  );
+  const picker = (detail.manifest?.params ?? []).find((param) => {
+    const filter = param.filter as { class?: string } | undefined;
+    return modelClass === "lora"
+      ? param.type === "lora_list"
+      : param.type === "model" && filter?.class === "diffusion";
+  });
+  const filtered = (picker?.filter as { family?: string } | undefined)?.family;
+  return filtered ?? detail.family ?? null;
+}
+
+/**
+ * Folders filed as `other` that hold files: what a folder of LoRAs under a
+ * name the default table does not know looks like from here.
+ */
+async function strayFolders(forge: ForgeUi): Promise<string[]> {
+  const other = await forge.get<ModelListing>("/api/models?class=other")
+    .catch(() => null);
+  return [...new Set((other?.models ?? []).map((model) => model.kind))];
+}
+
 function emptyNote(
   tool: LibraryTool,
   listing: ModelListing,
   inClass: number,
   matched: number,
-  family?: string,
+  family: string | undefined,
+  strays: string[],
 ): string | undefined {
   if (matched > 0) return undefined;
   if (inClass > 0) {
     return `no ${tool.noun} has family "${family}" — \`families\` lists the ` +
       `ones that do, and leaving family out lists all ${inClass}.`;
   }
-  const folders = Object.entries(listing.classes ?? {})
+  const classes = Object.entries(listing.classes ?? {});
+  const folders = classes
     .map(([kind, modelClass]) => `${kind} (${modelClass})`)
     .join(", ");
   if (!folders) return `no model folders are configured at all.`;
-  return `nothing in this library is classed \`${tool.modelClass}\`. The ` +
+  // A folder of the right class that is simply empty is not a filing
+  // problem, and saying it is sends someone off to edit config.yaml — unless
+  // files are sitting in a folder nothing claims, which is the misfiling.
+  const own = classes
+    .filter(([, modelClass]) => modelClass === tool.modelClass)
+    .map(([kind]) => kind);
+  if (own.length > 0 && strays.length === 0) {
+    return `the ${own.join(", ")} folder${
+      own.length > 1 ? "s hold" : " holds"
+    } ` +
+      `no ${tool.noun}s yet. Nothing here can be generated with until one is ` +
+      `added and the library rescanned.`;
+  }
+  const stray = strays.length > 0
+    ? ` Files sit in ${strays.join(", ")}, which nothing claims (other).`
+    : "";
+  return `nothing in this library is classed \`${tool.modelClass}\`.${stray} The ` +
     `configured folders are: ${folders}. A folder that holds ${tool.noun}s ` +
     `but is filed under another class has to be named by \`model_classes\` ` +
     `in config.yaml before anything will list it.`;
