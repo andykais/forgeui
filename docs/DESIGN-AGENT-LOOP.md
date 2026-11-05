@@ -164,10 +164,12 @@ bindings; the protocol is identical either way.
 | `search_gallery` | outputs under the §11.2 filters, including `project`, `source` and `model` (a listing's name), a page at a time by `cursor` | fast |
 | `list_templates` | templates (DESIGN.md §4.8): the workflow each fills, its `values`, what it `ask`s, and `problems` | fast |
 | `save_template` | a new template from a name, workflow, values and asks; or, by `template_id`, an update of only the fields passed (a bundled one gains a user copy) | fast |
-| `get_output` | what a round needs: the params (seed resolved, LoRAs as `{name, strength}` unless the halves differ), the job (workflow, when, how long, origin), the file, the notes | fast |
+| `get_output` | what a round needs: the params (seed resolved, LoRAs as `{name, strength}` unless the halves differ), the job (workflow, when, how long, origin), the file, the notes, and `inputs`: which params hold stored media (a picture, a mask), with their size | fast |
 | `get_output_details` | for debugging: the whole `GET /api/outputs/:id` — the sidecar with its queued graph, model hashes and per-node timings. Hundreds of lines with a few LoRAs, so never the default | fast |
 | `get_output_preview` | the convenient look: a picture as an **image block** or a video as a small MP4, downscaled to `max_edge` (768) | fast |
 | `get_output_file` | the file itself, byte for byte — image, audio or video block, or written to a path on the bridge's disk (`save_to`) | size of the file |
+| `get_input_preview` | a stored input by its value — what `attach_input` returned, or a media param from `get_output` — and, given `on`, a mask tinted over its picture (DESIGN.md §9) | fast |
+| `make_mask` | a mask drawn from shapes in fractions of the picture (rect, ellipse, polygon; erase, invert, `start_from` an existing mask) at the picture's own size; returns its value, `coverage` and the tinted preview, so it is checked before a round (§9) | fast |
 | `attach_input` | an output, or a file on the bridge's disk, into the input store (§9) | fast |
 | `gpu_status` | what is resident, and how much VRAM is free | fast |
 | **`generate`** | the round: evict, submit the batch, wait, free, report. A job may name a `template`: the bridge applies it as the panel does — its values, the job's params over them, its asks required — before the round starts, and the output records it | **minutes** |

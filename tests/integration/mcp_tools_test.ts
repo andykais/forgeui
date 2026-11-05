@@ -4,6 +4,8 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { type TestApp, withTestApp } from "../fixtures/app.ts";
 import { writeFakeSafetensors } from "../fixtures/models.ts";
 import { tinyPng } from "../fixtures/png.ts";
+import { decodePng } from "../../src/jobs/png.ts";
+import { decodeBase64 } from "@std/encoding/base64";
 import { ForgeUi } from "../../src/mcp/forgeui.ts";
 import { createBridgeServer } from "../../src/mcp/tools.ts";
 
@@ -32,13 +34,19 @@ interface Listing {
   models: Entry[];
 }
 
-/** Call one tool over the Streamable HTTP binding and read its JSON back. */
-async function callTool<T>(
+interface ContentBlock {
+  type: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+}
+
+/** Call one tool over the Streamable HTTP binding; every block it answers. */
+async function callToolContent(
   app: TestApp,
   name: string,
   args: Record<string, unknown> = {},
-  options: { expectError?: boolean } = {},
-): Promise<T> {
+): Promise<{ isError?: boolean; content: ContentBlock[] }> {
   const forge = new ForgeUi({ url: app.url });
   const handler = createMcpHandler(() =>
     createBridgeServer({
@@ -71,21 +79,31 @@ async function callTool<T>(
     const data = body.split("\n").find((line) => line.startsWith("data:"));
     assert(data, `no JSON-RPC response in: ${body}`);
     const message = JSON.parse(data.slice("data:".length)) as {
-      result?: { isError?: boolean; content: { text: string }[] };
+      result?: { isError?: boolean; content: ContentBlock[] };
       error?: { message: string };
     };
     assert(!message.error, `${name} failed: ${message.error?.message}`);
-    const result = message.result!;
-    const answer = result.content[0]!.text;
-    if (options.expectError) {
-      assert(result.isError, `${name} should have failed, got: ${answer}`);
-      return answer as T;
-    }
-    assert(!result.isError, `${name} answered an error: ${answer}`);
-    return JSON.parse(answer) as T;
+    return message.result!;
   } finally {
     await handler.close();
   }
+}
+
+/** Call one tool over the Streamable HTTP binding and read its JSON back. */
+async function callTool<T>(
+  app: TestApp,
+  name: string,
+  args: Record<string, unknown> = {},
+  options: { expectError?: boolean } = {},
+): Promise<T> {
+  const result = await callToolContent(app, name, args);
+  const answer = result.content[0]!.text!;
+  if (options.expectError) {
+    assert(result.isError, `${name} should have failed, got: ${answer}`);
+    return answer as T;
+  }
+  assert(!result.isError, `${name} answered an error: ${answer}`);
+  return JSON.parse(answer) as T;
 }
 
 /** Two checkpoint folders and a LoRA folder, spanning two families. */
@@ -824,4 +842,157 @@ Deno.test("templates are listed, saved, updated and run through the bridge", asy
     }, { expectError: true });
     assertStringIncludes(unknown, "list_templates");
   }, { comfy: true });
+});
+
+/**
+ * The case that prompted it: a person paints a mask in the editor and runs
+ * an inpaint, then asks the model to take notes. The model has to find that
+ * mask, see it over its picture, and be able to change it — without a shell,
+ * a disk, or ImageMagick.
+ */
+Deno.test("a painted mask is found, seen, redrawn and run through the bridge", async () => {
+  await withTestApp(async (app) => {
+    const upload = async (bytes: Uint8Array) => {
+      const form = new FormData();
+      form.set("file", new File([bytes.buffer as ArrayBuffer], "in.png"));
+      return await app.json<{ filename: string }>("/api/inputs", {
+        method: "POST",
+        body: form,
+      });
+    };
+    const image = await upload(tinyPng({ width: 64, height: 64 }));
+    const painted = await upload(tinyPng({
+      width: 64,
+      height: 64,
+      pixel: (x) => (x < 32 ? [255, 255, 255] : [0, 0, 0]),
+    }));
+    // The person's run, from the panel.
+    const job = await app.json<{ id: string }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "sd15-inpaint",
+        params: {
+          prompt: "a fox",
+          image: image.filename,
+          mask: painted.filename,
+        },
+        origin: { source: "ui" },
+      }),
+    });
+    let outputs: string[] = [];
+    for (let i = 0; i < 100 && outputs.length === 0; i++) {
+      const row = await app.json<{ status: string; outputs: string[] }>(
+        `/api/jobs/${job.id}`,
+      );
+      outputs = row.status === "done" ? row.outputs : [];
+      if (outputs.length === 0) await new Promise((r) => setTimeout(r, 50));
+    }
+    const outputId = outputs[0]!;
+
+    // 1. Found: get_output says which params are stored media, and which
+    //    picture the mask belongs to.
+    const output = await callTool<{
+      params: { image: string; mask: string };
+      inputs: Record<string, { kind: string; width: number; of?: string }>;
+    }>(app, "get_output", { output_id: outputId });
+    assertEquals(output.params.mask, painted.filename);
+    assertEquals(
+      output.inputs.mask,
+      {
+        kind: "mask",
+        width: 64,
+        height: 64,
+        of: "image",
+      } as unknown as typeof output.inputs.mask,
+    );
+
+    // 2. Seen: tinted over its picture, an image block the model can look at.
+    const seen = await callToolContent(app, "get_input_preview", {
+      value: output.params.mask,
+      on: output.params[output.inputs.mask!.of as "image"],
+    });
+    assert(!seen.isError, seen.content[0]?.text);
+    const picture = seen.content.find((block) => block.type === "image")!;
+    assertEquals(picture.mimeType, "image/png");
+    const tinted = (await decodePng(decodeBase64(picture.data!)))!;
+    assertEquals([tinted.width, tinted.height], [64, 64]);
+
+    // 3. Redrawn: the right half added to what the person painted.
+    const made = await callToolContent(app, "make_mask", {
+      image: output.params.image,
+      start_from: output.params.mask,
+      shapes: [{ shape: "rect", x: 0.5, y: 0, w: 0.5, h: 0.5 }],
+    });
+    assert(!made.isError, made.content[0]?.text);
+    const answer = JSON.parse(made.content[0]!.text!) as {
+      mask: string;
+      image: string;
+      coverage: number;
+    };
+    assertEquals(answer.coverage, 0.75);
+    assertEquals(answer.image, image.filename);
+    assert(made.content.some((block) => block.type === "image"));
+
+    // 4. Run: the mask's value goes straight into an inpaint.
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15-inpaint",
+        params: { prompt: "a fox", image: answer.image, mask: answer.mask },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+  }, { comfy: true });
+});
+
+Deno.test("make_mask starts from an output, and refuses what it cannot draw", async () => {
+  await withTestApp(async (app) => {
+    const round = await callTool<RoundResult>(app, "generate", {
+      jobs: [{ workflow_id: "sd15", params: { prompt: "a fox" } }],
+    });
+    const outputId = round.jobs[0]!.outputs[0]!.id;
+    const made = await callToolContent(app, "make_mask", {
+      output_id: outputId,
+      shapes: [{ shape: "ellipse", x: 0.25, y: 0.25, w: 0.5, h: 0.5 }],
+      invert: true,
+    });
+    assert(!made.isError, made.content[0]?.text);
+    const answer = JSON.parse(made.content[0]!.text!) as {
+      width: number;
+      coverage: number;
+    };
+    // Drawn at the output's own size, and everything but the ellipse.
+    assertEquals(answer.width, round.jobs[0]!.outputs[0]!.width);
+    assert(
+      answer.coverage > 0.75 && answer.coverage < 0.85,
+      `${answer.coverage}`,
+    );
+
+    const pixels = await callTool<string>(app, "make_mask", {
+      output_id: outputId,
+      shapes: [{ shape: "rect", x: 100, y: 100, w: 200, h: 200 }],
+    }, { expectError: true });
+    assertStringIncludes(pixels, "shapes");
+
+    const both = await callTool<string>(app, "make_mask", {
+      shapes: [{ shape: "rect", x: 0, y: 0, w: 1, h: 1 }],
+    }, { expectError: true });
+    assertStringIncludes(both, "exactly one of `image` or `output_id`");
+
+    const notValue = await callTool<string>(app, "get_input_preview", {
+      value: "mask.png",
+    }, { expectError: true });
+    assertStringIncludes(notValue, "not a stored input's value");
+  }, { comfy: true });
+});
+
+Deno.test("describe_workflow says a mask can be drawn with make_mask", async () => {
+  await withTestApp(async (app) => {
+    const detail = await callTool<{
+      params: { key: string; supply?: string }[];
+    }>(app, "describe_workflow", { workflow_id: "sd15-inpaint" });
+    const supply = new Map(detail.params.map((p) => [p.key, p.supply]));
+    assertStringIncludes(supply.get("mask") ?? "", "make_mask");
+    assertStringIncludes(supply.get("mask") ?? "", "`image`");
+    assertStringIncludes(supply.get("image") ?? "", "earlier output's params");
+  });
 });

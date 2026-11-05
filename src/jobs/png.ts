@@ -300,3 +300,47 @@ export async function pixelHash(png: Uint8Array): Promise<string | null> {
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
+
+/**
+ * Encode 8-bit pixels as a PNG: grey (one channel) or RGB (three). For what
+ * the app draws itself — a mask from shapes, a mask tinted over its picture
+ * (§9) — so no filters, which only buy size, and one IDAT.
+ */
+export async function encodePng(
+  width: number,
+  height: number,
+  channels: 1 | 3,
+  pixels: Uint8Array,
+): Promise<Uint8Array> {
+  const stride = width * channels;
+  if (pixels.length !== stride * height) {
+    throw new PngError(
+      `expected ${stride * height} bytes for ${width}×${height}, got ` +
+        `${pixels.length}`,
+    );
+  }
+  const ihdr = new Uint8Array(13);
+  const header = new DataView(ihdr.buffer);
+  header.setUint32(0, width);
+  header.setUint32(4, height);
+  ihdr[8] = 8;
+  ihdr[9] = channels === 1 ? 0 : 2;
+  // Each row is its filter byte (0, none) and then the row as it is.
+  const raw = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw.set(
+      pixels.subarray(y * stride, (y + 1) * stride),
+      y * (stride + 1) + 1,
+    );
+  }
+  const compressed = new Uint8Array(
+    await new Response(
+      new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate")),
+    ).arrayBuffer(),
+  );
+  return serializeChunks([
+    { type: "IHDR", data: ihdr },
+    { type: "IDAT", data: compressed },
+    { type: "IEND", data: new Uint8Array(0) },
+  ]);
+}

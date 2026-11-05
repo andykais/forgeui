@@ -1,6 +1,13 @@
 import { InputError, type StoredInput } from "../../inputs/store.ts";
+import {
+  inputSha,
+  parseMaskRequest,
+  renderMask,
+  renderOverlay,
+} from "../../inputs/mask.ts";
 import { WAVEFORM_SUFFIX } from "../../media/audio.ts";
 import { BodyError, json, readJson } from "../json.ts";
+import { maxEdgeOf } from "../media.ts";
 import type { AppContext, Route } from "../server.ts";
 
 /**
@@ -80,6 +87,34 @@ export function inputRoutes(ctx: AppContext): Route[] {
         }
         return json(view(await ctx.inputs.adoptOutput(outputId)), {
           status: 201,
+        });
+      },
+    },
+    {
+      // A mask drawn from shapes at its image's size (§9), for `forge mcp`.
+      method: "POST",
+      path: "/api/inputs/mask",
+      handler: async (req) => {
+        const request = parseMaskRequest(await readJson(req));
+        const { png, coverage } = await renderMask(ctx.inputs, request);
+        const stored = await ctx.inputs.add(png, { originalName: "mask.png" });
+        return json({ ...view(stored), coverage }, { status: 201 });
+      },
+    },
+    {
+      // The mask tinted over its picture (§9): how something that can only
+      // look checks a mask before a round is spent on it.
+      method: "GET",
+      path: "/api/inputs/:sha256/overlay",
+      handler: async (_req, { params, url }) => {
+        const png = await renderOverlay(
+          ctx.inputs,
+          inputSha(params.sha256, "mask"),
+          inputSha(url.searchParams.get("on"), "on"),
+          maxEdgeOf(url) ?? 768,
+        );
+        return new Response(png.slice().buffer, {
+          headers: { "content-type": "image/png" },
         });
       },
     },

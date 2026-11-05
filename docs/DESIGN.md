@@ -1083,6 +1083,45 @@ load. *Amended:* it used to keep the mask and warn, and the thumbnail drew
 it stretched over the new picture in the meantime. A same-size swap keeps
 it: the strokes still land on pixels.
 
+**A mask can also be drawn from shapes** (`POST /api/inputs/mask`). This is
+for `forge mcp`, which has no brush. An agent used to make masks with
+ImageMagick, and each step was easy to get wrong without any error: preview
+pixels instead of the original's, white on transparent (which reads as keep
+everything), a JPEG. It also needed a shell on the bridge's machine.
+
+The body names the image the mask is for and a list of shapes:
+`{image, shapes, start_from?, invert?}`.
+
+- **`image`** is a stored input's value. The mask is drawn at that image's
+  own recorded size, so it always fits.
+- **Each shape** is `rect` or `ellipse` with `{x, y, w, h}`, the top-left
+  corner and size of its box, or `polygon` with `points: [[x, y], …]` (at
+  least three). Every number is a fraction of the image's width or height,
+  from 0 to 1, so the same numbers mean the same place on a preview and on
+  the original.
+- **A shape paints white**, unless it has `erase: true`, which paints black.
+  Shapes apply in order.
+- **`start_from`** is an existing mask the shapes paint over: one painted in
+  the editor, or an earlier drawn one. It must be the image's size, like any
+  mask at submit (§9).
+- **`invert`** swaps black and white after the shapes.
+
+Edges are hard; the inpaint workflows' `grow` and `feather` soften them.
+Anything out of range is refused rather than clipped, as a job's params
+are (§4.3). The result is an 8-bit greyscale PNG, stored like any other
+input. The answer is the input's view plus `coverage`, the share of the
+picture the mask repaints (0 to 1), which catches a mask that came out
+empty or covering everything.
+
+**A mask can be seen over its image**: `GET /api/inputs/:sha256/overlay
+?on=<image>&max_edge=` draws the mask tinted red over the picture, scaled
+to fit `max_edge` (default 768), as a PNG. This is how an agent checks a
+mask before spending a round on it. The editor's tint is drawn in the
+browser; this is the same idea for something that only sees images. A
+picture that is not a PNG is decoded with ffmpeg, so without it only PNGs
+can be shown this way. A mask whose size is not its image's is refused with
+the submit's message.
+
 The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
 really a JPEG otherwise fails inside ComfyUI's load step, well past the point
@@ -1967,6 +2006,9 @@ POST /api/models/:hash/samples          upload or {civitai_url}; generation data
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}
+POST /api/inputs/mask                   {image, shapes, start_from?, invert?} → a mask drawn from shapes at the
+                                        image's size, stored as an input; the view plus `coverage` (§9)
+GET  /api/inputs/:sha256/overlay        ?on=<image value>&max_edge= — the mask tinted over its image, PNG (§9)
 GET  /api/system/status                 comfy state (starting|running|disconnected|failed), pid, uptime, VRAM free (ComfyUI /system_stats)
                                         plus started_at: when this run of the app began, which is where Generate's session starts (§11.2)
 POST /api/system/comfy/restart          managed mode only
@@ -2019,9 +2061,8 @@ phase: `video` params, the orphan sweep, and the rest of the list.
 `mask` widget, inpaint/edit bundled workflows.
 
 Landed so far: the mask editor (§10), and an inpaint for every image family
-(§4.6). Still to come: instruction-edit workflows (Flux.2 Klein,
-Qwen-Image-Edit), and a way
-for `forge mcp` to make a mask without painting one.
+(§4.6), and masks drawn from shapes for `forge mcp` (§9). Still to come:
+instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit).
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,

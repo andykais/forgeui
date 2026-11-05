@@ -528,15 +528,27 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "workflow, when, how long, and the origin saying who asked for it " +
       "and why — the file, and `notes`: what a person said about it " +
       "afterwards. Read the notes on what you made last time before " +
-      "deciding what to make next. Metadata only: to see the output use " +
-      "get_output_preview, and for the file itself get_output_file.",
+      "deciding what to make next. `inputs` names the params that hold " +
+      "stored media — the picture, a mask someone painted — and for a mask " +
+      "the param holding its picture: see one with get_input_preview, or " +
+      "pass its value back as it is to use it again. Metadata only: to see " +
+      "the output use get_output_preview, and for the file itself " +
+      "get_output_file.",
     inputSchema: z.strictObject({ output_id: z.string() }),
   }, async ({ output_id }) => {
     try {
       const detail = await forge.get<OutputDetail>(
         `/api/outputs/${encodeURIComponent(output_id)}`,
       );
-      return text(outputSummary(detail));
+      const summary = outputSummary(detail);
+      return text({
+        ...summary,
+        inputs: await storedInputs(
+          forge,
+          summary.job.workflow_id,
+          summary.params,
+        ),
+      });
     } catch (cause) {
       return failure(cause);
     }
@@ -612,6 +624,157 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         content: [
           { type: "text" as const, text: note },
           mediaBlock(media, forge.url),
+        ],
+      };
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("get_input_preview", {
+    description:
+      "See a stored input: a picture you attached, or one a past output was " +
+      "made from — the `image` or `mask` in get_output's params. Pass that " +
+      "value as it is. For a mask, also pass `on`, the picture it was " +
+      "painted on, and the mask comes back tinted red over it: the way to " +
+      "see what a person painted, or what make_mask drew, before a round.",
+    inputSchema: z.strictObject({
+      value: z.string().describe(
+        "a stored input's value, <sha256>.<ext>, from attach_input, " +
+          "make_mask or get_output's params",
+      ),
+      on: z.string().optional().describe(
+        "for a mask: the value of the picture it is for (get_output's " +
+          "`inputs` says which param that is)",
+      ),
+      max_edge: z.number().int().min(128).max(2048).optional().describe(
+        "longest edge in pixels, default 768",
+      ),
+    }),
+  }, async ({ value, on, max_edge }) => {
+    const edge = max_edge ?? DEFAULT_PREVIEW_EDGE;
+    try {
+      const sha = storedSha(value);
+      if (sha === null) return failure(notAValue("value", value));
+      if (on !== undefined) {
+        if (storedSha(on) === null) return failure(notAValue("on", on));
+        const png = await forge.overlay(sha, on, edge);
+        return {
+          content: [
+            textBlock(`mask ${value} tinted red over ${on}`),
+            {
+              type: "image" as const,
+              data: encodeBase64(png),
+              mimeType: "image/png",
+            },
+          ],
+        };
+      }
+      const input = await forge.get<StoredInputView>(`/api/inputs/${sha}`);
+      if (input.kind !== "image") {
+        return failure(
+          `${value} is ${input.kind}, which has no preview; it is the clip ` +
+            `you attached`,
+        );
+      }
+      const media = await forge.mediaAt(input.url, { maxEdge: edge });
+      const size = `${input.width}×${input.height}`;
+      return {
+        content: [
+          textBlock(
+            media.resized
+              ? `${value}: ${size}, shown at most ${edge}px`
+              : `${value}: ${size}, full size (ForgeUI has no ffmpeg)`,
+          ),
+          mediaBlock({ ...media, output: { media_url: input.url } }, forge.url),
+        ],
+      };
+    } catch (cause) {
+      return failure(cause);
+    }
+  });
+
+  server.registerTool("make_mask", {
+    description:
+      "Draw a mask for an inpaint workflow from shapes: white where the " +
+      "picture is repainted, black where it is kept, at the picture's own " +
+      "size. Shapes are in fractions of the picture (0–1, from the top-left " +
+      "corner), so the numbers you read off a preview are the numbers to " +
+      "pass. rect and ellipse take their box {x, y, w, h}; polygon takes " +
+      "points. `erase: true` cuts a shape out. `start_from` paints over a " +
+      "mask that exists — one a person painted (from get_output's params) " +
+      "or one you made — and `invert` repaints everything but the shapes. " +
+      "Comes back with the mask's value, `coverage` (the share repainted) " +
+      "and the mask tinted red over the picture: look at it before the " +
+      "round. Edges are hard; the workflow's grow and feather soften them.",
+    inputSchema: z.strictObject({
+      image: z.string().optional().describe(
+        "the picture's value: attach_input's, or `image` from get_output's " +
+          "params",
+      ),
+      output_id: z.string().optional().describe(
+        "instead of image: an output to inpaint, attached for you",
+      ),
+      shapes: z.array(z.discriminatedUnion("shape", [
+        z.strictObject({
+          shape: z.enum(["rect", "ellipse"]),
+          x: z.number().min(0).max(1),
+          y: z.number().min(0).max(1),
+          w: z.number().gt(0).max(1),
+          h: z.number().gt(0).max(1),
+          erase: z.boolean().optional(),
+        }),
+        z.strictObject({
+          shape: z.literal("polygon"),
+          points: z.array(
+            z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]),
+          ).min(3),
+          erase: z.boolean().optional(),
+        }),
+      ])).describe("drawn in order, each over what is there"),
+      start_from: z.string().optional().describe(
+        "an existing mask's value to paint over",
+      ),
+      invert: z.boolean().optional(),
+      max_edge: z.number().int().min(128).max(2048).optional().describe(
+        "longest edge of the tinted preview, default 768",
+      ),
+    }),
+  }, async ({ image, output_id, max_edge, ...mask }) => {
+    if ((image === undefined) === (output_id === undefined)) {
+      return failure("pass exactly one of `image` or `output_id`");
+    }
+    try {
+      const picture = image ?? (await forge.attachOutput(output_id!)).filename;
+      const made = await forge.post("/api/inputs/mask", {
+        image: picture,
+        ...mask,
+      }) as StoredInputView & { coverage: number };
+      const png = await forge.overlay(
+        made.sha256,
+        picture,
+        max_edge ?? DEFAULT_PREVIEW_EDGE,
+      );
+      return {
+        content: [
+          textBlock(JSON.stringify(
+            {
+              mask: made.filename,
+              image: picture,
+              width: made.width,
+              height: made.height,
+              coverage: made.coverage,
+              use: "pass `mask` as the workflow's mask param and `image` " +
+                "as the picture it is for",
+            },
+            null,
+            2,
+          )),
+          {
+            type: "image" as const,
+            data: encodeBase64(png),
+            mimeType: "image/png",
+          },
         ],
       };
     } catch (cause) {
@@ -1081,9 +1244,16 @@ function supplyHint(param: ManifestParam): string | undefined {
   if (param.type === "model" && filter.class === "lora") {
     return `a \`name\` from list_loras; leave it out for the default`;
   }
-  if (["image", "mask", "video", "audio"].includes(param.type)) {
+  if (param.type === "mask") {
+    const of = typeof param.of === "string" ? param.of : "image";
+    return `make_mask draws one over the picture in \`${of}\` (white ` +
+      `repaints, black keeps); or pass a mask's value from an earlier ` +
+      `output's params as it is`;
+  }
+  if (["image", "video", "audio"].includes(param.type)) {
     return `attach_input first (by output_id, or by file), then pass the ` +
-      `\`value\` it returns`;
+      `\`value\` it returns; or a value from an earlier output's params, ` +
+      `as it is`;
   }
   if (typeof param.follows === "string") {
     const step = typeof param.step === "number" && param.step > 0
@@ -1187,6 +1357,60 @@ async function applyTemplates(
       template: template.id,
     };
   }));
+}
+
+/** A stored input's value (§9): `<sha256>.<ext>`, the name ComfyUI knows. */
+const STORED_VALUE =
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
+
+function storedSha(value: string): string | null {
+  return STORED_VALUE.exec(value)?.[1] ?? null;
+}
+
+function notAValue(what: string, value: string): string {
+  return `${what}: "${value}" is not a stored input's value — that is ` +
+    `<sha256>.<ext>, as attach_input, make_mask and get_output's params ` +
+    `give it`;
+}
+
+/**
+ * Which params of a past output hold stored media, and what each is: the
+ * one thing the param value alone does not say. A mask names the param
+ * holding its picture (the manifest's `of`), which is what get_input_preview
+ * needs to draw it — and the workflow may be gone, so that part is a bonus.
+ */
+async function storedInputs(
+  forge: ForgeUi,
+  workflowId: string | null,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown> | undefined> {
+  const stored = Object.entries(params).filter(([, value]) =>
+    typeof value === "string" && storedSha(value) !== null
+  ) as [string, string][];
+  if (stored.length === 0) return undefined;
+  const manifest = workflowId === null ? null : await forge.get<WorkflowDetail>(
+    `/api/workflows/${encodeURIComponent(workflowId)}`,
+  ).then((detail) => detail.manifest).catch(() => null);
+  const byKey = new Map((manifest?.params ?? []).map((p) => [p.key, p]));
+  const entries = await Promise.all(stored.map(async ([key, value]) => {
+    const input = await forge.get<StoredInputView>(
+      `/api/inputs/${storedSha(value)}`,
+    ).catch(() => null);
+    const param = byKey.get(key);
+    return [
+      key,
+      input === null ? { missing: true } : {
+        kind: param?.type === "mask" ? "mask" : input.kind,
+        width: input.width ?? undefined,
+        height: input.height ?? undefined,
+        duration_s: seconds(input.duration_ms),
+        of: param?.type === "mask" && typeof param.of === "string"
+          ? param.of
+          : undefined,
+      },
+    ] as const;
+  }));
+  return Object.fromEntries(entries);
 }
 
 /** `GET /api/outputs/:id`, narrowed to what {@link outputSummary} reads. */
