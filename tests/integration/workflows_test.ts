@@ -350,6 +350,21 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
   });
 });
 
+/** What every bundled workflow is asked, across all of their params. */
+const EVERY_ANSWER: Record<string, unknown> = {
+  prompt: "a granite bowl of figs",
+  image: "abc123.png",
+  mask: "abc124.png",
+  loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
+  // What the audio workflows ask for instead of a prompt.
+  audio: "abc123.wav",
+  reference: "abc123.wav",
+  transcript: "the exact words of the reference clip",
+  text: "(sigh) it is good to hear your voice again",
+  voice: "an older man, warm, unhurried",
+  style: "neo-soul, live drums, warm rhodes",
+};
+
 Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async () => {
   await withTestApp(async (app) => {
     const dir = await Deno.makeTempDir({ prefix: "forgeui-bundled-" });
@@ -365,19 +380,15 @@ Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async 
         const jobId = `01JBUNDLED${
           workflow.id.toUpperCase().replace(/[^A-Z0-9]/g, "")
         }`;
-        const { values } = coerceParams(manifest, {
-          prompt: "a granite bowl of figs",
-          image: "abc123.png",
-          mask: "abc124.png",
-          loras: [{ name: "film-grain.safetensors", strength_model: 0.8 }],
-          // What the audio workflows ask for instead of a prompt.
-          audio: "abc123.wav",
-          reference: "abc123.wav",
-          transcript: "the exact words of the reference clip",
-          text: "(sigh) it is good to hear your voice again",
-          voice: "an older man, warm, unhurried",
-          style: "neo-soul, live drums, warm rhodes",
-        }, { randomSeed: () => 42 });
+        // One set of answers for every workflow, cut down to the keys each
+        // one takes: a key a workflow lacks is refused (§4.3).
+        const takes = new Set(manifest.params.map((param) => param.key));
+        const answers = Object.fromEntries(
+          Object.entries(EVERY_ANSWER).filter(([key]) => takes.has(key)),
+        );
+        const { values } = coerceParams(manifest, answers, {
+          randomSeed: () => 42,
+        });
         const { graph } = rewriteGraph({
           manifest,
           graph: workflow.apiGraph,

@@ -28,9 +28,10 @@ export interface CoerceOptions {
 export interface CoercedParams {
   /** One entry per manifest param, in manifest order. */
   values: Record<string, unknown>;
-  /** Keys the caller sent that the manifest no longer has (§6.4). */
-  unknownKeys: string[];
 }
+
+/** What a `lora_list` row may carry (§4.3); anything else is a typo. */
+const LORA_ROW_KEYS = ["name", "strength", "strength_model", "strength_clip"];
 
 export function randomSeed(): number {
   const bytes = new Uint32Array(2);
@@ -66,9 +67,42 @@ function describe(value: unknown): string {
   return typeof value;
 }
 
-function coerceNumber(param: NumberParam, value: unknown): number {
+/** "4–100", "at least 4", "at most 100": what a refusal shows. */
+function range(min?: number, max?: number): string {
+  if (min !== undefined && max !== undefined) return `${min}–${max}`;
+  return min !== undefined ? `at least ${min}` : `at most ${max}`;
+}
+
+/**
+ * A value the submitter named must be inside the range, not moved into it
+ * (§4.3): a clamped value is a result they will read as the one they asked
+ * for. A default nobody named is still clamped.
+ */
+function assertInRange(
+  param: Param,
+  value: number,
+  min: number | undefined,
+  max: number | undefined,
+) {
+  if (min === undefined && max === undefined) return;
+  if (
+    (min !== undefined && value < min) || (max !== undefined && value > max)
+  ) {
+    throw new ParamError(
+      param.key,
+      `${value} is out of range (${range(min, max)})`,
+    );
+  }
+}
+
+function coerceNumber(
+  param: NumberParam,
+  value: unknown,
+  provided: boolean,
+): number {
   let out = toNumber(value, param);
   if (param.type === "int") out = Math.round(out);
+  if (provided) assertInRange(param, out, param.min, param.max);
   if (param.step !== undefined && param.step > 0) {
     out = snap(out, param.step, param.min);
     if (param.type === "int") out = Math.round(out);
@@ -108,15 +142,37 @@ function coerceLoras(param: Param, value: unknown): LoraRow[] {
       throw new ParamError(param.key, `row ${i} must be an object`);
     }
     const row = raw as Record<string, unknown>;
-    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const unknown = Object.keys(row).filter((key) =>
+      !LORA_ROW_KEYS.includes(key)
+    );
+    if (unknown.length > 0) {
+      throw new ParamError(
+        param.key,
+        `row ${i} has no ${quoteAll(unknown)}; a row takes ${
+          LORA_ROW_KEYS.join(", ")
+        }`,
+      );
+    }
+    if (row.name !== undefined && typeof row.name !== "string") {
+      throw new ParamError(
+        param.key,
+        `row ${i}: name must be a LoRA filename, got ${describe(row.name)}`,
+      );
+    }
+    const name = (row.name ?? "").trim();
     // An empty row is a picker the user never filled in.
     if (name === "") continue;
+    // `strength` is the panel's linked slider; either half overrides it, and
+    // without it clip follows model, as the panel's rows always have. The
+    // sidecar records both halves either way.
+    const strength = row.strength === undefined
+      ? undefined
+      : toNumber(row.strength, param);
     const strengthModel = row.strength_model === undefined
-      ? 1
+      ? strength ?? 1
       : toNumber(row.strength_model, param);
-    // Linked strengths are the default; the sidecar records both either way.
     const strengthClip = row.strength_clip === undefined
-      ? strengthModel
+      ? strength ?? strengthModel
       : toNumber(row.strength_clip, param);
     rows.push({
       name,
@@ -156,6 +212,19 @@ function defaultValue(param: Param): unknown {
   }
 }
 
+function quoteAll(keys: string[]): string {
+  return keys.map((key) => `"${key}"`).join(", ");
+}
+
+function coerceBool(param: Param, value: unknown): boolean {
+  if (value === true || value === "true" || value === 1) return true;
+  if (value === false || value === "false" || value === 0) return false;
+  throw new ParamError(
+    param.key,
+    `expected true or false, got ${JSON.stringify(value) ?? describe(value)}`,
+  );
+}
+
 function isEmpty(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === "string") return value.trim() === "";
@@ -165,35 +234,49 @@ function isEmpty(value: unknown): boolean {
 
 /**
  * Validate and normalise submitted params against the manifest: fill defaults,
- * enforce `required`, clamp and snap numbers, resolve `seed: -1` to a real
- * seed, and drop empty LoRA rows. The result is what gets bound into the
- * graph and recorded in the sidecar, so it is always fully resolved.
+ * enforce `required`, snap numbers to their step, resolve `seed: -1` to a real
+ * seed, and drop empty LoRA rows. A key the manifest lacks, or a value outside
+ * its range, is refused rather than dropped or clamped (§4.3). The result is
+ * what gets bound into the graph and recorded in the sidecar, so it is always
+ * fully resolved.
  */
 export function coerceParams(
   manifest: Manifest,
   input: Record<string, unknown> = {},
   options: CoerceOptions = {},
 ): CoercedParams {
-  const values: Record<string, unknown> = {};
-  const known = new Set<string>();
+  const known = new Set(manifest.params.map((param) => param.key));
+  const unknown = Object.keys(input).filter((key) => !known.has(key));
+  if (unknown.length > 0) {
+    throw new ParamError(
+      unknown[0]!,
+      `this workflow has no param ${quoteAll(unknown)}; it takes ${
+        known.size > 0 ? [...known].join(", ") : "none"
+      }`,
+    );
+  }
 
+  const values: Record<string, unknown> = {};
   for (const param of manifest.params) {
-    known.add(param.key);
     const provided = input[param.key];
     const raw = provided === undefined ? defaultValue(param) : provided;
 
     switch (param.type) {
       case "text":
+        if (typeof raw === "object" && raw !== null) {
+          throw new ParamError(
+            param.key,
+            `expected text, got ${describe(raw)}`,
+          );
+        }
         values[param.key] = typeof raw === "string" ? raw : String(raw ?? "");
         break;
       case "int":
       case "float":
-        values[param.key] = coerceNumber(param, raw);
+        values[param.key] = coerceNumber(param, raw, provided !== undefined);
         break;
       case "bool":
-        values[param.key] = typeof raw === "boolean"
-          ? raw
-          : raw === "true" || raw === 1;
+        values[param.key] = coerceBool(param, raw);
         break;
       case "enum": {
         const text = typeof raw === "string" ? raw : String(raw ?? "");
@@ -212,6 +295,9 @@ export function coerceParams(
         const low = Math.max(0, param.min ?? 0);
         const high = Math.min(param.max ?? MAX_SEED, MAX_SEED);
         const seed = Math.round(toNumber(raw ?? -1, param));
+        if (seed >= 0 && provided !== undefined) {
+          assertInRange(param, seed, low, high);
+        }
         values[param.key] = seed < 0
           ? low + (options.randomSeed ?? randomSeed)() % (high - low + 1)
           : clamp(seed, low, high);
@@ -223,7 +309,13 @@ export function coerceParams(
       case "model":
       case "text_encoder":
       case "vae":
-        values[param.key] = typeof raw === "string" ? raw : "";
+        if (raw !== null && typeof raw !== "string") {
+          throw new ParamError(
+            param.key,
+            `expected a model filename, got ${describe(raw)}`,
+          );
+        }
+        values[param.key] = raw ?? "";
         break;
       case "lora_list":
         values[param.key] = coerceLoras(param, raw ?? []);
@@ -249,8 +341,5 @@ export function coerceParams(
     }
   }
 
-  return {
-    values,
-    unknownKeys: Object.keys(input).filter((key) => !known.has(key)),
-  };
+  return { values };
 }

@@ -15,7 +15,7 @@ import type {
   OutputRef,
   SubmitJob,
 } from "./forgeui.ts";
-import { isTerminal } from "./forgeui.ts";
+import { ForgeUiError, isTerminal } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
 import { sourceFor } from "./llm.ts";
 
@@ -120,7 +120,7 @@ export async function runRound(
   try {
     // 4. Submit. A rejection here is the model's to fix — a bad param names
     // itself — so the ids already queued are cancelled rather than orphaned.
-    for (const job of request.jobs) {
+    for (const [index, job] of request.jobs.entries()) {
       try {
         const row = await forge.submit(job, origin);
         submitted.set(row.id, {
@@ -132,7 +132,13 @@ export async function runRound(
         });
       } catch (cause) {
         await stopAll(forge, [...submitted.keys()]);
-        throw cause;
+        // In a batch of six, "steps: out of range" is no use without which.
+        throw new ForgeUiError(
+          `job ${index + 1} of ${request.jobs.length} (${job.workflow_id}) ` +
+            `was refused, and the round with it: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+        );
       }
     }
 

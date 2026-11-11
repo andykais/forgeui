@@ -11,6 +11,23 @@ export class ForgeUiError extends Error {
   override readonly name = "ForgeUiError";
 }
 
+/**
+ * ForgeUI answers a bad param with a message worth showing the model
+ * verbatim — it names the param, which is what lets it self-correct. §12
+ * answers `{error: {code, message}}`; rendering the envelope gives it
+ * "[object Object]".
+ */
+function errorDetail(text: string): string {
+  try {
+    const body = JSON.parse(text) as {
+      error?: { code?: string; message?: string } | string;
+    };
+    if (typeof body.error === "string") return body.error;
+    if (body.error?.message) return body.error.message;
+  } catch { /* the text is the detail */ }
+  return text.slice(0, 500);
+}
+
 /** What `POST /api/jobs` gives back, narrowed to what the bridge reads. */
 export interface JobRow {
   id: string;
@@ -132,6 +149,8 @@ export interface SubmitJob {
   workflow_id: string;
   params: Record<string, unknown>;
   note?: string;
+  /** The template the params were filled from, recorded on the output (§4.8). */
+  template?: string;
 }
 
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
@@ -173,28 +192,44 @@ export class ForgeUi {
     });
     const text = await response.text();
     if (!response.ok) {
-      // ForgeUI answers a bad param with a message worth showing the model
-      // verbatim — it names the param, which is what lets it self-correct.
-      // §12 answers `{error: {code, message}}`. Reaching for the message is
-      // the point: it names the param that was wrong, which is what lets the
-      // model fix it. Rendering the envelope gives it "[object Object]".
-      let detail = text.slice(0, 500);
-      try {
-        const body = JSON.parse(text) as {
-          error?: { code?: string; message?: string } | string;
-        };
-        if (typeof body.error === "string") detail = body.error;
-        else if (body.error?.message) detail = body.error.message;
-      } catch { /* the text is the detail */ }
       throw new ForgeUiError(
-        `${init?.method ?? "GET"} ${path}: ${response.status} ${detail}`,
+        `${init?.method ?? "GET"} ${path}: ${response.status} ${
+          errorDetail(text)
+        }`,
       );
     }
     return text.trim().length === 0 ? null : JSON.parse(text);
   }
 
+  /**
+   * A stored mask tinted over its picture, as PNG bytes (§9): the look a
+   * model takes before spending a round on a mask.
+   */
+  async overlay(
+    maskSha: string,
+    image: string,
+    maxEdge: number,
+  ): Promise<Uint8Array> {
+    const path = `/api/inputs/${encodeURIComponent(maskSha)}/overlay` +
+      `?on=${encodeURIComponent(image)}&max_edge=${maxEdge}`;
+    const response = await this.#fetch(`${this.#url}${path}`);
+    if (!response.ok) {
+      throw new ForgeUiError(
+        `GET ${path}: ${response.status} ${errorDetail(await response.text())}`,
+      );
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   get<T = unknown>(path: string): Promise<T> {
     return this.request(path) as Promise<T>;
+  }
+
+  put(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
   }
 
   patch(path: string, body: unknown): Promise<unknown> {
@@ -223,6 +258,7 @@ export class ForgeUi {
     return await this.post("/api/jobs", {
       workflow_id: job.workflow_id,
       params: job.params,
+      template: job.template,
       origin: { ...origin, note: note.length > 0 ? note : undefined },
     }) as JobRow;
   }

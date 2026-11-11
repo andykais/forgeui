@@ -108,11 +108,7 @@ interface Handlers {
   onseedlock: ReturnType<typeof vi.fn>;
 }
 
-function diffusionModel(
-  name: string,
-  family: string,
-  kind = "checkpoints",
-): ModelEntry {
+function diffusionModel(name: string, family: string, kind = "checkpoints"): ModelEntry {
   return {
     path: `/models/${kind}/${name}`,
     name,
@@ -177,8 +173,8 @@ function mount(
       checkpoints: extra.checkpoints ?? [],
       modelsOfClass: (modelClass: string | undefined) =>
         (modelClass === undefined ? undefined : extra.byClass?.[modelClass]) ??
-          extra.checkpoints ??
-          [],
+        extra.checkpoints ??
+        [],
       warnings: extra.warnings ?? [],
       ...(extra.loraFiles === undefined ? {} : { loraFiles: extra.loraFiles }),
       ...handlers,
@@ -221,6 +217,13 @@ describe("each param type renders from the manifest", () => {
     expect((stepsValue as HTMLInputElement).value).toBe("28");
     await fireEvent.input(stepsValue, { target: { value: "30" } });
     expect(handlers.onchange).toHaveBeenCalledWith("steps", 30);
+
+    // Typed past the end, it is brought into range once committed — the
+    // server refuses an out-of-range value rather than clamping it (§4.3).
+    await fireEvent.input(stepsValue, { target: { value: "500" } });
+    await fireEvent.change(stepsValue, { target: { value: "500" } });
+    expect(handlers.onchange).toHaveBeenLastCalledWith("steps", 100);
+    expect((stepsValue as HTMLInputElement).value).toBe("100");
 
     // An unbounded float is just a field.
     const cfg = screen.getByLabelText("CFG value");
@@ -275,9 +278,7 @@ describe("each param type renders from the manifest", () => {
       { size: [1024, 1024] },
     );
 
-    expect((screen.getByLabelText("Width") as HTMLInputElement).value).toBe(
-      "1024",
-    );
+    expect((screen.getByLabelText("Width") as HTMLInputElement).value).toBe("1024");
     // 16:9 of a 1024×1024 base, snapped to the model's 64px grid (§11.3).
     const preset = screen.getByRole("button", { name: "16:9" });
     expect(preset.getAttribute("title")).toBe("1344 × 768");
@@ -335,10 +336,7 @@ describe("each param type renders from the manifest", () => {
     // A model from checkpoints/ is selectable in a workflow whose loader is
     // a UNETLoader: one class, one list (§3).
     await fireEvent.click(screen.getByText("illustriousXL"));
-    expect(handlers.onchange).toHaveBeenCalledWith(
-      "model",
-      "illustriousXL.safetensors",
-    );
+    expect(handlers.onchange).toHaveBeenCalledWith("model", "illustriousXL.safetensors");
   });
 
   test("a model that is not on disk is flagged in the panel", async () => {
@@ -355,11 +353,7 @@ describe("each param type renders from the manifest", () => {
   });
 
   test("a text_encoder param picks from the clip class, not diffusion", async () => {
-    const encoder = diffusionModel(
-      "qwen3vl_4b.safetensors",
-      "unset",
-      "text_encoders",
-    );
+    const encoder = diffusionModel("qwen3vl_4b.safetensors", "unset", "text_encoders");
     encoder.class = "clip";
     const { handlers } = mount(
       [
@@ -382,10 +376,7 @@ describe("each param type renders from the manifest", () => {
     // The diffusion model is not offered for a text encoder slot.
     expect(screen.queryByText("flux1-dev")).toBeNull();
     await fireEvent.click(screen.getByText("qwen3vl_4b"));
-    expect(handlers.onchange).toHaveBeenCalledWith(
-      "clip",
-      "qwen3vl_4b.safetensors",
-    );
+    expect(handlers.onchange).toHaveBeenCalledWith("clip", "qwen3vl_4b.safetensors");
   });
 
   test("the model picker searches across folders", async () => {
@@ -421,8 +412,7 @@ describe("each param type renders from the manifest", () => {
       },
     ]);
     expect(screen.getByText(/Choose, drop or paste an image/)).toBeTruthy();
-    expect(screen.getByLabelText("Image: choose, drop or paste an image"))
-      .toBeTruthy();
+    expect(screen.getByLabelText("Image: choose, drop or paste an image")).toBeTruthy();
   });
 
   test("audio takes a clip, and offers no paste", () => {
@@ -450,7 +440,14 @@ describe("each param type renders from the manifest", () => {
 
   const maskParams: Param[] = [
     { key: "image", label: "Image", type: "image", required: true, bind: "25.image" },
-    { key: "mask", label: "Mask", type: "mask", of: "image", required: true, bind: "40.image" },
+    {
+      key: "mask",
+      label: "Mask",
+      type: "mask",
+      of: "image",
+      required: true,
+      bind: "40.image",
+    },
   ];
   const picture = `${"a".repeat(64)}.png`;
   const painted = `${"b".repeat(64)}.png`;
@@ -502,7 +499,9 @@ describe("each param type renders from the manifest", () => {
     const spy = sized({ [picture]: [96, 64], [painted]: [64, 64] });
     const { handlers } = mount(maskParams, { image: picture, mask: painted });
     await vi.waitFor(() => expect(handlers.onchange).toHaveBeenCalledWith("mask", ""));
-    expect(screen.getByText(/painted on a 64×64 picture and this one is 96×64/)).toBeTruthy();
+    expect(
+      screen.getByText(/painted on a 64×64 picture and this one is 96×64/),
+    ).toBeTruthy();
     // Never drawn stretched over the wrong picture on the way.
     expect(document.querySelector("[data-mask-tint]")).toBeNull();
     spy.mockRestore();
@@ -522,7 +521,7 @@ describe("the panel's own behaviour", () => {
       },
     ]);
     const keys = [...document.querySelectorAll("[data-param]")].map((node) =>
-      node.getAttribute("data-param")
+      node.getAttribute("data-param"),
     );
     expect(keys).toEqual(["prompt", "negative"]);
     expect(screen.getByText("required")).toBeTruthy();
@@ -560,14 +559,14 @@ describe("the panel's own behaviour", () => {
   });
 
   test("Reset to defaults is offered on the header", async () => {
-    const { handlers } = mount([{
-      key: "prompt",
-      type: "text",
-      bind: "6.text",
-    }]);
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Reset to defaults" }),
-    );
+    const { handlers } = mount([
+      {
+        key: "prompt",
+        type: "text",
+        bind: "6.text",
+      },
+    ]);
+    await fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
     expect(handlers.onreset).toHaveBeenCalled();
   });
 
@@ -594,17 +593,13 @@ describe("the seed", () => {
 
   test("unlocked shows the last-used seed greyed with the random hint", () => {
     mount([seedParam], { seed: -1 }, { seedLocked: false, lastSeed: 4242 });
-    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe(
-      "4242",
-    );
+    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe("4242");
     expect(screen.getByText(/random each run/)).toBeTruthy();
   });
 
   test("locked shows the pinned seed and says it is reused", () => {
     mount([seedParam], { seed: 4242 }, { seedLocked: true, lastSeed: 4242 });
-    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe(
-      "4242",
-    );
+    expect((screen.getByLabelText("Seed") as HTMLInputElement).value).toBe("4242");
     expect(screen.getByText(/reused until unlocked/)).toBeTruthy();
   });
 
@@ -643,9 +638,7 @@ describe("the LoRA list", () => {
   test("a row is added from the picker at full strength, linked", async () => {
     const { handlers } = mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-    await fireEvent.click(
-      screen.getByRole("button", { name: /krea\/film-grain/ }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       {
         name: "krea/film-grain.safetensors",
@@ -665,9 +658,7 @@ describe("the LoRA list", () => {
         },
       ],
     });
-    const slider = screen.getByLabelText(
-      "krea/film-grain.safetensors strength",
-    );
+    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
     // The fixture leaves the bounds at the default.
     expect(slider.getAttribute("min")).toBe("-2");
     expect(slider.getAttribute("max")).toBe("2");
@@ -697,9 +688,7 @@ describe("the LoRA list", () => {
         },
       ],
     });
-    const slider = screen.getByLabelText(
-      "krea/film-grain.safetensors strength",
-    );
+    const slider = screen.getByLabelText("krea/film-grain.safetensors strength");
     await fireEvent.input(slider, { target: { value: "0.5" } });
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       {
@@ -729,9 +718,7 @@ describe("the LoRA list", () => {
         { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
       ],
     });
-    await fireEvent.click(
-      screen.getByLabelText("Remove krea/film-grain.safetensors"),
-    );
+    await fireEvent.click(screen.getByLabelText("Remove krea/film-grain.safetensors"));
     expect(handlers.onchange).toHaveBeenCalledWith("loras", [
       { name: "detail.safetensors", strength_model: 1, strength_clip: 1 },
     ]);
@@ -791,11 +778,13 @@ describe("Reuse Parameters maps by key", () => {
 
 describe("the panel header and the prompt", () => {
   test("Edit is offered beside Reset to defaults", async () => {
-    const { handlers } = mount([{
-      key: "prompt",
-      type: "text",
-      bind: "6.text",
-    }]);
+    const { handlers } = mount([
+      {
+        key: "prompt",
+        type: "text",
+        bind: "6.text",
+      },
+    ]);
     await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(handlers.onedit).toHaveBeenCalled();
   });
@@ -823,9 +812,7 @@ describe("the panel header and the prompt", () => {
       { prompt: "figs", model: "" },
       { checkpoints: [diffusionModel("flux-dev.safetensors", "flux")] },
     );
-    await fireEvent.click(
-      screen.getByRole("button", { name: /choose a model/ }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: /choose a model/ }));
     await fireEvent.click(screen.getByRole("button", { name: /flux-dev/ }));
     // The focus is taken on the microtask after the picker closes.
     await Promise.resolve();
@@ -853,10 +840,9 @@ describe("sections (§4.2)", () => {
 
   /** Each field and group head, top to bottom, as the panel shows them. */
   function layout(): string[] {
-    return [
-      ...document.querySelectorAll<HTMLElement>("[data-param], [data-group]"),
-    ].map((element) =>
-      element.dataset.group ? `[${element.dataset.group}]` : element.dataset.param!,
+    return [...document.querySelectorAll<HTMLElement>("[data-param], [data-group]")].map(
+      (element) =>
+        element.dataset.group ? `[${element.dataset.group}]` : element.dataset.param!,
     );
   }
 
@@ -882,17 +868,26 @@ describe("sections (§4.2)", () => {
     expect(layout()).toEqual(["prompt", "[section:mask]", "[advanced]"]);
 
     document.body.innerHTML = "";
-    mount(params, { prompt: "figs", mask: "m" }, {
-      sections: [{ ...mask, collapsed: true }],
-    });
-    expect(screen.getByRole("button", { name: /^Mask/ }).getAttribute("aria-expanded"))
-      .toBe("false");
+    mount(
+      params,
+      { prompt: "figs", mask: "m" },
+      {
+        sections: [{ ...mask, collapsed: true }],
+      },
+    );
+    expect(
+      screen.getByRole("button", { name: /^Mask/ }).getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 
   test("a collapsed section opens itself for a required field left empty", async () => {
-    mount(params, { prompt: "figs", mask: "" }, {
-      sections: [{ ...mask, collapsed: true }],
-    });
+    mount(
+      params,
+      { prompt: "figs", mask: "" },
+      {
+        sections: [{ ...mask, collapsed: true }],
+      },
+    );
     await tick();
     const head = screen.getByRole("button", { name: /^Mask/ });
     expect(head.getAttribute("aria-expanded")).toBe("true");
@@ -933,8 +928,7 @@ describe("Advanced says when the problem is inside it", () => {
     expect(screen.getByText("VAE")).toBeTruthy();
     expect(screen.getByText("not found")).toBeTruthy();
     // And said on the header, so a section closed again still reads as wrong.
-    expect(screen.getByRole("button", { name: /Advanced/ }).textContent)
-      .toContain("1");
+    expect(screen.getByRole("button", { name: /Advanced/ }).textContent).toContain("1");
   });
 
   test("a section with nothing wrong in it stays collapsed", async () => {
@@ -996,13 +990,9 @@ describe("the LoRA search box", () => {
     mount([loraParam], { loras: [] });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
     const option = screen.getByRole("button", { name: /Film grain/ });
-    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe(
-      "Film grain",
-    );
+    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe("Film grain");
     const line = option.querySelector(".option-line")!;
-    expect(line.querySelector(".option-stats")?.textContent?.trim()).toBe(
-      "no outputs",
-    );
+    expect(line.querySelector(".option-stats")?.textContent?.trim()).toBe("no outputs");
     expect(line.querySelector(".option-file")?.textContent?.trim()).toBe(
       "· krea/film-grain.safetensors",
     );
@@ -1012,9 +1002,7 @@ describe("the LoRA search box", () => {
     mount([loraParam], { loras: [] }, { loraFiles: false });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
     const option = screen.getByRole("button", { name: /Film grain/ });
-    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe(
-      "Film grain",
-    );
+    expect(option.querySelector(".option-name")?.textContent?.trim()).toBe("Film grain");
     expect(option.querySelector(".option-file")).toBeNull();
     expect(option.textContent).not.toContain("film-grain.safetensors");
   });
@@ -1037,9 +1025,7 @@ describe("the LoRA search box", () => {
 
   test("a LoRA that has left the library still shows the file it names", async () => {
     mount([loraParam], {
-      loras: [
-        { name: "gone/old.safetensors", strength_model: 1, strength_clip: 1 },
-      ],
+      loras: [{ name: "gone/old.safetensors", strength_model: 1, strength_clip: 1 }],
     });
     await tick();
     const row = document.querySelector(".lora-row .name") as HTMLElement;
@@ -1051,17 +1037,12 @@ describe("the LoRA search box", () => {
     // a LoRA is not: you are working in this list, usually about to add
     // another, and being thrown back up to the prompt took the panel's scroll
     // with it.
-    mount([
-      { key: "prompt", label: "Prompt", type: "text", bind: "6.text" },
-      loraParam,
-    ], {
+    mount([{ key: "prompt", label: "Prompt", type: "text", bind: "6.text" }, loraParam], {
       prompt: "figs",
       loras: [],
     });
     await fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-    await fireEvent.click(
-      screen.getByRole("button", { name: /krea\/film-grain/ }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: /krea\/film-grain/ }));
     await tick();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(document.activeElement).not.toBe(screen.getByLabelText("Prompt"));
@@ -1091,15 +1072,12 @@ describe("the LoRA search box", () => {
 
     const search = screen.getByLabelText("Search LoRAs");
     await fireEvent.input(search, { target: { value: "krea.*grain" } });
-    expect(screen.getByRole("button", { name: /krea\/film-grain/ }))
-      .toBeTruthy();
-    expect(screen.queryByRole("button", { name: /detail\.safetensors/ }))
-      .toBeNull();
+    expect(screen.getByRole("button", { name: /krea\/film-grain/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /detail\.safetensors/ })).toBeNull();
 
     // A half-typed pattern falls back to a substring rather than emptying it.
     await fireEvent.input(search, { target: { value: "detail(" } });
-    expect(screen.queryByRole("button", { name: /krea\/film-grain/ }))
-      .toBeNull();
+    expect(screen.queryByRole("button", { name: /krea\/film-grain/ })).toBeNull();
   });
 });
 

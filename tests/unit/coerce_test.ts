@@ -129,19 +129,15 @@ Deno.test("required params must not be empty", () => {
   );
 });
 
-Deno.test("numbers are clamped, rounded and snapped to their step", () => {
+Deno.test("numbers are rounded and snapped to their step", () => {
   const { values } = coerceParams(everything, {
     prompt: "figs",
-    steps: 1000,
+    steps: 100,
     cfg: 7.34,
   }, fixedSeed);
   assertEquals(values.steps, 100);
   assertEquals(values.cfg, 7.3);
 
-  assertEquals(
-    coerceParams(everything, { prompt: "x", steps: 1 }, fixedSeed).values.steps,
-    4,
-  );
   assertEquals(
     coerceParams(everything, { prompt: "x", steps: 12.6 }, fixedSeed).values
       .steps,
@@ -158,6 +154,57 @@ Deno.test("numbers are clamped, rounded and snapped to their step", () => {
     ParamError,
     "expected a number",
   );
+});
+
+Deno.test("a number outside its range is refused with the range, not clamped", () => {
+  assertThrows(
+    () => coerceParams(everything, { prompt: "x", steps: 1000 }, fixedSeed),
+    ParamError,
+    "steps: 1000 is out of range (4–100)",
+  );
+  assertThrows(
+    () => coerceParams(everything, { prompt: "x", steps: 1 }, fixedSeed),
+    ParamError,
+    "steps: 1 is out of range (4–100)",
+  );
+  assertThrows(
+    () => coerceParams(everything, { prompt: "x", denoise: 1.5 }, fixedSeed),
+    ParamError,
+    "denoise: 1.5 is out of range (0–1)",
+  );
+  // The ends themselves are in range.
+  assertEquals(
+    coerceParams(everything, { prompt: "x", steps: 4 }, fixedSeed).values.steps,
+    4,
+  );
+});
+
+Deno.test("a default nobody named is still clamped into range", () => {
+  const narrow = build([
+    {
+      key: "steps",
+      type: "int",
+      default: 200,
+      min: 4,
+      max: 100,
+      bind: "3.steps",
+    },
+  ]);
+  assertEquals(coerceParams(narrow, {}).values.steps, 100);
+});
+
+Deno.test("a seed outside the workflow's own range is refused", () => {
+  const narrow = build([
+    { key: "seed", type: "seed", default: -1, max: 1000, bind: "3.seed" },
+  ]);
+  assertThrows(
+    () => coerceParams(narrow, { seed: 5000 }),
+    ParamError,
+    "seed: 5000 is out of range (0–1000)",
+  );
+  assertEquals(coerceParams(narrow, { seed: 999 }).values.seed, 999);
+  const rolled = coerceParams(narrow, { seed: -1 }).values.seed as number;
+  assertEquals(rolled >= 0 && rolled <= 1000, true);
 });
 
 Deno.test("seed: -1 resolves to a real seed, and a seed is kept as given", () => {
@@ -208,6 +255,83 @@ Deno.test("LoRA rows are normalised and empty ones dropped", () => {
   ]);
 });
 
+Deno.test("a LoRA row's `strength` sets both halves, and either half overrides it", () => {
+  const { values } = coerceParams(everything, {
+    prompt: "x",
+    loras: [
+      { name: "a.safetensors", strength: 0.6 },
+      { name: "b.safetensors", strength: 0.6, strength_clip: 0.3 },
+      { name: "c.safetensors", strength: "0.4", strength_model: 0.9 },
+    ],
+  }, fixedSeed);
+  assertEquals(values.loras, [
+    { name: "a.safetensors", strength_model: 0.6, strength_clip: 0.6 },
+    { name: "b.safetensors", strength_model: 0.6, strength_clip: 0.3 },
+    { name: "c.safetensors", strength_model: 0.9, strength_clip: 0.4 },
+  ]);
+});
+
+Deno.test("a LoRA row with a key it does not take is refused, naming the ones it does", () => {
+  assertThrows(
+    () =>
+      coerceParams(everything, {
+        prompt: "x",
+        loras: [{ name: "a.safetensors", weight: 0.6 }],
+      }, fixedSeed),
+    ParamError,
+    'loras: row 0 has no "weight"; a row takes name, strength, strength_model, strength_clip',
+  );
+  assertThrows(
+    () =>
+      coerceParams(everything, {
+        prompt: "x",
+        loras: [{ name: 7 }],
+      }, fixedSeed),
+    ParamError,
+    "loras: row 0: name must be a LoRA filename, got number",
+  );
+  assertThrows(
+    () =>
+      coerceParams(everything, {
+        prompt: "x",
+        loras: [{ name: "a.safetensors", strength: "lots" }],
+      }, fixedSeed),
+    ParamError,
+    "loras: expected a number",
+  );
+});
+
+Deno.test("a bool takes true or false, not anything truthy-looking", () => {
+  const toggled = build([
+    { key: "hires", type: "bool", default: false, bind: "3.denoise" },
+  ]);
+  assertEquals(coerceParams(toggled, { hires: true }).values.hires, true);
+  assertEquals(coerceParams(toggled, { hires: "false" }).values.hires, false);
+  assertEquals(coerceParams(toggled, { hires: 1 }).values.hires, true);
+  assertThrows(
+    () => coerceParams(toggled, { hires: "yes" }),
+    ParamError,
+    'hires: expected true or false, got "yes"',
+  );
+});
+
+Deno.test("a model param takes a filename, and text is not an object", () => {
+  assertThrows(
+    () =>
+      coerceParams(everything, {
+        prompt: "x",
+        checkpoint: { name: "base.safetensors" },
+      }, fixedSeed),
+    ParamError,
+    "checkpoint: expected a model filename, got object",
+  );
+  assertThrows(
+    () => coerceParams(everything, { prompt: { text: "x" } }, fixedSeed),
+    ParamError,
+    "prompt: expected text, got object",
+  );
+});
+
 Deno.test("enums only accept their options", () => {
   assertThrows(
     () => coerceParams(everything, { prompt: "x", sampler: "heun" }, fixedSeed),
@@ -216,19 +340,26 @@ Deno.test("enums only accept their options", () => {
   );
 });
 
-Deno.test("keys the manifest no longer has are reported, not silently dropped", () => {
-  const { values, unknownKeys } = coerceParams(everything, {
-    prompt: "x",
-    refiner_steps: 8,
-    old_key: "gone",
-  }, fixedSeed);
-  assertEquals(unknownKeys, ["refiner_steps", "old_key"]);
-  assertEquals("refiner_steps" in values, false);
+Deno.test("keys the manifest does not have are refused, naming the ones it does", () => {
+  assertThrows(
+    () =>
+      coerceParams(everything, {
+        prompt: "x",
+        refiner_steps: 8,
+        old_key: "gone",
+      }, fixedSeed),
+    ParamError,
+    'refiner_steps: this workflow has no param "refiner_steps", "old_key"; ' +
+      "it takes prompt, steps, cfg, denoise, sampler, seed, size, checkpoint, " +
+      "image, loras",
+  );
 });
 
-Deno.test("a workflow with no params coerces to nothing", () => {
-  assertEquals(coerceParams(build([]), { anything: 1 }), {
-    values: {},
-    unknownKeys: ["anything"],
-  });
+Deno.test("a workflow with no params coerces to nothing, and takes nothing", () => {
+  assertEquals(coerceParams(build([])), { values: {} });
+  assertThrows(
+    () => coerceParams(build([]), { anything: 1 }),
+    ParamError,
+    'this workflow has no param "anything"; it takes none',
+  );
 });

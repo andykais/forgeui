@@ -37,7 +37,7 @@ import {
   WorkflowNotFoundError,
   type WorkflowStore,
 } from "../workflows/loader.ts";
-import type { ApiGraph, Manifest } from "../workflows/types.ts";
+import type { ApiGraph, LoraRow, Manifest } from "../workflows/types.ts";
 import { isRunnable, MODEL_PARAM_CLASS } from "../workflows/types.ts";
 import type { ModelClass } from "../config/types.ts";
 import {
@@ -908,7 +908,7 @@ export class JobRunner {
   }
 
   /**
-   * Refuse a job whose model, text encoder or VAE is not on disk. The bundled
+   * Refuse a job whose model, text encoder, VAE or LoRA is not on disk. The bundled
    * workflows ship the filenames their source template used, which are not
    * the filenames on anyone else's machine, and without this the job is
    * queued and ComfyUI fails somewhere the user has to go digging for. Naming
@@ -926,6 +926,15 @@ export class JobRunner {
     if (!this.#modelExists) return;
     const missing: string[] = [];
     for (const param of applicableParams(manifest, values)) {
+      // A LoRA row names a file just as a loader does, and a misspelt one
+      // used to be found only by ComfyUI, after the GPU had changed hands.
+      if (param.type === "lora_list") {
+        for (const row of values[param.key] as LoraRow[]) {
+          if (this.#modelExists(row.name, "lora")) continue;
+          missing.push(`${param.label ?? param.key} ("${row.name}")`);
+        }
+        continue;
+      }
       if (
         param.type !== "model" && param.type !== "text_encoder" &&
         param.type !== "vae"

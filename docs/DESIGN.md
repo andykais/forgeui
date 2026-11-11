@@ -220,6 +220,44 @@ value is exactly the bundled graph's, and the user copy's own graph has since
 been changed to something else. The file is not rewritten; its next save
 from the workflow page writes it without them.
 
+**What a job's params are checked against** (`coerceParams`, for the panel,
+`POST /api/jobs`, a `forge mcp` round and a template alike). A value the
+submitter names is either used as given or refused with a message that names
+the key and what it takes. It is never quietly changed into something else:
+the submitter would see a result and believe it came from the value they
+sent. That matters most for an agent, which has no field to look at
+afterwards.
+
+- **A key the manifest does not have is refused**, and the message lists the
+  keys it does have. *Amended:* an earlier build dropped such keys without
+  saying, and an agent that wrote `strength` for `strength_model` ran a
+  whole sweep at 1.0. Reuse Parameters' "keys missing from the current
+  manifest" (§6.4) is about filling the panel, which takes what it can and
+  warns. The panel never submits a key that is not in its manifest.
+- **A number outside `min`/`max` is refused**, with the range. Rounding an
+  `int` and snapping to `step` are not refusals, because they never take a
+  value further than one step. The same holds for a `seed` outside the
+  workflow's own range (`-1` stays random). A default that is not the
+  submitter's, from the manifest or the graph, is still clamped, because
+  nobody asked for it.
+- **A `bool` takes `true`/`false`** (or `"true"`/`"false"`, `1`/`0`, from a
+  form). Anything else is refused rather than read as false.
+- **A model param takes a filename string.**
+- **A `lora_list` row takes `name`, `strength`, `strength_model` and
+  `strength_clip`, and nothing else.** `strength` sets both halves. This is
+  the panel's linked slider, and almost always what is meant.
+  `strength_model` or `strength_clip` overrides that half. Without
+  `strength`, clip follows `strength_model`. With none of them the row is
+  1.0/1.0. The resolved row always records both
+  (`{name, strength_model, strength_clip}`), so `strength` never reaches the
+  sidecar. A row whose `name` is empty is a picker nobody filled in and is
+  dropped. A `name` that is not a string is refused. So is a `name` that
+  is not a LoRA in the model folders, the same check a model, text encoder
+  or VAE param gets at submit. It is skipped when no LoRA has been scanned
+  at all, because then the app cannot see the library. A LoRA's
+  `strength_min`/`strength_max` is advice about where it is useful, not a
+  limit, so it is not checked here.
+
 #### `when`: a param that only sometimes applies
 
 Any param may carry `"when": { "param": "<key>", "is": <value> }`, and it
@@ -1044,6 +1082,45 @@ drawn over a picture it is known to fit, never stretched while the sizes
 load. *Amended:* it used to keep the mask and warn, and the thumbnail drew
 it stretched over the new picture in the meantime. A same-size swap keeps
 it: the strokes still land on pixels.
+
+**A mask can also be drawn from shapes** (`POST /api/inputs/mask`). This is
+for `forge mcp`, which has no brush. An agent used to make masks with
+ImageMagick, and each step was easy to get wrong without any error: preview
+pixels instead of the original's, white on transparent (which reads as keep
+everything), a JPEG. It also needed a shell on the bridge's machine.
+
+The body names the image the mask is for and a list of shapes:
+`{image, shapes, start_from?, invert?}`.
+
+- **`image`** is a stored input's value. The mask is drawn at that image's
+  own recorded size, so it always fits.
+- **Each shape** is `rect` or `ellipse` with `{x, y, w, h}`, the top-left
+  corner and size of its box, or `polygon` with `points: [[x, y], …]` (at
+  least three). Every number is a fraction of the image's width or height,
+  from 0 to 1, so the same numbers mean the same place on a preview and on
+  the original.
+- **A shape paints white**, unless it has `erase: true`, which paints black.
+  Shapes apply in order.
+- **`start_from`** is an existing mask the shapes paint over: one painted in
+  the editor, or an earlier drawn one. It must be the image's size, like any
+  mask at submit (§9).
+- **`invert`** swaps black and white after the shapes.
+
+Edges are hard; the inpaint workflows' `grow` and `feather` soften them.
+Anything out of range is refused rather than clipped, as a job's params
+are (§4.3). The result is an 8-bit greyscale PNG, stored like any other
+input. The answer is the input's view plus `coverage`, the share of the
+picture the mask repaints (0 to 1), which catches a mask that came out
+empty or covering everything.
+
+**A mask can be seen over its image**: `GET /api/inputs/:sha256/overlay
+?on=<image>&max_edge=` draws the mask tinted red over the picture, scaled
+to fit `max_edge` (default 768), as a PNG. This is how an agent checks a
+mask before spending a round on it. The editor's tint is drawn in the
+browser; this is the same idea for something that only sees images. A
+picture that is not a PNG is decoded with ffmpeg, so without it only PNGs
+can be shown this way. A mask whose size is not its image's is refused with
+the submit's message.
 
 The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
@@ -1885,7 +1962,8 @@ PUT  /api/templates/:id                 replace name/description/values/ask/acti
 DELETE /api/templates/:id               user templates and user copies; 409 for a bundled template with no copy
 POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
                                         the id of the template the panel was filled from (§4.8), which must
-                                        exist and fill this workflow
+                                        exist and fill this workflow; 400 for a param the manifest lacks or a
+                                        value it refuses (§4.3), never a silent change
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
                                         keeps the repeated run's template
 POST /api/jobs/:id/cancel
@@ -1928,6 +2006,9 @@ POST /api/models/:hash/samples          upload or {civitai_url}; generation data
 DELETE /api/samples/:id
 POST /api/models/:hash/fetch-info       explicit Civitai lookup
 POST /api/inputs                        upload → {sha256}
+POST /api/inputs/mask                   {image, shapes, start_from?, invert?} → a mask drawn from shapes at the
+                                        image's size, stored as an input; the view plus `coverage` (§9)
+GET  /api/inputs/:sha256/overlay        ?on=<image value>&max_edge= — the mask tinted over its image, PNG (§9)
 GET  /api/system/status                 comfy state (starting|running|disconnected|failed), pid, uptime, VRAM free (ComfyUI /system_stats)
                                         plus started_at: when this run of the app began, which is where Generate's session starts (§11.2)
 POST /api/system/comfy/restart          managed mode only
@@ -1980,9 +2061,8 @@ phase: `video` params, the orphan sweep, and the rest of the list.
 `mask` widget, inpaint/edit bundled workflows.
 
 Landed so far: the mask editor (§10), and an inpaint for every image family
-(§4.6). Still to come: instruction-edit workflows (Flux.2 Klein,
-Qwen-Image-Edit), and a way
-for `forge mcp` to make a mask without painting one.
+(§4.6), and masks drawn from shapes for `forge mcp` (§9). Still to come:
+instruction-edit workflows (Flux.2 Klein, Qwen-Image-Edit).
 
 **Phase 5 — quality**
 Manifest auto-generation, embedded ComfyUI save round-trip hardening,

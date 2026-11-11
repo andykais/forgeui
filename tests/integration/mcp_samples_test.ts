@@ -158,7 +158,7 @@ Deno.test("get_model_samples finds a model by hash, and can skip the pictures", 
   await withSamples(async (app, lora) => {
     const result = await callTool(app, "get_model_samples", {
       model: lora.hash!,
-      limit: 0,
+      previews: 0,
     });
     assert(!result.isError, JSON.stringify(result));
     assertEquals(result.content.length, 1, "the list alone");
@@ -271,7 +271,7 @@ Deno.test("get_model_samples carries the model's description too", async () => {
     await importDescriptions(app, lora);
     const result = await callTool(app, "get_model_samples", {
       model: lora.name,
-      limit: 0,
+      previews: 0,
     });
     const listing = JSON.parse((result.content[0] as { text: string }).text);
     assertStringIncludes(listing.description, "0.6–0.8");

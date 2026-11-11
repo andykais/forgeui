@@ -343,6 +343,54 @@ Deno.test("a model a workflow names but the folders do not hold is refused", asy
   }
 });
 
+Deno.test("a LoRA the folders do not hold is refused before it is queued", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "forgeui-missing-lora-" });
+  try {
+    const checkpoints = join(dir, "checkpoints");
+    const loras = join(dir, "loras");
+    await writeFakeSafetensors(join(checkpoints, "real.safetensors"), {
+      name: "real",
+    });
+    await writeFakeSafetensors(join(loras, "grain.safetensors"), {
+      name: "grain",
+    });
+    await withTestApp(async (app) => {
+      await scanAndHash(app);
+      const submit = (name: string) =>
+        app.fetch("/api/jobs", {
+          method: "POST",
+          body: JSON.stringify({
+            workflow_id: "illustrious",
+            params: {
+              prompt: "figs",
+              model: "real.safetensors",
+              loras: [{ name, strength: 0.6 }],
+            },
+          }),
+        });
+      const typo = await submit("grian.safetensors");
+      assertEquals(typo.status, 400);
+      const body = await typo.json() as { error: { message: string } };
+      assertStringIncludes(body.error.message, "not in your model folders");
+      assertStringIncludes(body.error.message, "grian.safetensors");
+
+      // The real one passes the check; no ComfyUI, so it stops after it.
+      const ok = await submit("grain.safetensors");
+      await ok.body?.cancel();
+      assertEquals(ok.status, 503);
+    }, {
+      argv: [
+        "--models-dir",
+        `checkpoints=${checkpoints}`,
+        "--models-dir",
+        `loras=${loras}`,
+      ],
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("hashing fills in identity, and only re-reads what changed", async () => {
   await withModels(async (app, fixtures) => {
     await scanAndHash(app);
