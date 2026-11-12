@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { type TestApp, withTestApp } from "../fixtures/app.ts";
 import { writeFakeSafetensors } from "../fixtures/models.ts";
@@ -368,8 +368,14 @@ Deno.test("a round names its files, and one of them feeds the next round", async
     const [output] = round.jobs[0]!.outputs;
     assert(output, "the round reports what it made");
     assertEquals(output.kind, "image");
-    assert(output.path?.endsWith(".png"), `no file path: ${output.path}`);
-    assert(output.media_url?.startsWith("/api/media/"), output.media_url);
+    // Absolute: a relative path is read against wherever the model is.
+    assert(isAbsolute(output.path ?? ""), `not absolute: ${output.path}`);
+    assert(output.path!.endsWith(".png"), output.path);
+    assert((await Deno.stat(output.path!)).isFile, "the path is the file");
+    assert(
+      output.media_url?.startsWith(`${app.url}/api/media/`),
+      output.media_url,
+    );
 
     // The whole output, not the downscaled copy `get_output_preview` returns.
     const attached = await callTool<Attached>(app, "attach_input", {
@@ -683,7 +689,8 @@ Deno.test("get_output is the params, the job and the file; details has the rest"
       api_graph?: unknown;
     }>(app, "get_output", { output_id: id });
     assertEquals(summary.id, id);
-    assert(summary.file.endsWith(".png"), summary.file);
+    assert(isAbsolute(summary.file), `not absolute: ${summary.file}`);
+    assert((await Deno.stat(summary.file)).isFile, "the path is the file");
     assertEquals(summary.job.workflow_id, "sd15");
     assertEquals(summary.job.origin?.project, "foxes");
     assertEquals(summary.params.seed, 7);
@@ -694,12 +701,27 @@ Deno.test("get_output is the params, the job and the file; details has the rest"
     assertEquals(summary.sidecar, undefined);
     assertEquals(summary.api_graph, undefined);
 
-    const details = await callTool<{ sidecar: { api_graph: unknown } }>(
-      app,
-      "get_output_details",
-      { output_id: id },
-    );
+    const details = await callTool<{
+      path: string;
+      sidecar_path: string;
+      media_url: string;
+      sidecar: { api_graph: unknown };
+    }>(app, "get_output_details", { output_id: id });
     assert(details.sidecar.api_graph, "details carries the queued graph");
+    assertEquals(details.path, summary.file);
+    assert(
+      (await Deno.stat(details.sidecar_path)).isFile,
+      details.sidecar_path,
+    );
+    assert(details.media_url.startsWith(app.url), details.media_url);
+
+    // search_gallery's rows too: nothing relative anywhere a model reads.
+    const page = await callTool<{
+      outputs: { id: string; path: string; sidecar_path: string }[];
+    }>(app, "search_gallery", { project: "foxes" });
+    const row = page.outputs.find((output) => output.id === id)!;
+    assertEquals(row.path, summary.file);
+    assert(isAbsolute(row.sidecar_path), row.sidecar_path);
   }, { comfy: true });
 });
 
