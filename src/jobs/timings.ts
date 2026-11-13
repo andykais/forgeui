@@ -1,6 +1,5 @@
 import type { Database } from "../db/sqlite.ts";
-import { relative } from "@std/path";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, storedOutputPath } from "../config/paths.ts";
 import {
   countNodeTimings,
   NODE_TIMING_ALPHA,
@@ -54,7 +53,7 @@ export async function seedNodeTimings(options: {
     try {
       const sidecar = parseSidecar(
         await Deno.readTextFile(path),
-        relative(options.paths.root, path),
+        storedOutputPath(options.paths, path),
       );
       hash = sidecar.workflow?.hash ?? null;
       nodes = sidecar.timing.nodes ?? {};

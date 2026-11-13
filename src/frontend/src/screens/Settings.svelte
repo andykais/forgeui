@@ -322,6 +322,16 @@
         <code class="mono">FORGEUI_DATA_DIR</code>, else
         <code class="mono">~/.forgeui</code>.
       </p>
+      {#if app.outputsDir && app.outputsDir !== `${app.dataDir}/outputs`}
+        <div class="field">
+          <span class="label">Outputs</span>
+          <div class="value mono">{app.outputsDir}</div>
+        </div>
+        <p class="dim note">
+          Moved out of the data directory by <code class="mono">outputs.dir</code> in
+          <code class="mono">config.yaml</code>, read at launch.
+        </p>
+      {/if}
       {#if storage}
         <div class="storage">
           {#each [["outputs", storage.outputs], ["samples", storage.samples], ["inputs", storage.inputs], ["staging", storage.staging], ["app.db", storage.db], ["telemetry.db", storage.telemetry]] as const as [label, use] (label)}

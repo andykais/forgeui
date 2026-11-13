@@ -149,5 +149,6 @@ export function defaultConfig(): Config {
       samples: 4,
       ingest_on_boot: true,
     },
+    outputs: { dir: null },
   };
 }

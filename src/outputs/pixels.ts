@@ -1,4 +1,3 @@
-import { join } from "@std/path";
 import type { Database } from "../db/sqlite.ts";
 import {
   inputsWithoutPixelHash,
@@ -10,7 +9,7 @@ import {
   setOutputPixelHash,
 } from "../db/queries.ts";
 import { pixelHash } from "../jobs/png.ts";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 
 /**
  * Pixel hashes (§9): how a pasted picture finds the output it came from.
@@ -41,7 +40,7 @@ export async function hashOutput(
   setOutputPixelHash(
     db,
     output.id,
-    await pixelHashOf(join(paths.root, output.path)),
+    await pixelHashOf(diskPath(paths, output.path)),
   );
 }
 
@@ -72,7 +71,7 @@ export async function backfillPixelHashes(
       setInputPixelHash(
         db,
         input.sha256,
-        await pixelHashOf(join(paths.root, input.path)),
+        await pixelHashOf(diskPath(paths, input.path)),
       );
       done.inputs++;
       await breathe();

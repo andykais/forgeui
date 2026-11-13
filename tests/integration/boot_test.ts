@@ -95,6 +95,7 @@ Deno.test("PATCH /api/config rejects bad input without writing", async () => {
     for (
       const [body, expected] of [
         ['{"model_folders":{"loras":["/mnt/x"]}}', "read at launch"],
+        ['{"outputs":{"dir":"/mnt/x"}}', "read at launch"],
         ['{"comfy":{"mode":"turbo"}}', "one of managed, local_url"],
         ['{"nonsense":true}', 'unknown key "nonsense"'],
         ["{oops", "invalid JSON body"],

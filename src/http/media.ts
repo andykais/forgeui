@@ -1,15 +1,18 @@
 import { contentType } from "@std/media-types";
-import { extname, join, normalize, resolve } from "@std/path";
-import type { DataPaths } from "../config/paths.ts";
+import { extname, normalize } from "@std/path";
+import {
+  type DataPaths,
+  diskPath,
+  MEDIA_ROOTS,
+  StoredPathError,
+} from "../config/paths.ts";
 import { MAX_EDGE, MIN_EDGE, resizeMedia } from "../media/resize.ts";
 
 /**
- * `GET /api/media/*` (§12) serves the three directories that hold media, and
- * only those: a request that resolves anywhere else is refused rather than
- * followed.
+ * `GET /api/media/*` (§12) serves the three directories that hold media
+ * ({@link MEDIA_ROOTS}), and only those: a request that resolves anywhere
+ * else is refused rather than followed.
  */
-
-const SERVABLE = ["outputs", "inputs", "samples"] as const;
 
 export class MediaPathError extends Error {
   override readonly name = "MediaPathError";
@@ -36,7 +39,11 @@ export function maxEdgeOf(url: URL): number | null {
   return value;
 }
 
-/** `outputs/2026/09/05/01J-0.png` → an absolute path inside `<appdata>`. */
+/**
+ * `outputs/2026/09/05/01J-0.png` → the file on disk. The first segment names
+ * a media folder, not a folder of `<appdata>`: `outputs/` is wherever
+ * `outputs.dir` put the outputs (§3).
+ */
 export function resolveMediaPath(paths: DataPaths, relative: string): string {
   const decoded = relative.split("/").map(decodeURIComponent).join("/");
   const normalized = normalize(decoded);
@@ -44,17 +51,21 @@ export function resolveMediaPath(paths: DataPaths, relative: string): string {
     throw new MediaPathError("media path must be relative to the data dir");
   }
   const root = normalized.split("/")[0] ?? "";
-  if (!(SERVABLE as readonly string[]).includes(root)) {
+  if (!(MEDIA_ROOTS as readonly string[]).includes(root)) {
     throw new MediaPathError(
-      `media path must start with ${SERVABLE.join(", ")}`,
+      `media path must start with ${MEDIA_ROOTS.join(", ")}`,
     );
   }
-  const absolute = resolve(join(paths.root, normalized));
-  // Belt and braces against symlinks and clever encodings.
-  if (!absolute.startsWith(resolve(paths.root) + "/")) {
-    throw new MediaPathError("media path escapes the data dir");
+  try {
+    // Belt and braces against clever encodings: the answer must stay inside
+    // the folder the first segment names.
+    return diskPath(paths, normalized);
+  } catch (cause) {
+    if (cause instanceof StoredPathError) {
+      throw new MediaPathError(cause.message);
+    }
+    throw cause;
   }
-  return absolute;
 }
 
 function rangeOf(

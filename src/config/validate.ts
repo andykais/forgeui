@@ -264,6 +264,7 @@ export function validatePartialConfig(
     "keys",
     "ui",
     "import",
+    "outputs",
   ]);
   const out: PartialConfig = {};
 
@@ -347,6 +348,12 @@ export function validatePartialConfig(
   if ("ui" in raw) out.ui = validateUi(raw.ui, `${where}.ui`);
   if ("import" in raw) {
     out.import = validateImport(raw.import, `${where}.import`);
+  }
+  if ("outputs" in raw) {
+    const outputs = record(raw.outputs, `${where}.outputs`);
+    rejectUnknown(outputs, `${where}.outputs`, ["dir"]);
+    out.outputs = {};
+    pick(outputs, "dir", out.outputs, nullableStr, `${where}.outputs`);
   }
 
   return out;

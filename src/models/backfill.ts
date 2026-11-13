@@ -1,6 +1,5 @@
 import type { Database } from "../db/sqlite.ts";
-import { join } from "@std/path";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import {
   insertOutputModels,
   refreshModelUsage,
@@ -64,7 +63,7 @@ export class SidecarModelIndex {
       let models: SidecarModelRef[];
       try {
         models = parseSidecar(
-          await Deno.readTextFile(join(paths.root, sidecarPath)),
+          await Deno.readTextFile(diskPath(paths, sidecarPath)),
           sidecarPath,
         ).models;
       } catch {
