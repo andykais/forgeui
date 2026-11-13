@@ -12,7 +12,7 @@ import {
   setInputPixelHash,
 } from "../db/queries.ts";
 import { pixelHash } from "../jobs/png.ts";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import { type ProbedMedia, probeMedia } from "./probe.ts";
 import { readAudio } from "../media/audio.ts";
 
@@ -71,7 +71,7 @@ export class InputStore {
   }
 
   absolute(relative: string): string {
-    return join(this.#paths.root, relative);
+    return diskPath(this.#paths, relative);
   }
 
   /**
@@ -137,7 +137,7 @@ export class InputStore {
     if (output.deleted_at !== null) {
       throw new InputError(`output "${outputId}" has been deleted`);
     }
-    const source = join(this.#paths.root, output.path);
+    const source = diskPath(this.#paths, output.path);
     let bytes: Uint8Array;
     try {
       bytes = await Deno.readFile(source);

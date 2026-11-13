@@ -635,6 +635,8 @@ export interface StorageUse {
 
 export interface Storage {
   data_dir: string;
+  /** Where the outputs are: inside the data dir unless `outputs.dir` says otherwise. */
+  outputs_dir: string;
   outputs: StorageUse;
   inputs: StorageUse;
   samples: StorageUse;

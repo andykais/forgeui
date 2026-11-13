@@ -398,6 +398,8 @@ export const api = {
     request<{
       comfy: import("./types.ts").ComfyStatus;
       data_dir: string;
+      /** Where `outputs/…` paths are on disk (`outputs.dir`, §3). */
+      outputs_dir: string;
       /** When the server came up: where "this session" starts (§11.2). */
       started_at: number;
     }>("/api/system/status"),

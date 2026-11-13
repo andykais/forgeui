@@ -69,6 +69,9 @@ export function systemRoutes(ctx: AppContext): Route[] {
         return json({
           comfy: ctx.comfy.status(),
           data_dir: ctx.paths.root,
+          // Where `outputs/…` paths live on disk: the data dir's own
+          // `outputs` unless `outputs.dir` moved it (§3).
+          outputs_dir: ctx.paths.outputs,
           started_at: startedAt,
         });
       },
@@ -136,6 +139,7 @@ export function systemRoutes(ctx: AppContext): Route[] {
         // the app never writes there (§3).
         return json({
           data_dir: ctx.paths.root,
+          outputs_dir: ctx.paths.outputs,
           outputs,
           inputs,
           samples,

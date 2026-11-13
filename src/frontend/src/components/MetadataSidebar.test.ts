@@ -26,6 +26,7 @@ const library: ModelEntry[] = [];
 vi.mock("../stores/app.svelte.ts", () => ({
   app: {
     dataDir: "/data",
+    diskPath: (path: string) => `/data/${path}`,
     get loras() {
       return library;
     },
