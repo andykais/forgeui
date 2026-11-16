@@ -174,6 +174,12 @@ bindings; the protocol is identical either way.
 | `gpu_status` | what is resident, and how much VRAM is free | fast |
 | **`generate`** | the round: evict, submit the batch, wait, free, report. A job may name a `template`: the bridge applies it as the panel does — its values, the job's params over them, its asks required — before the round starts, and the output records it | **minutes** |
 
+Every file path a tool returns is absolute, on the machine running ForgeUI
+(resolved as DESIGN.md §3's `diskPath` does, so `outputs.dir` is honoured),
+and every media URL carries the server. A model
+handed `outputs/2026/…png` reads it against wherever it happens to be, which
+is never the data dir.
+
 Only the last one is special, and only in how long it takes.
 
 The two library listings are split by class rather than taking a `kind`

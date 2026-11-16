@@ -13,7 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { encodeBase64 } from "@std/encoding/base64";
-import { basename, join } from "@std/path";
+import { basename, join, resolve } from "@std/path";
 import type {
   ForgeUi,
   MediaBytes,
@@ -515,7 +515,15 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         }
         query.set("models", row.hash);
       }
-      return text(await forge.get(`/api/outputs?${query}`));
+      const page = await forge.get<{ outputs: object[]; cursor: unknown }>(
+        `/api/outputs?${query}`,
+      );
+      return text({
+        ...page,
+        outputs: await Promise.all(
+          page.outputs.map((output) => forge.absolutize(output)),
+        ),
+      });
     } catch (cause) {
       return failure(cause);
     }
@@ -526,7 +534,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "What one output is and what made it: the params it was generated " +
       "with (seed resolved, LoRAs with their strengths), its job — " +
       "workflow, when, how long, and the origin saying who asked for it " +
-      "and why — the file, and `notes`: what a person said about it " +
+      "and why — the file (an absolute path on the machine running " +
+      "ForgeUI), and `notes`: what a person said about it " +
       "afterwards. Read the notes on what you made last time before " +
       "deciding what to make next. `inputs` names the params that hold " +
       "stored media — the picture, a mask someone painted — and for a mask " +
@@ -543,6 +552,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       const summary = outputSummary(detail);
       return text({
         ...summary,
+        file: await forge.absolutePath(summary.file),
         inputs: await storedInputs(
           forge,
           summary.job.workflow_id,
@@ -565,7 +575,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
   }, async ({ output_id }) => {
     try {
       return text(
-        await forge.get(`/api/outputs/${encodeURIComponent(output_id)}`),
+        await forge.absolutize(
+          await forge.get<object>(
+            `/api/outputs/${encodeURIComponent(output_id)}`,
+          ),
+        ),
       );
     } catch (cause) {
       return failure(cause);
@@ -803,7 +817,10 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     try {
       const media = await forge.media(output_id);
       if (save_to !== undefined) {
-        const path = await saveTarget(save_to, media.output.path, output_id);
+        // Resolved, so `saved` is absolute even when save_to was not.
+        const path = resolve(
+          await saveTarget(save_to, media.output.path, output_id),
+        );
         await Deno.writeFile(path, media.bytes);
         return text({
           saved: path,
@@ -954,7 +971,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       "or an id. A job can start from a template (list_templates): name it " +
       "and its values fill the params, yours on top, and the params it " +
       "asks for are yours to give. Every finished job comes back with its " +
-      "outputs named, so the next round can attach one. `params` are checked against the " +
+      "outputs named — an id to attach, and the file's absolute path on the " +
+      "machine running ForgeUI. `params` are checked against the " +
       "workflow as describe_workflow gives it: a key it does not list, or " +
       "a number outside its min/max, refuses the round with what it takes " +
       "— nothing is renamed, dropped or clamped for you. e.g. params " +
