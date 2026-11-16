@@ -399,6 +399,21 @@ export interface Workflow {
   uiGraph: Record<string, unknown> | null;
   /** `sha256(api.json + manifest.json)` (§4.5). */
   hash: string;
+  /**
+   * Set when an agent made this workflow (§4.9): who, and when. Only an
+   * agent-made workflow can be changed by a write made on an agent's behalf.
+   * Read from `agent.json` in a user workflow's directory; bundled
+   * workflows never have one.
+   */
+  agent: WorkflowAgent | null;
+}
+
+/** `agent.json`: the agent that made a workflow (§4.9). */
+export interface WorkflowAgent {
+  /** The agent's `origin.source` label, e.g. `llm:qwen-vlm` (§6.2). */
+  source: string;
+  /** Milliseconds since the epoch. */
+  created_at: number;
 }
 
 export function isLink(value: unknown): value is ApiLink {

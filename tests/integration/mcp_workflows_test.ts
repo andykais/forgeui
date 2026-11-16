@@ -1,0 +1,481 @@
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { exists } from "@std/fs";
+import { join } from "@std/path";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { type TestApp, withTestApp } from "../fixtures/app.ts";
+import { ForgeUi } from "../../src/mcp/forgeui.ts";
+import { createBridgeServer } from "../../src/mcp/tools.ts";
+import { NODE_PACKS } from "../../src/workflows/nodes.ts";
+
+/**
+ * Workflows an agent writes (DESIGN.md §4.9): made through the bridge,
+ * listed and run like any other, and changeable through the bridge only
+ * when an agent made them — refused by the bridge, and again by the server
+ * when a write says it is made on an agent's behalf.
+ */
+
+interface ToolResult {
+  isError?: boolean;
+  text: string;
+}
+
+async function call(
+  app: TestApp,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<ToolResult> {
+  const forge = new ForgeUi({ url: app.url });
+  const handler = createMcpHandler(() =>
+    createBridgeServer({
+      forge,
+      llm: null,
+      freeVram: false,
+      progress: false,
+      defaultTimeoutMs: 30_000,
+    })
+  );
+  try {
+    const response = await handler.fetch(
+      new Request("http://bridge/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    const body = await response.text();
+    const data = body.split("\n").find((line) => line.startsWith("data:"));
+    assert(data, `no JSON-RPC response in: ${body}`);
+    const message = JSON.parse(data.slice("data:".length)) as {
+      result?: { isError?: boolean; content: { text?: string }[] };
+      error?: { message: string };
+    };
+    assert(!message.error, `${name} failed: ${message.error?.message}`);
+    return {
+      isError: message.result!.isError,
+      text: message.result!.content[0]!.text!,
+    };
+  } finally {
+    await handler.close();
+  }
+}
+
+async function ok<T>(
+  app: TestApp,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
+  const result = await call(app, name, args);
+  assert(!result.isError, `${name} answered an error: ${result.text}`);
+  return JSON.parse(result.text) as T;
+}
+
+async function refused(
+  app: TestApp,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<string> {
+  const result = await call(app, name, args);
+  assert(result.isError, `${name} should have failed, got: ${result.text}`);
+  return result.text;
+}
+
+interface Saved {
+  id: string;
+  name: string;
+  runnable: boolean;
+  not_runnable_because?: string;
+  made_by: string | null;
+  params: { key: string; advanced?: boolean; max?: number }[];
+  graph_checked_against_comfyui: boolean;
+  warnings?: string[];
+  notes?: string[];
+}
+
+interface Listed {
+  id: string;
+  source: string;
+  runnable: boolean;
+  agent: { source: string; created_at: number } | null;
+}
+
+async function listed(app: TestApp): Promise<Listed[]> {
+  const response = await app.fetch("/api/workflows");
+  return (await response.json() as { workflows: Listed[] }).workflows;
+}
+
+/** A complete SD 1.5 graph, written out as an agent would write it. */
+function sd15Graph(): Record<string, unknown> {
+  return {
+    "1": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: "v1-5-pruned-emaonly-fp16.safetensors" },
+    },
+    "2": {
+      class_type: "CLIPTextEncode",
+      inputs: { text: "", clip: ["1", 1] },
+    },
+    "3": {
+      class_type: "CLIPTextEncode",
+      inputs: { text: "blurry", clip: ["1", 1] },
+    },
+    "4": {
+      class_type: "EmptyLatentImage",
+      inputs: { width: 512, height: 512, batch_size: 1 },
+    },
+    "5": {
+      class_type: "KSampler",
+      inputs: {
+        seed: 0,
+        steps: 8,
+        cfg: 7,
+        sampler_name: "euler",
+        scheduler: "normal",
+        denoise: 1,
+        model: ["1", 0],
+        positive: ["2", 0],
+        negative: ["3", 0],
+        latent_image: ["4", 0],
+      },
+    },
+    "6": {
+      class_type: "VAEDecode",
+      inputs: { samples: ["5", 0], vae: ["1", 2] },
+    },
+    "7": {
+      class_type: "SaveImage",
+      inputs: { filename_prefix: "forge", images: ["6", 0] },
+    },
+  };
+}
+
+const SD15_PARAMS = [
+  { key: "prompt", type: "text", required: true, bind: "2.text" },
+  { key: "seed", type: "seed", bind: "5.seed" },
+  { key: "steps", type: "int", min: 1, max: 30, bind: "5.steps" },
+];
+
+Deno.test("an agent's workflow lists, describes and runs like any other", async () => {
+  await withTestApp(async (app) => {
+    const saved = await ok<Saved>(app, "create_workflow", {
+      name: "SD 1.5 (8 steps)",
+      id: "sd15-fast",
+      family: "sd15",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    assertEquals(saved.id, "sd15-fast");
+    assert(saved.runnable, saved.not_runnable_because);
+    assertEquals(saved.made_by, "llm:unknown");
+    assert(saved.graph_checked_against_comfyui);
+    assertEquals(saved.params.map((param) => param.key), [
+      "prompt",
+      "seed",
+      "steps",
+    ]);
+
+    // The Workflows screen and the picker see it, marked as an agent's.
+    const row = (await listed(app)).find((w) => w.id === "sd15-fast");
+    assert(row, "the new workflow is listed");
+    assertEquals(row.source, "user");
+    assert(row.runnable);
+    assertEquals(row.agent?.source, "llm:unknown");
+
+    const described = await ok<{ editable: boolean; params: unknown[] }>(
+      app,
+      "describe_workflow",
+      { workflow_id: "sd15-fast" },
+    );
+    assertEquals(described.editable, true);
+
+    // And it runs through the same round as a bundled one.
+    const round = await ok<{
+      counts: { done: number };
+      jobs: { error?: string }[];
+    }>(app, "generate", {
+      jobs: [{
+        workflow_id: "sd15-fast",
+        params: { prompt: "a lighthouse", steps: 6 },
+      }],
+    });
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+  }, { comfy: true });
+});
+
+Deno.test("from_workflow copies a workflow, and the copy is the agent's", async () => {
+  await withTestApp(async (app) => {
+    const saved = await ok<Saved>(app, "create_workflow", {
+      name: "SD 1.5, steps up front",
+      from_workflow: "sd15",
+    });
+    assertEquals(saved.id, "sd-1-5-steps-up-front");
+    assert(saved.runnable, saved.not_runnable_because);
+    assertEquals(
+      saved.params.map((param) => param.key),
+      ["prompt", "negative", "size", "seed", "loras", "steps", "cfg"],
+    );
+
+    // The original is untouched: still bundled, no user copy, no record.
+    const sd15 = (await listed(app)).find((w) => w.id === "sd15")!;
+    assertEquals(sd15.source, "bundled");
+    assertEquals(sd15.agent, null);
+  }, { comfy: true });
+});
+
+Deno.test("every bundled workflow can be the start of one", async () => {
+  // The node check must not refuse a graph that ships with the app: a copy
+  // of any of them is the obvious first move for an agent.
+  await withTestApp(async (app) => {
+    const bundled = (await listed(app)).filter((w) => w.source === "bundled");
+    assert(bundled.length > 20);
+    for (const workflow of bundled) {
+      const saved = await ok<Saved>(app, "create_workflow", {
+        name: `${workflow.id} copy`,
+        from_workflow: workflow.id,
+      });
+      assertEquals(saved.runnable, workflow.runnable, workflow.id);
+      assertEquals(saved.warnings, undefined, workflow.id);
+    }
+  }, { comfy: { packs: Object.keys(NODE_PACKS) } });
+});
+
+Deno.test("a graph ComfyUI would refuse is refused before anything is saved, every problem at once", async () => {
+  await withTestApp(async (app) => {
+    const graph = sd15Graph();
+    (graph["5"] as { class_type: string }).class_type = "KSampler2";
+    (graph["6"] as { inputs: Record<string, unknown> }).inputs.vae = ["1", 7];
+    (graph["2"] as { inputs: Record<string, unknown> }).inputs.clip = [1, 1];
+
+    // The shape problem stops it first, on its own.
+    let message = await refused(app, "create_workflow", {
+      name: "broken",
+      api_json: graph,
+      params: SD15_PARAMS,
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    assertStringIncludes(message, "Nothing was saved");
+    assertStringIncludes(message, 'node "2" (CLIPTextEncode).clip');
+    assertStringIncludes(message, '["1", 1], not [1, 1]');
+
+    // Then everything ComfyUI's node list says, in one answer.
+    (graph["2"] as { inputs: Record<string, unknown> }).inputs.clip = ["1", 1];
+    message = await refused(app, "create_workflow", {
+      name: "broken",
+      api_json: graph,
+      params: SD15_PARAMS,
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    assertStringIncludes(message, "2 problems");
+    assertStringIncludes(
+      message,
+      'node "5" (KSampler2): this ComfyUI has no node type "KSampler2" — ' +
+        'did you mean "KSampler"?',
+    );
+    assertStringIncludes(
+      message,
+      'node "6" (VAEDecode).vae: links to output 7',
+    );
+    assertStringIncludes(message, "0: MODEL, 1: CLIP, 2: VAE");
+
+    assert(!(await listed(app)).some((w) => w.id === "broken"));
+  }, { comfy: true });
+});
+
+Deno.test("a bind the graph does not have is ForgeUI's refusal, and names the param", async () => {
+  await withTestApp(async (app) => {
+    const message = await refused(app, "create_workflow", {
+      name: "Bad bind",
+      api_json: sd15Graph(),
+      params: [{ key: "prompt", type: "text", bind: "9.text" }],
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    assertStringIncludes(
+      message,
+      "ForgeUI refused the params/outputs (the manifest)",
+    );
+    assertStringIncludes(message, "manifest.params[0] (prompt).bind");
+    assertStringIncludes(message, 'no node "9"');
+    assert(!(await listed(app)).some((w) => w.id === "bad-bind"));
+    assert(
+      !(await exists(join(app.paths.userWorkflows, "bad-bind"))),
+      "a refused create leaves no directory behind",
+    );
+  }, { comfy: true });
+});
+
+Deno.test("an agent's workflow can be changed by the agent; a field the manifest lacks is reported", async () => {
+  await withTestApp(async (app) => {
+    await ok<Saved>(app, "create_workflow", {
+      name: "Mine",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+    });
+    const draft = await ok<Saved>(app, "get_workflow_source", {
+      workflow_id: "mine",
+    });
+    assertEquals((draft as unknown as { editable: boolean }).editable, true);
+
+    const updated = await ok<Saved>(app, "update_workflow", {
+      workflow_id: "mine",
+      outputs: [{ node: "7", kind: "image" }],
+      params: [
+        ...SD15_PARAMS.slice(0, 2),
+        { key: "steps", type: "int", maximum: 50, bind: "5.steps" },
+      ],
+    });
+    assert(updated.runnable, updated.not_runnable_because);
+    assertEquals(updated.warnings, [
+      'param "steps": "maximum" is not a param field, so it was ignored',
+    ]);
+  }, { comfy: true });
+});
+
+Deno.test("a draft says why it cannot run yet", async () => {
+  await withTestApp(async (app) => {
+    const saved = await ok<Saved>(app, "create_workflow", {
+      name: "No outputs",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+    });
+    assertEquals(saved.runnable, false);
+    assertStringIncludes(
+      saved.not_runnable_because!,
+      "manifest.outputs is empty",
+    );
+  }, { comfy: true });
+});
+
+Deno.test("the bridge refuses to change a workflow no agent made, and says what to do", async () => {
+  await withTestApp(async (app) => {
+    const message = await refused(app, "update_workflow", {
+      workflow_id: "sd15",
+      description: "mine now",
+    });
+    assertStringIncludes(message, '"sd15" was not made by an agent');
+    assertStringIncludes(message, "came with ForgeUI");
+    assertStringIncludes(message, 'from_workflow "sd15"');
+    assert(!(await exists(join(app.paths.userWorkflows, "sd15"))));
+
+    // A person's own workflow is just as off limits.
+    const created = await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name: "Hand made" }),
+    });
+    assertEquals(created.status, 201);
+    const theirs = await refused(app, "update_workflow", {
+      workflow_id: "hand-made",
+      description: "mine now",
+    });
+    assertStringIncludes(theirs, "a person made or edited");
+  }, { comfy: true });
+});
+
+Deno.test("the server refuses an agent's write to a workflow no agent made, whatever sent it", async () => {
+  await withTestApp(async (app) => {
+    // The second line of the rule (§4.9): not the bridge, the server.
+    const response = await app.fetch("/api/workflows/sd15", {
+      method: "PUT",
+      body: JSON.stringify({
+        agent: "llm:somebody",
+        manifest: {
+          id: "sd15",
+          name: "Taken",
+          kind: "image",
+          params: [],
+          outputs: [],
+        },
+      }),
+    });
+    assertEquals(response.status, 403);
+    const body = await response.json() as {
+      error: { code: string; message: string };
+    };
+    assertEquals(body.error.code, "forbidden");
+    assertStringIncludes(body.error.message, "not made by an agent");
+    assert(
+      !(await exists(join(app.paths.userWorkflows, "sd15"))),
+      "a refused write makes no user copy",
+    );
+
+    // A person's write is unaffected, and may edit an agent's workflow too.
+    await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name: "Agent's", agent: "llm:qwen" }),
+    });
+    const human = await app.fetch("/api/workflows/agent-s", {
+      method: "PUT",
+      body: JSON.stringify({
+        manifest: {
+          id: "agent-s",
+          name: "Renamed",
+          kind: "image",
+          params: [],
+          outputs: [],
+        },
+      }),
+    });
+    assertEquals(human.status, 200, await human.clone().text());
+    // …and that does not take it away from the agent.
+    const row = (await listed(app)).find((w) => w.id === "agent-s")!;
+    assertEquals(row.agent?.source, "llm:qwen");
+
+    // An agent naming an id that is taken is told, not renamed.
+    const taken = await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ id: "sd15", name: "x", agent: "llm:qwen" }),
+    });
+    assertEquals(taken.status, 409);
+    await taken.body?.cancel();
+  });
+});
+
+Deno.test("agent.json is the record, a copy is not the agent's, and a damaged record fails closed", async () => {
+  await withTestApp(async (app) => {
+    await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name: "Made", agent: "llm:qwen" }),
+    });
+    const record = JSON.parse(
+      await Deno.readTextFile(
+        join(app.paths.userWorkflows, "made", "agent.json"),
+      ),
+    );
+    assertEquals(record.source, "llm:qwen");
+    assertEquals(typeof record.created_at, "number");
+
+    const copy = await app.fetch("/api/workflows/made/duplicate", {
+      method: "POST",
+    });
+    assertEquals(copy.status, 201);
+    assertEquals((await copy.json() as Listed).agent, null);
+
+    await Deno.writeTextFile(
+      join(app.paths.userWorkflows, "made", "agent.json"),
+      "{not json",
+    );
+    await app.workflows.reload();
+    const damaged = (await listed(app)).find((w) => w.id === "made")!;
+    assertEquals(damaged.agent, null);
+  });
+});
+
+Deno.test("with no ComfyUI the graph is still saved, and the answer says it went unchecked", async () => {
+  await withTestApp(async (app) => {
+    const saved = await ok<Saved>(app, "create_workflow", {
+      name: "Offline",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    assertEquals(saved.graph_checked_against_comfyui, false);
+    assertStringIncludes(saved.notes![0]!, "ComfyUI could not be reached");
+  });
+});

@@ -1,5 +1,6 @@
 import { workflowUsage } from "../../db/queries.ts";
 import { literalInputs } from "../../workflows/inputs.ts";
+import { readAgentSource } from "../../workflows/loader.ts";
 import type { Workflow } from "../../workflows/types.ts";
 import { isRunnable } from "../../workflows/types.ts";
 import { json, readJson } from "../json.ts";
@@ -35,6 +36,9 @@ function summary(
     last_job_at: usage.get(workflow.id)?.last_job_at ?? null,
     last_output_id: usage.get(workflow.id)?.last_output_id ?? null,
     has_ui_json: workflow.uiGraph !== null,
+    // Who made it, when an agent did; only such a workflow takes a write
+    // made on an agent's behalf (§4.9).
+    agent: workflow.agent,
     // Where a picture goes, for Reuse image (§10): the first image param.
     image_param:
       manifest?.params.find((param) => param.type === "image")?.key ?? null,
@@ -70,7 +74,9 @@ export function workflowRoutes(ctx: AppContext): Route[] {
       path: "/api/workflows",
       handler: async (req) => {
         const body = await readJson(req) as Record<string, unknown>;
-        const workflow = await ctx.workflows.create(body);
+        const workflow = await ctx.workflows.create(body, {
+          agent: readAgentSource(body.agent),
+        });
         return json(detail(ctx, workflow), { status: 201 });
       },
     },
@@ -85,7 +91,9 @@ export function workflowRoutes(ctx: AppContext): Route[] {
       path: "/api/workflows/:id",
       handler: async (req, { params }) => {
         const body = await readJson(req) as Record<string, unknown>;
-        const workflow = await ctx.workflows.save(params.id!, body);
+        const workflow = await ctx.workflows.save(params.id!, body, {
+          agent: readAgentSource(body.agent),
+        });
         return json(detail(ctx, workflow));
       },
     },

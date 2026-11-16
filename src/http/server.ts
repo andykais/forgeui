@@ -45,6 +45,7 @@ import { ParamError } from "../workflows/coerce.ts";
 import { RewriteError } from "../workflows/rewrite.ts";
 import {
   WorkflowConflictError,
+  WorkflowForbiddenError,
   WorkflowNotFoundError,
   type WorkflowStore,
 } from "../workflows/loader.ts";
@@ -243,6 +244,9 @@ function handlerError(cause: unknown, req: Request): Response {
     cause instanceof TemplateNotFoundError
   ) {
     return error(404, "not_found", cause.message);
+  }
+  if (cause instanceof WorkflowForbiddenError) {
+    return error(403, "forbidden", cause.message);
   }
   if (cause instanceof NotImplementedError) {
     return error(501, "not_implemented", cause.message);

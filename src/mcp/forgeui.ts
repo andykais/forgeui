@@ -9,6 +9,16 @@
 
 export class ForgeUiError extends Error {
   override readonly name = "ForgeUiError";
+  /** The HTTP status, when ForgeUI answered at all. */
+  readonly status: number | null;
+  /** ForgeUI's own message, without the method, path and status. */
+  readonly detail: string;
+
+  constructor(message: string, status: number | null = null, detail = message) {
+    super(message);
+    this.status = status;
+    this.detail = detail;
+  }
 }
 
 /**
@@ -192,10 +202,11 @@ export class ForgeUi {
     });
     const text = await response.text();
     if (!response.ok) {
+      const detail = errorDetail(text);
       throw new ForgeUiError(
-        `${init?.method ?? "GET"} ${path}: ${response.status} ${
-          errorDetail(text)
-        }`,
+        `${init?.method ?? "GET"} ${path}: ${response.status} ${detail}`,
+        response.status,
+        detail,
       );
     }
     return text.trim().length === 0 ? null : JSON.parse(text);

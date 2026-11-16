@@ -17,12 +17,16 @@ import type {
   Manifest,
   Param,
   Workflow,
+  WorkflowAgent,
   WorkflowSource,
 } from "./types.ts";
+import { checkGraphShape } from "./graph_check.ts";
 
 export const MANIFEST_FILE = "manifest.json";
 export const API_FILE = "workflow.api.json";
 export const UI_FILE = "workflow.ui.json";
+/** Who made a workflow, when an agent did (§4.9). User workflows only. */
+export const AGENT_FILE = "agent.json";
 
 export class WorkflowNotFoundError extends Error {
   override readonly name = "WorkflowNotFoundError";
@@ -33,6 +37,62 @@ export class WorkflowNotFoundError extends Error {
 
 export class WorkflowConflictError extends Error {
   override readonly name = "WorkflowConflictError";
+}
+
+/**
+ * A write made on an agent's behalf to a workflow no agent made (§4.9).
+ * The server's half of the rule; the bridge's tools are the other half.
+ */
+export class WorkflowForbiddenError extends Error {
+  override readonly name = "WorkflowForbiddenError";
+}
+
+/** What `agent` on a create or save may hold: the agent's source label. */
+const AGENT_SOURCE_MAX = 120;
+
+/**
+ * The `agent` field of `POST`/`PUT /api/workflows` (§4.9): absent for a
+ * person's write, else the label of the agent the write is made for, the
+ * same string a job it submits carries as `origin.source` (§6.2).
+ */
+export function readAgentSource(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new ManifestError(
+      'agent: expected the agent\'s source label, e.g. "llm:qwen-vlm"',
+    );
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length > AGENT_SOURCE_MAX) {
+    throw new ManifestError(`agent: at most ${AGENT_SOURCE_MAX} characters`);
+  }
+  return trimmed;
+}
+
+/**
+ * `agent.json`, or null. Anything that is not a well-formed record reads as
+ * null: a damaged file makes the workflow a person's, which an agent cannot
+ * change, rather than one it can. The rule fails closed.
+ */
+async function readAgentFile(dir: string): Promise<WorkflowAgent | null> {
+  let text: string;
+  try {
+    text = await Deno.readTextFile(join(dir, AGENT_FILE));
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
+  }
+  try {
+    const raw = JSON.parse(text) as Record<string, unknown>;
+    if (
+      typeof raw?.source === "string" && raw.source.length > 0 &&
+      typeof raw.created_at === "number"
+    ) {
+      return { source: raw.source, created_at: raw.created_at };
+    }
+  } catch { /* falls through */ }
+  log(`workflows: ${dir}: ignoring a malformed ${AGENT_FILE}`);
+  return null;
 }
 
 /** Where the shipped workflows live in the source tree. */
@@ -69,6 +129,26 @@ function asGraph(value: unknown, where: string): ApiGraph {
     throw new ManifestError(`${where}: expected an object of nodes`);
   }
   return value as ApiGraph;
+}
+
+/**
+ * A graph about to be written, checked for the shape every queued prompt
+ * needs (§4.9): nodes with a `class_type` and `inputs`, links that point at
+ * nodes which exist. Every problem at once, so a caller that wrote the graph
+ * by hand — an agent, usually — fixes them in one go rather than one per
+ * round trip. Only on writes: a graph already on disk loads as it is.
+ */
+function checkedGraph(value: unknown, where: string): ApiGraph {
+  const graph = asGraph(value, where);
+  const problems = checkGraphShape(graph);
+  if (problems.length > 0) {
+    throw new ManifestError(
+      `${where}: ${problems.length} problem${
+        problems.length === 1 ? "" : "s"
+      }: ${problems.join("; ")}`,
+    );
+  }
+  return graph;
 }
 
 /**
@@ -119,6 +199,8 @@ export async function loadWorkflowDir(
     apiGraph,
     uiGraph,
     hash: await workflowHash(apiGraph, manifest),
+    // Bundled workflows ship with the app; nothing an agent wrote is in one.
+    agent: source === "user" ? await readAgentFile(dir) : null,
   };
 }
 
@@ -176,6 +258,17 @@ export interface SaveWorkflowBody {
 export interface CreateWorkflowBody extends SaveWorkflowBody {
   id?: string;
   name?: string;
+}
+
+/** Who a write is made for: a person (null) or an agent's label (§4.9). */
+export interface WriteActor {
+  agent: string | null;
+}
+
+const PERSON: WriteActor = { agent: null };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function slugify(name: string): string {
@@ -352,8 +445,22 @@ export class WorkflowStore {
    * `PUT /api/workflows/:id`: write the manifest and/or the two graph files.
    * Saving a bundled workflow creates the user copy first (§4.6).
    */
-  async save(id: string, body: SaveWorkflowBody): Promise<Workflow> {
+  async save(
+    id: string,
+    body: SaveWorkflowBody,
+    actor: WriteActor = PERSON,
+  ): Promise<Workflow> {
     const workflow = this.require(id);
+    // First, before anything else is read or written: an agent may change
+    // only what an agent made (§4.9). A person may change anything,
+    // including an agent's workflow, which stays the agent's to edit too.
+    if (actor.agent !== null && workflow.agent === null) {
+      throw new WorkflowForbiddenError(
+        `"${id}" was not made by an agent, so it cannot be changed on an ` +
+          `agent's behalf; make a new workflow instead (a copy of this one ` +
+          `is a fine start)`,
+      );
+    }
     if (
       body.manifest === undefined && body.ui_json === undefined &&
       body.api_json === undefined
@@ -364,7 +471,7 @@ export class WorkflowStore {
     }
     const graph = body.api_json === undefined
       ? workflow.apiGraph
-      : asGraph(body.api_json, "api_json");
+      : checkedGraph(body.api_json, "api_json");
     // Validate before touching the filesystem, so a rejected save leaves no
     // half-made user copy behind.
     // Without the defaults the screen was only showing: the ones the graph
@@ -391,39 +498,93 @@ export class WorkflowStore {
     }
     if (body.ui_json !== undefined) {
       await writeJsonFile(join(dir, UI_FILE), body.ui_json);
+    } else if (body.api_json !== undefined) {
+      // A new graph without its editor document leaves the old document
+      // describing a graph that no longer runs. Without one, the editor
+      // rebuilds it from the api graph (§4.1), which is at least the truth.
+      await Deno.remove(join(dir, UI_FILE)).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      });
     }
     return await this.#reloadOne(id);
   }
 
   /** `POST /api/workflows`: blank, or an imported LiteGraph document. */
-  async create(body: CreateWorkflowBody = {}): Promise<Workflow> {
-    const name = typeof body.name === "string" && body.name.trim().length > 0
+  async create(
+    body: CreateWorkflowBody = {},
+    actor: WriteActor = PERSON,
+  ): Promise<Workflow> {
+    const named = typeof body.name === "string" && body.name.trim().length > 0
       ? body.name.trim()
-      : "Untitled workflow";
-    const id = this.#freeId(
-      typeof body.id === "string" && body.id.length > 0
-        ? body.id
-        : slugify(name),
-    );
-    const dir = this.#userPath(id);
-    await Deno.mkdir(dir, { recursive: true });
+      : null;
+    const asked = typeof body.id === "string" && body.id.length > 0
+      ? body.id
+      : null;
+    // An agent that names an id means that id: quietly saving it as
+    // `<id>-2` would leave it editing, and running, something it did not
+    // make (§4.9). A person's import is renamed, as it always was.
+    if (actor.agent !== null && asked !== null && this.#byId.has(asked)) {
+      throw new WorkflowConflictError(
+        `a workflow "${asked}" already exists; pick another id, or leave ` +
+          `it out to have one made from the name`,
+      );
+    }
+    const manifestName = isRecord(body.manifest) &&
+        typeof body.manifest.name === "string" &&
+        body.manifest.name.trim().length > 0
+      ? body.manifest.name.trim()
+      : null;
+    const name = named ?? manifestName ?? "Untitled workflow";
+    const id = this.#freeId(asked ?? slugify(name));
 
+    // Everything is checked before the directory exists, so a refused
+    // create leaves nothing behind for the next listing to trip over.
     const graph = body.api_json === undefined
       ? {}
-      : asGraph(body.api_json, "api_json");
+      : checkedGraph(body.api_json, "api_json");
     const manifest = body.manifest === undefined
       ? stubManifest(id, name)
-      : validateManifest(body.manifest, { id, graph });
+      : validateManifest(
+        // The directory decides the id, and a manifest with no name of its
+        // own takes the request's: neither has to be given twice.
+        // A manifest copied from another workflow's detail carries the
+        // defaults that graph only filled in; they stay the graph's (§4.3).
+        isRecord(body.manifest)
+          ? withoutGraphDefaults({
+            ...body.manifest,
+            id,
+            name: manifestName ?? name,
+          })
+          : body.manifest,
+        { id, graph },
+      );
 
-    await writeJsonFile(
-      join(dir, MANIFEST_FILE),
-      JSON.parse(serializeManifest(manifest)),
-    );
-    await writeJsonFile(join(dir, API_FILE), graph);
-    await writeJsonFile(
-      join(dir, UI_FILE),
-      body.ui_json ?? emptyLiteGraph(),
-    );
+    const dir = this.#userPath(id);
+    await Deno.mkdir(dir, { recursive: true });
+    try {
+      await writeJsonFile(
+        join(dir, MANIFEST_FILE),
+        JSON.parse(serializeManifest(manifest)),
+      );
+      await writeJsonFile(join(dir, API_FILE), graph);
+      if (body.ui_json !== undefined) {
+        await writeJsonFile(join(dir, UI_FILE), body.ui_json);
+      } else if (Object.keys(graph).length === 0) {
+        await writeJsonFile(join(dir, UI_FILE), emptyLiteGraph());
+      }
+      // A graph with no editor document gets none: the editor rebuilds one
+      // from the api graph (§4.1), laid out, rather than opening blank.
+      if (actor.agent !== null) {
+        const record: WorkflowAgent = {
+          source: actor.agent,
+          created_at: Date.now(),
+        };
+        await writeJsonFile(join(dir, AGENT_FILE), record);
+      }
+    } catch (error) {
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+      throw error;
+    }
     return await this.#reloadOne(id);
   }
 
@@ -433,6 +594,11 @@ export class WorkflowStore {
     const dir = this.#userPath(copyId);
     await Deno.mkdir(dir, { recursive: true });
     await copy(source.dir, dir, { overwrite: true });
+    // A copy someone asked for in the app is theirs, whoever made the
+    // original (§4.9).
+    await Deno.remove(join(dir, AGENT_FILE)).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    });
 
     const manifest = source.manifest
       ? { ...source.manifest, id: copyId, name: `${source.manifest.name} copy` }
