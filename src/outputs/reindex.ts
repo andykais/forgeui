@@ -1,6 +1,6 @@
 import type { Database } from "../db/sqlite.ts";
-import { extname, join, relative } from "@std/path";
-import type { DataPaths } from "../config/paths.ts";
+import { extname, join } from "@std/path";
+import { type DataPaths, storedOutputPath } from "../config/paths.ts";
 import {
   allOutputIds,
   deleteOutputRow,
@@ -160,10 +160,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
   const seen = new Set<string>();
 
   for await (const sidecarPath of sidecarFiles(paths.outputs)) {
-    const relativeSidecar = relative(paths.root, sidecarPath).replaceAll(
-      "\\",
-      "/",
-    );
+    const relativeSidecar = storedOutputPath(paths, sidecarPath);
     let sidecar: Sidecar;
     try {
       sidecar = parseSidecar(
@@ -217,7 +214,7 @@ export async function reindex(options: ReindexOptions): Promise<ReindexResult> {
       const row: OutputRow = {
         id,
         job_id: sidecar.job_id,
-        path: relative(paths.root, mediaPath).replaceAll("\\", "/"),
+        path: storedOutputPath(paths, mediaPath),
         sidecar_path: relativeSidecar,
         kind: output.kind,
         width,

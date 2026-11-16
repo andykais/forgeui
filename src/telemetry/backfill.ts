@@ -1,6 +1,5 @@
 import type { Database } from "../db/sqlite.ts";
-import { join } from "@std/path";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import { listLiveOutputs } from "../db/queries.ts";
 import { log } from "../log.ts";
 import { recordedLabels } from "./queries.ts";
@@ -40,7 +39,7 @@ export async function backfillOutputSizes(options: {
     if (already.has(output.id)) continue;
     let bytes: number;
     try {
-      bytes = (await Deno.stat(join(options.paths.root, output.path))).size;
+      bytes = (await Deno.stat(diskPath(options.paths, output.path))).size;
     } catch {
       // The row outlived its file. `reindex` is what settles that; a report
       // of sizes is not the place to guess at one.

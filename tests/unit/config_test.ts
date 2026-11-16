@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { parse as parseYaml } from "@std/yaml";
+import { join } from "@std/path";
 import {
   ConfigError,
   DATA_DIR_ENV,
@@ -302,6 +303,50 @@ Deno.test("import.dir and import.model_dir move the folders", () => {
   const relative = dataPaths("/data", { dir: "inbox", model_dir: "weights" });
   assertEquals(relative.imports, "/data/inbox");
   assertEquals(relative.downloads, "/data/weights");
+});
+
+Deno.test("outputs.dir moves the outputs folder, and nothing else", () => {
+  assertEquals(dataPaths("/data").outputs, "/data/outputs");
+  assertEquals(
+    dataPaths("/data", null, { dir: "/mnt/big/outputs" }).outputs,
+    "/mnt/big/outputs",
+  );
+  // Relative to the data directory, as import.dir is.
+  const relative = dataPaths("/data", null, { dir: "gallery" });
+  assertEquals(relative.outputs, "/data/gallery");
+  assertEquals(relative.inputs, "/data/inputs");
+  assertEquals(relative.samples, "/data/samples");
+  assertEquals(relative.staging, "/data/staging");
+});
+
+Deno.test("outputs.dir is read from config.yaml at launch, and refused by a patch", async () => {
+  await withTempDir(async (dir) => {
+    const elsewhere = join(dir, "elsewhere");
+    await Deno.writeTextFile(
+      join(dir, "config.yaml"),
+      `outputs:\n  dir: ${elsewhere}\n`,
+    );
+    const { store } = await loadConfig({ dataDir: dir });
+    assertEquals(store.config.outputs.dir, elsewhere);
+    assertEquals(store.paths.outputs, elsewhere);
+    // Created at boot, like every other folder the app owns.
+    assert((await Deno.stat(elsewhere)).isDirectory);
+
+    await assertRejects(
+      () => store.patch({ outputs: { dir: "/mnt/x" } }),
+      ConfigError,
+      "read at launch",
+    );
+  });
+  assertThrows(
+    () => validatePartialConfig({ outputs: { folder: "/x" } }),
+    ConfigError,
+    'unknown key "folder"',
+  );
+  assertThrows(
+    () => validatePartialConfig({ outputs: { dir: 3 } }),
+    ConfigError,
+  );
 });
 
 /**

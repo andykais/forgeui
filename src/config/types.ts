@@ -237,6 +237,21 @@ export interface ImportConfig {
   ingest_on_boot: boolean;
 }
 
+/**
+ * Where generated media live (§3). A config entry rather than a flag because
+ * every process that opens the data dir — `serve`, `reindex`, `forge mcp`'s
+ * host — has to agree on it.
+ */
+export interface OutputsConfig {
+  /**
+   * The outputs folder; null → `<appdata>/outputs`. A relative path is taken
+   * from the data dir. Read at launch. Moving it means moving the files too:
+   * the database stores `outputs/…`, never this folder, so nothing in it
+   * changes and no reindex is needed.
+   */
+  dir: string | null;
+}
+
 export interface Config {
   server: ServerConfig;
   comfy: ComfyConfig;
@@ -246,6 +261,7 @@ export interface Config {
   keys: KeyBindings;
   ui: UiConfig;
   import: ImportConfig;
+  outputs: OutputsConfig;
 }
 
 /** A `config.yaml` document, a CLI override layer, or a `PATCH` body. */
@@ -257,6 +273,7 @@ export interface PartialConfig {
   keys?: Partial<KeyBindings>;
   ui?: PartialUiConfig;
   import?: Partial<ImportConfig>;
+  outputs?: Partial<OutputsConfig>;
 }
 
 export interface PartialUiConfig {

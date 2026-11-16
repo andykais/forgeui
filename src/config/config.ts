@@ -90,6 +90,7 @@ export function mergePartialConfig(
   const keys = mergeSection(a.keys, b.keys);
   const ui = mergeUi(a.ui, b.ui);
   const importing = mergeSection(a.import, b.import);
+  const outputs = mergeSection(a.outputs, b.outputs);
   if (server) out.server = server;
   if (comfy) out.comfy = comfy;
   if (folders) out.model_folders = folders;
@@ -97,6 +98,7 @@ export function mergePartialConfig(
   if (keys) out.keys = keys;
   if (ui) out.ui = ui;
   if (importing) out.import = importing;
+  if (outputs) out.outputs = outputs;
   return out;
 }
 
@@ -125,6 +127,7 @@ export function effectiveConfig(...layers: PartialConfig[]): Config {
       },
     },
     import: { ...base.import, ...layer.import },
+    outputs: { ...base.outputs, ...layer.outputs },
   };
 }
 
@@ -201,13 +204,20 @@ export class ConfigStore {
 
   /**
    * Merge a partial config into `config.yaml` and rewrite it. `model_folders`
-   * is launch-time only and is refused here (§11.2).
+   * and `outputs` are launch-time only and are refused here (§11.2, §3):
+   * pointing the outputs somewhere else while the app runs would leave every
+   * file it already knows about behind.
    */
   async patch(patch: unknown): Promise<Config> {
     const validated = validatePartialConfig(patch, "patch");
     if (validated.model_folders) {
       throw new ConfigError(
         "patch.model_folders: model folders are read at launch; edit config.yaml and restart",
+      );
+    }
+    if (validated.outputs) {
+      throw new ConfigError(
+        "patch.outputs: the outputs folder is read at launch; move the files, edit config.yaml and restart",
       );
     }
     this.#onDisk = mergePartialConfig(this.#onDisk, validated);
@@ -329,8 +339,8 @@ export async function loadConfig(
   }
 
   // Now that both layers are known, the folders they may have moved are too.
-  const settings = effectiveConfig(onDisk, options.overrides ?? {}).import;
-  paths = dataPaths(options.dataDir, settings);
+  const effective = effectiveConfig(onDisk, options.overrides ?? {});
+  paths = dataPaths(options.dataDir, effective.import, effective.outputs);
   await ensureDataDirs(paths);
 
   const store = new ConfigStore({

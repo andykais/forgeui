@@ -180,8 +180,11 @@ export async function completeJob(
     );
   }
 
+  // The row says `outputs/…`; where that is on disk is `outputs.dir`'s to
+  // say (§3), so the two are built side by side rather than one from the
+  // other.
   const relativeDir = `outputs/${dayPath(createdAt)}`;
-  const absoluteDir = join(paths.root, relativeDir);
+  const absoluteDir = join(paths.outputs, dayPath(createdAt));
   await Deno.mkdir(absoluteDir, { recursive: true });
 
   interface Moved {

@@ -1,8 +1,7 @@
 import type { Database } from "../db/sqlite.ts";
-import { join } from "@std/path";
 import { WAVEFORM_SUFFIX, waveformPathFor } from "../media/audio.ts";
 import { toneColour } from "../media/tone.ts";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import {
   countLiveOutputsForSidecar,
   countOutputs,
@@ -194,7 +193,7 @@ export class OutputStore {
     let sidecarError: string | null = null;
     try {
       sidecar = parseSidecar(
-        await Deno.readTextFile(join(this.#paths.root, row.sidecar_path)),
+        await Deno.readTextFile(diskPath(this.#paths, row.sidecar_path)),
         row.sidecar_path,
       );
     } catch (cause) {
@@ -280,7 +279,7 @@ export class OutputStore {
     row: OutputRow,
     notes: string | null,
   ): Promise<void> {
-    const path = join(this.#paths.root, row.sidecar_path);
+    const path = diskPath(this.#paths, row.sidecar_path);
     const sidecar = parseSidecar(
       await Deno.readTextFile(path),
       row.sidecar_path,
@@ -379,7 +378,7 @@ export class OutputStore {
   async #removeFiles(id: string): Promise<void> {
     const row = getOutput(this.#db, id);
     if (!row || row.deleted_at === null) return; // Restored in the meantime.
-    const media = join(this.#paths.root, row.path);
+    const media = diskPath(this.#paths, row.path);
     await remove(media);
     // Audio carries a drawn waveform beside it (§2.2); it is part of the
     // output, not a file of its own, so it goes at the same moment.
@@ -394,14 +393,14 @@ export class OutputStore {
         others.map((other) => this.#mediaExists(other)),
       );
       if (!anyMediaLeft.includes(true)) {
-        await remove(join(this.#paths.root, row.sidecar_path));
+        await remove(diskPath(this.#paths, row.sidecar_path));
       }
     }
   }
 
   async #mediaExists(row: OutputRow): Promise<boolean> {
     try {
-      await Deno.stat(join(this.#paths.root, row.path));
+      await Deno.stat(diskPath(this.#paths, row.path));
       return true;
     } catch {
       return false;

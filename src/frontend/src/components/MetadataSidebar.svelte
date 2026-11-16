@@ -212,7 +212,8 @@
     navigate(event.shiftKey ? `/gallery?models=${hash}` : `/models/${hash}`);
   }
   /** Absolute paths, as FILES shows them. */
-  const dataDir = $derived(app.dataDir);
+  const mediaFile = $derived(app.diskPath(output.path));
+  const sidecarFile = $derived(app.diskPath(output.sidecar_path));
 
   function copy(path: string) {
     navigator.clipboard?.writeText(path);
@@ -612,12 +613,12 @@
     <div class="label">Files</div>
     <button
       class="file"
-      title={`${dataDir}/${output.path}`}
-      onclick={() => copy(`${dataDir}/${output.path}`)}
+      title={mediaFile}
+      onclick={() => copy(mediaFile)}
     >
       <span class="kind mono dim">{output.path.split(".").pop()}</span>
-      <span class="path mono">{dataDir}/{output.path}</span>
-      {#if copied === `${dataDir}/${output.path}`}
+      <span class="path mono">{mediaFile}</span>
+      {#if copied === mediaFile}
         <Check size={12} />
       {:else}
         <span class="copy dim">copy</span>
@@ -625,12 +626,12 @@
     </button>
     <button
       class="file"
-      title={`${dataDir}/${output.sidecar_path}`}
-      onclick={() => copy(`${dataDir}/${output.sidecar_path}`)}
+      title={sidecarFile}
+      onclick={() => copy(sidecarFile)}
     >
       <span class="kind mono dim">json</span>
-      <span class="path mono">{dataDir}/{output.sidecar_path}</span>
-      {#if copied === `${dataDir}/${output.sidecar_path}`}
+      <span class="path mono">{sidecarFile}</span>
+      {#if copied === sidecarFile}
         <Check size={12} />
       {:else}
         <span class="copy dim">copy</span>

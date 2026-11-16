@@ -1,7 +1,7 @@
 import type { Database } from "../db/sqlite.ts";
 import { extname, join } from "@std/path";
 import { ulid } from "@std/ulid";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import {
   clearThumbPath,
   deleteSampleRow,
@@ -292,9 +292,9 @@ export class SampleStore {
     if (modelHashes.length === 0) {
       throw new SampleError("promote needs at least one model hash");
     }
-    const source = join(this.#paths.root, output.path);
+    const source = diskPath(this.#paths, output.path);
     const sidecarText = await Deno.readTextFile(
-      join(this.#paths.root, output.sidecar_path),
+      diskPath(this.#paths, output.sidecar_path),
     );
     const sha256 = await hashFileStreaming(source);
     const created: SampleView[] = [];
@@ -356,8 +356,8 @@ export class SampleStore {
    */
   async remove(id: string): Promise<SampleView> {
     const sample = this.require(id);
-    await removeFile(join(this.#paths.root, sample.path));
-    await removeFile(join(this.#paths.root, sample.sidecar_path));
+    await removeFile(diskPath(this.#paths, sample.path));
+    await removeFile(diskPath(this.#paths, sample.sidecar_path));
     clearThumbPath(this.#db, sample.path);
     deleteSampleRow(this.#db, id);
     return sample;
@@ -420,7 +420,7 @@ export class SampleStore {
     for (const row of samplesWithoutSha256(this.#db)) {
       let sha256: string;
       try {
-        sha256 = await hashFileStreaming(join(this.#paths.root, row.path));
+        sha256 = await hashFileStreaming(diskPath(this.#paths, row.path));
       } catch (cause) {
         // A sample whose file is gone stays unhashed; it duplicates nothing.
         if (!(cause instanceof Deno.errors.NotFound)) {
@@ -471,7 +471,7 @@ export class SampleStore {
     let raw: SampleRaw | null = null;
     try {
       const sidecar = JSON.parse(
-        Deno.readTextFileSync(join(this.#paths.root, row.sidecar_path)),
+        Deno.readTextFileSync(diskPath(this.#paths, row.sidecar_path)),
       ) as { raw?: unknown };
       raw = readRaw(sidecar.raw);
     } catch {

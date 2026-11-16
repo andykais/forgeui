@@ -12,7 +12,12 @@ import {
 } from "../../src/outputs/cursor.ts";
 import { mediaUrl } from "../../src/outputs/store.ts";
 import { MediaPathError, resolveMediaPath } from "../../src/http/media.ts";
-import { dataPaths } from "../../src/config/paths.ts";
+import {
+  dataPaths,
+  diskPath,
+  storedOutputPath,
+  StoredPathError,
+} from "../../src/config/paths.ts";
 import { Database } from "../../src/db/sqlite.ts";
 import { applyPragmas, migrate } from "../../src/db/db.ts";
 
@@ -144,6 +149,49 @@ Deno.test("media paths stay inside the data dir", () => {
       undefined,
       bad,
     );
+  }
+});
+
+Deno.test("media paths follow outputs.dir, and stay inside it", () => {
+  const paths = dataPaths("/home/nt/.forgeui", null, { dir: "/mnt/big/out" });
+  assertEquals(
+    resolveMediaPath(paths, "outputs/2026/09/05/01J-0.png"),
+    "/mnt/big/out/2026/09/05/01J-0.png",
+  );
+  // Only the outputs moved.
+  assertEquals(
+    resolveMediaPath(paths, "inputs/ab/abc.png"),
+    "/home/nt/.forgeui/inputs/ab/abc.png",
+  );
+  assertEquals(
+    diskPath(paths, "outputs/2026/09/05/01J.json"),
+    "/mnt/big/out/2026/09/05/01J.json",
+  );
+  // The way back: what reindex records for a file it found.
+  assertEquals(
+    storedOutputPath(paths, "/mnt/big/out/2026/09/05/01J-0.png"),
+    "outputs/2026/09/05/01J-0.png",
+  );
+  assertThrows(
+    () => storedOutputPath(paths, "/home/nt/.forgeui/outputs/x.png"),
+    StoredPathError,
+  );
+
+  for (
+    const bad of [
+      "outputs/../../etc/passwd",
+      "outputs/../app.db",
+      "app.db",
+      "/mnt/big/out/2026/x.png",
+    ]
+  ) {
+    assertThrows(
+      () => resolveMediaPath(paths, bad),
+      MediaPathError,
+      undefined,
+      bad,
+    );
+    assertThrows(() => diskPath(paths, bad), StoredPathError, undefined, bad);
   }
 });
 

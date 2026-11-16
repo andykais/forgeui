@@ -14,6 +14,7 @@ import {
   type UiScreen,
   type WorkflowSummary,
 } from "../types.ts";
+import { diskPath } from "../lib/paths.ts";
 import { decodePreviewFrame } from "../lib/preview.ts";
 import { plain } from "../lib/state.svelte.ts";
 
@@ -31,6 +32,8 @@ class AppState {
   config = $state<Config | null>(null);
   comfy = $state<ComfyStatus | null>(null);
   dataDir = $state<string>("");
+  /** Where `outputs/…` paths are on disk; `outputs.dir` may move it (§3). */
+  outputsDir = $state<string>("");
   /**
    * When the server came up. Generate shows "this session's jobs" (§11.2),
    * and that is the line: a browser reload is the same session, a restart of
@@ -184,6 +187,7 @@ class AppState {
       this.config = config;
       this.comfy = status.comfy;
       this.dataDir = status.data_dir;
+      this.outputsDir = status.outputs_dir;
       this.startedAt = status.started_at ?? 0;
       this.workflows = workflows;
       this.templates = templates;
@@ -199,6 +203,11 @@ class AppState {
     }
   }
 
+  /** A stored media path as an absolute one, for showing and copying (§3). */
+  diskPath(path: string): string {
+    return diskPath(this.dataDir, this.outputsDir, path);
+  }
+
   /** After a reconnection: where this session starts, and what is in it. */
   async #resync(): Promise<void> {
     try {
@@ -208,6 +217,7 @@ class AppState {
       ]);
       this.comfy = status.comfy;
       this.dataDir = status.data_dir;
+      this.outputsDir = status.outputs_dir;
       this.startedAt = status.started_at ?? 0;
       this.jobs = jobs;
     } catch {

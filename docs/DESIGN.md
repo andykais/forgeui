@@ -95,6 +95,21 @@ app to ComfyUI's lifecycle for no benefit.
 Model folders (checkpoints, loras, vae, …) are configured in `config.yaml` and
 are **never written to**.
 
+**`outputs.dir` moves the outputs folder.** `outputs/` can live outside
+`<appdata>` — on a bigger disk, say — when `config.yaml` sets `outputs.dir`
+(null → `<appdata>/outputs`; a relative path is taken from `<appdata>`). It is
+read at launch, and `PATCH /api/config` refuses it. The database never records
+the folder: every stored media path begins with `outputs/`, `inputs/` or
+`samples/`, and that first segment names a folder of the app's, not a folder
+under `<appdata>`. One function (`diskPath`, `src/config/paths.ts`) turns a
+stored path into a file on disk, and everything that reads, serves or removes
+a file goes through it. So nothing in `app.db` changes when files move, and
+no reindex is needed:
+
+- **Moving `<appdata>`** whole: start with the new `--data-dir`.
+- **Moving the outputs**: stop the app, move the folder, set `outputs.dir` to
+  where it went, start the app.
+
 ### 3.1 Configuration and first run
 Settings must be expressible before the app has ever run, so they do not live
 in SQLite (which sits inside the data dir and is a rebuildable index).
@@ -102,7 +117,7 @@ in SQLite (which sits inside the data dir and is a rebuildable index).
 | Layer | Holds | Set by |
 |---|---|---|
 | Bootstrap | data dir only | `--data-dir` flag or `FORGEUI_DATA_DIR` env; default `~/.forgeui` |
-| `config.yaml` | five top-level blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, layout per screen (§11.3), filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
+| `config.yaml` | the top-level blocks below, plus `import` (DESIGN-MODEL-IMPORT §8) and `outputs` (`dir`, read at launch; §3) — five original blocks: `server` (host and port the app itself serves on), `comfy` (`mode: managed \| local_url`, install `path`, `url`, `python` interpreter, `extra_args` appended to the generated launch flags), `model_folders` (folders per kind), `keys` (§11.4), `ui` (rail state, tile size per screen, layout per screen (§11.3), filmstrip collapsed) | hand-edited before first run; Settings writes it on field blur; `GET/PATCH /api/config` |
 | Per-run overrides | any `config.yaml` key | CLI flags (`--comfy-path`, `--comfy-url`, `--comfy-mode`, `--models-dir kind=path`, `--host`, `--port`), applied for that process only, never written back |
 
 First run: if `config.yaml` is absent the app writes one with defaults and

@@ -1,7 +1,7 @@
 import type { Database } from "../db/sqlite.ts";
 import { join } from "@std/path";
 import { ulid } from "@std/ulid";
-import type { DataPaths } from "../config/paths.ts";
+import { type DataPaths, diskPath } from "../config/paths.ts";
 import { ComfyHttpError } from "../comfy/client.ts";
 import type { ComfyEvent, ComfyImageRef } from "../comfy/events.ts";
 import type { ComfyManager } from "../comfy/manager.ts";
@@ -395,7 +395,7 @@ export class JobRunner {
       // The sidecar is the source of truth, and it works even if the
       // workflow has been deleted since (§6.1).
       const sidecar = parseSidecar(
-        await Deno.readTextFile(join(this.#paths.root, output.sidecar_path)),
+        await Deno.readTextFile(diskPath(this.#paths, output.sidecar_path)),
         output.sidecar_path,
       );
       if (!sidecar.api_graph || Object.keys(sidecar.api_graph).length === 0) {
@@ -1104,7 +1104,7 @@ export class JobRunner {
     for (const output of outputs) {
       let bytes: number;
       try {
-        bytes = (await Deno.stat(join(this.#paths.root, output.path))).size;
+        bytes = (await Deno.stat(diskPath(this.#paths, output.path))).size;
       } catch {
         continue;
       }
