@@ -97,7 +97,11 @@ export type ObjectInfo = Record<string, ObjectInfoNode>;
 export interface GraphCheck {
   /** Would make ComfyUI refuse the prompt. */
   errors: string[];
-  /** Worth knowing, but ComfyUI would queue it. */
+  /**
+   * Saved anyway, because they may be fixed by something other than the
+   * graph — a model downloaded later. Each says whether ComfyUI would
+   * refuse to run the graph meanwhile.
+   */
   warnings: string[];
 }
 
@@ -196,6 +200,9 @@ function listChoices(choices: unknown[]): string {
  * A combo value that is not among the choices is a warning, not an error:
  * for a loader the choices are the files on this machine today, and a
  * workflow made for a model that is not downloaded yet is still a workflow.
+ * The warning says plainly that ComfyUI refuses to run it meanwhile ("Value
+ * not in list"), because an earlier wording said the opposite and an agent
+ * took it at its word.
  * An input the node does not declare is a warning too, since ComfyUI
  * ignores it — but it is usually a misspelt one, which is worth saying.
  */
@@ -281,7 +288,9 @@ export function checkGraphAgainstNodes(
       ) {
         warnings.push(
           `${at}.${name}: ${JSON.stringify(value)} is not one of this ` +
-            `ComfyUI's choices (${listChoices(choices)})`,
+            `ComfyUI's choices (${listChoices(choices)}), so ComfyUI will ` +
+            `refuse to run the graph until it is — fine only if that ` +
+            `file is still to be downloaded`,
         );
       }
     }

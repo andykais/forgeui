@@ -164,7 +164,7 @@ bindings; the protocol is identical either way.
 | `search_gallery` | outputs under the §11.2 filters, including `project`, `source` and `model` (a listing's name), a page at a time by `cursor` | fast |
 | `list_templates` | templates (DESIGN.md §4.8): the workflow each fills, its `values`, what it `ask`s, and `problems` | fast |
 | `save_template` | a new template from a name, workflow, values and asks; or, by `template_id`, an update of only the fields passed (a bundled one gains a user copy) | fast |
-| `get_workflow_source` | one workflow as stored — api graph and full manifest, binds included — and whether it is `editable` (DESIGN.md §4.9) | fast |
+| `get_workflow_source` | one workflow as stored — api graph and full manifest, binds included — whether it is `editable` (DESIGN.md §4.9), and `comfyui_check`: the graph against today's `/object_info`, what would make a run fail | fast |
 | `create_workflow` | a new workflow from a graph and params, or a copy of one (`from_workflow`) with fields replaced; the graph is checked against ComfyUI's `/object_info` first, every problem at once, and the bridge stamps `agent` (§4.9) | fast |
 | `update_workflow` | a workflow an agent made, only the fields passed; refused for any other, with how to copy it instead (§4.9) | fast |
 | `get_output` | what a round needs: the params (seed resolved, LoRAs as `{name, strength}` unless the halves differ), the job (workflow, when, how long, origin), the file, the notes, and `inputs`: which params hold stored media (a picture, a mask), with their size | fast |

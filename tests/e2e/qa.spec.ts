@@ -237,6 +237,30 @@ test("Generate", async ({ page, request }) => {
     await expect(page.locator(".card.failed")).toBeVisible({ timeout: 30_000 });
   });
 
+  // A graph ComfyUI will not queue at all, as opposed to one that fails while
+  // running: the reasons are per node, one line each (DESIGN §12).
+  await shot(page, group, "Refused by ComfyUI", "A graph ComfyUI will not queue: one line per failing node.", async () => {
+    const sd15 = await (await request.get("/api/workflows/sd15")).json();
+    const graph = structuredClone(sd15.api_json);
+    graph["3"].class_type = "KSamplerTurbo";
+    delete graph["9"].inputs.filename_prefix;
+    const created = await request.post("/api/workflows", {
+      data: {
+        id: "qa-refused",
+        name: "Refused graph",
+        manifest: { ...sd15.manifest, name: "Refused graph" },
+        api_json: graph,
+      },
+    });
+    expect(created.status()).toBe(201);
+    // The picker lists what was there when the page loaded.
+    await connected(page, "/generate");
+    await generate(page, /^Refused graph/, "a lighthouse on a cliff");
+    await expect(page.locator(".submit-error")).toContainText("KSamplerTurbo");
+  }, true);
+  await closePopovers(page);
+  await request.delete("/api/workflows/qa-refused").catch(() => {});
+
   await shot(page, group, "Session grid", "Several finished generations.", async () => {
     for (const prompt of ["a granite bowl of figs, north light", "a fox asleep on warm stone"]) {
       const before = await page.locator(".tile").count();

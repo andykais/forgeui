@@ -185,7 +185,7 @@ function graphRefusal(check: ComfyCheck): string {
     bullets(check.errors),
     ...(check.warnings.length > 0
       ? [
-        "Also worth fixing (ComfyUI would not refuse these):",
+        "Also worth fixing (warnings; each says whether a run would fail):",
         bullets(check.warnings),
       ]
       : []),
@@ -310,13 +310,20 @@ export function registerWorkflowTools(
       "full manifest, binds included. Any workflow can be read. `editable` " +
       "says whether update_workflow may change it — only workflows you or " +
       "another agent made are; the rest you copy with create_workflow's " +
-      "`from_workflow`. Large: use describe_workflow to run one.",
+      "`from_workflow`. `comfyui_check` is the graph checked against the " +
+      "node types this ComfyUI has right now — what would make a run fail " +
+      "(a missing model file, a wrong sampler name, a node type that is " +
+      "not installed) — so read it when a workflow is refused. Large: use " +
+      "describe_workflow to run one.",
     inputSchema: z.strictObject({
       workflow_id: z.string().describe("id from list_workflows"),
     }),
   }, async ({ workflow_id }) => {
     try {
       const detail = await read(workflow_id);
+      // The same check a create runs, against today's ComfyUI: model files
+      // come and go, so a workflow that passed when it was made may not now.
+      const check = await checkGraph(forge, detail.api_json);
       return text({
         id: detail.id,
         name: detail.name,
@@ -324,6 +331,9 @@ export function registerWorkflowTools(
         made_by: detail.agent?.source ?? null,
         runnable: detail.runnable,
         error: detail.error ?? undefined,
+        comfyui_check: check.checked
+          ? { errors: check.errors, warnings: check.warnings }
+          : { skipped: check.note ?? "the graph is empty" },
         manifest: detail.manifest,
         api_json: detail.api_json,
       });

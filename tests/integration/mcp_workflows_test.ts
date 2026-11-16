@@ -479,3 +479,38 @@ Deno.test("with no ComfyUI the graph is still saved, and the answer says it went
     assertStringIncludes(saved.notes![0]!, "ComfyUI could not be reached");
   });
 });
+
+Deno.test("a graph ComfyUI refuses at run time says which node and why, and get_workflow_source shows it beforehand", async () => {
+  await withTestApp(async (app) => {
+    await ok<Saved>(app, "create_workflow", {
+      name: "Drifts",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+      outputs: [{ node: "7", kind: "image" }],
+    });
+    // Something changes after it was made — here a person's save, past the
+    // bridge's check — so the graph no longer validates in ComfyUI.
+    const graph = sd15Graph();
+    (graph["5"] as { class_type: string }).class_type = "KSamplerTurbo";
+    const saved = await app.fetch("/api/workflows/drifts", {
+      method: "PUT",
+      body: JSON.stringify({ api_json: graph }),
+    });
+    assertEquals(saved.status, 200, await saved.clone().text());
+
+    const source = await ok<{
+      comfyui_check: { errors: string[]; warnings: string[] };
+    }>(app, "get_workflow_source", { workflow_id: "drifts" });
+    assertEquals(source.comfyui_check.errors.length, 1);
+    assertStringIncludes(
+      source.comfyui_check.errors[0]!,
+      'no node type "KSamplerTurbo" — did you mean "KSampler"',
+    );
+
+    const message = await refused(app, "generate", {
+      jobs: [{ workflow_id: "drifts", params: { prompt: "x" } }],
+    });
+    assertStringIncludes(message, "502");
+    assertStringIncludes(message, '- node "5" (KSamplerTurbo):');
+  }, { comfy: true });
+});

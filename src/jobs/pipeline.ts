@@ -533,10 +533,22 @@ export class JobRunner {
       this.#broadcastJob(input.jobId);
       return this.#requireJob(input.jobId);
     } catch (cause) {
+      const nodeErrors = cause instanceof ComfyHttpError
+        ? cause.nodeErrors
+        : {};
+      // The card's header names the node a run failed at; a refused graph
+      // names the first node ComfyUI refused, the rest are in the message.
+      const [firstId, first] = Object.entries(nodeErrors)[0] ?? [];
+      const firstType = (first as { class_type?: unknown } | undefined)
+        ?.class_type;
       const error: JobError = {
         type: "submit_failed",
         message: cause instanceof Error ? cause.message : String(cause),
-        node_errors: cause instanceof ComfyHttpError ? cause.nodeErrors : {},
+        ...(firstId === undefined ? {} : {
+          node_id: firstId,
+          node_type: typeof firstType === "string" ? firstType : null,
+        }),
+        node_errors: nodeErrors,
       };
       this.#fail(input.jobId, error);
       throw new JobSubmitError(

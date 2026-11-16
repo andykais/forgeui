@@ -588,7 +588,10 @@ nothing is saved unless all pass, and each message names the node or param:
    output slot the source node has and carries the type the input takes, and
    the graph has an output node. A combo value off the list (for a loader,
    the files on disk today) and an input the node does not declare are
-   warnings, returned with a saved workflow. When ComfyUI cannot be reached
+   warnings, returned with a saved workflow. The first still makes ComfyUI
+   refuse a run ("Value not in list") until the file exists, and its
+   warning says so; it is not an error only because a workflow may be made
+   before its model is downloaded. When ComfyUI cannot be reached
    the step is skipped and the answer says so.
 3. *Manifest* — the server, as for any save: `validateManifest` against the
    graph, every bind included. The bridge also names any param field the
@@ -2069,7 +2072,11 @@ DELETE /api/templates/:id               user templates and user copies; 409 for 
 POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
                                         the id of the template the panel was filled from (§4.8), which must
                                         exist and fill this workflow; 400 for a param the manifest lacks or a
-                                        value it refuses (§4.3), never a silent change
+                                        value it refuses (§4.3), never a silent change; 502 `comfy_rejected`
+                                        when ComfyUI refuses the graph, its message ComfyUI's own followed by
+                                        one line per failing node (`node "3" (KSampler): Value not in list: …`,
+                                        from ComfyUI's `node_errors`, which the body and the job's error also
+                                        carry), since "Prompt outputs failed validation" alone names nothing
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
                                         keeps the repeated run's template
 POST /api/jobs/:id/cancel
