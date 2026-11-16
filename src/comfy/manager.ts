@@ -116,6 +116,19 @@ export class ComfyManager {
     return this.#process?.log(limit) ?? [];
   }
 
+  /**
+   * Where the managed child's log is now, or null when there is no log to
+   * read (§11.2: only a managed ComfyUI has one). With {@link logSince},
+   * what ComfyUI printed while one request was in flight.
+   */
+  logMark(): number | null {
+    return this.#process?.running ? this.#process.logMark : null;
+  }
+
+  logSince(mark: number): string[] {
+    return this.#process?.linesSince(mark) ?? [];
+  }
+
   /** Non-blocking: the UI comes up while ComfyUI is still starting (§11.3). */
   start(): void {
     if (this.#closed) return;

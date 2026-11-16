@@ -1,5 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { describeNodeErrors, withNodeErrors } from "../../src/comfy/errors.ts";
+import {
+  describeNodeErrors,
+  validationLog,
+  withNodeErrors,
+} from "../../src/comfy/errors.ts";
 
 /** `node_errors` as a real ComfyUI's `/prompt` sends it (execution.py). */
 const REAL = {
@@ -69,5 +73,52 @@ Deno.test("anything not in ComfyUI's shape is skipped, not guessed at", () => {
   assertEquals(describeNodeErrors({ "1": "nope", "2": { errors: ["x"] } }), []);
   assertEquals(describeNodeErrors({ "4": { class_type: "Foo", errors: [] } }), [
     `node "4" (Foo): failed validation`,
+  ]);
+});
+
+Deno.test("ComfyUI's log of a refusal: its validation lines, nothing else from the same moment", () => {
+  // What a ComfyUI prints for a refused prompt (execution.py validate_prompt,
+  // server.py post_prompt), with a running job's progress bar interleaved
+  // and stderr lines carrying the process wrapper's "! " prefix.
+  const lines = [
+    "got prompt",
+    "! Failed to validate prompt for output 9:",
+    " 45%|████▌     | 9/20 [00:02<00:02,  4.10it/s]",
+    "! * CheckpointLoaderSimple 4:",
+    "!   - Value not in list: ckpt_name: 'qwen.safetensors' not in ['v1-5.safetensors']",
+    "! * KSampler 3:",
+    "!   - Required input is missing: cfg",
+    "! Output will be ignored",
+    "! invalid prompt: {'type': 'prompt_outputs_failed_validation', 'message': 'Prompt outputs failed validation', 'details': '', 'extra_info': {}}",
+  ];
+  assertEquals(validationLog(lines), [
+    "Failed to validate prompt for output 9:",
+    "* CheckpointLoaderSimple 4:",
+    "  - Value not in list: ckpt_name: 'qwen.safetensors' not in ['v1-5.safetensors']",
+    "* KSampler 3:",
+    "  - Required input is missing: cfg",
+    "Output will be ignored",
+  ]);
+  assertEquals(
+    validationLog(["got prompt", "Prompt executed in 2.1 seconds"]),
+    [],
+  );
+});
+
+Deno.test("the log as a real ComfyUI 0.34 writes it: coloured level tags", () => {
+  // Copied from a managed ComfyUI 0.34.0 refusing sd15 with no checkpoint.
+  const lines = [
+    "! \x1b[32m[INFO]\x1b[0m got prompt",
+    "! \x1b[1m\x1b[31m[ERROR]\x1b[0m Failed to validate prompt for output 9:",
+    "! \x1b[1m\x1b[31m[ERROR]\x1b[0m * CheckpointLoaderSimple 1:",
+    "! \x1b[1m\x1b[31m[ERROR]\x1b[0m   - Value not in list: ckpt_name: 'v1-5-pruned-emaonly-fp16.safetensors' not in []",
+    "! \x1b[1m\x1b[31m[ERROR]\x1b[0m Output will be ignored",
+    "! \x1b[1m\x1b[33m[WARNING]\x1b[0m invalid prompt: {'type': 'prompt_outputs_failed_validation', 'message': 'Prompt outputs failed validation', 'details': '', 'extra_info': {}}",
+  ];
+  assertEquals(validationLog(lines), [
+    "Failed to validate prompt for output 9:",
+    "* CheckpointLoaderSimple 1:",
+    "  - Value not in list: ckpt_name: 'v1-5-pruned-emaonly-fp16.safetensors' not in []",
+    "Output will be ignored",
   ]);
 });

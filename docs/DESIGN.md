@@ -2076,7 +2076,12 @@ POST /api/jobs                          {workflow_id, params, origin?, template?
                                         when ComfyUI refuses the graph, its message ComfyUI's own followed by
                                         one line per failing node (`node "3" (KSampler): Value not in list: …`,
                                         from ComfyUI's `node_errors`, which the body and the job's error also
-                                        carry), since "Prompt outputs failed validation" alone names nothing
+                                        carry), since "Prompt outputs failed validation" alone names nothing.
+                                        A managed ComfyUI's log lines for the refusal go on the job's error as
+                                        `comfy_log`: ComfyUI logs without a prompt id, but it validates inside
+                                        the `/prompt` request, so the lines its log gained between the request
+                                        and the answer — filtered to what validation prints — are this graph's.
+                                        They join the message only when `node_errors` gave no reasons
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
                                         keeps the repeated run's template
 POST /api/jobs/:id/cancel

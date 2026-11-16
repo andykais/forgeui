@@ -19,6 +19,8 @@ export class ComfyProcess {
   readonly startedAt: number;
   #child: Deno.ChildProcess;
   #log: string[] = [];
+  /** Lines recorded since start; the index of the next line to arrive. */
+  #seq = 0;
   #logLimit: number;
   #exited: Deno.CommandStatus | null = null;
   #done: Promise<void>;
@@ -67,6 +69,18 @@ export class ComfyProcess {
     return this.#log.slice(-limit);
   }
 
+  /** A place in the log to read on from with {@link linesSince}. */
+  get logMark(): number {
+    return this.#seq;
+  }
+
+  /** Every line recorded after `mark`, as far as the kept tail reaches. */
+  linesSince(mark: number): string[] {
+    const missing = this.#seq - mark;
+    if (missing <= 0) return [];
+    return this.#log.slice(-Math.min(missing, this.#log.length));
+  }
+
   /** SIGTERM, then SIGKILL if it is still there. */
   async stop(graceMs = 3000): Promise<void> {
     if (this.#exited) return;
@@ -93,6 +107,7 @@ export class ComfyProcess {
 
   #record(line: string): void {
     this.#log.push(line);
+    this.#seq++;
     if (this.#log.length > this.#logLimit) {
       this.#log.splice(0, this.#log.length - this.#logLimit);
     }
