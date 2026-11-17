@@ -22,7 +22,7 @@ import {
 
 const DESCRIPTION_LINE_MAX = 160;
 const DESCRIPTION_MAX = 1500;
-const TOOLTIP_MAX = 240;
+const TOOLTIP_MAX = 600;
 /** A loader's choices are the files on disk, which can run to hundreds. */
 const CHOICES_MAX = 100;
 
@@ -286,6 +286,22 @@ export interface InputDetail {
   names?: string;
   min_count?: number;
   tooltip?: string;
+  /** What the editor labels it, when that is not its name. */
+  label?: string;
+  /** A choice that takes a list of choices rather than one. */
+  multiselect?: true;
+  /**
+   * The value is a file in ComfyUI's input folder, uploaded in the editor.
+   * In a ForgeUI workflow, expose it as the param of that kind (§4.3), which
+   * puts the file there at submit.
+   */
+  upload?: "image" | "video" | "audio" | "file";
+  /** ComfyUI's own editor tucks it away: a fair guess for `advanced`. */
+  advanced?: true;
+  /** A seed the editor re-rolls after each run; API format does not. */
+  randomized_in_editor?: true;
+  /** Choices the editor fetches at run time, so none are listed here. */
+  choices_from?: string;
 }
 
 function detailOf(input: ParsedInput): InputDetail {
@@ -340,6 +356,27 @@ function detailOf(input: ParsedInput): InputDetail {
   }
   const tooltip = clipped(o.tooltip, TOOLTIP_MAX);
   if (tooltip) detail.tooltip = tooltip;
+  // What a raw read of /object_info would be looked at for (§4.9).
+  if (typeof o.display_name === "string" && o.display_name !== input.name) {
+    detail.label = o.display_name;
+  }
+  if (o.multiselect === true) detail.multiselect = true;
+  const upload = o.image_upload === true
+    ? "image"
+    : o.video_upload === true
+    ? "video"
+    : o.audio_upload === true
+    ? "audio"
+    : o.file_upload === true
+    ? "file"
+    : undefined;
+  if (upload) detail.upload = upload;
+  if (o.advanced === true) detail.advanced = true;
+  if (o.control_after_generate === true) detail.randomized_in_editor = true;
+  if (isRecord(o.remote) && typeof o.remote.route === "string") {
+    detail.choices_from = `ComfyUI's ${o.remote.route}, at run time`;
+    delete detail.choices_note;
+  }
   return detail;
 }
 
@@ -447,12 +484,30 @@ export function describeNode(name: string, node: ObjectInfoNode): NodeDetail {
 }
 
 /** Each named node described, or why it could not be, with near names. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A node's `/object_info` entry exactly as ComfyUI serves it. */
+export interface RawNode {
+  name: string;
+  raw: ObjectInfoNode;
+}
+
+/**
+ * Each named node described, or why it could not be, with near names. With
+ * `raw`, each node's own `/object_info` entry as ComfyUI serves it — every
+ * field and every choice, nothing clipped — so nothing is ever a reason to
+ * read the whole list, which is megabytes.
+ */
 export function describeNodes(
   info: ObjectInfo,
   names: string[],
-): (NodeDetail | { name: string; error: string })[] {
+  options: { raw?: boolean } = {},
+): (NodeDetail | RawNode | { name: string; error: string })[] {
   return names.map((name) => {
     const node = info[name];
+    if (node && options.raw) return { name, raw: node };
     if (node) return describeNode(name, node);
     const near = closest(name, Object.keys(info));
     return {

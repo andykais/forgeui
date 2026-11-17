@@ -332,7 +332,9 @@ export function registerWorkflowTools(
       "no filter you get the categories to start from. Then call " +
       "describe_comfy_nodes for the ones you will use: it gives every " +
       "input's range, default and choices, and a node ready to paste. Paid " +
-      "cloud API nodes and deprecated ones are left out unless asked for.",
+      "cloud API nodes and deprecated ones are left out unless asked for. " +
+      "This and describe_comfy_nodes cover everything in ComfyUI's " +
+      "/object_info; never read that whole, it is megabytes.",
     inputSchema: z.strictObject({
       query: z.string().optional().describe(
         'words that must all match, e.g. "qwen image" or "upscale"',
@@ -377,6 +379,15 @@ export function registerWorkflowTools(
     }
     return text({
       ...result,
+      // A signature line is not enough to write a node: say where the rest
+      // is, before an agent goes looking in the raw node list.
+      ...(result.nodes.length > 0
+        ? {
+          details: "these are signatures only: describe_comfy_nodes gives " +
+            "each input's default, range and choices and a node to paste " +
+            "(raw: true for ComfyUI's entry unabridged)",
+        }
+        : {}),
       ...(result.total > result.offset + result.nodes.length
         ? {
           next:
@@ -404,21 +415,30 @@ export function registerWorkflowTools(
       '["<node id>", <slot>] points at; and `example`, the node in API ' +
       "format with every required input filled — replace each " +
       '"<link: TYPE>" with a link. For a loader, `choices` are the model ' +
-      "files actually on disk, so use one of them. Get names from " +
-      "search_comfy_nodes or from a workflow's graph (get_workflow_source).",
+      "files actually on disk, so use one of them. Also said where they " +
+      "apply: `upload` (a file in ComfyUI's input folder — expose it as an " +
+      "image/video/audio param), `multiselect` (the value is a list), " +
+      "`advanced` (ComfyUI tucks it away; a fair default for the param). " +
+      "Long text and lists are clipped; `raw: true` gives each node's " +
+      "entry exactly as ComfyUI's /object_info has it, every field and " +
+      "choice. Never read /object_info whole: it is megabytes. Get names " +
+      "from search_comfy_nodes or a workflow's graph (get_workflow_source).",
     inputSchema: z.strictObject({
       node_types: z.array(z.string()).min(1).max(20).describe(
         'class_type names, e.g. ["KSampler", "UNETLoader"]',
       ),
+      raw: z.boolean().optional().describe(
+        "each node's /object_info entry as ComfyUI serves it, unabridged",
+      ),
     }),
-  }, async ({ node_types }) => {
+  }, async ({ node_types, raw }) => {
     let info: ObjectInfo;
     try {
       info = await objectInfo(forge);
     } catch {
       return failure(COMFY_UNREACHABLE);
     }
-    return text({ nodes: describeNodes(info, node_types) });
+    return text({ nodes: describeNodes(info, node_types, { raw }) });
   });
 
   server.registerTool("get_workflow_source", {

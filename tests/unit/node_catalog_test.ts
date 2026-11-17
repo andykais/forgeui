@@ -134,3 +134,40 @@ Deno.test("describe: an unknown name comes back with the nearest ones", () => {
     'did you mean "KSampler"',
   );
 });
+
+Deno.test("describe: what a raw read of /object_info would be looked at for", () => {
+  const image = describe("LoadImage").inputs.find((i) => i.name === "image")!;
+  assertEquals(image.upload, "image");
+  assertEquals(describe("LoadAudio").inputs[0]!.upload, "audio");
+  const device = describe("CLIPLoader").inputs.find((i) =>
+    i.name === "device"
+  )!;
+  assertEquals(device.advanced, true);
+  const seed = describe("KSampler").inputs.find((i) => i.name === "seed")!;
+  assertEquals(seed.randomized_in_editor, true);
+  const vae = describe("LTXVEmptyLatentAudio").inputs.find((i) =>
+    i.name === "audio_vae"
+  )!;
+  assert(vae.label && vae.label !== "audio_vae", JSON.stringify(vae));
+  const output = describe("LoadImageOutput").inputs.find((i) =>
+    i.name === "image"
+  )!;
+  assertStringIncludes(output.choices_from!, "at run time");
+
+  const [multi] = describeNodes({
+    PickMany: {
+      input: {
+        required: {
+          tags: ["COMBO", { options: ["a", "b"], multiselect: true }],
+        },
+      },
+      output: ["STRING"],
+    },
+  }, ["PickMany"]) as NodeDetail[];
+  assertEquals(multi!.inputs[0]!.multiselect, true);
+});
+
+Deno.test("describe raw: the node's own entry, unabridged", () => {
+  const [entry] = describeNodes(INFO, ["CLIPLoader"], { raw: true });
+  assertEquals((entry as { raw: unknown }).raw, INFO["CLIPLoader"]);
+});

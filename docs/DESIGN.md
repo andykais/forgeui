@@ -609,6 +609,13 @@ cloud API nodes, left out unless asked for, as are deprecated ones. A
 description gives every input's range, default and choices, and an
 API-format example with links as `"<link: TYPE>"` placeholders. An empty
 loader list says so: it is the commonest reason a written graph is refused.
+A description also says what an agent would otherwise read the raw list
+for — an input's editor label, `multiselect` (the value is a list), `upload`
+(a file in ComfyUI's input folder, which a ForgeUI workflow exposes as a
+media param), ComfyUI's own `advanced` flag, choices fetched at run time —
+and `raw: true` returns each named node's entry exactly as ComfyUI serves
+it, unclipped. Nothing is then a reason to read `/object_info` whole, and
+both tools say not to: it is megabytes, most of a context window.
 
 ComfyUI's v3 schema changes which input *names* a node takes, and both read
 it the same way: a dynamic combo (`COMFY_DYNAMICCOMBO_V3`) holds its option's

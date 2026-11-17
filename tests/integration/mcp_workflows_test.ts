@@ -543,6 +543,17 @@ Deno.test("search_comfy_nodes and describe_comfy_nodes read the ComfyUI behind F
     assertEquals(described.nodes[0]!.name, "KSampler");
     assert(described.nodes[0]!.example);
     assertStringIncludes(described.nodes[1]!.error!, 'did you mean "KSampler"');
+
+    const raw = await ok<{ nodes: { name: string; raw?: unknown }[] }>(
+      app,
+      "describe_comfy_nodes",
+      { node_types: ["KSampler"], raw: true },
+    );
+    assert(raw.nodes[0]!.raw, "raw: true hands back the node's own entry");
+    assertStringIncludes(
+      JSON.stringify(found),
+      "describe_comfy_nodes",
+    );
   }, { comfy: true });
 });
 
