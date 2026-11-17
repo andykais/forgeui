@@ -13,6 +13,45 @@ function asciiJson(value: unknown): string {
 import { tinyWav } from "../fixtures/wav.ts";
 import { tinyPng } from "../fixtures/png.ts";
 import {
+  CORE_NODES,
+  NODE_PACKS,
+  type NodeSchema,
+} from "../../src/workflows/nodes.ts";
+import { apiGraphToLiteGraph } from "../../src/workflows/litegraph.ts";
+
+/** ComfyUI's `templates/index.json`, cut down to one free and one paid. */
+const FAKE_TEMPLATE_INDEX = [{
+  moduleName: "default",
+  title: "Image",
+  type: "image",
+  templates: [
+    {
+      name: "fake_sd15_t2i",
+      title: "SD 1.5 Text to Image",
+      description: "Text to image with Stable Diffusion 1.5.",
+      mediaType: "image",
+      tags: ["Text to Image"],
+      models: ["SD1.5"],
+      date: "2026-01-01",
+      size: 2_000_000_000,
+      openSource: true,
+      io: {
+        outputs: [{ nodeId: 9, nodeType: "SaveImage", mediaType: "image" }],
+      },
+    },
+    {
+      name: "api_fake_paid_t2i",
+      title: "A Paid Text to Image",
+      description: "Calls a paid cloud API.",
+      mediaType: "image",
+      tags: ["Text to Image", "API"],
+      models: ["Paid"],
+      date: "2026-01-01",
+      openSource: false,
+    },
+  ],
+}];
+import {
   type ApiGraph,
   type ApiNode,
   samplerNode,
@@ -349,6 +388,15 @@ export class FakeComfy {
     if (req.method === "GET" && path === "/system_stats") {
       return this.#systemStats();
     }
+    if (req.method === "GET" && path === "/object_info") {
+      return Response.json(this.#objectInfo());
+    }
+    if (req.method === "GET" && path === "/templates/index.json") {
+      return Response.json(FAKE_TEMPLATE_INDEX);
+    }
+    if (req.method === "GET" && path === "/templates/fake_sd15_t2i.json") {
+      return this.#templateDocument();
+    }
     // Not ComfyUI's: the visual QA walk (tests/e2e/qa.spec.ts) runs this as a
     // child process it has no handle on, so it queues a failure this way.
     if (req.method === "POST" && path === "/__fake/scenario") {
@@ -385,6 +433,77 @@ export class FakeComfy {
     socket.onclose = () => this.#sockets.delete(socket);
     socket.onerror = () => this.#sockets.delete(socket);
     return response;
+  }
+
+  /**
+   * ComfyUI's node list, for the node types this fake accepts (§4.9).
+   *
+   * The app's node table knows slot names and widget order, not which
+   * inputs are optional or what type each takes, so every input is listed
+   * as optional and typed `*`. That is enough for what the bridge checks
+   * through the fake — unknown types, links past the last output slot, a
+   * graph with no output node; the finer checks are unit-tested against a
+   * real `/object_info` shape.
+   */
+  #objectInfo(): Record<string, unknown> {
+    // A widget is a value input; what the editor writes after one (a
+    // seed's control, an upload button) is said the way ComfyUI says it.
+    const widget = (schema: NodeSchema, name: string) => {
+      const after = schema.after?.[name];
+      return ["*", {
+        default: "",
+        ...(after === undefined
+          ? {}
+          : after === "image"
+          ? { image_upload: true }
+          : { control_after_generate: true }),
+      }];
+    };
+    const entry = (schema: NodeSchema, module = "nodes") => ({
+      python_module: module,
+      input: {
+        required: {},
+        optional: Object.fromEntries([
+          ...(schema.inputs ?? []).map((name) => [name, ["*"]]),
+          ...(schema.widgets ?? []).map((name) => [name, widget(schema, name)]),
+        ]),
+      },
+      output: schema.outputs ?? [],
+      output_name: schema.outputs ?? [],
+      output_node: schema.output === true,
+    });
+    const info: Record<string, unknown> = {};
+    for (const [type, schema] of Object.entries(CORE_NODES)) {
+      info[type] = entry(schema);
+    }
+    for (const pack of this.#options.packs ?? []) {
+      for (
+        const [type, schema] of Object.entries(NODE_PACKS[pack]?.nodes ?? {})
+      ) {
+        info[type] = entry(schema, `custom_nodes.${pack}`);
+      }
+    }
+    for (const type of this.#options.extraNodeTypes ?? []) {
+      info[type] ??= entry({ output: true });
+    }
+    return info;
+  }
+
+  /**
+   * A template as ComfyUI's editor saves one: the bundled sd15 graph,
+   * rebuilt as an editor document by the app's own converter
+   * (`litegraph.ts`), so a template import round-trips through both.
+   */
+  async #templateDocument(): Promise<Response> {
+    const graph = JSON.parse(
+      await Deno.readTextFile(
+        new URL(
+          "../../workflows/bundled/sd15/workflow.api.json",
+          import.meta.url,
+        ),
+      ),
+    );
+    return Response.json(apiGraphToLiteGraph(graph));
   }
 
   #postScenario(url: URL): Response {

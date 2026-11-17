@@ -3,6 +3,11 @@ import { join } from "@std/path";
 import { ulid } from "@std/ulid";
 import { type DataPaths, diskPath } from "../config/paths.ts";
 import { ComfyHttpError } from "../comfy/client.ts";
+import {
+  describeNodeErrors,
+  REFUSAL_LOGGED,
+  validationLog,
+} from "../comfy/errors.ts";
 import type { ComfyEvent, ComfyImageRef } from "../comfy/events.ts";
 import type { ComfyManager } from "../comfy/manager.ts";
 import {
@@ -93,6 +98,9 @@ export class JobSubmitError extends Error {
     this.nodeErrors = nodeErrors;
   }
 }
+
+/** How long a refused submit waits for ComfyUI's log to catch up. */
+const REFUSAL_LOG_WAIT_MS = 500;
 
 /** How often a job's progress is written to the database while it runs. */
 const PROGRESS_WRITE_INTERVAL_MS = 250;
@@ -518,6 +526,9 @@ export class JobRunner {
       }`,
     );
 
+    // Where ComfyUI's log is before it sees this graph: a refusal's reasons
+    // are printed while the request is in flight (DESIGN §12).
+    const logMark = this.#comfy.logMark();
     try {
       const { prompt_id } = await this.#comfy.client.prompt(
         input.graph,
@@ -533,10 +544,34 @@ export class JobRunner {
       this.#broadcastJob(input.jobId);
       return this.#requireJob(input.jobId);
     } catch (cause) {
+      const nodeErrors = cause instanceof ComfyHttpError
+        ? cause.nodeErrors
+        : {};
+      const comfyLog = logMark === null || !(cause instanceof ComfyHttpError)
+        ? []
+        : await this.#refusalLog(logMark);
+      let message = cause instanceof Error ? cause.message : String(cause);
+      // The reasons are normally in node_errors, already in the message. When
+      // ComfyUI's answer carried none, its log is the only account there is.
+      if (describeNodeErrors(nodeErrors).length === 0 && comfyLog.length > 0) {
+        message = `${message}\nComfyUI's log while it checked the graph:\n${
+          comfyLog.join("\n")
+        }`;
+      }
+      // The card's header names the node a run failed at; a refused graph
+      // names the first node ComfyUI refused, the rest are in the message.
+      const [firstId, first] = Object.entries(nodeErrors)[0] ?? [];
+      const firstType = (first as { class_type?: unknown } | undefined)
+        ?.class_type;
       const error: JobError = {
         type: "submit_failed",
-        message: cause instanceof Error ? cause.message : String(cause),
-        node_errors: cause instanceof ComfyHttpError ? cause.nodeErrors : {},
+        message,
+        ...(firstId === undefined ? {} : {
+          node_id: firstId,
+          node_type: typeof firstType === "string" ? firstType : null,
+        }),
+        node_errors: nodeErrors,
+        ...(comfyLog.length > 0 ? { comfy_log: comfyLog } : {}),
       };
       this.#fail(input.jobId, error);
       throw new JobSubmitError(
@@ -545,6 +580,24 @@ export class JobRunner {
         error.node_errors ?? {},
       );
     }
+  }
+
+  /**
+   * ComfyUI's log lines about a refused prompt, read on from `mark`.
+   *
+   * ComfyUI logs `invalid prompt: …` just before it answers, but the line
+   * comes through a pipe and can land a moment after the answer does, so
+   * wait briefly for it rather than read a log that is still arriving.
+   */
+  async #refusalLog(mark: number): Promise<string[]> {
+    const deadline = Date.now() + REFUSAL_LOG_WAIT_MS;
+    while (
+      !this.#comfy.logSince(mark).some((line) => REFUSAL_LOGGED.test(line)) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return validationLog(this.#comfy.logSince(mark));
   }
 
   // -------------------------------------------------------------- cancelling

@@ -583,11 +583,20 @@ Deno.test("ComfyUI refusing a graph fails the job and says why", async () => {
     };
     assertEquals(body.error.code, "comfy_rejected");
     assert(KREA2_SAMPLER in body.node_errors);
+    // The message says which node and why, not only "failed validation":
+    // it is all the Generate panel and an agent get to read.
+    assertStringIncludes(
+      body.error.message,
+      `- node "${KREA2_SAMPLER}" (SuperCustomSampler): unknown node type`,
+    );
 
     // The attempt is still on the record (§5.2: job rows are kept forever).
     const failed = await job(app, body.job.id);
     assertEquals(failed.status, "failed");
     assertEquals(failed.error?.type, "submit_failed");
+    assertStringIncludes(failed.error!.message, "(SuperCustomSampler)");
+    assertEquals(failed.error?.node_id, KREA2_SAMPLER);
+    assertEquals(failed.error?.node_type, "SuperCustomSampler");
     assert(KREA2_SAMPLER in (failed.error?.node_errors ?? {}));
   }, { comfy: true });
 });

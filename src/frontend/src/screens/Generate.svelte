@@ -958,6 +958,11 @@
     background: #2e1a18;
     font-size: 11px;
     color: var(--error);
+    /* A refused graph lists one failing node per line (§12). */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 30vh;
+    overflow: auto;
   }
 
   .corner {

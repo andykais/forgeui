@@ -27,6 +27,12 @@ export interface JobError {
   node_type?: string | null;
   traceback?: string[];
   node_errors?: Record<string, unknown>;
+  /**
+   * A refused submit, managed mode: what ComfyUI printed while it checked
+   * the graph (DESIGN §12) — the same reasons as `node_errors` as ComfyUI
+   * worded them for its log, and the one record when `node_errors` is empty.
+   */
+  comfy_log?: string[];
 }
 
 /**

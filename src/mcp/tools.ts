@@ -25,6 +25,7 @@ import type {
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
 import { runRound } from "./round.ts";
+import { registerWorkflowTools } from "./workflow_tools.ts";
 import { APP_VERSION } from "../version.ts";
 
 export interface BridgeOptions {
@@ -204,6 +205,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         description: detail.description,
         runnable: detail.runnable,
         error: detail.error ?? undefined,
+        // Whether update_workflow can change it (DESIGN.md §4.9).
+        editable: detail.agent != null,
         params: (detail.manifest?.params ?? []).map((param) => {
           const { bind: _bind, ...rest } = param;
           const supply = supplyHint(param);
@@ -939,6 +942,8 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     }
   });
 
+  registerWorkflowTools(server, { forge, llm });
+
   server.registerTool("gpu_status", {
     description:
       "What is on the GPU right now and how much VRAM is free. Ask before a " +
@@ -1221,6 +1226,8 @@ interface WorkflowDetail {
   description: string | null;
   runnable: boolean;
   error?: string | null;
+  /** Set when an agent made it (DESIGN.md §4.9). */
+  agent?: { source: string; created_at: number } | null;
   manifest: { params?: ManifestParam[] } | null;
 }
 

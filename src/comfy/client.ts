@@ -1,5 +1,6 @@
 import type { ApiGraph } from "../workflows/types.ts";
 import { type ComfyImageRef, outputImages } from "./events.ts";
+import { withNodeErrors } from "./errors.ts";
 
 /** HTTP half of the ComfyUI API (§2). The websocket half lives in ws.ts. */
 
@@ -128,6 +129,9 @@ export class ComfyClient {
       } catch {
         // Not JSON; the text body is the message.
       }
+      // "Prompt outputs failed validation" names nothing; the reasons are
+      // per node, and they are what anyone reading this needs.
+      message = withNodeErrors(message, nodeErrors);
       throw new ComfyHttpError(response.status, message, parsed, nodeErrors);
     }
     return response;

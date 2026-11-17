@@ -513,6 +513,171 @@ template it was made with (§6.2).
   default as *set*, everything else as *open*. Opened from a template, the
   same dialog offers to update it.
 
+### 4.9 Workflows an agent makes
+
+An agent driving ForgeUI through `forge mcp` (DESIGN-AGENT-LOOP §5.1) can
+write workflows of its own — `create_workflow`, from a graph it writes or as
+a copy of an existing workflow (`from_workflow`) — and change them later with
+`update_workflow`. It cannot change any other workflow: not a bundled one,
+not one a person made. What it makes is an ordinary user workflow in
+`workflows/user/<id>/`: it lists on the Workflows screen and in the Generate
+picker, opens in the editor, runs from the panel, `POST /api/jobs` and
+`generate`, takes templates, and can be edited, duplicated or deleted by a
+person like any other.
+
+**The record is `agent.json`**, a fourth file beside the three of §4.1,
+written once, by a create that carries `agent`:
+
+```json
+{ "source": "llm:qwen-vlm", "created_at": 1763251200000 }
+```
+
+`source` is the label a job the agent submits carries as `origin.source`
+(§6.2). The file is read only from `workflows/user/`, so a bundled workflow
+never has one. Nothing writes it afterwards: a save does not, a duplicate
+drops it (a copy someone asked for in the app is theirs), and one that is not
+well-formed reads as absent — the workflow becomes a person's, which an agent
+cannot change, rather than the other way round. The API serves it as `agent`
+(`null` for everything else) on every workflow row. It is not part of the
+workflow hash (§4.5) and outputs do not record it.
+
+**The rule, and the two places it is held.** `POST` and `PUT
+/api/workflows[/:id]` take an optional `agent`: absent for a person's write,
+else the label of the agent the write is made for.
+
+1. *The server.* A `PUT` carrying `agent` to a workflow with no `agent.json`
+   is refused with **403** `forbidden` before anything is read or written, so
+   a refused write does not even make the user copy a bundled save would. A
+   create carrying `agent` that names a taken id is refused with 409 rather
+   than renamed to `<id>-2`, which would leave the agent editing, and
+   running, something it did not make.
+2. *The bridge.* `update_workflow` reads the workflow first and refuses one
+   with no record, saying how to copy it instead. `agent` is filled in by the
+   bridge as code, from the model the LLM server has loaded, exactly as
+   `origin.source` is: no tool has a parameter through which the model could
+   name itself, claim a workflow, or leave `agent` out. No tool deletes,
+   resets or duplicates a workflow.
+
+Either holds without the other: a bug in the bridge still meets the 403. As
+with `source` (§6.2) this is labelling under a single-user trust model, not
+security against a hostile client — ForgeUI has no authentication, and
+anything that can reach its API can send a `PUT` without `agent`, as the web
+UI does. What it guarantees is that the agent, which reaches ForgeUI only
+through the bridge's tools, cannot change a workflow it did not make.
+
+The line is agent versus person, not one model versus another: an agent may
+change any agent-made workflow, whichever model made it. The label is
+whatever llama-swap or Strata has loaded, which changes with the model, so a
+per-model rule would lock an agent out of its own work after a swap. A
+person's edit leaves the record alone, so a workflow a person has tidied up
+stays the agent's to change too.
+
+**Checks, every problem at once.** A graph written by hand fails in more ways
+than one exported from the editor, and an agent fixes faster from one list
+than from one error per round trip. So a write is checked in three steps,
+nothing is saved unless all pass, and each message names the node or param:
+
+1. *Shape* — the server, on every `api_json` it is asked to write (person or
+   agent; graphs already on disk load as they are): each node an object with
+   a `class_type` and an `inputs` object, each array input a `["<id>",
+   <slot>]` link (ComfyUI reads every array input as one, and a numeric id
+   is the common slip) to a node that exists.
+2. *Nodes* — the bridge, against the `/object_info` of the ComfyUI behind
+   ForgeUI (through `/comfy`): the node type exists (with the nearest names
+   when it does not), required inputs are present, a link points at an
+   output slot the source node has and carries the type the input takes, and
+   the graph has an output node. A combo value off the list (for a loader,
+   the files on disk today) and an input the node does not declare are
+   warnings, returned with a saved workflow. The first still makes ComfyUI
+   refuse a run ("Value not in list") until the file exists, and its
+   warning says so; it is not an error only because a workflow may be made
+   before its model is downloaded. When ComfyUI cannot be reached
+   the step is skipped and the answer says so.
+3. *Manifest* — the server, as for any save: `validateManifest` against the
+   graph, every bind included. The bridge also names any param field the
+   manifest does not have (`maximum` for `max`), which validation drops
+   without a word.
+
+**What a graph can be built from.** `search_comfy_nodes` and
+`describe_comfy_nodes` read the same `/object_info` the check does, so what an
+agent is told a node takes is what its graph is checked against
+(`src/workflows/node_spec.ts` reads it for both). A search returns one line
+per node — inputs as `name: TYPE` with `?` for optional, output types in slot
+order, where it comes from (`core`, `api`, `custom: <pack>`) — because the
+whole list is ~900 node types and 1.6 MB on a stock 0.34; a third are paid
+cloud API nodes, left out unless asked for, as are deprecated ones. A
+description gives every input's range, default and choices, and an
+API-format example with links as `"<link: TYPE>"` placeholders. An empty
+loader list says so: it is the commonest reason a written graph is refused.
+A description also says what an agent would otherwise read the raw list
+for — an input's editor label, `multiselect` (the value is a list), `upload`
+(a file in ComfyUI's input folder, which a ForgeUI workflow exposes as a
+media param), ComfyUI's own `advanced` flag, choices fetched at run time —
+and `raw: true` returns each named node's entry exactly as ComfyUI serves
+it. **Tooltips and descriptions are never cut:** a clipped tooltip is the
+sentence that would have said what the input does. They are left out of a
+description unless `include_tooltips` is set, and `inputs` narrows a look to
+the inputs in question, so the way to read one is list, describe, then
+describe again with tooltips for the inputs that matter. Only choice lists
+past 100 are shortened (a loader's can run to hundreds), and `raw` has
+them all. Nothing is then a reason to read `/object_info` whole, and
+both tools say not to: it is megabytes, most of a context window.
+
+ComfyUI's v3 schema changes which input *names* a node takes, and both read
+it the same way: a dynamic combo (`COMFY_DYNAMICCOMBO_V3`) holds its option's
+key and that option's inputs follow as `<parent>.<child>`; an autogrow input
+(`COMFY_AUTOGROW_V3`) is sent as `<parent>.<prefix>0`, `…1`, the first `min`
+required and the parent never; a match-type output (`COMFY_MATCHTYPE_V3`)
+carries the type of what is wired into the inputs sharing its template, so
+the check follows those links upstream rather than read the placeholder —
+which the bundled Anima, LTX-2.3 and MiniMax graphs depend on.
+
+**Starting from ComfyUI's own templates, or any editor document.**
+`search_comfy_templates` reads the template list ComfyUI serves
+(`/templates/index.json`, ~500 on 0.34; those calling paid APIs left out unless
+asked for), and `create_workflow` takes `from_comfy_template` or
+`editor_json`. Templates and shared workflows are editor documents, not API
+graphs, so `src/workflows/editor_graph.ts` converts them the way the editor's
+`graphToPrompt()` does: widget values read positionally against `/object_info`
+(a seed's control and an upload button each hold a slot the graph never sees,
+including the control the editor gives every INT named `seed`/`noise_seed`; a
+document saved before a node grew an input gets that input's default), links
+followed through `Reroute`, bypassed nodes and subgraph boundaries, subgraphs
+flattened to `<instance>:<node>` ids, a promoted widget's value taken from the
+instance (positional over the subgraph's value inputs) or from the inner widget
+`proxyWidgets` names, `PrimitiveNode` values written into their targets, and
+list values wrapped as `{"__value__": […]}`. It is tested against what
+ComfyUI's frontend itself produced (tests/golden/editor_graph/, made with
+`scripts/editor_oracle.cjs`): of the 514 templates a 0.34 install ships it
+agrees on 502; ten use widgets only the editor can fill (a painted canvas, a
+rendered 3D view), which the result says, and two hit editor quirks. A node
+type the ComfyUI lacks — a custom pack not installed — refuses the import by
+name. The imported workflow keeps the document as its `workflow.ui.json`, its
+save nodes become its outputs, and it starts with no params: it runs exactly as
+the template came until some are exposed.
+
+**What the check refuses.** Only what ComfyUI would: a problem on a node no
+output node reaches is a warning, since ComfyUI never runs that node (the
+editor emits a few such orphans, and refusing them refused templates ComfyUI
+runs). A loader whose list is empty — no file of that kind on disk — is a
+warning that says every value will be refused until one is added.
+
+**Deleting and node packs.** `delete_workflow` removes a workflow an agent
+made; `DELETE /api/workflows/:id` with `{agent}` in the body is held to the
+same record as a save, 403 otherwise. `list_node_packs` lists the custom node
+packs ComfyUI loaded (from where each node came from) and the packs ForgeUI's
+workflows can `require`, with whether each is installed and which workflows
+wait on it; `search_comfy_nodes` filters by `source`. A pack is installed by
+whoever runs ComfyUI, never by ForgeUI.
+
+The Workflows screen and a workflow's page badge an agent-made workflow
+**by agent**; the hover names the model.
+
+A graph written without an editor document gets no `workflow.ui.json`; the
+editor rebuilds one from the api graph (§4.1). A save that replaces
+`api_json` without sending `ui_json` removes the old document for the same
+reason: it would describe a graph that no longer runs.
+
 ---
 
 ## 5. Generation pipeline
@@ -1965,11 +2130,15 @@ table toggle** — small tiles, large tiles, table — stored per screen.
 GET  /api/workflows                     list (latest versions): id, name, family, kind, category, params summary, source, last_job_at, last_output_id, image_param (the first `image` param's key, or null: what Reuse image lists, §10)
 GET  /api/workflows/:id                 manifest + metadata (+ has_user_copy)
 GET  /api/workflows/:id/inputs          every literal input of api.json: [{node_id, node_type, node_title, input, value, type_hint}]
-PUT  /api/workflows/:id                 save manifest / ui+api json (bundled → creates the user copy)
-POST /api/workflows                     new: {} (blank, opens the editor) or {ui_json} (Import .json)
+PUT  /api/workflows/:id                 save manifest / ui+api json (bundled → creates the user copy); with
+                                        `agent` (an agent's write, §4.9) 403 unless the workflow has agent.json;
+                                        api_json without ui_json drops the stale ui document
+POST /api/workflows                     new: {} (blank, opens the editor) or {ui_json} (Import .json), or
+                                        {id?, name, manifest, api_json, agent?}; with `agent` writes agent.json
+                                        and a taken id is 409, not renamed (§4.9). Every row carries `agent`
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
-DELETE /api/workflows/:id               user copies only; 409 for bundled
+DELETE /api/workflows/:id               user copies only; 409 for bundled; with {agent} in the body, 403 unless agent.json (§4.9)
 GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems, last_output ({id, kind, media_url} of the newest output made with it, or null)
 GET  /api/templates/:id
 POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name
@@ -1978,7 +2147,16 @@ DELETE /api/templates/:id               user templates and user copies; 409 for 
 POST /api/jobs                          {workflow_id, params, origin?, template?}   one job per call; `template` is
                                         the id of the template the panel was filled from (§4.8), which must
                                         exist and fill this workflow; 400 for a param the manifest lacks or a
-                                        value it refuses (§4.3), never a silent change
+                                        value it refuses (§4.3), never a silent change; 502 `comfy_rejected`
+                                        when ComfyUI refuses the graph, its message ComfyUI's own followed by
+                                        one line per failing node (`node "3" (KSampler): Value not in list: …`,
+                                        from ComfyUI's `node_errors`, which the body and the job's error also
+                                        carry), since "Prompt outputs failed validation" alone names nothing.
+                                        A managed ComfyUI's log lines for the refusal go on the job's error as
+                                        `comfy_log`: ComfyUI logs without a prompt id, but it validates inside
+                                        the `/prompt` request, so the lines its log gained between the request
+                                        and the answer — filtered to what validation prints — are this graph's.
+                                        They join the message only when `node_errors` gave no reasons
 POST /api/jobs/rerun                    {output_id} | {job_id} (+ origin?)   resubmit a frozen graph (rerun exact / retry failed);
                                         keeps the repeated run's template
 POST /api/jobs/:id/cancel

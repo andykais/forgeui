@@ -237,6 +237,30 @@ test("Generate", async ({ page, request }) => {
     await expect(page.locator(".card.failed")).toBeVisible({ timeout: 30_000 });
   });
 
+  // A graph ComfyUI will not queue at all, as opposed to one that fails while
+  // running: the reasons are per node, one line each (DESIGN §12).
+  await shot(page, group, "Refused by ComfyUI", "A graph ComfyUI will not queue: one line per failing node.", async () => {
+    const sd15 = await (await request.get("/api/workflows/sd15")).json();
+    const graph = structuredClone(sd15.api_json);
+    graph["3"].class_type = "KSamplerTurbo";
+    delete graph["9"].inputs.filename_prefix;
+    const created = await request.post("/api/workflows", {
+      data: {
+        id: "qa-refused",
+        name: "Refused graph",
+        manifest: { ...sd15.manifest, name: "Refused graph" },
+        api_json: graph,
+      },
+    });
+    expect(created.status()).toBe(201);
+    // The picker lists what was there when the page loaded.
+    await connected(page, "/generate");
+    await generate(page, /^Refused graph/, "a lighthouse on a cliff");
+    await expect(page.locator(".submit-error")).toContainText("KSamplerTurbo");
+  }, true);
+  await closePopovers(page);
+  await request.delete("/api/workflows/qa-refused").catch(() => {});
+
   await shot(page, group, "Session grid", "Several finished generations.", async () => {
     for (const prompt of ["a granite bowl of figs, north light", "a fox asleep on warm stone"]) {
       const before = await page.locator(".tile").count();
@@ -361,7 +385,7 @@ test("Models", async ({ page }) => {
     page.goto("/models/does-not-exist"), true);
 });
 
-test("Workflows", async ({ page }) => {
+test("Workflows", async ({ page, request }) => {
   watchConsole(page);
   const group = "Workflows";
   await shot(page, group, "List", "Every bundled workflow.", async () => {
@@ -382,6 +406,31 @@ test("Workflows", async ({ page }) => {
     scrollToBottom(page));
   await shot(page, group, "Not found", "A workflow id that does not exist.", () =>
     page.goto("/workflows/does-not-exist"), true);
+
+  // A workflow an agent made through forge mcp, badged in the list and on
+  // its page (DESIGN §4.9).
+  const sd15 = await (await request.get("/api/workflows/sd15")).json();
+  const made = await request.post("/api/workflows", {
+    data: {
+      id: "qa-agent-made",
+      name: "SD 1.5 (8 steps)",
+      manifest: { ...sd15.manifest, name: "SD 1.5 (8 steps)" },
+      api_json: sd15.api_json,
+      agent: "llm:qwen3.5-9b",
+    },
+  });
+  expect(made.status()).toBe(201);
+  await shot(page, group, "Agent-made workflow", "Badged in the list (its hover, a native title, names the model).", async () => {
+    await page.goto("/workflows");
+    await expect(
+      page.locator("tr", { hasText: "SD 1.5 (8 steps)" }).locator(".badge", { hasText: "by agent" }),
+    ).toBeVisible();
+  });
+  await shot(page, group, "Agent-made workflow page", "The badge on the workflow's own page.", async () => {
+    await page.locator("td .name", { hasText: "SD 1.5 (8 steps)" }).click();
+    await expect(page.getByText("by agent")).toBeVisible();
+  });
+  await request.delete("/api/workflows/qa-agent-made").catch(() => {});
 });
 
 test("Templates", async ({ page }) => {
