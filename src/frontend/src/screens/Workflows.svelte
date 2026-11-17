@@ -6,7 +6,7 @@
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
   import { navigate } from "../router.svelte.ts";
-  import { relativeTime } from "../lib/format.ts";
+  import { agentTitle, relativeTime } from "../lib/format.ts";
   import Popover from "../components/Popover.svelte";
   import { toasts } from "../stores/toasts.svelte.ts";
   import MediaThumb from "../components/MediaThumb.svelte";
@@ -202,6 +202,9 @@
               <span class="name">{workflow.name}</span>
               {#if workflow.source === "user" && workflow.has_bundled}
                 <span class="badge accent">user copy</span>
+              {/if}
+              {#if workflow.agent}
+                <span class="badge" title={agentTitle(workflow.agent)}>by agent</span>
               {/if}
               {#if workflow.error}
                 <span class="badge error" title={workflow.error}>manifest error</span>

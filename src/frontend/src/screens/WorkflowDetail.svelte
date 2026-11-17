@@ -3,6 +3,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LayoutTemplate from "@lucide/svelte/icons/layout-template";
   import { escapeGoesBack } from "../lib/back.ts";
+  import { agentTitle } from "../lib/format.ts";
   import { untrack } from "svelte";
   import { api } from "../api.ts";
   import { app } from "../stores/app.svelte.ts";
@@ -33,7 +34,9 @@
   let { id }: Props = $props();
 
   /** This workflow's templates (§4.8), linked from its header. */
-  const templates = $derived(app.templates.filter((template) => template.workflow === id));
+  const templates = $derived(
+    app.templates.filter((template) => template.workflow === id),
+  );
 
   let detail = $state<WorkflowDetail | null>(null);
   let inputs = $state<LiteralInput[]>([]);
@@ -107,7 +110,7 @@
       param.type === "size"
         ? (param.bind as { w: string }).w
         : Array.isArray(param.bind)
-          ? param.bind[0] ?? null
+          ? (param.bind[0] ?? null)
           : typeof param.bind === "string"
             ? param.bind
             : null;
@@ -277,14 +280,20 @@
   }
 </script>
 
-<svelte:window onkeydown={(event) => escapeGoesBack(event, () => navigate("/workflows"))} />
+<svelte:window
+  onkeydown={(event) => escapeGoesBack(event, () => navigate("/workflows"))}
+/>
 
 {#if !detail}
   <p class="empty">loading…</p>
 {:else}
   <section class="detail">
     <header>
-      <button class="back" title="Back to workflows (esc)" onclick={() => navigate("/workflows")}>
+      <button
+        class="back"
+        title="Back to workflows (esc)"
+        onclick={() => navigate("/workflows")}
+      >
         <ArrowLeft size={15} />
       </button>
       <span class="thumb"></span>
@@ -293,6 +302,9 @@
           <h1>{detail.name}</h1>
           {#if detail.family}<span class="badge accent">{detail.family}</span>{/if}
           <span class="badge">{detail.kind}</span>
+          {#if detail.agent}
+            <span class="badge" title={agentTitle(detail.agent)}>by agent</span>
+          {/if}
         </div>
         <div class="mono dim sub">
           {detail.id} · {detail.source} · hash {detail.hash.slice(7, 13)} ·
@@ -480,7 +492,9 @@
                     {String(param.default ?? "")}
                     <!-- Where it comes from: edit the loader in ComfyUI and this follows. -->
                     {#if param.default_from === "graph" && param.default !== ""}
-                      <span class="dim" title="Read from the ComfyUI graph; edit the node there to change it"
+                      <span
+                        class="dim"
+                        title="Read from the ComfyUI graph; edit the node there to change it"
                         >· from graph</span
                       >
                     {/if}

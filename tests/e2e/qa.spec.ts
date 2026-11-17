@@ -385,7 +385,7 @@ test("Models", async ({ page }) => {
     page.goto("/models/does-not-exist"), true);
 });
 
-test("Workflows", async ({ page }) => {
+test("Workflows", async ({ page, request }) => {
   watchConsole(page);
   const group = "Workflows";
   await shot(page, group, "List", "Every bundled workflow.", async () => {
@@ -406,6 +406,30 @@ test("Workflows", async ({ page }) => {
     scrollToBottom(page));
   await shot(page, group, "Not found", "A workflow id that does not exist.", () =>
     page.goto("/workflows/does-not-exist"), true);
+
+  // A workflow an agent made through forge mcp, badged in the list and on
+  // its page (DESIGN §4.9).
+  const sd15 = await (await request.get("/api/workflows/sd15")).json();
+  const made = await request.post("/api/workflows", {
+    data: {
+      id: "qa-agent-made",
+      name: "SD 1.5 (8 steps)",
+      manifest: { ...sd15.manifest, name: "SD 1.5 (8 steps)" },
+      api_json: sd15.api_json,
+      agent: "llm:qwen3.5-9b",
+    },
+  });
+  expect(made.status()).toBe(201);
+  await shot(page, group, "Agent-made workflow", "Badged in the list; the hover names the model.", async () => {
+    await page.goto("/workflows");
+    await page.locator("tr", { hasText: "SD 1.5 (8 steps)" }).locator(".badge", { hasText: "by agent" }).hover();
+    await page.waitForTimeout(600);
+  });
+  await shot(page, group, "Agent-made workflow page", "The badge on the workflow's own page.", async () => {
+    await page.getByRole("cell", { name: "SD 1.5 (8 steps)", exact: true }).click();
+    await expect(page.getByText("by agent")).toBeVisible();
+  });
+  await request.delete("/api/workflows/qa-agent-made").catch(() => {});
 });
 
 test("Templates", async ({ page }) => {

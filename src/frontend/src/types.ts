@@ -122,6 +122,8 @@ export interface WorkflowSummary {
   has_ui_json: boolean;
   /** The first `image` param's key: what Reuse image puts the picture in. */
   image_param: string | null;
+  /** Set when an agent made it through `forge mcp` (DESIGN §4.9). */
+  agent: { source: string; created_at: number } | null;
 }
 
 /**
