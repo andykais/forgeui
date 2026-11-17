@@ -514,3 +514,41 @@ Deno.test("a graph ComfyUI refuses at run time says which node and why, and get_
     assertStringIncludes(message, '- node "5" (KSamplerTurbo):');
   }, { comfy: true });
 });
+
+Deno.test("search_comfy_nodes and describe_comfy_nodes read the ComfyUI behind ForgeUI", async () => {
+  await withTestApp(async (app) => {
+    // No filter: the map, not 900 lines.
+    const map = await ok<{
+      total: number;
+      categories: unknown[];
+      nodes?: unknown;
+      next: string;
+    }>(app, "search_comfy_nodes", {});
+    assert(map.total > 20);
+    assertEquals(map.nodes, undefined);
+    assertStringIncludes(map.next, "narrow");
+
+    const found = await ok<{ nodes: { name: string; outputs: string }[] }>(
+      app,
+      "search_comfy_nodes",
+      { query: "ksampler" },
+    );
+    assert(found.nodes.some((n) => n.name === "KSampler"));
+
+    const described = await ok<{
+      nodes: ({ name: string; example?: unknown; error?: string })[];
+    }>(app, "describe_comfy_nodes", {
+      node_types: ["KSampler", "KSamplr"],
+    });
+    assertEquals(described.nodes[0]!.name, "KSampler");
+    assert(described.nodes[0]!.example);
+    assertStringIncludes(described.nodes[1]!.error!, 'did you mean "KSampler"');
+  }, { comfy: true });
+});
+
+Deno.test("with no ComfyUI the node tools say so rather than answer empty", async () => {
+  await withTestApp(async (app) => {
+    const message = await refused(app, "search_comfy_nodes", { query: "x" });
+    assertStringIncludes(message, "ComfyUI could not be reached");
+  });
+});

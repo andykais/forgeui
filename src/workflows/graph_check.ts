@@ -16,6 +16,12 @@
  */
 
 import type { ApiGraph } from "./types.ts";
+import {
+  expectedInputs,
+  MATCH_TYPE,
+  matchedInputs,
+  type ObjectInfo,
+} from "./node_spec.ts";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -80,19 +86,7 @@ export function checkGraphShape(graph: ApiGraph): string[] {
   return problems;
 }
 
-/** One node type as ComfyUI's `/object_info` describes it. */
-export interface ObjectInfoNode {
-  input?: {
-    required?: Record<string, unknown>;
-    optional?: Record<string, unknown>;
-    hidden?: Record<string, unknown>;
-  };
-  output?: unknown[];
-  output_name?: unknown[];
-  output_node?: boolean;
-}
-
-export type ObjectInfo = Record<string, ObjectInfoNode>;
+export type { ObjectInfo, ObjectInfoNode } from "./node_spec.ts";
 
 export interface GraphCheck {
   /** Would make ComfyUI refuse the prompt. */
@@ -105,28 +99,6 @@ export interface GraphCheck {
   warnings: string[];
 }
 
-/**
- * An input's spec, `[type, options?]`, read into the type and, for a combo,
- * its choices. ComfyUI writes a combo as `[[...choices], opts]` and newer
- * builds also as `["COMBO", {options: [...]}]`.
- */
-function inputSpec(
-  spec: unknown,
-): { type: string | null; choices: unknown[] | null } {
-  if (!Array.isArray(spec) || spec.length === 0) {
-    return { type: null, choices: null };
-  }
-  const [head, options] = spec;
-  if (Array.isArray(head)) return { type: "COMBO", choices: head };
-  if (typeof head !== "string") return { type: null, choices: null };
-  if (
-    head === "COMBO" && isPlainObject(options) && Array.isArray(options.options)
-  ) {
-    return { type: "COMBO", choices: options.options };
-  }
-  return { type: head, choices: null };
-}
-
 /** `"IMAGE,MASK"` or `"*"`: the types an input or output may carry. */
 function typesOf(type: string): Set<string> {
   return new Set(type.split(",").map((part) => part.trim()));
@@ -137,6 +109,42 @@ function compatible(given: string, wanted: string): boolean {
   const a = typesOf(given);
   for (const type of typesOf(wanted)) if (a.has(type)) return true;
   return false;
+}
+
+/**
+ * What output `slot` of node `id` carries. A match-type output reports a
+ * placeholder and takes its type from the inputs sharing its template — a
+ * switch passes on whatever is wired into it — so follow those links up the
+ * graph; with none wired, it is whatever the template allows.
+ */
+function outputType(
+  graph: ApiGraph,
+  info: ObjectInfo,
+  id: string,
+  slot: number,
+  depth = 0,
+): string | null {
+  const node = graph[id];
+  const schema = node ? info[node.class_type] : undefined;
+  const type = schema?.output?.[slot];
+  if (typeof type !== "string") return null;
+  if (type !== MATCH_TYPE) return type;
+  const matched = matchedInputs(schema!, slot);
+  if (depth < 16) {
+    for (const input of matched) {
+      const value = node!.inputs?.[input.name];
+      if (!Array.isArray(value)) continue;
+      const upstream = outputType(
+        graph,
+        info,
+        String(value[0]),
+        Number(value[1]),
+        depth + 1,
+      );
+      if (upstream !== null && upstream !== "*") return upstream;
+    }
+  }
+  return matched[0]?.type ?? "*";
 }
 
 /** Edit distance, for "did you mean". Small inputs only. */
@@ -225,34 +233,36 @@ export function checkGraphAgainstNodes(
       continue;
     }
     if (schema.output_node) outputs++;
-    const required = schema.input?.required ?? {};
-    const optional = schema.input?.optional ?? {};
     const hidden = schema.input?.hidden ?? {};
     const inputs = node.inputs ?? {};
+    // The names this node takes with the values it holds: a dynamic combo's
+    // chosen option adds inputs, an autogrow input is its numbered names.
+    const expected = expectedInputs(schema, inputs);
 
-    for (const name of Object.keys(required)) {
-      if (!(name in inputs)) {
-        errors.push(`${at}: required input "${name}" is missing`);
+    for (const input of expected.values()) {
+      if (input.required && !(input.name in inputs)) {
+        errors.push(`${at}: required input "${input.name}" is missing`);
       }
     }
     for (const [name, value] of Object.entries(inputs)) {
-      const spec = required[name] ?? optional[name];
-      if (spec === undefined) {
-        // `<parent>.<child>`: a dynamic combo's own widgets (nodes.ts).
+      const input = expected.get(name);
+      if (input === undefined) {
+        // A nested name past what is expanded here (a dynamic combo inside
+        // another) is left to ComfyUI rather than guessed at.
         if (name in hidden || name.includes(".")) continue;
         warnings.push(
           `${at}: "${name}" is not an input of ${node.class_type}, so ` +
             `ComfyUI ignores it` +
             didYouMean(
-              closest(name, [
-                ...Object.keys(required),
-                ...Object.keys(optional),
-              ]),
+              closest(
+                name,
+                [...expected.keys()].filter((key) => !key.includes(".")),
+              ),
             ),
         );
         continue;
       }
-      const { type, choices } = inputSpec(spec);
+      const { type, choices } = input;
       if (Array.isArray(value)) {
         const [from, slot] = value as [string, number];
         const source = graph[from];
@@ -270,7 +280,7 @@ export function checkGraphAgainstNodes(
           );
           continue;
         }
-        const given = produced[slot];
+        const given = outputType(graph, info, from, slot);
         if (
           typeof given === "string" && type !== null && type !== "COMBO" &&
           !compatible(given, type)
@@ -281,6 +291,18 @@ export function checkGraphAgainstNodes(
             } is ${given}`,
           );
         }
+        continue;
+      }
+      // A dynamic combo's choice decides which inputs the node has; one that
+      // is not among its options leaves ComfyUI nothing to expand.
+      if (
+        input.kind === "dynamic_combo" && choices !== null &&
+        !choices.includes(value)
+      ) {
+        errors.push(
+          `${at}.${name}: ${JSON.stringify(value)} is not one of its ` +
+            `options (${listChoices(choices)})`,
+        );
         continue;
       }
       if (

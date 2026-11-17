@@ -153,3 +153,115 @@ Deno.test("every bundled graph has the shape the server asks of a written one", 
     assertEquals(checkGraphShape(graph), [], entry.name);
   }
 });
+
+/** A real ComfyUI 0.34's node list, trimmed (tests/unit/node_catalog_test.ts). */
+const REAL = JSON.parse(
+  await Deno.readTextFile(
+    new URL("../fixtures/object_info_comfy_0.34.json", import.meta.url),
+  ),
+) as ObjectInfo;
+
+Deno.test("real node list: every bundled graph passes but for the node pack it needs", async () => {
+  // Bundled graphs use switches and resizes whose outputs are typed by what
+  // is wired into them; a check that read the placeholder type refused them.
+  for await (const entry of Deno.readDir(shippedBundledDir())) {
+    if (!entry.isDirectory) continue;
+    const graph = JSON.parse(
+      await Deno.readTextFile(
+        join(shippedBundledDir(), entry.name, "workflow.api.json"),
+      ),
+    ) as ApiGraph;
+    const { errors } = checkGraphAgainstNodes(graph, REAL);
+    const real = errors.filter((e) => !e.includes('no node type "BreezeTTS2'));
+    assertEquals(real, [], entry.name);
+  }
+});
+
+Deno.test("real node list: a switch passes on the type wired into it", () => {
+  const graph = (feed: [string, number]) => ({
+    "1": node("CheckpointLoaderSimple", { ckpt_name: "x.safetensors" }),
+    "2": node("ComfySwitchNode", {
+      switch: true,
+      on_true: feed,
+      on_false: feed,
+    }),
+    "3": node("KSampler", {
+      model: ["2", 0],
+      seed: 0,
+      steps: 4,
+      cfg: 1,
+      sampler_name: "euler",
+      scheduler: "normal",
+      positive: ["4", 0],
+      negative: ["4", 0],
+      latent_image: ["5", 0],
+      denoise: 1,
+    }),
+    "4": node("CLIPTextEncode", { text: "", clip: ["1", 1] }),
+    "5": node("EmptyLatentImage", { width: 64, height: 64, batch_size: 1 }),
+    "6": node("PreviewAny", { source: ["3", 0] }),
+  });
+  assertEquals(checkGraphAgainstNodes(graph(["1", 0]), REAL).errors, []);
+  assertEquals(checkGraphAgainstNodes(graph(["1", 1]), REAL).errors, [
+    'node "3" (KSampler).model: expects MODEL, but output 0 of node "2" (ComfySwitchNode) is CLIP',
+  ]);
+});
+
+Deno.test("real node list: a repeatable input is sent by its numbered names", () => {
+  const graph = (inputs: Record<string, unknown>) => ({
+    "1": node("LoadImage", { image: "a.png" }),
+    "2": node("BatchImagesNode", inputs),
+    "3": node("PreviewAny", { source: ["2", 0] }),
+  });
+  assertEquals(
+    checkGraphAgainstNodes(graph({ "images.image0": ["1", 0] }), REAL).errors,
+    [],
+  );
+  assertEquals(checkGraphAgainstNodes(graph({}), REAL).errors, [
+    'node "2" (BatchImagesNode): required input "images.image0" is missing',
+  ]);
+});
+
+Deno.test("real node list: a choice that brings inputs needs them, and must be one of its options", () => {
+  const graph = (inputs: Record<string, unknown>) => ({
+    "1": node("LoadImage", { image: "a.png" }),
+    "2": node("ResizeImageMaskNode", { input: ["1", 0], ...inputs }),
+    "3": node("PreviewAny", { source: ["2", 0] }),
+  });
+  assertEquals(
+    checkGraphAgainstNodes(
+      graph({
+        resize_type: "scale dimensions",
+        "resize_type.width": 512,
+        "resize_type.height": 512,
+        "resize_type.crop": "center",
+        scale_method: "area",
+      }),
+      REAL,
+    ).errors,
+    [],
+  );
+  assertEquals(
+    checkGraphAgainstNodes(
+      graph({
+        resize_type: "scale dimensions",
+        "resize_type.width": 512,
+        scale_method: "area",
+      }),
+      REAL,
+    ).errors,
+    [
+      'node "2" (ResizeImageMaskNode): required input "resize_type.height" is missing',
+      'node "2" (ResizeImageMaskNode): required input "resize_type.crop" is missing',
+    ],
+  );
+  const wrong = checkGraphAgainstNodes(
+    graph({
+      resize_type: "bigger",
+      scale_method: "area",
+    }),
+    REAL,
+  ).errors;
+  assertEquals(wrong.length, 1);
+  assertStringIncludes(wrong[0]!, '"bigger" is not one of its options');
+});

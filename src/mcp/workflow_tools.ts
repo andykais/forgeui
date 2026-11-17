@@ -26,6 +26,7 @@ import {
   checkGraphShape,
   type ObjectInfo,
 } from "../workflows/graph_check.ts";
+import { describeNodes, searchNodes } from "../workflows/node_catalog.ts";
 import {
   type ApiGraph,
   FAMILIES,
@@ -151,6 +152,22 @@ interface ComfyCheck {
  * server checks its shape and every bind regardless — and the answer says
  * the nodes went unchecked.
  */
+/**
+ * ComfyUI's node list, through ForgeUI's `/comfy` proxy — the same ComfyUI
+ * a round runs on, custom nodes and model files included.
+ */
+async function objectInfo(forge: ForgeUi): Promise<ObjectInfo> {
+  const info = await forge.get<ObjectInfo>("/comfy/object_info");
+  if (typeof info !== "object" || info === null || Array.isArray(info)) {
+    throw new ForgeUiError("ComfyUI's /object_info was not a node list");
+  }
+  return info;
+}
+
+const COMFY_UNREACHABLE =
+  "ComfyUI could not be reached through ForgeUI, so its node list cannot " +
+  "be read right now; gpu_status says whether it is running";
+
 async function checkGraph(
   forge: ForgeUi,
   graph: Record<string, unknown>,
@@ -162,8 +179,7 @@ async function checkGraph(
   if (shape.length > 0) return { errors: shape, warnings: [], checked: true };
   let info: ObjectInfo;
   try {
-    info = await forge.get<ObjectInfo>("/comfy/object_info");
-    if (typeof info !== "object" || info === null) throw new Error();
+    info = await objectInfo(forge);
   } catch {
     return {
       errors: [],
@@ -303,6 +319,107 @@ export function registerWorkflowTools(
   const { forge, llm } = options;
   const read = (id: string) =>
     forge.get<WorkflowSource>(`/api/workflows/${encodeURIComponent(id)}`);
+
+  server.registerTool("search_comfy_nodes", {
+    description:
+      "Find the node types the ComfyUI behind ForgeUI has — what a " +
+      "workflow's graph can be built from, custom nodes included. Each " +
+      "match is one line: its inputs (`name: TYPE`, `?` for optional), its " +
+      "output types in slot order, and where it comes from. Filter by " +
+      "words (`query`: name, display name, aliases, category, description), " +
+      "by `category`, or by what it plugs into: `output_type` finds what " +
+      "can make a CONDITIONING, `input_type` what can take a LATENT. With " +
+      "no filter you get the categories to start from. Then call " +
+      "describe_comfy_nodes for the ones you will use: it gives every " +
+      "input's range, default and choices, and a node ready to paste. Paid " +
+      "cloud API nodes and deprecated ones are left out unless asked for.",
+    inputSchema: z.strictObject({
+      query: z.string().optional().describe(
+        'words that must all match, e.g. "qwen image" or "upscale"',
+      ),
+      category: z.string().optional().describe(
+        'a category or the start of one, e.g. "model/loaders", "sampling"',
+      ),
+      input_type: z.string().optional().describe(
+        'only nodes with an input of this type, e.g. "LATENT"',
+      ),
+      output_type: z.string().optional().describe(
+        'only nodes with an output of this type, e.g. "MODEL"',
+      ),
+      include_api_nodes: z.boolean().optional().describe(
+        "include paid cloud API nodes (they need a Comfy account and credits)",
+      ),
+      include_deprecated: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional().describe(
+        "default 30",
+      ),
+      offset: z.number().int().min(0).optional(),
+    }),
+  }, async (filters) => {
+    let info: ObjectInfo;
+    try {
+      info = await objectInfo(forge);
+    } catch {
+      return failure(COMFY_UNREACHABLE);
+    }
+    const unfiltered = filters.query === undefined &&
+      filters.category === undefined && filters.input_type === undefined &&
+      filters.output_type === undefined;
+    const result = searchNodes(info, filters);
+    if (unfiltered) {
+      // Hundreds of lines nobody asked for: the map, and how to narrow it.
+      return text({
+        total: result.total,
+        categories: result.categories,
+        left_out: result.left_out,
+        next: "narrow with query, category, input_type or output_type",
+      });
+    }
+    return text({
+      ...result,
+      ...(result.total > result.offset + result.nodes.length
+        ? {
+          next:
+            `${
+              result.total - result.offset - result.nodes.length
+            } more: pass offset ${result.offset + result.nodes.length}, ` +
+            "or narrow the search",
+        }
+        : {}),
+      ...(result.total === 0
+        ? {
+          next: "nothing matched; try fewer words, a category from a " +
+            "search with no filter, or include_api_nodes",
+        }
+        : {}),
+    });
+  });
+
+  server.registerTool("describe_comfy_nodes", {
+    description:
+      "Node types in full, as the ComfyUI behind ForgeUI has them: each " +
+      "input with what it takes (a link from another node, a value, one of " +
+      "its choices), its type, default, min/max/step and tooltip; each " +
+      "output by slot, name and type, which is what a link " +
+      '["<node id>", <slot>] points at; and `example`, the node in API ' +
+      "format with every required input filled — replace each " +
+      '"<link: TYPE>" with a link. For a loader, `choices` are the model ' +
+      "files actually on disk, so use one of them. Get names from " +
+      "search_comfy_nodes or from a workflow's graph (get_workflow_source).",
+    inputSchema: z.strictObject({
+      node_types: z.array(z.string()).min(1).max(20).describe(
+        'class_type names, e.g. ["KSampler", "UNETLoader"]',
+      ),
+    }),
+  }, async ({ node_types }) => {
+    let info: ObjectInfo;
+    try {
+      info = await objectInfo(forge);
+    } catch {
+      return failure(COMFY_UNREACHABLE);
+    }
+    return text({ nodes: describeNodes(info, node_types) });
+  });
 
   server.registerTool("get_workflow_source", {
     description:

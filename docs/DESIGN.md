@@ -598,6 +598,27 @@ nothing is saved unless all pass, and each message names the node or param:
    manifest does not have (`maximum` for `max`), which validation drops
    without a word.
 
+**What a graph can be built from.** `search_comfy_nodes` and
+`describe_comfy_nodes` read the same `/object_info` the check does, so what an
+agent is told a node takes is what its graph is checked against
+(`src/workflows/node_spec.ts` reads it for both). A search returns one line
+per node — inputs as `name: TYPE` with `?` for optional, output types in slot
+order, where it comes from (`core`, `api`, `custom: <pack>`) — because the
+whole list is ~900 node types and 1.6 MB on a stock 0.34; a third are paid
+cloud API nodes, left out unless asked for, as are deprecated ones. A
+description gives every input's range, default and choices, and an
+API-format example with links as `"<link: TYPE>"` placeholders. An empty
+loader list says so: it is the commonest reason a written graph is refused.
+
+ComfyUI's v3 schema changes which input *names* a node takes, and both read
+it the same way: a dynamic combo (`COMFY_DYNAMICCOMBO_V3`) holds its option's
+key and that option's inputs follow as `<parent>.<child>`; an autogrow input
+(`COMFY_AUTOGROW_V3`) is sent as `<parent>.<prefix>0`, `…1`, the first `min`
+required and the parent never; a match-type output (`COMFY_MATCHTYPE_V3`)
+carries the type of what is wired into the inputs sharing its template, so
+the check follows those links upstream rather than read the placeholder —
+which the bundled Anima, LTX-2.3 and MiniMax graphs depend on.
+
 A graph written without an editor document gets no `workflow.ui.json`; the
 editor rebuilds one from the api graph (§4.1). A save that replaces
 `api_json` without sending `ui_json` removes the old document for the same
