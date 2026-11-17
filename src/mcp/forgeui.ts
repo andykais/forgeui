@@ -7,6 +7,8 @@
  * which is what lets the bridge send it before the server side of §6.2 lands.
  */
 
+import { isAbsolute, join } from "@std/path";
+
 export class ForgeUiError extends Error {
   override readonly name = "ForgeUiError";
   /** The HTTP status, when ForgeUI answered at all. */
@@ -109,8 +111,9 @@ export interface SampleRow {
 export interface OutputRef {
   id: string;
   kind: string;
-  /** Where it sits under the data dir — what the file is actually called. */
+  /** The file, absolute, on ForgeUI's machine. */
   path?: string;
+  /** Where ForgeUI serves it, with the server. */
   media_url?: string;
   width?: number | null;
   height?: number | null;
@@ -174,9 +177,21 @@ export interface ForgeUiOptions {
   fetch?: typeof fetch;
 }
 
+/** The folders ForgeUI's stored media paths are relative to (§3). */
+interface MediaRoots {
+  data: string;
+  outputs: string;
+}
+
+/** Fields of an output row that name a stored media file. */
+const PATH_FIELDS = ["path", "sidecar_path"] as const;
+/** Fields that are a URL path on ForgeUI's own server. */
+const URL_FIELDS = ["media_url", "waveform_url", "url"] as const;
+
 export class ForgeUi {
   readonly #url: string;
   readonly #fetch: typeof fetch;
+  #roots: Promise<MediaRoots | null> | null = null;
 
   constructor(options: ForgeUiOptions) {
     this.#url = options.url.replace(/\/+$/, "");
@@ -185,6 +200,70 @@ export class ForgeUi {
 
   get url(): string {
     return this.#url;
+  }
+
+  /**
+   * Where ForgeUI keeps its files, absolute (`GET /api/system/status`):
+   * the data dir, and the outputs folder, which `outputs.dir` can put
+   * elsewhere (§3). Asked once; a failure is not remembered, so the next
+   * call asks again.
+   */
+  #mediaRoots(): Promise<MediaRoots | null> {
+    this.#roots ??= this.get<{ data_dir?: string; outputs_dir?: string }>(
+      "/api/system/status",
+    ).then((status) =>
+      status.data_dir
+        ? {
+          data: status.data_dir,
+          outputs: status.outputs_dir ?? join(status.data_dir, "outputs"),
+        }
+        : null
+    ).catch(() => {
+      this.#roots = null;
+      return null;
+    });
+    return this.#roots;
+  }
+
+  /**
+   * A stored media path made absolute, as ForgeUI's own `diskPath` does it
+   * (§3): the first segment names an app folder — `outputs/` the outputs
+   * folder wherever it is, `inputs/` and `samples/` the ones in the data
+   * dir. A model handed `outputs/2026/…png` takes it as relative to wherever
+   * it happens to be. The path is on ForgeUI's machine.
+   */
+  async absolutePath(stored: string): Promise<string> {
+    if (isAbsolute(stored)) return stored;
+    const roots = await this.#mediaRoots();
+    if (roots === null) return stored;
+    const [first, ...rest] = stored.split("/");
+    return first === "outputs"
+      ? join(roots.outputs, ...rest)
+      : join(roots.data, stored);
+  }
+
+  /** A URL path on ForgeUI's server (`/api/media/…`), with the server. */
+  absoluteUrl(path: string): string {
+    return path.startsWith("/") ? `${this.#url}${path}` : path;
+  }
+
+  /**
+   * An output row with nothing relative left in it: its file paths under
+   * the data dir, its media URLs on ForgeUI's server.
+   */
+  async absolutize<T extends object>(row: T): Promise<T> {
+    const out = { ...row } as Record<string, unknown>;
+    for (const field of PATH_FIELDS) {
+      if (typeof out[field] === "string") {
+        out[field] = await this.absolutePath(out[field] as string);
+      }
+    }
+    for (const field of URL_FIELDS) {
+      if (typeof out[field] === "string") {
+        out[field] = this.absoluteUrl(out[field] as string);
+      }
+    }
+    return out as T;
   }
 
   async request(
@@ -287,7 +366,7 @@ export class ForgeUi {
     const row = await this.get<
       OutputRef & { kind?: string }
     >(`/api/outputs/${encodeURIComponent(id)}`);
-    return {
+    return await this.absolutize({
       id,
       kind: row.kind ?? "image",
       path: row.path,
@@ -295,7 +374,7 @@ export class ForgeUi {
       width: row.width ?? null,
       height: row.height ?? null,
       duration_ms: row.duration_ms ?? null,
-    };
+    });
   }
 
   /**
