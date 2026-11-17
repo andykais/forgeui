@@ -32,6 +32,7 @@ import {
   searchNodes,
 } from "../workflows/node_catalog.ts";
 import { NODE_PACKS } from "../workflows/nodes.ts";
+import { editorToApi } from "../workflows/editor_graph.ts";
 import {
   type ApiGraph,
   FAMILIES,
@@ -309,6 +310,138 @@ function report(
   };
 }
 
+interface TemplateEntry {
+  name: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  models?: string[];
+  date?: string;
+  size?: number;
+  openSource?: boolean;
+  mediaType?: string;
+  io?: { outputs?: { mediaType?: string }[] };
+}
+
+/**
+ * ComfyUI's `templates/index.json` (categories, each with templates),
+ * searched. A template that calls a paid API is one marked not open
+ * source, or named `api_…`.
+ */
+export function searchTemplates(
+  index: unknown,
+  filters: {
+    query?: string;
+    media?: string;
+    include_api?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+) {
+  const categories = Array.isArray(index) ? index : [];
+  const all: (TemplateEntry & { category: string })[] = [];
+  const seen = new Set<string>();
+  for (const category of categories) {
+    if (typeof category !== "object" || category === null) continue;
+    const c = category as { title?: string; templates?: TemplateEntry[] };
+    for (const t of c.templates ?? []) {
+      if (typeof t?.name !== "string" || seen.has(t.name)) continue;
+      seen.add(t.name);
+      all.push({ ...t, category: c.title ?? "" });
+    }
+  }
+  const words = (filters.query ?? "").toLowerCase().split(/\s+/).filter(
+    Boolean,
+  );
+  const isApi = (t: TemplateEntry) =>
+    t.openSource === false || t.name.startsWith("api_");
+  const makes = (t: TemplateEntry & { category: string }) => {
+    const out = t.io?.outputs?.[0]?.mediaType;
+    if (/3d/i.test(t.category) || (t.tags ?? []).some((x) => /3d/i.test(x))) {
+      return "3d";
+    }
+    return out ??
+      (/video/i.test(t.category)
+        ? "video"
+        : /audio/i.test(t.category)
+        ? "audio"
+        : "image");
+  };
+  let api = 0;
+  const matches = all.filter((t) => {
+    const text = [
+      t.name,
+      t.title,
+      t.description,
+      ...(t.tags ?? []),
+      ...(t.models ?? []),
+    ]
+      .join("\n").toLowerCase();
+    if (!words.every((w) => text.includes(w))) return false;
+    if (filters.media && makes(t) !== filters.media) return false;
+    if (isApi(t) && !filters.include_api) {
+      api++;
+      return false;
+    }
+    return true;
+  });
+  const offset = filters.offset ?? 0;
+  const limit = filters.limit ?? 20;
+  return {
+    total: matches.length,
+    offset,
+    templates: matches.slice(offset, offset + limit).map((t) => ({
+      name: t.name,
+      title: t.title,
+      description: t.description,
+      makes: makes(t),
+      models: t.models ?? [],
+      ...(typeof t.size === "number" && t.size > 0
+        ? { model_download_gb: Math.round(t.size / 1e8) / 10 }
+        : {}),
+      tags: t.tags ?? [],
+      ...(t.date ? { date: t.date } : {}),
+      ...(isApi(t) ? { paid_api: true } : {}),
+    })),
+    ...(api > 0 ? { left_out: { paid_api: api } } : {}),
+    ...(matches.length > offset + limit
+      ? {
+        next: `${matches.length - offset - limit} more: pass offset ${
+          offset + limit
+        }`,
+      }
+      : {}),
+  };
+}
+
+/** What a save node writes, by its type's name. */
+function outputKind(classType: string): "image" | "video" | "audio" {
+  if (/audio/i.test(classType)) return "audio";
+  if (/video|webm|animated/i.test(classType)) return "video";
+  return "image";
+}
+
+/**
+ * A converted graph's results: its nodes that write files, the ones
+ * ComfyUI marks as output nodes and that save rather than preview.
+ */
+function outputNodes(
+  graph: Record<string, unknown>,
+  info: ObjectInfo,
+): { node: string; kind: string }[] {
+  return Object.entries(graph)
+    .filter(([, node]) => {
+      const type = (node as { class_type?: string }).class_type ?? "";
+      // What a job collects: pictures, clips, sound — not a 3D file.
+      return info[type]?.output_node === true &&
+        /^Save(Image|Video|Animated|WEBM|Audio)/i.test(type);
+    })
+    .map(([id, node]) => ({
+      node: id,
+      kind: outputKind((node as { class_type: string }).class_type),
+    }));
+}
+
 /** The label every write carries: the model the LLM server has loaded. */
 async function agentLabel(llm: LlmHost | null): Promise<string> {
   const model = llm === null
@@ -413,6 +546,51 @@ export function registerWorkflowTools(
         }
         : {}),
     });
+  });
+
+  server.registerTool("search_comfy_templates", {
+    description:
+      "ComfyUI's own workflow templates — known-good graphs for each " +
+      "model it supports, the best start for a new workflow. Each has a " +
+      "name to pass to create_workflow's from_comfy_template, what it " +
+      "makes, the models it needs (and how much they weigh), and its " +
+      "tags. Filter by words over the name, title, description, tags and " +
+      "models. Templates that call paid cloud APIs are left out unless " +
+      "asked for. A template's model files must be on disk for it to " +
+      "run: describe_comfy_nodes on its loaders lists what is.",
+    inputSchema: z.strictObject({
+      query: z.string().optional().describe(
+        'words that must all match, e.g. "qwen image edit"',
+      ),
+      media: z.enum(["image", "video", "audio", "3d"]).optional().describe(
+        "what it makes",
+      ),
+      include_api: z.boolean().optional().describe(
+        "include templates that call paid cloud APIs",
+      ),
+      limit: z.number().int().min(1).max(100).optional().describe(
+        "default 20",
+      ),
+      offset: z.number().int().min(0).optional(),
+    }),
+  }, async ({ query, media, include_api, limit, offset }) => {
+    let index: unknown;
+    try {
+      index = await forge.get("/comfy/templates/index.json");
+    } catch {
+      return failure(
+        "ComfyUI's template list could not be read through ForgeUI " +
+          "(ComfyUI not running, or a build without templates)",
+      );
+    }
+    const result = searchTemplates(index, {
+      query,
+      media,
+      include_api,
+      limit,
+      offset,
+    });
+    return text(result);
   });
 
   server.registerTool("list_node_packs", {
@@ -566,7 +744,14 @@ export function registerWorkflowTools(
       "with generate like any of them; you can change it later with " +
       "update_workflow. Start from an existing workflow with " +
       "`from_workflow` (its graph and params are copied, and whatever you " +
-      "pass replaces that field), or write the graph yourself. The graph " +
+      "pass replaces that field), from one of ComfyUI's own templates " +
+      "(`from_comfy_template`, see search_comfy_templates), from a " +
+      "workflow as ComfyUI's editor saves it (`editor_json`), or write the " +
+      "graph yourself (`api_json`). A template or editor document is " +
+      "converted as ComfyUI's editor would queue it, subgraphs flattened " +
+      "(an inner node is <instance>:<node>), and its save nodes become the " +
+      "outputs; it starts with no params, so it runs exactly as it came " +
+      "until you expose some with update_workflow. The graph " +
       "is checked against the node types this ComfyUI has before anything " +
       "is saved, and every problem comes back at once, naming the node; " +
       "then ForgeUI checks each param's bind against the graph. Nothing is " +
@@ -578,12 +763,38 @@ export function registerWorkflowTools(
           "Must not be taken",
       ),
       from_workflow: z.string().optional().describe(
-        "copy this workflow's graph and params first",
+        "copy this ForgeUI workflow's graph and params first",
+      ),
+      from_comfy_template: z.string().optional().describe(
+        "start from one of ComfyUI's own templates, by the name " +
+          "search_comfy_templates gives",
+      ),
+      editor_json: z.record(z.string(), z.unknown()).optional().describe(
+        "a workflow as ComfyUI's editor saves it ({nodes, links, …}, the " +
+          "format shared workflows come in); it is converted to api_json",
       ),
       api_json: apiJson.optional(),
       ...manifestFields,
     }),
-  }, async ({ name, id, from_workflow, api_json, ...fields }) => {
+  }, async (
+    {
+      name,
+      id,
+      from_workflow,
+      from_comfy_template,
+      editor_json,
+      api_json,
+      ...fields
+    },
+  ) => {
+    const starts = [from_workflow, from_comfy_template, editor_json, api_json]
+      .filter((x) => x !== undefined).length;
+    if (starts > 1) {
+      return failure(
+        "Nothing was saved: give one starting point — from_workflow, " +
+          "from_comfy_template, editor_json or api_json",
+      );
+    }
     let graph: Record<string, unknown> = api_json ?? {};
     let manifest: Record<string, unknown> = {
       kind: "image",
@@ -616,10 +827,58 @@ export function registerWorkflowTools(
         manifest = rest;
       }
     }
+    const converted: string[] = [];
+    if (from_comfy_template !== undefined || editor_json !== undefined) {
+      let doc: unknown = editor_json;
+      if (from_comfy_template !== undefined) {
+        try {
+          doc = await forge.get(
+            `/comfy/templates/${encodeURIComponent(from_comfy_template)}.json`,
+          );
+        } catch {
+          return failure(
+            `Nothing was saved: ComfyUI has no template "${from_comfy_template}" ` +
+              "(search_comfy_templates lists them by name)",
+          );
+        }
+      }
+      let info: ObjectInfo;
+      try {
+        info = await objectInfo(forge);
+      } catch {
+        return failure(
+          `Nothing was saved: ${COMFY_UNREACHABLE}, and converting needs it`,
+        );
+      }
+      const result = editorToApi(doc, info);
+      if (result.errors.length > 0) {
+        return failure(
+          [
+            "Nothing was saved: the editor document could not be converted.",
+            bullets(result.errors),
+          ].join("\n"),
+        );
+      }
+      graph = result.graph as Record<string, unknown>;
+      converted.push(...result.notes);
+      // The document is kept as the editor's, so the graph opens as it was
+      // laid out rather than rebuilt.
+      uiJson = doc;
+      if (fields.outputs === undefined) {
+        manifest.outputs = outputNodes(graph, info);
+      }
+      if (fields.kind === undefined) {
+        const kinds = (manifest.outputs as { kind: string }[]).map((o) =>
+          o.kind
+        );
+        if (kinds.length > 0) manifest.kind = kinds[0];
+      }
+    }
     manifest = { ...manifest, ...defined(fields) };
 
     const check = await checkGraph(forge, graph);
     if (check.errors.length > 0) return failure(graphRefusal(check));
+    check.warnings.unshift(...converted);
     try {
       const saved = await forge.post("/api/workflows", {
         id,

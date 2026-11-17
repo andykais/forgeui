@@ -656,3 +656,131 @@ Deno.test("list_node_packs: what is installed, and which workflows wait on a mis
     );
   }, { comfy: { packs: ["ComfyUI-Breeze-TTS-2"] } });
 });
+
+Deno.test("search_comfy_templates lists ComfyUI's templates, paid ones only on request", async () => {
+  await withTestApp(async (app) => {
+    const free = await ok<{
+      templates: { name: string; makes: string; model_download_gb?: number }[];
+      left_out?: { paid_api: number };
+    }>(app, "search_comfy_templates", { query: "text to image" });
+    assertEquals(free.templates.map((t) => t.name), ["fake_sd15_t2i"]);
+    assertEquals(free.templates[0]!.makes, "image");
+    assertEquals(free.templates[0]!.model_download_gb, 2);
+    assertEquals(free.left_out, { paid_api: 1 });
+    const all = await ok<{ templates: { name: string; paid_api?: true }[] }>(
+      app,
+      "search_comfy_templates",
+      { include_api: true },
+    );
+    assertEquals(
+      all.templates.find((t) => t.paid_api)?.name,
+      "api_fake_paid_t2i",
+    );
+  }, { comfy: true });
+});
+
+Deno.test("create_workflow from a ComfyUI template: converted, its save node the output, runnable as it came", async () => {
+  await withTestApp(async (app) => {
+    const saved = await ok<
+      Saved & { outputs: { node: string; kind: string }[] }
+    >(
+      app,
+      "create_workflow",
+      { name: "From template", from_comfy_template: "fake_sd15_t2i" },
+    );
+    assert(saved.runnable, saved.not_runnable_because);
+    assertEquals(saved.outputs, [{ node: "9", kind: "image" }]);
+    assertEquals(saved.params, []);
+
+    // The template was the bundled sd15 graph, saved as an editor document
+    // by litegraph.ts: converting it back gives the same graph.
+    const source = await ok<
+      { api_json: Record<string, { class_type: string; inputs: unknown }> }
+    >(
+      app,
+      "get_workflow_source",
+      { workflow_id: "from-template" },
+    );
+    const bundled = JSON.parse(
+      await Deno.readTextFile(
+        new URL(
+          "../../workflows/bundled/sd15/workflow.api.json",
+          import.meta.url,
+        ),
+      ),
+    ) as Record<string, { class_type: string; inputs: unknown }>;
+    const strip = (g: typeof bundled) =>
+      Object.fromEntries(
+        Object.entries(g).map((
+          [id, n],
+        ) => [id, { class_type: n.class_type, inputs: n.inputs }]),
+      );
+    assertEquals(strip(source.api_json), strip(bundled));
+    // The editor keeps the document it came as, layout and all.
+    const row = (await listed(app)).find((w) => w.id === "from-template") as
+      & Listed
+      & { has_ui_json?: boolean };
+    assertEquals(row.has_ui_json, true);
+
+    const round = await ok<
+      { counts: { done: number }; jobs: { error?: string }[] }
+    >(
+      app,
+      "generate",
+      { jobs: [{ workflow_id: "from-template" }] },
+    );
+    assertEquals(round.counts.done, 1, round.jobs[0]?.error);
+  }, { comfy: true });
+});
+
+Deno.test("create_workflow from editor_json, and the ways a start is refused", async () => {
+  await withTestApp(async (app) => {
+    const doc =
+      await (await fetch(`${app.fake!.url}/templates/fake_sd15_t2i.json`))
+        .json();
+    const saved = await ok<Saved>(app, "create_workflow", {
+      name: "Pasted",
+      editor_json: doc,
+    });
+    assert(saved.runnable, saved.not_runnable_because);
+
+    assertStringIncludes(
+      await refused(app, "create_workflow", {
+        name: "Two starts",
+        editor_json: doc,
+        from_workflow: "sd15",
+      }),
+      "give one starting point",
+    );
+    assertStringIncludes(
+      await refused(app, "create_workflow", {
+        name: "Not a document",
+        editor_json: { "1": { class_type: "KSampler", inputs: {} } },
+      }),
+      "not a ComfyUI editor document",
+    );
+    assertStringIncludes(
+      await refused(app, "create_workflow", {
+        name: "Missing pack",
+        editor_json: {
+          nodes: [{
+            id: 1,
+            type: "SomePackNode",
+            mode: 0,
+            inputs: [],
+            outputs: [],
+          }],
+          links: [],
+        },
+      }),
+      '"SomePackNode" is not in this ComfyUI',
+    );
+    assertStringIncludes(
+      await refused(app, "create_workflow", {
+        name: "No such",
+        from_comfy_template: "no_such_template",
+      }),
+      'ComfyUI has no template "no_such_template"',
+    );
+  }, { comfy: true });
+});

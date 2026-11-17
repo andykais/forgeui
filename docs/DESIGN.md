@@ -614,7 +614,13 @@ for — an input's editor label, `multiselect` (the value is a list), `upload`
 (a file in ComfyUI's input folder, which a ForgeUI workflow exposes as a
 media param), ComfyUI's own `advanced` flag, choices fetched at run time —
 and `raw: true` returns each named node's entry exactly as ComfyUI serves
-it, unclipped. Nothing is then a reason to read `/object_info` whole, and
+it. **Tooltips and descriptions are never cut:** a clipped tooltip is the
+sentence that would have said what the input does. They are left out of a
+description unless `include_tooltips` is set, and `inputs` narrows a look to
+the inputs in question, so the way to read one is list, describe, then
+describe again with tooltips for the inputs that matter. Only choice lists
+past 100 are shortened (a loader's can run to hundreds), and `raw` has
+them all. Nothing is then a reason to read `/object_info` whole, and
 both tools say not to: it is megabytes, most of a context window.
 
 ComfyUI's v3 schema changes which input *names* a node takes, and both read
@@ -625,6 +631,47 @@ required and the parent never; a match-type output (`COMFY_MATCHTYPE_V3`)
 carries the type of what is wired into the inputs sharing its template, so
 the check follows those links upstream rather than read the placeholder —
 which the bundled Anima, LTX-2.3 and MiniMax graphs depend on.
+
+**Starting from ComfyUI's own templates, or any editor document.**
+`search_comfy_templates` reads the template list ComfyUI serves
+(`/templates/index.json`, ~500 on 0.34; those calling paid APIs left out unless
+asked for), and `create_workflow` takes `from_comfy_template` or
+`editor_json`. Templates and shared workflows are editor documents, not API
+graphs, so `src/workflows/editor_graph.ts` converts them the way the editor's
+`graphToPrompt()` does: widget values read positionally against `/object_info`
+(a seed's control and an upload button each hold a slot the graph never sees,
+including the control the editor gives every INT named `seed`/`noise_seed`; a
+document saved before a node grew an input gets that input's default), links
+followed through `Reroute`, bypassed nodes and subgraph boundaries, subgraphs
+flattened to `<instance>:<node>` ids, a promoted widget's value taken from the
+instance (positional over the subgraph's value inputs) or from the inner widget
+`proxyWidgets` names, `PrimitiveNode` values written into their targets, and
+list values wrapped as `{"__value__": […]}`. It is tested against what
+ComfyUI's frontend itself produced (tests/golden/editor_graph/, made with
+`scripts/editor_oracle.cjs`): of the 514 templates a 0.34 install ships it
+agrees on 502; ten use widgets only the editor can fill (a painted canvas, a
+rendered 3D view), which the result says, and two hit editor quirks. A node
+type the ComfyUI lacks — a custom pack not installed — refuses the import by
+name. The imported workflow keeps the document as its `workflow.ui.json`, its
+save nodes become its outputs, and it starts with no params: it runs exactly as
+the template came until some are exposed.
+
+**What the check refuses.** Only what ComfyUI would: a problem on a node no
+output node reaches is a warning, since ComfyUI never runs that node (the
+editor emits a few such orphans, and refusing them refused templates ComfyUI
+runs). A loader whose list is empty — no file of that kind on disk — is a
+warning that says every value will be refused until one is added.
+
+**Deleting and node packs.** `delete_workflow` removes a workflow an agent
+made; `DELETE /api/workflows/:id` with `{agent}` in the body is held to the
+same record as a save, 403 otherwise. `list_node_packs` lists the custom node
+packs ComfyUI loaded (from where each node came from) and the packs ForgeUI's
+workflows can `require`, with whether each is installed and which workflows
+wait on it; `search_comfy_nodes` filters by `source`. A pack is installed by
+whoever runs ComfyUI, never by ForgeUI.
+
+The Workflows screen and a workflow's page badge an agent-made workflow
+**by agent**; the hover names the model.
 
 A graph written without an editor document gets no `workflow.ui.json`; the
 editor rebuilds one from the api graph (§4.1). A save that replaces
@@ -2091,7 +2138,7 @@ POST /api/workflows                     new: {} (blank, opens the editor) or {ui
                                         and a taken id is 409, not renamed (§4.9). Every row carries `agent`
 POST /api/workflows/:id/duplicate
 POST /api/workflows/:id/reset           delete the user copy, revert to bundled
-DELETE /api/workflows/:id               user copies only; 409 for bundled
+DELETE /api/workflows/:id               user copies only; 409 for bundled; with {agent} in the body, 403 unless agent.json (§4.9)
 GET  /api/templates                     list (§4.8): id, name, description, workflow, workflow_name, family, action, values, ask, source, has_bundled, problems, last_output ({id, kind, media_url} of the newest output made with it, or null)
 GET  /api/templates/:id
 POST /api/templates                     {name, description?, workflow, values, ask, action?} → a user template; id from the name

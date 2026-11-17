@@ -92,6 +92,7 @@ Deno.test("nodes: unknown types, missing inputs, wrong slots and wrong types are
       seed: 0,
       sampler_name: "euler",
       positive: ["1", 5],
+      negative: ["2", 0],
     }),
     "4": node("SaveImage", { images: ["3", 0], filename_prefix: "f" }),
   }, INFO);
@@ -102,6 +103,18 @@ Deno.test("nodes: unknown types, missing inputs, wrong slots and wrong types are
     'node "3" (KSampler).positive: links to output 5 of node "1" (CheckpointLoaderSimple), which has 3 (0: MODEL, 1: CLIP, 2: VAE)',
     'node "4" (SaveImage).images: expects IMAGE, but output 0 of node "3" (KSampler) is LATENT',
   ]);
+});
+
+Deno.test("nodes: a problem no output reaches is a warning, since ComfyUI skips the node", () => {
+  const { errors, warnings } = checkGraphAgainstNodes({
+    "1": node("CheckpointLoaderSimple", { ckpt_name: "v1-5.safetensors" }),
+    "2": node("KSampler", { model: ["1", 0], seed: 0 }),
+    "3": node("PreviewAny", { source: ["1", 0] }),
+  }, INFO);
+  assertEquals(errors, []);
+  assertEquals(warnings.length, 3);
+  assertStringIncludes(warnings[0]!, 'node "2" (KSampler): required input');
+  assertStringIncludes(warnings[0]!, "nothing it feeds reaches an output");
 });
 
 Deno.test("nodes: a combo value off the list and an unknown input are warnings", () => {

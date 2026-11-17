@@ -147,6 +147,26 @@ function outputType(
   return matched[0]?.type ?? "*";
 }
 
+/** The nodes an output node needs, following links back from each. */
+function reachableFromOutputs(graph: ApiGraph, info: ObjectInfo): Set<string> {
+  const seen = new Set<string>();
+  const stack = Object.keys(graph).filter((id) => {
+    const type = graph[id]?.class_type;
+    return typeof type === "string" && info[type]?.output_node === true;
+  });
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id) || !graph[id]) continue;
+    seen.add(id);
+    for (const value of Object.values(graph[id]!.inputs ?? {})) {
+      if (Array.isArray(value) && typeof value[0] === "string") {
+        stack.push(value[0]);
+      }
+    }
+  }
+  return seen;
+}
+
 /** Edit distance, for "did you mean". Small inputs only. */
 function distance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -221,12 +241,22 @@ export function checkGraphAgainstNodes(
   const errors: string[] = [];
   const warnings: string[] = [];
   let outputs = 0;
+  // ComfyUI runs what an output needs and nothing else: a problem on a node
+  // no output reaches is one it never meets, so it is a warning here.
+  const needed = reachableFromOutputs(graph, info);
 
   for (const [id, node] of Object.entries(graph)) {
     const at = label(id, node.class_type);
+    const problem = (message: string) =>
+      needed.has(id) ? errors.push(message) : warnings.push(
+        `${message} — but nothing it feeds reaches an output, so ComfyUI ` +
+          `skips it`,
+      );
+    // checkGraphShape's to report; this only reads a graph that passed it.
+    if (typeof node.class_type !== "string") continue;
     const schema = info[node.class_type];
     if (!schema) {
-      errors.push(
+      problem(
         `${at}: this ComfyUI has no node type "${node.class_type}"` +
           didYouMean(closest(node.class_type, Object.keys(info))),
       );
@@ -241,7 +271,7 @@ export function checkGraphAgainstNodes(
 
     for (const input of expected.values()) {
       if (input.required && !(input.name in inputs)) {
-        errors.push(`${at}: required input "${input.name}" is missing`);
+        problem(`${at}: required input "${input.name}" is missing`);
       }
     }
     for (const [name, value] of Object.entries(inputs)) {
@@ -271,7 +301,7 @@ export function checkGraphAgainstNodes(
         const produced = sourceSchema.output ?? [];
         if (slot >= produced.length) {
           const names = (sourceSchema.output_name ?? produced).map(String);
-          errors.push(
+          problem(
             `${at}.${name}: links to output ${slot} of ${
               label(from, source!.class_type)
             }, which has ${produced.length} (${
@@ -285,7 +315,7 @@ export function checkGraphAgainstNodes(
           typeof given === "string" && type !== null && type !== "COMBO" &&
           !compatible(given, type)
         ) {
-          errors.push(
+          problem(
             `${at}.${name}: expects ${type}, but output ${slot} of ${
               label(from, source!.class_type)
             } is ${given}`,
@@ -299,20 +329,27 @@ export function checkGraphAgainstNodes(
         input.kind === "dynamic_combo" && choices !== null &&
         !choices.includes(value)
       ) {
-        errors.push(
+        problem(
           `${at}.${name}: ${JSON.stringify(value)} is not one of its ` +
             `options (${listChoices(choices)})`,
         );
         continue;
       }
       if (
-        choices !== null && choices.length > 0 && !choices.includes(value)
+        choices !== null && !choices.includes(value)
       ) {
+        // An empty list is a loader whose folder has nothing in it: every
+        // value is refused, which is the likeliest reason a copied graph
+        // will not run.
         warnings.push(
-          `${at}.${name}: ${JSON.stringify(value)} is not one of this ` +
-            `ComfyUI's choices (${listChoices(choices)}), so ComfyUI will ` +
-            `refuse to run the graph until it is — fine only if that ` +
-            `file is still to be downloaded`,
+          choices.length === 0
+            ? `${at}.${name}: ${JSON.stringify(value)} — this ComfyUI has ` +
+              `no file of this kind at all, so ComfyUI will refuse to run ` +
+              `the graph until one is added`
+            : `${at}.${name}: ${JSON.stringify(value)} is not one of this ` +
+              `ComfyUI's choices (${listChoices(choices)}), so ComfyUI will ` +
+              `refuse to run the graph until it is — fine only if that ` +
+              `file is still to be downloaded`,
         );
       }
     }

@@ -187,11 +187,11 @@ export function parseInput(
         : {}),
     };
   }
-  // A widget unless it is forced to be a socket; anything the editor draws
-  // without a socket, or that names the widget it draws, is a value too.
+  // A custom type with a default (`COLOR`, `BOUNDING_BOXES`, `CURVE`) is
+  // one the editor draws a widget for; a link type never has one.
   const isValue = options.forceInput !== true && (
     VALUE_TYPES.has(head) || options.socketless === true ||
-    typeof options.widgetType === "string"
+    typeof options.widgetType === "string" || options.default !== undefined
   );
   return { ...base, options, kind: isValue ? "value" : "link", type: head };
 }
