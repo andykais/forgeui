@@ -214,7 +214,7 @@ Field notes:
 | `lora_list` | repeatable rows: lora picker + strength(s) | `chain` (graph rewrite, §4.4) |
 | `image` | file picker / drop / paste, thumbnail with the stored size | scalar (`LoadImage.image`), content-addressed (§9) |
 | `mask` | painted over the image its `of` names, in the mask editor (§10) | scalar (`LoadImageMask.image`, channel `red`), content-addressed (§9) |
-| `video` | upload / pick from gallery | scalar, content-addressed (§9) |
+| `video` | file picker / drop, or a dragged video result; a player | scalar (`LoadVideo.file`), content-addressed (§9) |
 
 **Where a param's value comes from**, first match wins:
 
@@ -387,6 +387,7 @@ Initial set:
 | `minimax-h3-i2v` | minimax-h3 | video | the official Comfy-Org MiniMax H3 image-to-video template, flattened out of its subgraph: image (required), prompt, size (step 32), duration (seconds at 24 fps, rounded up to the model's 17k + 5 frame grid), seed, loras, use_turbo; the model, text encoder, both VAEs, steps, the turbo LoRA, its strength and steps, and the sampler advanced. One pass, video and stereo audio generated together |
 | `minimax-h3-ia2v` | minimax-h3 | video | `minimax-h3-i2v` plus an audio take (required) and a start offset; `duration` follows the clip (§11.3). The trimmed clip is anchored at frame 0 by `MiniMaxH3AddGuide`, so the sampler keeps it and draws a picture to fit it |
 | `anima` | anima | image | as above; family-filtered loras |
+| `frame-interpolate` | — | video | the first workflow that takes a video: video (required), multiplier (2–8), model. Core RIFE / FILM nodes (ComfyUI v0.20+); one number multiplies both the frames and the frame rate, so the length and the source's sound are kept. The model comes from the `interpolation` class, `frame_interpolation/`, which takes a raw RIFE `flownet.pkl` (4.25 and later) as well as safetensors |
 | `flux-klein` | flux2 | image | prompt, model, size, loras, seed, clip |
 | `z-image-turbo` | z-image | image | prompt, model, seed, size, loras; few steps by default |
 | `sd15` | sd15 | image | prompt, negative, seed, size, loras; steps/cfg advanced |
@@ -1306,6 +1307,15 @@ The extension and the recorded dimensions come from the **first bytes of the
 file**, never from its name or the browser's `Content-Type`. A `.png` that is
 really a JPEG otherwise fails inside ComfyUI's load step, well past the point
 where anything useful can be said about it. PNG, JPEG and WebP only.
+
+*Amended:* audio (DESIGN-AUDIO §4.3) and **video** are taken the same way.
+A video is MP4, MOV, WebM or MKV, told by its container: MP4 and MOV are
+ISO-BMFF like an m4a, so the `ftyp` brand decides (`M4A `/`M4B ` are sound,
+`qt  ` is QuickTime, anything else is MP4), and Matroska is WebM when its
+DocType says so. A video's frame size is not in its first bytes in any form
+worth parsing, so it and the duration come from ffprobe once the file is on
+disk, and are null on a machine without ffmpeg. A `video` param shows the
+clip as a player; a dragged video result is adopted, as an image is.
 
 **Where an input came from** (`derived_from_output`) is what the lineage
 view walks (§11.2), and it is found three ways, first match wins:

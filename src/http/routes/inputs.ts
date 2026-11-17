@@ -26,7 +26,7 @@ function view(input: StoredInput) {
     kind: input.kind,
     width: input.width,
     height: input.height,
-    /** Audio only; a picture has no length (DESIGN-AUDIO §4.3). */
+    /** Audio and video; a picture has no length (DESIGN-AUDIO §4.3). */
     duration_ms: input.duration_ms,
     bytes: input.bytes,
     /** What the panel shows as a thumbnail, and the viewer as lineage. */

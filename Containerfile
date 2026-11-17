@@ -157,4 +157,5 @@ CMD ["--host", "0.0.0.0", \
      "--models-dir", "upscale_models=/models/upscale_models", \
      "--models-dir", "latent_upscale_models=/models/latent_upscale_models", \
      "--models-dir", "embeddings=/models/embeddings", \
+     "--models-dir", "frame_interpolation=/models/frame_interpolation", \
      "--models-dir", "breezetts2=/models/breezetts2"]

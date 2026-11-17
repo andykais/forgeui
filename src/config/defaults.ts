@@ -22,6 +22,10 @@ export const DEFAULT_MODEL_KINDS = [
   "upscale_models",
   "latent_upscale_models",
   "embeddings",
+  // RIFE and FILM weights for the core `FrameInterpolationModelLoader`
+  // (ComfyUI v0.20+). Raw RIFE checkpoints ship as `flownet.pkl`, which that
+  // loader reads as-is, so the folder takes `.pkl` as well as `.safetensors`.
+  "frame_interpolation",
   // Not a ComfyUI folder key: the Breeze TTS 2 node pack registers this one
   // itself and searches any `breezetts2:` mapping it finds in
   // extra_model_paths.yaml (docs/DESIGN-AUDIO.md §4.4). Listing it here is
@@ -54,6 +58,7 @@ const KIND_CLASSES: Record<string, ModelClass> = {
   upscale_models: "upscale",
   latent_upscale_models: "upscale",
   embeddings: "embedding",
+  frame_interpolation: "interpolation",
   // Speech weights drive a generation, but not through a model picker: the
   // pack's loader node takes one of four fixed build labels and resolves the
   // file itself, so these rows are informational (§4.4).

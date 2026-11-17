@@ -763,11 +763,14 @@ export interface InputMedia {
   sha256: string;
   ext: string;
   filename: string;
-  kind: "image" | "audio";
-  /** Null for audio, which has no dimensions (DESIGN-AUDIO §4.3). */
+  kind: "image" | "audio" | "video";
+  /**
+   * Null for audio, which has no dimensions (DESIGN-AUDIO §4.3), and for a
+   * video ffprobe could not read.
+   */
   width: number | null;
   height: number | null;
-  /** Audio only: how long the clip runs. */
+  /** Audio and video: how long the clip runs. */
   duration_ms: number | null;
   bytes: number;
   url: string;

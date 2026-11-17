@@ -232,7 +232,7 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         "an output id from generate or search_gallery",
       ),
       file: z.string().optional().describe(
-        "absolute path to an image or audio file on the bridge's own disk",
+        "absolute path to an image, audio or video file on the bridge's own disk",
       ),
     }),
   }, async ({ output_id, file }) => {

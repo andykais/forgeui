@@ -433,9 +433,21 @@ describe("each param type renders from the manifest", () => {
     expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
   });
 
-  test("video still says why it cannot run yet", () => {
-    mount([{ key: "clip", label: "Clip", type: "video", bind: "11.video" }]);
-    expect(screen.getByText(/arrive in a later phase/)).toBeTruthy();
+  test("video takes a file or a dragged result, and offers no paste", () => {
+    mount([{ key: "clip", label: "Clip", type: "video", bind: "11.file" }]);
+    expect(screen.getByText(/Choose or drop a video/)).toBeTruthy();
+    expect(screen.getByLabelText("Clip: choose or drop a video")).toBeTruthy();
+    expect(screen.queryByText(/arrive in a later phase/)).toBeNull();
+  });
+
+  test("an attached video plays from the store", () => {
+    const clip = `${"c".repeat(64)}.mp4`;
+    mount([{ key: "clip", label: "Clip", type: "video", bind: "11.file" }], {
+      clip,
+    });
+    expect(document.querySelector("video")?.getAttribute("src")).toBe(
+      `/api/media/inputs/cc/${clip}`,
+    );
   });
 
   const maskParams: Param[] = [

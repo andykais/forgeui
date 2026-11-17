@@ -85,6 +85,7 @@ Deno.test("first run writes config.yaml with defaults and a keys block", async (
       upscale_models: [],
       latent_upscale_models: [],
       embeddings: [],
+      frame_interpolation: [],
       breezetts2: [],
     });
 

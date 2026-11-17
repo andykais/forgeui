@@ -1,0 +1,68 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "example.mp4"
+    },
+    "_meta": {
+      "title": "Source video"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": ["1", 0]
+    }
+  },
+  "3": {
+    "class_type": "FrameInterpolationModelLoader",
+    "inputs": {
+      "model_name": "rife-v4.26.pkl"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 2
+    },
+    "_meta": {
+      "title": "Multiplier"
+    }
+  },
+  "5": {
+    "class_type": "FrameInterpolate",
+    "inputs": {
+      "interp_model": ["3", 0],
+      "images": ["2", 0],
+      "multiplier": ["4", 0]
+    }
+  },
+  "6": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a * b",
+      "values.a": ["2", 2],
+      "values.b": ["4", 0]
+    },
+    "_meta": {
+      "title": "Output fps"
+    }
+  },
+  "7": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "fps": ["6", 0],
+      "images": ["5", 0],
+      "audio": ["2", 1]
+    }
+  },
+  "8": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "video/Interpolated",
+      "format": "auto",
+      "format.codec": "auto",
+      "video": ["7", 0]
+    }
+  }
+}

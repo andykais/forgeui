@@ -52,6 +52,7 @@ const BUNDLED = [
   ["flux-klein", "Flux.2 Klein"],
   ["flux-klein-img2img", "Flux.2 Klein (img2img)"],
   ["flux-klein-inpaint", "Flux.2 Klein (inpaint)"],
+  ["frame-interpolate", "Frame Interpolation"],
   ["illustrious", "Illustrious XL"],
   ["illustrious-img2img", "Illustrious XL (img2img)"],
   ["illustrious-inpaint", "Illustrious XL (inpaint)"],
@@ -323,6 +324,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "flux2",
         "flux2",
         "flux2",
+        // Frame interpolation works on any video, so it has no family.
+        null,
         "sdxl",
         "sdxl",
         "sdxl",
@@ -363,6 +366,7 @@ const EVERY_ANSWER: Record<string, unknown> = {
   text: "(sigh) it is good to hear your voice again",
   voice: "an older man, warm, unhurried",
   style: "neo-soul, live drums, warm rhodes",
+  video: "abc123.mp4",
 };
 
 Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async () => {

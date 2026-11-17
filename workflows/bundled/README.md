@@ -1,6 +1,6 @@
 # Bundled workflows
 
-The 25 workflows of DESIGN §4.6, shipped with the app and copied into
+The 26 workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
@@ -16,6 +16,7 @@ from then on (§4.6).
 | `flux-klein`          | Flux.2 Klein                      | flux2        | image | prompt, model, size, loras, seed, clip · steps, cfg, vae advanced                                                                                                                                                                                                      |
 | `flux-klein-img2img`  | Flux.2 Klein (img2img)            | flux2        | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, upscale_method, clip, vae, model advanced                                                                                     |
 | `flux-klein-inpaint`  | Flux.2 Klein (inpaint)            | flux2        | image | image, prompt, creativity, seed, loras · **Mask** section: mask (`of` image), grow, feather · steps, cfg, sampler, clip, vae, model advanced                                                                                                                           |
+| `frame-interpolate`   | Frame Interpolation               | —            | video | video, multiplier, model; core RIFE / FILM nodes, no custom pack — see below                                                                                                                                                                                           |
 | `illustrious`         | Illustrious XL                    | sdxl         | image | prompt, negative, model, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                       |
 | `illustrious-img2img` | Illustrious XL (img2img)          | sdxl         | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
 | `illustrious-inpaint` | Illustrious XL (inpaint)          | sdxl         | image | image, prompt, negative, creativity, seed, loras · **Mask** section: mask (`of` image), grow, feather · steps, cfg, sampler, scheduler, model advanced                                                                                                                 |
@@ -211,3 +212,12 @@ saving replaces it with the editor's own.
 - `ltx2-i2v` needs a recent ComfyUI: the LTX-2.3 classes it uses
   (`LTXAVTextEncoderLoader`, `LTXVConcatAVLatent`, `LTXVImgToVideoInplace` and
   the rest) arrived with the model.
+
+`frame-interpolate` is written by hand rather than imported: there is no
+official template for it. It is the first bundled workflow that takes a video.
+`LoadVideo` → `GetVideoComponents` splits the source into frames, sound and
+frame rate; `FrameInterpolate` multiplies the frames; and one `PrimitiveInt`
+feeds both the interpolator and a `ComfyMathExpression` that multiplies the
+frame rate, so the result runs as long as the source and keeps its sound. The
+model is picked from the `interpolation` class (`frame_interpolation/`), which
+takes RIFE 4.25+ and FILM checkpoints, a raw `flownet.pkl` included.

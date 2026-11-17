@@ -24,12 +24,17 @@ export interface ProbedImage {
   height: number;
 }
 
-/** A file the store will take: a picture with a size, or sound without one. */
+/**
+ * A file the store will take: a picture with a size, sound without one, or a
+ * video. A video's size is not in its first bytes in any form worth parsing,
+ * so it is null here and filled in by ffprobe once the file is on disk
+ * (`media/video.ts`), as an audio clip's duration is.
+ */
 export interface ProbedMedia {
   ext: string;
   contentType: string;
-  kind: "image" | "audio";
-  /** Null for audio, which has no dimensions to record. */
+  kind: "image" | "audio" | "video";
+  /** Null for audio, which has no dimensions, and for video until probed. */
   width: number | null;
   height: number | null;
 }
@@ -145,10 +150,50 @@ function probeAudio(bytes: Uint8Array): ProbedMedia | null {
   if (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) {
     return audio("mp3", "audio/mpeg");
   }
-  // ISO-BMFF: `....ftyp` at offset 4, which is what an m4a/aac file is.
-  if (text(4, 4) === "ftyp") return audio("m4a", "audio/mp4");
+  // ISO-BMFF: `....ftyp` at offset 4. An m4a is one, and so is every MP4 and
+  // QuickTime video, so only the audio brands are taken here; the rest are
+  // `probeVideo`'s.
+  if (text(4, 4) === "ftyp" && M4A_BRANDS.has(text(8, 4))) {
+    return audio("m4a", "audio/mp4");
+  }
   return null;
 }
+
+/** The ISO-BMFF major brands that mean sound only: iTunes audio and books. */
+const M4A_BRANDS = new Set(["M4A ", "M4B ", "M4P ", "F4A ", "F4B "]);
+
+/**
+ * The containers ComfyUI's `LoadVideo` will take: MP4 and QuickTime (both
+ * ISO-BMFF, told apart by the major brand) and Matroska, whose WebM flavour
+ * names itself in the EBML header's DocType.
+ */
+function probeVideo(bytes: Uint8Array): ProbedMedia | null {
+  const text = (at: number, length: number) =>
+    new TextDecoder().decode(bytes.subarray(at, at + length));
+  const video = (ext: string, contentType: string): ProbedMedia => ({
+    ext,
+    contentType,
+    kind: "video",
+    width: null,
+    height: null,
+  });
+
+  if (text(4, 4) === "ftyp") {
+    return text(8, 4) === "qt  "
+      ? video("mov", "video/quicktime")
+      : video("mp4", "video/mp4");
+  }
+  if (startsWith(bytes, EBML_MAGIC)) {
+    // The DocType sits a few bytes into the header; 64 is far more than any
+    // encoder puts in front of it.
+    return text(0, 64).includes("webm")
+      ? video("webm", "video/webm")
+      : video("mkv", "video/x-matroska");
+  }
+  return null;
+}
+
+const EBML_MAGIC = [0x1a, 0x45, 0xdf, 0xa3] as const;
 
 /** The formats ComfyUI's `LoadImage` will take, and nothing else. */
 export function probeImage(bytes: Uint8Array): ProbedImage {
@@ -178,11 +223,12 @@ export function probeImage(bytes: Uint8Array): ProbedImage {
 }
 
 /**
- * What the store takes: a picture or a sound, decided by the bytes.
+ * What the store takes: a picture, a sound or a video, decided by the bytes.
  *
- * Images are tried first because they are the common case and their magic is
- * unambiguous; the error when neither matches names both, since "only PNG,
- * JPEG and WebP" is a confusing thing to be told about a `.wav`.
+ * Audio goes first so that an m4a is not mistaken for an MP4 video (they
+ * share a container and differ only in the brand). The error when nothing
+ * matches names every kind, since "only PNG, JPEG and WebP" is a confusing
+ * thing to be told about a `.wav`.
  */
 export function probeMedia(bytes: Uint8Array): ProbedMedia {
   if (bytes.length < 16) {
@@ -190,13 +236,16 @@ export function probeMedia(bytes: Uint8Array): ProbedMedia {
   }
   const audio = probeAudio(bytes);
   if (audio) return audio;
+  const video = probeVideo(bytes);
+  if (video) return video;
   try {
     const image = probeImage(bytes);
     return { ...image, kind: "image" };
   } catch {
     throw new ImageProbeError(
       "an input must be a PNG, JPEG or WebP image, " +
-        "or a WAV, FLAC, MP3, Opus, Ogg or M4A sound",
+        "a WAV, FLAC, MP3, Opus, Ogg or M4A sound, " +
+        "or an MP4, MOV, WebM or MKV video",
     );
   }
 }
