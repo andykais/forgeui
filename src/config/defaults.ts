@@ -18,6 +18,9 @@ export const DEFAULT_MODEL_KINDS = [
   "loras",
   "vae",
   "text_encoders",
+  // Image encoders for vision-conditioned models (IP-Adapter, unCLIP, some
+  // image-to-video graphs), loaded by the core `CLIPVisionLoader`.
+  "clip_vision",
   "controlnet",
   "upscale_models",
   "latent_upscale_models",
