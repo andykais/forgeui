@@ -563,3 +563,96 @@ Deno.test("with no ComfyUI the node tools say so rather than answer empty", asyn
     assertStringIncludes(message, "ComfyUI could not be reached");
   });
 });
+
+Deno.test("delete_workflow: an agent deletes what it made, and nothing else", async () => {
+  await withTestApp(async (app) => {
+    await ok<Saved>(app, "create_workflow", {
+      name: "Draft",
+      api_json: sd15Graph(),
+      params: SD15_PARAMS,
+    });
+    assertEquals(
+      await ok<{ deleted: string }>(app, "delete_workflow", {
+        workflow_id: "draft",
+      }),
+      { deleted: "draft" },
+    );
+    assert(!(await listed(app)).some((w) => w.id === "draft"));
+
+    const bundled = await refused(app, "delete_workflow", {
+      workflow_id: "sd15",
+    });
+    assertStringIncludes(bundled, "Nothing was deleted");
+    assertStringIncludes(bundled, "came with ForgeUI");
+
+    await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name: "Theirs" }),
+    });
+    assertStringIncludes(
+      await refused(app, "delete_workflow", { workflow_id: "theirs" }),
+      "you can only delete workflows you made",
+    );
+
+    // The server's half: DELETE on an agent's behalf is held to the record.
+    const forbidden = await app.fetch("/api/workflows/theirs", {
+      method: "DELETE",
+      body: JSON.stringify({ agent: "llm:qwen" }),
+    });
+    assertEquals(forbidden.status, 403);
+    await forbidden.body?.cancel();
+    assert((await listed(app)).some((w) => w.id === "theirs"));
+
+    // A person may delete an agent's workflow.
+    await app.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ name: "Agent made", agent: "llm:qwen" }),
+    });
+    const human = await app.fetch("/api/workflows/agent-made", {
+      method: "DELETE",
+    });
+    assertEquals(human.status, 204);
+  }, { comfy: true });
+});
+
+Deno.test("list_node_packs: what is installed, and which workflows wait on a missing pack", async () => {
+  // No packs: the Breeze workflows name one they cannot have.
+  await withTestApp(async (app) => {
+    const packs = await ok<{
+      installed: unknown[];
+      known: {
+        id: string;
+        installed: boolean;
+        missing_nodes?: string[];
+        workflows_needing_it?: string[];
+      }[];
+    }>(app, "list_node_packs", {});
+    assertEquals(packs.installed, []);
+    const breeze = packs.known.find((p) => p.id === "ComfyUI-Breeze-TTS-2")!;
+    assertEquals(breeze.installed, false);
+    assert(breeze.missing_nodes!.includes("BreezeTTS2LoadModel"));
+    assertEquals(breeze.workflows_needing_it!.sort(), [
+      "breeze-tts-clone",
+      "breeze-tts-design",
+    ]);
+  }, { comfy: true });
+
+  // With it installed: listed, and searchable by source.
+  await withTestApp(async (app) => {
+    const packs = await ok<{
+      installed: { pack: string; node_count: number }[];
+      known: { id: string; installed: boolean }[];
+    }>(app, "list_node_packs", {});
+    assertEquals(packs.installed.map((p) => p.pack), ["ComfyUI-Breeze-TTS-2"]);
+    assert(packs.known[0]!.installed);
+    const found = await ok<{ nodes: { name: string; source: string }[] }>(
+      app,
+      "search_comfy_nodes",
+      { source: "ComfyUI-Breeze-TTS-2" },
+    );
+    assert(found.nodes.length > 0);
+    assert(
+      found.nodes.every((n) => n.source === "custom: ComfyUI-Breeze-TTS-2"),
+    );
+  }, { comfy: { packs: ["ComfyUI-Breeze-TTS-2"] } });
+});

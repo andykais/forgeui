@@ -21,8 +21,18 @@ import {
 } from "./node_spec.ts";
 
 const DESCRIPTION_LINE_MAX = 160;
-const DESCRIPTION_MAX = 1500;
-const TOOLTIP_MAX = 600;
+/**
+ * Tooltips and descriptions are never cut (§4.9): a clipped tooltip is the
+ * sentence that would have said what the input does. They are left out of
+ * a description unless asked for instead, so a node stays short to read and
+ * the text comes whole when it is wanted.
+ */
+export interface DescribeOptions {
+  /** Every input's and output's tooltip, in full. */
+  tooltips?: boolean;
+  /** Only these inputs (a dynamic combo brings its options' inputs). */
+  inputs?: string[];
+}
 /** A loader's choices are the files on disk, which can run to hundreds. */
 const CHOICES_MAX = 100;
 
@@ -39,10 +49,10 @@ function oneLine(
 /** A model merge node lists a weight per block; the line stays a line. */
 const SIGNATURE_INPUTS_MAX = 14;
 
-function clipped(text: unknown, max: number): string | undefined {
+/** Text as ComfyUI wrote it, trimmed and whole, or nothing when blank. */
+function clipped(text: unknown): string | undefined {
   if (typeof text !== "string" || text.trim().length === 0) return undefined;
-  const trimmed = text.trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
+  return text.trim();
 }
 
 export interface SearchFilters {
@@ -58,6 +68,11 @@ export interface SearchFilters {
   include_api_nodes?: boolean;
   /** Deprecated nodes, left out unless asked for. */
   include_deprecated?: boolean;
+  /**
+   * Where the node comes from: `core`, `api`, `custom` (any pack), or a
+   * pack's folder name under `custom_nodes/`.
+   */
+  source?: string;
   limit?: number;
   offset?: number;
 }
@@ -215,6 +230,22 @@ export function searchNodes(
         continue;
       }
     }
+    if (filters.source !== undefined) {
+      const from = nodeSource(node);
+      const wanted = filters.source.toLowerCase();
+      const pack = from.startsWith("custom: ")
+        ? from.slice(8).toLowerCase()
+        : null;
+      const fits = from === wanted ||
+        (wanted === "custom" && pack !== null) ||
+        (pack !== null && (wanted === pack || wanted === `custom: ${pack}`));
+      if (!fits) continue;
+      // Asking for API nodes by source is asking for them.
+      if (wanted === "api") {
+        matches.push([name, node]);
+        continue;
+      }
+    }
     if (node.api_node && !filters.include_api_nodes) {
       api++;
       continue;
@@ -304,7 +335,7 @@ export interface InputDetail {
   choices_from?: string;
 }
 
-function detailOf(input: ParsedInput): InputDetail {
+function detailOf(input: ParsedInput, tooltips = false): InputDetail {
   const o = input.options;
   const num = (v: unknown) =>
     typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -344,7 +375,7 @@ function detailOf(input: ParsedInput): InputDetail {
   if (input.kind === "dynamic_combo" && input.dynamic) {
     detail.options = input.dynamic.map((option) => ({
       key: option.key,
-      inputs: option.inputs.map(detailOf),
+      inputs: option.inputs.map((child) => detailOf(child, tooltips)),
     }));
   }
   if (input.kind === "autogrow" && input.grow) {
@@ -354,8 +385,9 @@ function detailOf(input: ParsedInput): InputDetail {
       : names.join(", ");
     detail.min_count = input.grow.min;
   }
-  const tooltip = clipped(o.tooltip, TOOLTIP_MAX);
-  if (tooltip) detail.tooltip = tooltip;
+  if (tooltips && typeof o.tooltip === "string" && o.tooltip.trim()) {
+    detail.tooltip = o.tooltip.trim();
+  }
   // What a raw read of /object_info would be looked at for (§4.9).
   if (typeof o.display_name === "string" && o.display_name !== input.name) {
     detail.label = o.display_name;
@@ -442,16 +474,45 @@ export interface NodeDetail {
    * The node in API format with every required input filled: literals at
    * their defaults, links as `"<link: TYPE>"` placeholders to replace with
    * `["<node id>", <slot>]`. Optional inputs with a default are included.
+   * Left out when only some inputs were asked for.
    */
-  example: { class_type: string; inputs: Record<string, unknown> };
+  example?: { class_type: string; inputs: Record<string, unknown> };
+  /** Input names asked for that the node does not have. */
+  unknown_inputs?: string[];
+  /** Says how to see the tooltips, when the node has some and they were not asked for. */
+  tooltips?: string;
 }
 
-export function describeNode(name: string, node: ObjectInfoNode): NodeDetail {
-  const inputs = parseInputs(node);
+function hasTooltips(node: ObjectInfoNode): boolean {
+  const any = (spec: unknown): boolean =>
+    Array.isArray(spec) && isRecord(spec[1]) &&
+    typeof spec[1].tooltip === "string" && spec[1].tooltip.length > 0;
+  return [node.input?.required, node.input?.optional].some((section) =>
+    Object.values(section ?? {}).some(any)
+  ) || (node.output_tooltips ?? []).some((t) => typeof t === "string" && t);
+}
+
+export function describeNode(
+  name: string,
+  node: ObjectInfoNode,
+  options: DescribeOptions = {},
+): NodeDetail {
+  const tooltips = options.tooltips === true;
+  const all = parseInputs(node);
+  const wanted = options.inputs;
+  const inputs = wanted === undefined
+    ? all
+    : all.filter((input) => wanted.includes(input.name));
+  const unknown = (wanted ?? []).filter((name) =>
+    !all.some((input) => input.name === name)
+  );
   const example: Record<string, unknown> = {};
-  for (const input of inputs) exampleValues(input, example);
+  for (const input of all) exampleValues(input, example);
   const outputs = (node.output ?? []).map((raw, slot) => {
-    const tooltip = clipped(node.output_tooltips?.[slot], TOOLTIP_MAX);
+    const text = node.output_tooltips?.[slot];
+    const tooltip = tooltips && typeof text === "string" && text.trim()
+      ? text.trim()
+      : undefined;
     const { type, follows } = outputTypeOf(node, slot);
     return {
       slot,
@@ -470,16 +531,29 @@ export function describeNode(name: string, node: ObjectInfoNode): NodeDetail {
       ? { display_name: node.display_name }
       : {}),
     ...(node.category ? { category: node.category } : {}),
-    ...(clipped(node.description, DESCRIPTION_MAX)
-      ? { description: clipped(node.description, DESCRIPTION_MAX) }
+    ...(clipped(node.description)
+      ? { description: clipped(node.description) }
       : {}),
     source: nodeSource(node),
     output_node: node.output_node === true,
     ...(node.experimental ? { experimental: true as const } : {}),
     ...(node.deprecated ? { deprecated: true as const } : {}),
-    inputs: inputs.map(detailOf),
+    inputs: inputs.map((input) => detailOf(input, tooltips)),
     outputs,
-    example: { class_type: name, inputs: example },
+    ...(wanted === undefined
+      ? { example: { class_type: name, inputs: example } }
+      : {}),
+    ...(unknown.length > 0
+      ? {
+        unknown_inputs: unknown.map((name) => {
+          const near = closest(name, all.map((input) => input.name));
+          return near.length > 0 ? `${name} (did you mean ${near[0]}?)` : name;
+        }),
+      }
+      : {}),
+    ...(!tooltips && hasTooltips(node)
+      ? { tooltips: "hidden: include_tooltips: true shows them in full" }
+      : {}),
   };
 }
 
@@ -503,12 +577,12 @@ export interface RawNode {
 export function describeNodes(
   info: ObjectInfo,
   names: string[],
-  options: { raw?: boolean } = {},
+  options: DescribeOptions & { raw?: boolean } = {},
 ): (NodeDetail | RawNode | { name: string; error: string })[] {
   return names.map((name) => {
     const node = info[name];
     if (node && options.raw) return { name, raw: node };
-    if (node) return describeNode(name, node);
+    if (node) return describeNode(name, node, options);
     const near = closest(name, Object.keys(info));
     return {
       name,
@@ -518,4 +592,64 @@ export function describeNodes(
           : " (search_comfy_nodes finds them by what they do)"),
     };
   });
+}
+
+/** A custom node pack as this ComfyUI has it loaded. */
+export interface InstalledPack {
+  /** The folder under `custom_nodes/`. */
+  pack: string;
+  node_count: number;
+  /** A few of its node types, to search or describe. */
+  nodes: string[];
+}
+
+/** A pack ForgeUI knows a workflow may need (nodes.ts `NODE_PACKS`). */
+export interface KnownPack {
+  id: string;
+  name: string;
+  url: string;
+  installed: boolean;
+  /** Its node types this ComfyUI does not have, when not installed. */
+  missing_nodes?: string[];
+}
+
+/**
+ * Custom node packs, read off where ComfyUI loaded each node from, and the
+ * packs ForgeUI's own workflows can require, each with whether every node
+ * it is known for is there. A pack is installed by whoever runs ComfyUI;
+ * ForgeUI never downloads one (AGENTS.md).
+ */
+export function nodePacks(
+  info: ObjectInfo,
+  known: Record<
+    string,
+    { id: string; name: string; url: string; nodes: Record<string, unknown> }
+  >,
+): { installed: InstalledPack[]; known: KnownPack[] } {
+  const byPack = new Map<string, string[]>();
+  for (const [name, node] of Object.entries(info)) {
+    const from = nodeSource(node);
+    if (!from.startsWith("custom: ")) continue;
+    const pack = from.slice(8);
+    byPack.set(pack, [...(byPack.get(pack) ?? []), name]);
+  }
+  return {
+    installed: [...byPack].sort((a, b) => a[0].localeCompare(b[0])).map((
+      [pack, names],
+    ) => ({
+      pack,
+      node_count: names.length,
+      nodes: names.sort().slice(0, 8),
+    })),
+    known: Object.values(known).map((pack) => {
+      const missing = Object.keys(pack.nodes).filter((type) => !(type in info));
+      return {
+        id: pack.id,
+        name: pack.name,
+        url: pack.url,
+        installed: missing.length === 0,
+        ...(missing.length > 0 ? { missing_nodes: missing } : {}),
+      };
+    }),
+  };
 }

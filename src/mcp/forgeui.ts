@@ -329,6 +329,13 @@ export class ForgeUi {
     });
   }
 
+  delete(path: string, body?: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: "DELETE",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
   post(path: string, body?: unknown): Promise<unknown> {
     return this.request(path, {
       method: "POST",

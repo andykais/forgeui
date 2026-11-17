@@ -86,14 +86,9 @@ Deno.test("describe: inputs with ranges and choices, and a node ready to paste",
   assertEquals(sampler.takes, "choice");
   assert(sampler.choices!.includes("euler"));
   assertEquals(ks.inputs.find((i) => i.name === "model")!.takes, "link");
-  assertEquals(ks.example.inputs.model, "<link: MODEL>");
-  assertEquals(ks.example.inputs.steps, 20);
-  assertEquals(ks.outputs, [{
-    slot: 0,
-    name: "LATENT",
-    type: "LATENT",
-    tooltip: "The denoised latent.",
-  }]);
+  assertEquals(ks.example!.inputs.model, "<link: MODEL>");
+  assertEquals(ks.example!.inputs.steps, 20);
+  assertEquals(ks.outputs, [{ slot: 0, name: "LATENT", type: "LATENT" }]);
 });
 
 Deno.test("describe: a loader with no files says so", () => {
@@ -113,8 +108,8 @@ Deno.test("describe: a choice that brings inputs, and a repeatable input", () =>
     type.options![0]!.inputs.map((i) => i.name),
     ["resize_type.width", "resize_type.height", "resize_type.crop"],
   );
-  assertEquals(resize.example.inputs["resize_type"], "scale dimensions");
-  assertEquals(resize.example.inputs["resize_type.width"], 512);
+  assertEquals(resize.example!.inputs["resize_type"], "scale dimensions");
+  assertEquals(resize.example!.inputs["resize_type.width"], 512);
   assertEquals(resize.outputs[0]!.same_type_as, ["input"]);
   assertEquals(resize.outputs[0]!.type, "IMAGE,MASK");
 
@@ -124,7 +119,7 @@ Deno.test("describe: a choice that brings inputs, and a repeatable input", () =>
   assertEquals(images.type, "IMAGE");
   assertEquals(images.names, "images.image0, images.image1, … images.image49");
   assertEquals(images.min_count, 1);
-  assertEquals(batch.example.inputs, { "images.image0": "<link: IMAGE>" });
+  assertEquals(batch.example!.inputs, { "images.image0": "<link: IMAGE>" });
 });
 
 Deno.test("describe: an unknown name comes back with the nearest ones", () => {
@@ -170,4 +165,27 @@ Deno.test("describe: what a raw read of /object_info would be looked at for", ()
 Deno.test("describe raw: the node's own entry, unabridged", () => {
   const [entry] = describeNodes(INFO, ["CLIPLoader"], { raw: true });
   assertEquals((entry as { raw: unknown }).raw, INFO["CLIPLoader"]);
+});
+
+Deno.test("tooltips: hidden unless asked for, then whole; inputs narrow it", () => {
+  const plain = describe("KSampler");
+  assert(plain.inputs.every((i) => i.tooltip === undefined));
+  assertStringIncludes(plain.tooltips!, "include_tooltips");
+
+  const [full] = describeNodes(INFO, ["KSampler"], {
+    tooltips: true,
+    inputs: ["cfg", "denoise", "cgf"],
+  }) as NodeDetail[];
+  assertEquals(full!.inputs.map((i) => i.name), ["cfg", "denoise"]);
+  // Exactly ComfyUI's text, however long: never cut.
+  const raw = (INFO["KSampler"]!.input!.required!["cfg"] as [
+    string,
+    { tooltip: string },
+  ])[1].tooltip;
+  assert(raw.length > 200, "the fixture's cfg tooltip is a long one");
+  assertEquals(full!.inputs[0]!.tooltip, raw);
+  assertEquals(full!.outputs[0]!.tooltip, "The denoised latent.");
+  assertEquals(full!.example, undefined, "a narrowed look has no example");
+  assertEquals(full!.unknown_inputs, ["cgf (did you mean cfg?)"]);
+  assertEquals(full!.tooltips, undefined);
 });

@@ -625,9 +625,18 @@ export class WorkflowStore {
     return await this.#reloadOne(id);
   }
 
-  /** `DELETE /api/workflows/:id`: user copies only, 409 for bundled (§12). */
-  async remove(id: string): Promise<void> {
+  /**
+   * `DELETE /api/workflows/:id`: user copies only, 409 for bundled (§12).
+   * On an agent's behalf, only a workflow an agent made (§4.9).
+   */
+  async remove(id: string, actor: WriteActor = PERSON): Promise<void> {
     const workflow = this.require(id);
+    if (actor.agent !== null && workflow.agent === null) {
+      throw new WorkflowForbiddenError(
+        `"${id}" was not made by an agent, so it cannot be deleted on an ` +
+          `agent's behalf`,
+      );
+    }
     if (workflow.hasBundled) {
       throw new WorkflowConflictError(
         workflow.source === "user"

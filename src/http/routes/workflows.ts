@@ -100,8 +100,12 @@ export function workflowRoutes(ctx: AppContext): Route[] {
     {
       method: "DELETE",
       path: "/api/workflows/:id",
-      handler: async (_req, { params }) => {
-        await ctx.workflows.remove(params.id!);
+      handler: async (req, { params }) => {
+        // An optional body: `{agent}` when an agent asks (§4.9).
+        const body = await readJson(req) as Record<string, unknown>;
+        await ctx.workflows.remove(params.id!, {
+          agent: readAgentSource(body.agent),
+        });
         return new Response(null, { status: 204 });
       },
     },

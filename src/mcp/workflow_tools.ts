@@ -26,7 +26,12 @@ import {
   checkGraphShape,
   type ObjectInfo,
 } from "../workflows/graph_check.ts";
-import { describeNodes, searchNodes } from "../workflows/node_catalog.ts";
+import {
+  describeNodes,
+  nodePacks,
+  searchNodes,
+} from "../workflows/node_catalog.ts";
+import { NODE_PACKS } from "../workflows/nodes.ts";
 import {
   type ApiGraph,
   FAMILIES,
@@ -352,6 +357,10 @@ export function registerWorkflowTools(
         "include paid cloud API nodes (they need a Comfy account and credits)",
       ),
       include_deprecated: z.boolean().optional(),
+      source: z.string().optional().describe(
+        'where nodes come from: "core", "api", "custom" (any pack), or a ' +
+          "pack's folder name from list_node_packs",
+      ),
       limit: z.number().int().min(1).max(100).optional().describe(
         "default 30",
       ),
@@ -366,7 +375,7 @@ export function registerWorkflowTools(
     }
     const unfiltered = filters.query === undefined &&
       filters.category === undefined && filters.input_type === undefined &&
-      filters.output_type === undefined;
+      filters.output_type === undefined && filters.source === undefined;
     const result = searchNodes(info, filters);
     if (unfiltered) {
       // Hundreds of lines nobody asked for: the map, and how to narrow it.
@@ -406,6 +415,56 @@ export function registerWorkflowTools(
     });
   });
 
+  server.registerTool("list_node_packs", {
+    description:
+      "The custom node packs this ComfyUI has loaded, each with how many " +
+      "node types it adds (search_comfy_nodes with `source` set to its " +
+      "name lists them), and the packs ForgeUI's own workflows can need, " +
+      "each with whether it is installed and which workflows wait on it. " +
+      "Build only on nodes that are there: a pack is installed by whoever " +
+      "runs ComfyUI, never from here.",
+    inputSchema: z.strictObject({}),
+  }, async () => {
+    let info: ObjectInfo;
+    try {
+      info = await objectInfo(forge);
+    } catch {
+      return failure(COMFY_UNREACHABLE);
+    }
+    const packs = nodePacks(info, NODE_PACKS);
+    // Which workflows name a pack that is not there (manifest `requires`).
+    const missing = new Set(
+      packs.known.filter((pack) => !pack.installed).map((pack) => pack.id),
+    );
+    const waiting: Record<string, string[]> = {};
+    if (missing.size > 0) {
+      try {
+        const { workflows } = await forge.get<{ workflows: { id: string }[] }>(
+          "/api/workflows",
+        );
+        const details = await Promise.all(
+          workflows.map((w) => read(w.id).catch(() => null)),
+        );
+        for (const detail of details) {
+          const requires = (detail?.manifest?.requires ?? []) as string[];
+          for (const pack of requires) {
+            if (missing.has(pack)) (waiting[pack] ??= []).push(detail!.id);
+          }
+        }
+      } catch { /* the list is still worth having without this */ }
+    }
+    return text({
+      installed: packs.installed,
+      known: packs.known.map((pack) => ({
+        ...pack,
+        ...(waiting[pack.id] ? { workflows_needing_it: waiting[pack.id] } : {}),
+      })),
+      ...(packs.installed.length === 0
+        ? { note: "no custom node packs: every node here is ComfyUI's own" }
+        : {}),
+    });
+  });
+
   server.registerTool("describe_comfy_nodes", {
     description:
       "Node types in full, as the ComfyUI behind ForgeUI has them: each " +
@@ -419,26 +478,42 @@ export function registerWorkflowTools(
       "apply: `upload` (a file in ComfyUI's input folder — expose it as an " +
       "image/video/audio param), `multiselect` (the value is a list), " +
       "`advanced` (ComfyUI tucks it away; a fair default for the param). " +
-      "Long text and lists are clipped; `raw: true` gives each node's " +
-      "entry exactly as ComfyUI's /object_info has it, every field and " +
-      "choice. Never read /object_info whole: it is megabytes. Get names " +
-      "from search_comfy_nodes or a workflow's graph (get_workflow_source).",
+      "Tooltips are left out unless `include_tooltips` is set, and then " +
+      "come whole; `inputs` narrows to the ones you care about, so the " +
+      "way to read them is: search, describe, then describe again with " +
+      "include_tooltips and the inputs in question. Choice lists over 100 " +
+      "are cut, and `raw: true` gives each node's entry exactly as " +
+      "ComfyUI's /object_info has it. Never read /object_info whole: it is " +
+      "megabytes. Get names from search_comfy_nodes or a workflow's graph " +
+      "(get_workflow_source).",
     inputSchema: z.strictObject({
       node_types: z.array(z.string()).min(1).max(20).describe(
         'class_type names, e.g. ["KSampler", "UNETLoader"]',
+      ),
+      include_tooltips: z.boolean().optional().describe(
+        "every input's and output's tooltip, in full",
+      ),
+      inputs: z.array(z.string()).min(1).optional().describe(
+        'only these inputs, e.g. ["cfg", "denoise"]; the outputs still come',
       ),
       raw: z.boolean().optional().describe(
         "each node's /object_info entry as ComfyUI serves it, unabridged",
       ),
     }),
-  }, async ({ node_types, raw }) => {
+  }, async ({ node_types, raw, include_tooltips, inputs }) => {
     let info: ObjectInfo;
     try {
       info = await objectInfo(forge);
     } catch {
       return failure(COMFY_UNREACHABLE);
     }
-    return text({ nodes: describeNodes(info, node_types, { raw }) });
+    return text({
+      nodes: describeNodes(info, node_types, {
+        raw,
+        tooltips: include_tooltips,
+        inputs,
+      }),
+    });
   });
 
   server.registerTool("get_workflow_source", {
@@ -628,6 +703,52 @@ export function registerWorkflowTools(
       return text(report(saved, check, fields.params));
     } catch (cause) {
       return failure(saveRefusal(cause, workflow_id));
+    }
+  });
+
+  server.registerTool("delete_workflow", {
+    description:
+      "Delete a workflow you made: a draft that went nowhere, a copy you " +
+      "no longer need. Workflows that came with ForgeUI or that a person " +
+      "made cannot be deleted. What it already made stays in the gallery.",
+    inputSchema: z.strictObject({
+      workflow_id: z.string().describe("a workflow you made"),
+    }),
+  }, async ({ workflow_id }) => {
+    let current: WorkflowSource;
+    try {
+      current = await read(workflow_id);
+    } catch (cause) {
+      return failure(
+        saveRefusal(cause, workflow_id).replace(
+          "Nothing was saved",
+          "Nothing was deleted",
+        ),
+      );
+    }
+    if (current.agent === null) {
+      return failure(
+        `Nothing was deleted: "${workflow_id}" was not made by an agent ` +
+          `(it ${
+            current.source === "bundled"
+              ? "came with ForgeUI"
+              : "is one a person made or edited"
+          }), and you can only delete workflows you made.`,
+      );
+    }
+    try {
+      await forge.delete(
+        `/api/workflows/${encodeURIComponent(workflow_id)}`,
+        { agent: await agentLabel(llm) },
+      );
+      return text({ deleted: workflow_id });
+    } catch (cause) {
+      return failure(
+        saveRefusal(cause, workflow_id).replace(
+          "Nothing was saved",
+          "Nothing was deleted",
+        ),
+      );
     }
   });
 }

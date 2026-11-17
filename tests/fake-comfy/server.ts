@@ -406,7 +406,8 @@ export class FakeComfy {
    * real `/object_info` shape.
    */
   #objectInfo(): Record<string, unknown> {
-    const entry = (schema: NodeSchema) => ({
+    const entry = (schema: NodeSchema, module = "nodes") => ({
+      python_module: module,
       input: {
         required: {},
         optional: Object.fromEntries(
@@ -427,7 +428,7 @@ export class FakeComfy {
       for (
         const [type, schema] of Object.entries(NODE_PACKS[pack]?.nodes ?? {})
       ) {
-        info[type] = entry(schema);
+        info[type] = entry(schema, `custom_nodes.${pack}`);
       }
     }
     for (const type of this.#options.extraNodeTypes ?? []) {
