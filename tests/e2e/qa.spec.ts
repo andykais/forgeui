@@ -420,13 +420,14 @@ test("Workflows", async ({ page, request }) => {
     },
   });
   expect(made.status()).toBe(201);
-  await shot(page, group, "Agent-made workflow", "Badged in the list; the hover names the model.", async () => {
+  await shot(page, group, "Agent-made workflow", "Badged in the list (its hover, a native title, names the model).", async () => {
     await page.goto("/workflows");
-    await page.locator("tr", { hasText: "SD 1.5 (8 steps)" }).locator(".badge", { hasText: "by agent" }).hover();
-    await page.waitForTimeout(600);
+    await expect(
+      page.locator("tr", { hasText: "SD 1.5 (8 steps)" }).locator(".badge", { hasText: "by agent" }),
+    ).toBeVisible();
   });
   await shot(page, group, "Agent-made workflow page", "The badge on the workflow's own page.", async () => {
-    await page.getByRole("cell", { name: "SD 1.5 (8 steps)", exact: true }).click();
+    await page.locator("td .name", { hasText: "SD 1.5 (8 steps)" }).click();
     await expect(page.getByText("by agent")).toBeVisible();
   });
   await request.delete("/api/workflows/qa-agent-made").catch(() => {});
