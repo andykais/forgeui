@@ -7,7 +7,7 @@
 
   /**
    * A job that has no output yet: running (percent, ETA, node, step counter
-   * over the streaming preview), queued (a dashed placeholder with its own
+   * over the streaming preview, and a Cancel that interrupts it), queued (a dashed placeholder with its own
    * cancel — the strip does not cancel individual queued jobs), or failed
    * (the error inline with Retry, Reuse parameters and Copy error) — §11.2.
    */
@@ -21,6 +21,23 @@
   const preview = $derived(app.previews[job.id] ?? null);
   const progress = $derived(job.progress);
   const seed = $derived(typeof job.params.seed === "number" ? job.params.seed : null);
+
+  /*
+   * Cancelling a running job asks ComfyUI to interrupt it; the job only turns
+   * cancelled when ComfyUI says it stopped, which can take a while inside a
+   * node that does not check for interrupts (a model load). Until then the
+   * card says it is cancelling, so a second click is not the obvious move.
+   */
+  let cancelling = $state(false);
+
+  async function cancel() {
+    cancelling = true;
+    try {
+      await api.cancelJob(job.id);
+    } catch {
+      cancelling = false;
+    }
+  }
 
   async function retry() {
     await api.rerun({ job_id: job.id });
@@ -43,6 +60,15 @@
     <div class="head row">
       <span class="badge running">Running</span>
       <span class="dim">{preview ? "streaming preview" : "waiting for preview"}</span>
+      <span class="spacer"></span>
+      <button
+        class="cancel"
+        title="Stop this job; nothing it made so far is kept"
+        disabled={cancelling}
+        onclick={cancel}
+      >
+        {cancelling ? "Cancelling…" : "Cancel"}
+      </button>
     </div>
     <div class="foot">
       <!--
@@ -161,6 +187,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .head .cancel {
+    flex: none;
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .head .cancel:disabled {
+    color: var(--text-3);
+    cursor: default;
   }
 
   /* The preview frame behind this can be any colour, so scrim the text. */

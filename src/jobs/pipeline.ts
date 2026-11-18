@@ -609,7 +609,7 @@ export class JobRunner {
     if (job.status !== "queued" && job.status !== "running") return job;
 
     if (job.prompt_id && job.status === "running") {
-      await this.#comfy.client.interrupt().catch(() => {});
+      await this.#comfy.client.interrupt(job.prompt_id).catch(() => {});
       // ComfyUI answers with execution_interrupted; if the socket is down the
       // next reconcile settles it from /history.
       return this.#requireJob(id);
