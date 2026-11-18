@@ -44,6 +44,19 @@
   let fit = $state(true);
   let fullscreen = $state(false);
   let strip = $state<HTMLDivElement | undefined>(undefined);
+  /*
+   * The page's video and the fullscreen one exist together while fullscreen is
+   * up; only the one on top may play, or the clip is heard twice, a beat
+   * apart. The page's copy is paused on the way in and on every clip change
+   * (a new `src` restarts an autoplaying element), and resumes on the way out.
+   */
+  let inlineVideo = $state<HTMLVideoElement | undefined>(undefined);
+
+  $effect(() => {
+    void selected.media_url;
+    if (fullscreen) inlineVideo?.pause();
+    else inlineVideo?.play().catch(() => {});
+  });
 
   const index = $derived(samples.findIndex((sample) => sample.id === selected.id));
   /** The prompt, from a promotion's params or an import's generation data. */
@@ -125,7 +138,13 @@
     <div class="media" class:one-to-one={!fit}>
       {#if selected.kind === "video"}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={selected.media_url} controls autoplay loop></video>
+        <video
+          bind:this={inlineVideo}
+          src={selected.media_url}
+          controls
+          autoplay={!fullscreen}
+          loop
+        ></video>
       {:else}
         <img src={selected.media_url} alt={prompt ?? selected.id} />
       {/if}

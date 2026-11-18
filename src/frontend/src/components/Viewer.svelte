@@ -1,13 +1,7 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import type {
-    Job,
-    Layout,
-    Output,
-    OutputDetail,
-    UiScreen,
-  } from "../types.ts";
+  import type { Job, Layout, Output, OutputDetail, UiScreen } from "../types.ts";
   import { hasMetadata } from "../types.ts";
   import { api } from "../api.ts";
   import { app, type ReuseTarget } from "../stores/app.svelte.ts";
@@ -134,6 +128,17 @@
     else if (delta < 0 && index === 0) onfollow?.();
   }
 
+  /*
+   * Stepping to another clip while fullscreen keeps both elements and swaps
+   * their `src`, and a new `src` with `autoplay` starts the clip over — so the
+   * page's copy played again underneath, heard but not seen. It autoplays only
+   * while it is the one on show, and is paused again on every clip change.
+   */
+  $effect(() => {
+    void selected.media_url;
+    if (fullscreen) inlineVideo?.pause();
+  });
+
   $effect(() => {
     const inline = inlineVideo;
     const full = fullVideo;
@@ -241,7 +246,7 @@
           bind:this={inlineVideo}
           src={selected.media_url}
           controls
-          autoplay
+          autoplay={!fullscreen}
           loop
         ></video>
       {:else if isAudio}
