@@ -353,6 +353,36 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["fps", "bit_depth", "color_space"],
     outputs: ["VIDEO"],
   },
+  /**
+   * A file in ComfyUI's input folder as a video object. The upload button the
+   * editor puts after `file` is the image uploader's, as on `LoadImage`.
+   */
+  LoadVideo: {
+    widgets: ["file"],
+    after: { file: "image" },
+    outputs: ["VIDEO"],
+  },
+  /** The other way round from `CreateVideo`: frames, sound and frame rate. */
+  GetVideoComponents: {
+    inputs: ["video"],
+    outputs: ["images", "audio", "fps", "bit_depth", "color_space"],
+  },
+
+  // ------------------------------------------ frame interpolation (§4.6)
+  //
+  // `comfy_extras/nodes_frame_interpolation.py`, core since v0.20. The loader
+  // reads `frame_interpolation/` and tells RIFE from FILM by the state dict's
+  // keys; of RIFE it takes only the five-block layout of 4.25 and later.
+  FrameInterpolationModelLoader: {
+    widgets: ["model_name"],
+    outputs: ["INTERP_MODEL"],
+  },
+  /** `multiplier` frames out per frame in, so `n` frames become `(n-1)m+1`. */
+  FrameInterpolate: {
+    inputs: ["interp_model", "images"],
+    widgets: ["multiplier"],
+    outputs: ["IMAGE"],
+  },
 
   // --------------------------------------------------- MiniMax H3 (§4.6)
   //

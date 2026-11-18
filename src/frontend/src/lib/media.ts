@@ -67,7 +67,7 @@ export function posterFrame(url: string): string {
  * behind them, and a 64-character hash is no use to anybody as a line of text.
  */
 const INPUT_FILENAME =
-  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a|mp4|mov|webm|mkv)$/;
 
 export function inputMediaUrl(value: unknown): string | null {
   if (typeof value !== "string" || !INPUT_FILENAME.test(value)) return null;

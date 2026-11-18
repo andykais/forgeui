@@ -106,6 +106,7 @@
     controlnet: "ControlNet",
     upscale: "Upscalers",
     embedding: "Embeddings",
+    interpolation: "Frame interpolation",
     other: "Other",
   };
 

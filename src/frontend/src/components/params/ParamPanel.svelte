@@ -13,6 +13,7 @@
   import ModelParam from "./ModelParam.svelte";
   import AudioParam from "./AudioParam.svelte";
   import ImageParam from "./ImageParam.svelte";
+  import VideoParam from "./VideoParam.svelte";
   import MaskParam from "./MaskParam.svelte";
   import type { LoraRow, Manifest, ModelEntry, Param, Template } from "../../types.ts";
   import { applicableParams } from "../../lib/applies.ts";
@@ -577,15 +578,12 @@
           onchange={(filename) => onchange(param.key, filename)}
           onattach={(media) => onaudio?.(param.key, media)}
         />
-      {:else}
-        <!--
-          video: video inputs wait on the store's video half, so the panel
-          says so rather than pretending to accept a file.
-        -->
-        <p class="note">
-          <TriangleAlert size={12} />
-          {param.type} inputs arrive in a later phase, so this workflow cannot run yet.
-        </p>
+      {:else if param.type === "video"}
+        <VideoParam
+          {param}
+          value={(values[param.key] as string) ?? ""}
+          onchange={(filename) => onchange(param.key, filename)}
+        />
       {/if}
     </div>
   {/snippet}
@@ -792,18 +790,6 @@
     flex-direction: column;
     gap: 12px;
     margin-top: 10px;
-  }
-
-  .note {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    margin: 0;
-    padding: 7px 8px;
-    border-radius: var(--radius-control);
-    background: var(--raised);
-    color: var(--text-4);
-    font-size: 11px;
   }
 
   .from-template {

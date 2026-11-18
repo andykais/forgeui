@@ -1,0 +1,43 @@
+{
+  "id": "frame-interpolate",
+  "name": "Frame Interpolation",
+  "family": null,
+  "kind": "video",
+  "category": null,
+  "description": "Makes a video smoother by drawing new frames between the ones it has, with ComfyUI's own RIFE / FILM nodes. The result plays at the source's speed with multiplier times the frames, and keeps its sound.",
+  "params": [
+    {
+      "key": "video",
+      "label": "Video",
+      "type": "video",
+      "required": true,
+      "bind": "1.file"
+    },
+    {
+      "key": "multiplier",
+      "label": "Multiplier",
+      "type": "int",
+      "default": 2,
+      "min": 2,
+      "max": 8,
+      "bind": "4.value",
+      "description": "How many frames come out for each one that goes in: 2 turns 24 fps into 48. The output frame rate follows, so the length stays the same."
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "interpolation"
+      },
+      "bind": "3.model_name",
+      "description": "A RIFE 4.25 or 4.26 checkpoint (a raw `flownet.pkl` loads as-is), or a FILM one, in `frame_interpolation/`. Older RIFE versions (4.6, 4.9, 4.22) are a different shape and ComfyUI's loader refuses them."
+    }
+  ],
+  "outputs": [
+    {
+      "node": "8",
+      "kind": "video"
+    }
+  ]
+}

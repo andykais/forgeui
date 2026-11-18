@@ -70,6 +70,7 @@ export const MODEL_CLASSES = [
   "controlnet",
   "upscale",
   "embedding",
+  "interpolation",
   "other",
 ] as const;
 export type ModelClass = typeof MODEL_CLASSES[number];

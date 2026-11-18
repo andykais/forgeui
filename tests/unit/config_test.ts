@@ -81,10 +81,12 @@ Deno.test("first run writes config.yaml with defaults and a keys block", async (
       loras: [],
       vae: [],
       text_encoders: [],
+      clip_vision: [],
       controlnet: [],
       upscale_models: [],
       latent_upscale_models: [],
       embeddings: [],
+      frame_interpolation: [],
       breezetts2: [],
     });
 

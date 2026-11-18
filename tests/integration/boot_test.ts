@@ -133,10 +133,12 @@ Deno.test("a hand-written config.yaml is honoured on boot", async () => {
       loras: ["/mnt/models/loras"],
       vae: [],
       text_encoders: [],
+      clip_vision: [],
       controlnet: [],
       upscale_models: [],
       latent_upscale_models: [],
       embeddings: [],
+      frame_interpolation: [],
       breezetts2: [],
     });
     assertEquals(app.createdConfig, false);

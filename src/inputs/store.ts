@@ -15,6 +15,7 @@ import { pixelHash } from "../jobs/png.ts";
 import { type DataPaths, diskPath } from "../config/paths.ts";
 import { type ProbedMedia, probeMedia } from "./probe.ts";
 import { readAudio } from "../media/audio.ts";
+import { readVideo } from "../media/video.ts";
 
 /**
  * The content-addressed input store (§9): `inputs/<sha[0:2]>/<sha>.<ext>`.
@@ -40,7 +41,7 @@ export class InputError extends Error {
  * two must name the same extensions.
  */
 export const INPUT_FILENAME =
-  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a)$/;
+  /^([0-9a-f]{64})\.(png|jpe?g|webp|wav|flac|mp3|opus|ogg|m4a|mp4|mov|webm|mkv)$/;
 
 export interface StoredInput extends ProbedMedia {
   sha256: string;
@@ -49,7 +50,7 @@ export interface StoredInput extends ProbedMedia {
   /** The name ComfyUI will know it by, once uploaded. */
   filename: string;
   bytes: number;
-  /** Audio only: how long the clip runs (DESIGN-AUDIO §4.3). */
+  /** Audio and video: how long the clip runs (DESIGN-AUDIO §4.3). */
   duration_ms: number | null;
   derived_from_output: string | null;
 }
@@ -107,11 +108,11 @@ export class InputStore {
     const stored = this.#record({
       sha256,
       relative,
-      probed,
+      probed: await measured(probed, absolute),
       bytes: bytes.length,
       // An attached clip gets the same treatment a result does: measured, and
       // drawn, so the param can show the shape of what was attached (§2.3).
-      audio: probed.kind === "audio" ? await readAudio(absolute) : null,
+      audio: await durationOf(probed, absolute),
       kind: options.kind ?? probed.kind,
       originalName: options.originalName ?? null,
       derivedFromOutput: parent,
@@ -159,11 +160,11 @@ export class InputStore {
     const adopted = this.#record({
       sha256,
       relative,
-      probed,
+      probed: await measured(probed, absolute),
       bytes: bytes.length,
       // The output already has a waveform beside it, but that one belongs to
       // the output and goes when it is deleted; the input keeps its own.
-      audio: probed.kind === "audio" ? await readAudio(absolute) : null,
+      audio: await durationOf(probed, absolute),
       kind: probed.kind,
       originalName: null,
       derivedFromOutput: outputId,
@@ -223,7 +224,7 @@ export class InputStore {
       ext: row.ext,
       filename: `${row.sha256}.${row.ext}`,
       contentType: contentTypeOf(row.ext),
-      kind: row.kind === "audio" ? "audio" : "image",
+      kind: row.kind === "audio" || row.kind === "video" ? row.kind : "image",
       width: row.width,
       height: row.height,
       duration_ms: row.duration_ms,
@@ -248,6 +249,35 @@ export class InputStore {
   }
 }
 
+/**
+ * A video's frame size, which its first bytes do not give up (`probe.ts`),
+ * filled in from ffprobe once the file is on disk. Everything else passes
+ * through as probed.
+ */
+async function measured(
+  probed: ProbedMedia,
+  absolute: string,
+): Promise<ProbedMedia> {
+  if (probed.kind !== "video") return probed;
+  const { width, height } = await readVideo(absolute);
+  return { ...probed, width, height };
+}
+
+/**
+ * How long an attached clip runs: audio is measured and drawn (its waveform
+ * lands beside the file), video is measured. A picture has no length.
+ */
+async function durationOf(
+  probed: ProbedMedia,
+  absolute: string,
+): Promise<{ duration_ms: number | null } | null> {
+  if (probed.kind === "audio") return await readAudio(absolute);
+  if (probed.kind === "video") {
+    return { duration_ms: (await readVideo(absolute)).duration_ms };
+  }
+  return null;
+}
+
 function contentTypeOf(ext: string): string {
   if (ext === "png") return "image/png";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -257,5 +287,9 @@ function contentTypeOf(ext: string): string {
   if (ext === "mp3") return "audio/mpeg";
   if (ext === "opus" || ext === "ogg") return "audio/ogg";
   if (ext === "m4a") return "audio/mp4";
+  if (ext === "mp4") return "video/mp4";
+  if (ext === "mov") return "video/quicktime";
+  if (ext === "webm") return "video/webm";
+  if (ext === "mkv") return "video/x-matroska";
   return "application/octet-stream";
 }

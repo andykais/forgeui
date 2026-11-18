@@ -38,6 +38,9 @@ const MODEL_EXTENSIONS = new Set([
   ".sft",
   ".gguf",
   ".bin",
+  // A raw RIFE checkpoint is a pickled state dict named `flownet.pkl`, and
+  // ComfyUI's frame interpolation loader takes it without conversion.
+  ".pkl",
 ]);
 
 async function walk(

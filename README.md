@@ -141,10 +141,10 @@ podman docs). Older toolkit setups can instead pass `--gpus all`.
 
 `/models` is expected to hold one subfolder per model kind — `checkpoints`,
 `Stable-Diffusion`, `diffusion_models`, `unet`, `loras`, `vae`, `text_encoders`,
-`controlnet`, `upscale_models`, `latent_upscale_models`, `embeddings`,
-`breezetts2` — matching how the container's entrypoint wires up `--models-dir`
-(see `Containerfile`'s `CMD`). A folder you do not use can simply be absent; a
-missing folder scans as empty.
+`clip_vision`, `controlnet`, `upscale_models`, `latent_upscale_models`,
+`embeddings`, `frame_interpolation`, `breezetts2` — matching how the container's
+entrypoint wires up `--models-dir` (see `Containerfile`'s `CMD`). A folder you
+do not use can simply be absent; a missing folder scans as empty.
 
 Anything that can drive a generation is one _class_ to the app, so
 `checkpoints`, `diffusion_models` and `unet` are listed together in a workflow's
@@ -194,6 +194,23 @@ ship anything made with them.
 Point it somewhere else by naming the folder rather than moving it: the
 `breezetts2` key in `model_folders` can be any path (`/models/tts`, say), and
 ForgeUI writes it into the `extra_model_paths.yaml` ComfyUI hands the pack.
+
+### Frame interpolation: RIFE and FILM
+
+`frame-interpolate` draws new frames between a video's own, with ComfyUI's core
+`FrameInterpolationModelLoader` (no custom node). It reads
+`/models/frame_interpolation`, and takes a raw RIFE checkpoint as it ships — the
+`train_log/flownet.pkl` inside a release zip — so there is nothing to convert.
+Rename it on the way in, since every release calls it the same thing:
+
+```sh
+unzip RIFE_v4.26.zip 'train_log/flownet.pkl' -d /tmp/rife
+mv /tmp/rife/train_log/flownet.pkl /models/frame_interpolation/rife-v4.26.pkl
+```
+
+Only RIFE **4.25 and later** load (4.25, 4.25.lite, 4.26, 4.26.heavy): the
+loader knows one RIFE layout, five blocks behind an encoder head, and 4.6, 4.9
+and 4.22 are four-block networks it refuses. FILM checkpoints load too.
 
 ### Models are never downloaded by a run
 

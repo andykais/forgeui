@@ -141,3 +141,54 @@ Deno.test("anything that is neither says so, naming both", () => {
   );
   assertThrows(() => probeMedia(junk), ImageProbeError, "WAV, FLAC, MP3");
 });
+
+/** `....ftyp<brand>`, the start of every ISO-BMFF file. */
+function isoBmff(brand: string): Uint8Array {
+  const bytes = new Uint8Array(32);
+  const text = new TextEncoder();
+  new DataView(bytes.buffer).setUint32(0, 24);
+  bytes.set(text.encode("ftyp"), 4);
+  bytes.set(text.encode(brand), 8);
+  return bytes;
+}
+
+function ebml(docType: string): Uint8Array {
+  const bytes = new Uint8Array(48);
+  bytes.set([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01]);
+  bytes.set([0x42, 0x82, 0x80 | docType.length], 9);
+  bytes.set(new TextEncoder().encode(docType), 12);
+  return bytes;
+}
+
+Deno.test("a video is told from an m4a by the brand, not the container", () => {
+  // The same `ftyp` box opens both. Treating every one as audio filed MP4s
+  // as `.m4a`, which `LoadVideo` will not list.
+  assertEquals(probeMedia(isoBmff("M4A ")).kind, "audio");
+  assertEquals(probeMedia(isoBmff("M4A ")).ext, "m4a");
+
+  for (const brand of ["isom", "mp42", "avc1", "M4V "]) {
+    const video = probeMedia(isoBmff(brand));
+    assertEquals(video.kind, "video", brand);
+    assertEquals(video.ext, "mp4", brand);
+    assertEquals(video.contentType, "video/mp4", brand);
+  }
+  assertEquals(probeMedia(isoBmff("qt  ")).ext, "mov");
+});
+
+Deno.test("Matroska is WebM when its DocType says so, MKV otherwise", () => {
+  const webm = probeMedia(ebml("webm"));
+  assertEquals([webm.kind, webm.ext, webm.contentType], [
+    "video",
+    "webm",
+    "video/webm",
+  ]);
+  const mkv = probeMedia(ebml("matroska"));
+  assertEquals([mkv.kind, mkv.ext], ["video", "mkv"]);
+  // Its size is ffprobe's to say, once the file is on disk.
+  assertEquals([mkv.width, mkv.height], [null, null]);
+});
+
+Deno.test("the refusal names video too", () => {
+  const junk = new Uint8Array(32).fill(0x7a);
+  assertThrows(() => probeMedia(junk), ImageProbeError, "MP4, MOV, WebM");
+});

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -534,6 +535,26 @@ test("Inpaint", async ({ page }) => {
       join(dirname(fileURLToPath(import.meta.url)), "../../docs/screenshots/phase-1/gallery-table.png"),
     );
     await expect(page.locator('[data-param="mask"]')).toContainText("so it was cleared");
+  });
+});
+
+test("Frame interpolation", async ({ page }) => {
+  watchConsole(page);
+  const group = "Frame interpolation";
+  await connected(page, "/generate");
+  await shot(page, group, "Empty panel", "The first workflow that takes a video: video, multiplier, model.", () =>
+    pickWorkflow(page, /Frame Interpolation/));
+  await shot(page, group, "Video attached", "A clip in the video param: a player, its size and length.", async () => {
+    // Drawn by ffmpeg rather than committed: two seconds of its test card.
+    const clip = join(out!, "clip.mp4");
+    execFileSync("ffmpeg", [
+      "-nostdin", "-v", "error", "-y",
+      "-f", "lavfi", "-i", "testsrc2=size=320x192:rate=12:duration=2",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", clip,
+    ]);
+    await page.locator('[data-param="video"] input[type="file"]').setInputFiles(clip);
+    await expect(page.locator('[data-param="video"] video')).toBeVisible();
+    await expect(page.locator('[data-param="video"]')).toContainText("320×192");
   });
 });
 
