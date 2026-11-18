@@ -59,6 +59,7 @@ const BUNDLED = [
   ["krea2", "Krea 2 Turbo"],
   ["krea2-img2img", "Krea 2 Turbo (img2img)"],
   ["krea2-inpaint", "Krea 2 Turbo (inpaint)"],
+  ["krea2-pose", "Krea 2 Turbo (pose)"],
   ["ltx2-ia2v", "LTX-2.3 Image + Audio to Video"],
   ["ltx2-i2v", "LTX-2.3 Image to Video"],
   ["minimax-h3-ia2v", "MiniMax H3 Image + Audio to Video"],
@@ -66,6 +67,7 @@ const BUNDLED = [
   ["sd15", "Stable Diffusion 1.5"],
   ["sd15-img2img", "Stable Diffusion 1.5 (img2img)"],
   ["sd15-inpaint", "Stable Diffusion 1.5 (inpaint)"],
+  ["sd15-pose", "Stable Diffusion 1.5 (pose)"],
   ["z-image-turbo", "Z-Image Turbo"],
   ["z-image-img2img", "Z-Image Turbo (img2img)"],
   ["z-image-inpaint", "Z-Image Turbo (inpaint)"],
@@ -299,6 +301,31 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
       "grow",
       "feather",
     ]);
+    // A picture to take the pose from, and a prompt for everything else
+    // (§4.6). Detection is a switch, so a ready skeleton skips it.
+    assertEquals(keys("sd15-pose"), [
+      "image",
+      "detect_pose",
+      "prompt",
+      "negative",
+      "strength",
+      "megapixels",
+      "seed",
+      "loras",
+    ]);
+    // start, end, the ControlNet, the pose detector, steps, cfg, model.
+    assertEquals(byId.get("sd15-pose")!.params.advanced, 7);
+    // No size on either: the result takes the skeleton's shape, so the
+    // graph reads it off the scaled skeleton. SD 1.5 asks how many pixels;
+    // Krea 2's edit scaler picks its own.
+    assertEquals(keys("krea2-pose"), [
+      "image",
+      "detect_pose",
+      "prompt",
+      "strength",
+      "seed",
+      "loras",
+    ]);
     // No category: nothing routes to an inpaint yet (§4.2).
     assertEquals(byId.get("sd15-inpaint")!.category, null);
     // steps, cfg, sampler, scheduler, model.
@@ -329,6 +356,8 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         "sdxl",
         "sdxl",
         "sdxl",
+        // Krea 2 has a fourth: the pose workflow (§4.6).
+        "krea2",
         "krea2",
         "krea2",
         "krea2",
@@ -342,6 +371,7 @@ Deno.test("bundled manifests expose the surface DESIGN §4.6 specifies", async (
         // one pinned to a take.
         "minimax-h3",
         "minimax-h3",
+        "sd15",
         "sd15",
         "sd15",
         "sd15",
@@ -372,11 +402,12 @@ const EVERY_ANSWER: Record<string, unknown> = {
 Deno.test("every bundled workflow rewrites into a graph ComfyUI accepts", async () => {
   await withTestApp(async (app) => {
     const dir = await Deno.makeTempDir({ prefix: "forgeui-bundled-" });
-    // With the speech pack installed, because two of the bundled workflows
-    // declare it and a ComfyUI without it would reject them by design (§4.6).
+    // With the speech pack and the Krea 2 edit pack installed, because
+    // bundled workflows declare them and a ComfyUI without them would reject
+    // those by design (§4.6).
     const fake = await startFakeComfy({
       stagingDir: join(dir, "staging"),
-      packs: ["ComfyUI-Breeze-TTS-2"],
+      packs: ["ComfyUI-Breeze-TTS-2", "ComfyUI-Krea2-Ostris-Edit"],
     });
     try {
       for (const workflow of app.workflows.list()) {

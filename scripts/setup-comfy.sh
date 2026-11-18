@@ -21,6 +21,14 @@ MODEL_REPO="Comfy-Org/stable-diffusion-v1-5-archive"
 MODEL_FILE="v1-5-pruned-emaonly-fp16.safetensors"
 MODEL_DIR="$COMFY_DIR/models/checkpoints"
 
+# The pose workflow (sd15-pose): an SD 1.5 OpenPose ControlNet, ~720 MB, and
+# core SDPose's pose detector, ~1.9 GB. Skip both with FORGEUI_SKIP_POSE=1;
+# the pose contract test is then skipped too.
+CONTROLNET_REPO="comfyanonymous/ControlNet-v1-1_fp16_safetensors"
+CONTROLNET_FILE="control_v11p_sd15_openpose_fp16.safetensors"
+SDPOSE_REPO="Comfy-Org/SDPose"
+SDPOSE_FILE="sdpose_wholebody_fp16.safetensors"
+
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 step "ComfyUI $COMFY_VERSION in $COMFY_DIR"
@@ -61,15 +69,27 @@ step "PyTorch (CPU wheels)"
 step "ComfyUI requirements"
 "$VENV_DIR/bin/python" -m pip install --quiet -r "$COMFY_DIR/requirements.txt"
 
-step "Checkpoint $MODEL_FILE"
-mkdir -p "$MODEL_DIR"
-if [ -s "$MODEL_DIR/$MODEL_FILE" ]; then
-  echo "already downloaded ($(du -h "$MODEL_DIR/$MODEL_FILE" | cut -f1))"
-else
+# fetch <repo> <path in repo> <destination file>
+fetch() {
+  if [ -s "$3" ]; then
+    echo "already downloaded ($(du -h "$3" | cut -f1))"
+    return
+  fi
+  mkdir -p "$(dirname "$3")"
   curl -fL --retry 3 --retry-delay 2 -C - --progress-bar \
-    -o "$MODEL_DIR/$MODEL_FILE.part" \
-    "https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_FILE?download=true"
-  mv "$MODEL_DIR/$MODEL_FILE.part" "$MODEL_DIR/$MODEL_FILE"
+    -o "$3.part" "https://huggingface.co/$1/resolve/main/$2?download=true"
+  mv "$3.part" "$3"
+}
+
+step "Checkpoint $MODEL_FILE"
+fetch "$MODEL_REPO" "$MODEL_FILE" "$MODEL_DIR/$MODEL_FILE"
+
+if [ "${FORGEUI_SKIP_POSE:-}" != "1" ]; then
+  step "ControlNet $CONTROLNET_FILE"
+  fetch "$CONTROLNET_REPO" "$CONTROLNET_FILE" \
+    "$COMFY_DIR/models/controlnet/$CONTROLNET_FILE"
+  step "Pose detector $SDPOSE_FILE"
+  fetch "$SDPOSE_REPO" "checkpoints/$SDPOSE_FILE" "$MODEL_DIR/$SDPOSE_FILE"
 fi
 
 step "Ready"

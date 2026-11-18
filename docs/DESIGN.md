@@ -395,6 +395,8 @@ Initial set:
 | `krea2-inpaint` | krea2 | image | as `sd15-inpaint` on Krea 2 Turbo: image (required), prompt, creativity (0.85), seed, loras; the **Mask** section; steps, cfg, sampler, scheduler, clip, vae and the model advanced |
 | `sd15-inpaint` | sd15 | image | image (required), prompt, negative, creativity (0.75), seed, loras; a **Mask** section (§4.2) holding mask (required, `of: image`), grow and feather; steps, cfg, sampler, scheduler and the model advanced. Repaints only what the mask covers and pastes the result back over the original, so everything outside it is the original's own pixels |
 | `<id>-img2img` | as its sibling | image | one per image family: `krea2-img2img`, `sd15-img2img`, `illustrious-img2img`, `anima-img2img`, `z-image-img2img`, `flux-klein-img2img`. `category: img2img`; image (required), creativity (0.5), scale (1), prompt, seed, loras; the upscale-model path and the sampling overrides advanced. **Upscale is a bundled template on each** (§4.8, §10), not a workflow of its own |
+| `sd15-pose` | sd15 | image | text-to-image held to a pose with an **OpenPose ControlNet**: image (required, the picture to take the pose from), detect_pose, prompt, negative, strength (1), megapixels (0.25), seed, loras; start, end, the ControlNet, the pose detector, steps, cfg and the model advanced. `detect_pose` is a `switch` (§4.4): on, core SDPose reads the person's keypoints and draws the skeleton; off, the picture already is one. Runs on stock ComfyUI, and on the contract check's CPU one |
+| `krea2-pose` | krea2 | image | the same surface on Krea 2 Turbo, without negative or megapixels: its edit scaler picks about a megapixel itself. Krea 2 has no ControlNet; its pose control is an **edit LoRA** that reads the skeleton as a reference picture, which stock ComfyUI's Krea 2 ignores, so this one `requires` the **Krea 2 Ostris Edit** nodes. strength is the LoRA's; the LoRA, the pose detector, steps, cfg and the three loaders advanced |
 
 Display names: Flux Krea 2, Flux Krea 2 (img2img), Illustrious XL,
 LTX-2.3 Image to Video, Anima, Flux Klein, Z-Image Turbo,
@@ -422,6 +424,29 @@ model files, so only the fake runs it here. *Amended:* every image family
 with an img2img sibling now has an inpaint beside it, the same mask graph
 on its own loaders and schedule. LTX-2.3 has none: it makes a video, and a
 mask painted over its first frame says nothing about the frames after it.
+
+**Pose** is the first kind of ControlNet here, and a family gets it as its
+own `<id>-pose` workflow rather than a checkbox on the plain one: the
+plain panel stays what it was, and a pose run is a different thing to ask
+for — a picture to copy and a prompt for everything else. A ControlNet is a
+second network that steers the sampler towards a control image, here an
+OpenPose skeleton; on SD 1.5 `ControlNetApplyAdvanced` sits between the
+prompt encoders and the sampler, with `strength` and the slice of the
+schedule it steers (`start`, `end`) as params. The skeleton is drawn in the
+graph from an ordinary photo by core SDPose (`SDPoseKeypointExtractor` →
+`SDPoseDrawKeypoints`, one person, no detector), so nothing beyond stock
+ComfyUI is needed to detect a pose, and the `controlnet_aux` pack SwarmUI
+uses is not. Its weights are a checkpoint, picked like one. Krea 2's pose
+model is not a ControlNet at all but an edit LoRA trained with AI Toolkit,
+so the same panel drives a different graph: the skeleton goes into the
+prompt's conditioning as a reference latent (`TextEncodeKrea2OstrisEdit`),
+and `Krea2OstrisEditModelPatch` makes the model read it. The pose map is
+not saved as an output: a second output would run the detector even with
+`detect_pose` off. Neither has a `size`: the output takes the skeleton's shape, which the
+graph reads off the scaled skeleton (`GetImageSize`). A `size` would follow
+the picture (§10), and a phone photo's own pixels are many times what SD
+1.5 can draw. Depth, other families and img2img with a pose are later
+additions of the same shape.
 
 Exact node graphs are authored in ComfyUI and committed as files; the table
 above defines the intended manifest surface.

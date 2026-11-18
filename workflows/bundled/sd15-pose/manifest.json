@@ -1,0 +1,177 @@
+{
+  "id": "sd15-pose",
+  "name": "Stable Diffusion 1.5 (pose)",
+  "family": "sd15",
+  "kind": "image",
+  "category": null,
+  "description": "Text-to-image with Stable Diffusion 1.5, posed like the person in a picture. The pose is read off the picture as a skeleton, and an OpenPose ControlNet holds the result to it while the prompt decides everything else: who, wearing what, where. The result takes the picture's shape.",
+  "params": [
+    {
+      "key": "image",
+      "label": "Pose",
+      "type": "image",
+      "required": true,
+      "description": "A photo of someone in the pose you want, or — with \"Detect the pose\" off — a ready OpenPose skeleton. Its shape sets the size.",
+      "bind": "10.image"
+    },
+    {
+      "key": "detect_pose",
+      "label": "Detect the pose",
+      "type": "bool",
+      "default": true,
+      "description": "Find the pose in the picture with SDPose and draw it as a skeleton. Turn it off when the picture already is a skeleton (coloured limbs on black).",
+      "bind": {
+        "switch": {
+          "input": "16.image",
+          "on": "15.IMAGE",
+          "off": "10.IMAGE"
+        }
+      }
+    },
+    {
+      "key": "prompt",
+      "label": "Prompt",
+      "type": "text",
+      "required": true,
+      "bind": "6.text"
+    },
+    {
+      "key": "negative",
+      "label": "Negative prompt",
+      "type": "text",
+      "bind": "7.text"
+    },
+    {
+      "key": "strength",
+      "label": "Pose strength",
+      "type": "float",
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "default": 1,
+      "description": "How hard the ControlNet holds the result to the skeleton. Lower it if the pose comes out stiff or the picture breaks up; raise it if the pose is ignored.",
+      "bind": "12.strength"
+    },
+    {
+      "key": "megapixels",
+      "label": "Size",
+      "type": "float",
+      "min": 0.05,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.25,
+      "description": "How many pixels the result has, in megapixels; its shape is the pose picture's. 0.25 is SD 1.5's own 512×512, and much past it the model starts repeating limbs.",
+      "bind": "16.megapixels"
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "seed",
+      "default": -1,
+      "bind": "3.seed"
+    },
+    {
+      "key": "loras",
+      "label": "LoRAs",
+      "type": "lora_list",
+      "filter": {
+        "family": "sd15"
+      },
+      "bind": {
+        "chain": {
+          "model_from": "1.MODEL",
+          "clip_from": "1.CLIP",
+          "model_to": [
+            "3.model"
+          ],
+          "clip_to": [
+            "6.clip",
+            "7.clip"
+          ]
+        }
+      }
+    },
+    {
+      "key": "start",
+      "label": "Pose from",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "advanced": true,
+      "description": "Where in the schedule the ControlNet starts steering. Above 0 lets the model lay the picture out freely first.",
+      "bind": "12.start_percent"
+    },
+    {
+      "key": "end",
+      "label": "Pose until",
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "advanced": true,
+      "description": "Where it stops. Below 1 leaves the last, fine-detail steps to the model alone.",
+      "bind": "12.end_percent"
+    },
+    {
+      "key": "controlnet",
+      "label": "ControlNet",
+      "type": "model",
+      "filter": {
+        "class": "controlnet",
+        "family": "sd15"
+      },
+      "advanced": true,
+      "description": "An SD 1.5 OpenPose ControlNet, in `controlnet/`. A ControlNet for another family will not load.",
+      "bind": "11.control_net_name"
+    },
+    {
+      "key": "pose_model",
+      "label": "Pose detector",
+      "type": "model",
+      "advanced": true,
+      "when": {
+        "param": "detect_pose",
+        "is": true
+      },
+      "description": "The SDPose checkpoint, in `checkpoints/`.",
+      "bind": "13.ckpt_name"
+    },
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "int",
+      "advanced": true,
+      "min": 1,
+      "max": 100,
+      "bind": "3.steps"
+    },
+    {
+      "key": "cfg",
+      "label": "CFG",
+      "type": "float",
+      "advanced": true,
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "bind": "3.cfg"
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "model",
+      "filter": {
+        "class": "diffusion",
+        "family": "sd15"
+      },
+      "advanced": true,
+      "bind": "1.ckpt_name"
+    }
+  ],
+  "outputs": [
+    {
+      "node": "9",
+      "kind": "image"
+    }
+  ]
+}

@@ -5288,5 +5288,309 @@
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []
+  },
+  "ControlNetLoader": {
+    "input": { "required": { "control_net_name": [[]] } },
+    "input_order": { "required": ["control_net_name"] },
+    "is_input_list": false,
+    "output": ["CONTROL_NET"],
+    "output_is_list": [false],
+    "output_name": ["CONTROL_NET"],
+    "name": "ControlNetLoader",
+    "display_name": "Load ControlNet Model",
+    "description": "",
+    "python_module": "nodes",
+    "category": "model/loaders",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": [
+      "controlnet",
+      "control net",
+      "cn",
+      "load controlnet",
+      "controlnet loader"
+    ]
+  },
+  "ControlNetApplyAdvanced": {
+    "input": {
+      "required": {
+        "positive": ["CONDITIONING"],
+        "negative": ["CONDITIONING"],
+        "control_net": ["CONTROL_NET"],
+        "image": ["IMAGE"],
+        "strength": [
+          "FLOAT",
+          { "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01 }
+        ],
+        "start_percent": [
+          "FLOAT",
+          { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }
+        ],
+        "end_percent": [
+          "FLOAT",
+          { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }
+        ]
+      },
+      "optional": { "vae": ["VAE"] }
+    },
+    "input_order": {
+      "required": [
+        "positive",
+        "negative",
+        "control_net",
+        "image",
+        "strength",
+        "start_percent",
+        "end_percent"
+      ],
+      "optional": ["vae"]
+    },
+    "is_input_list": false,
+    "output": ["CONDITIONING", "CONDITIONING"],
+    "output_is_list": [false, false],
+    "output_name": ["positive", "negative"],
+    "name": "ControlNetApplyAdvanced",
+    "display_name": "Apply ControlNet",
+    "description": "",
+    "python_module": "nodes",
+    "category": "model/conditioning/controlnet",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": [
+      "controlnet",
+      "apply controlnet",
+      "use controlnet",
+      "control net"
+    ]
+  },
+  "SDPoseKeypointExtractor": {
+    "input": {
+      "required": {
+        "model": ["MODEL", {}],
+        "vae": ["VAE", {}],
+        "image": ["IMAGE", {}],
+        "batch_size": [
+          "INT",
+          { "default": 16, "min": 1, "max": 10000, "step": 1 }
+        ]
+      },
+      "optional": {
+        "bboxes": [
+          "BOUNDING_BOX",
+          {
+            "tooltip": "Optional bounding boxes for more accurate detections. Required for multi-person detection.",
+            "default": { "x": 0, "y": 0, "width": 512, "height": 512 },
+            "socketless": true,
+            "forceInput": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": ["model", "vae", "image", "batch_size"],
+      "optional": ["bboxes"]
+    },
+    "is_input_list": false,
+    "output": ["POSE_KEYPOINT"],
+    "output_is_list": [false],
+    "output_name": ["keypoints"],
+    "output_tooltips": [
+      "Keypoints in OpenPose frame format (canvas_width, canvas_height, people)"
+    ],
+    "output_matchtypes": null,
+    "name": "SDPoseKeypointExtractor",
+    "display_name": "SDPose Keypoint Extractor",
+    "description": "Extract pose keypoints from images using the SDPose model: https://huggingface.co/Comfy-Org/SDPose/tree/main/checkpoints",
+    "python_module": "comfy_extras.nodes_sdpose",
+    "category": "image/detection",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "openpose",
+      "pose detection",
+      "preprocessor",
+      "keypoints",
+      "sdpose"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "SDPoseDrawKeypoints": {
+    "input": {
+      "required": {
+        "keypoints": ["POSE_KEYPOINT", {}],
+        "draw_body": ["BOOLEAN", { "default": true }],
+        "draw_hands": ["BOOLEAN", { "default": true }],
+        "draw_face": ["BOOLEAN", { "default": true }],
+        "draw_feet": ["BOOLEAN", { "default": false }],
+        "stick_width": [
+          "INT",
+          { "default": 4, "min": 1, "max": 10, "step": 1 }
+        ],
+        "face_point_size": [
+          "INT",
+          { "default": 3, "min": 1, "max": 10, "step": 1 }
+        ],
+        "score_threshold": [
+          "FLOAT",
+          { "default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01 }
+        ],
+        "draw_head": ["BOOLEAN", { "default": true }]
+      }
+    },
+    "input_order": {
+      "required": [
+        "keypoints",
+        "draw_body",
+        "draw_hands",
+        "draw_face",
+        "draw_feet",
+        "stick_width",
+        "face_point_size",
+        "score_threshold",
+        "draw_head"
+      ]
+    },
+    "is_input_list": false,
+    "output": ["IMAGE"],
+    "output_is_list": [false],
+    "output_name": ["IMAGE"],
+    "output_tooltips": [null],
+    "output_matchtypes": null,
+    "name": "SDPoseDrawKeypoints",
+    "display_name": "SDPose Draw Keypoints",
+    "description": "",
+    "python_module": "comfy_extras.nodes_sdpose",
+    "category": "image/detection",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "openpose",
+      "pose detection",
+      "preprocessor",
+      "keypoints",
+      "pose"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "FluxKontextImageScale": {
+    "input": { "required": { "image": ["IMAGE", {}] } },
+    "input_order": { "required": ["image"] },
+    "is_input_list": false,
+    "output": ["IMAGE"],
+    "output_is_list": [false],
+    "output_name": ["IMAGE"],
+    "output_tooltips": [null],
+    "output_matchtypes": null,
+    "name": "FluxKontextImageScale",
+    "display_name": null,
+    "description": "This node resizes the image to one that is more optimal for flux kontext.",
+    "python_module": "comfy_extras.nodes_flux",
+    "category": "model/conditioning/flux",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "FluxKontextMultiReferenceLatentMethod": {
+    "input": {
+      "required": {
+        "conditioning": ["CONDITIONING", {}],
+        "reference_latents_method": [
+          "COMBO",
+          {
+            "advanced": true,
+            "multiselect": false,
+            "options": ["offset", "index", "uxo/uno", "index_timestep_zero"]
+          }
+        ]
+      }
+    },
+    "input_order": { "required": ["conditioning", "reference_latents_method"] },
+    "is_input_list": false,
+    "output": ["CONDITIONING"],
+    "output_is_list": [false],
+    "output_name": ["CONDITIONING"],
+    "output_tooltips": [null],
+    "output_matchtypes": null,
+    "name": "FluxKontextMultiReferenceLatentMethod",
+    "display_name": "Edit Model Reference Method",
+    "description": "",
+    "python_module": "comfy_extras.nodes_flux",
+    "category": "model/conditioning/flux",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": true,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "ImageScaleToTotalPixels": {
+    "input": {
+      "required": {
+        "image": ["IMAGE", {}],
+        "upscale_method": [
+          "COMBO",
+          {
+            "multiselect": false,
+            "options": [
+              "nearest-exact",
+              "bilinear",
+              "area",
+              "bicubic",
+              "lanczos"
+            ]
+          }
+        ],
+        "megapixels": [
+          "FLOAT",
+          { "default": 1.0, "min": 0.01, "max": 16.0, "step": 0.01 }
+        ],
+        "resolution_steps": [
+          "INT",
+          { "advanced": true, "default": 1, "min": 1, "max": 256 }
+        ]
+      }
+    },
+    "input_order": {
+      "required": ["image", "upscale_method", "megapixels", "resolution_steps"]
+    },
+    "is_input_list": false,
+    "output": ["IMAGE"],
+    "output_is_list": [false],
+    "output_name": ["IMAGE"],
+    "output_tooltips": [null],
+    "output_matchtypes": null,
+    "name": "ImageScaleToTotalPixels",
+    "display_name": "Scale Image to Total Pixels",
+    "description": "",
+    "python_module": "comfy_extras.nodes_post_processing",
+    "category": "image/upscaling",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
   }
 }

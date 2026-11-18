@@ -720,11 +720,13 @@ Deno.test("families come back with model and workflow counts", async () => {
     assertEquals(byName.get("flux")?.workflows, 0);
     // Every other image family has three: the workflow, its img2img sibling
     // and its inpaint (§4.6, §10). The enhancer is a checkbox on the one
-    // Krea 2 workflow rather than a fourth (§7.1).
-    for (
-      const family of ["flux2", "krea2", "sd15", "sdxl", "anima", "z-image"]
-    ) {
+    // Krea 2 workflow rather than a fourth (§7.1). Krea 2 and SD 1.5 have a
+    // pose workflow as their fourth (§4.6).
+    for (const family of ["flux2", "sdxl", "anima", "z-image"]) {
       assertEquals(byName.get(family)?.workflows, 3, family);
+    }
+    for (const family of ["krea2", "sd15"]) {
+      assertEquals(byName.get(family)?.workflows, 4, family);
     }
     assertEquals(byName.get("sd15")?.models, 0);
     // The video workflow is LTX-2.3 now, and none of these graphs upscale a

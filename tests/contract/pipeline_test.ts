@@ -89,7 +89,7 @@ const bundled = (id: string, file: string) =>
  */
 async function workflowFiles(): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
-  for (const id of ["sd15", "sd15-inpaint"]) {
+  for (const id of ["sd15", "sd15-inpaint", "sd15-pose"]) {
     const api = JSON.parse(
       await Deno.readTextFile(bundled(id, "workflow.api.json")),
     );
@@ -118,6 +118,8 @@ async function startApp(): Promise<TestApp> {
       `checkpoints=${join(COMFY_DIR!, "models", "checkpoints")}`,
       "--models-dir",
       `loras=${join(COMFY_DIR!, "models", "loras")}`,
+      "--models-dir",
+      `controlnet=${join(COMFY_DIR!, "models", "controlnet")}`,
     ],
   });
 }
@@ -552,3 +554,130 @@ contractTest("a painted mask repaints only what it covers", async () => {
     await app.dispose();
   }
 }, { sampler: true, app: true });
+
+/*
+ * An OpenPose skeleton, drawn the way the ControlNet was trained to read one:
+ * each limb a coloured bar, each joint a dot, on black. Keypoints in OpenPose
+ * order (nose, neck, right shoulder…, both eyes and ears last); the figure
+ * faces the viewer, so its right is the picture's left, and both arms are up.
+ */
+const POSE_SIZE = [256, 384] as const;
+// deno-fmt-ignore
+const KEYPOINTS: [number, number][] = [
+  [128, 70], [128, 100], [98, 100], [78, 70], [70, 36], [158, 100],
+  [178, 70], [186, 36], [108, 200], [104, 270], [100, 340], [148, 200],
+  [152, 270], [156, 340], [122, 64], [134, 64], [114, 68], [142, 68],
+];
+// deno-fmt-ignore
+const LIMBS: [number, number][] = [
+  [1, 2], [1, 5], [2, 3], [3, 4], [5, 6], [6, 7], [1, 8], [8, 9], [9, 10],
+  [1, 11], [11, 12], [12, 13], [1, 0], [0, 14], [14, 16], [0, 15], [15, 17],
+];
+// deno-fmt-ignore
+const POSE_COLORS: [number, number, number][] = [
+  [255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0],
+  [85, 255, 0], [0, 255, 0], [0, 255, 85], [0, 255, 170], [0, 255, 255],
+  [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255], [170, 0, 255],
+  [255, 0, 255], [255, 0, 170], [255, 0, 85],
+];
+
+function skeletonPixel(x: number, y: number): [number, number, number] {
+  for (const [i, [kx, ky]] of KEYPOINTS.entries()) {
+    if ((x - kx) ** 2 + (y - ky) ** 2 <= 16) return POSE_COLORS[i];
+  }
+  for (const [i, [a, b]] of LIMBS.entries()) {
+    const [ax, ay] = KEYPOINTS[a];
+    const [bx, by] = KEYPOINTS[b];
+    const length2 = (bx - ax) ** 2 + (by - ay) ** 2;
+    const t = Math.max(
+      0,
+      Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length2),
+    );
+    const distance2 = (x - ax - t * (bx - ax)) ** 2 +
+      (y - ay - t * (by - ay)) ** 2;
+    if (distance2 <= 9) {
+      const [r, g, b] = POSE_COLORS[i];
+      return [r * 0.6, g * 0.6, b * 0.6];
+    }
+  }
+  return [0, 0, 0];
+}
+
+contractTest(
+  "a pose run follows a skeleton, and detects one in a photo",
+  async () => {
+    const app = await startApp();
+    try {
+      const upload = async (bytes: Uint8Array, name: string) => {
+        const form = new FormData();
+        form.set("file", new File([bytes.buffer as ArrayBuffer], name));
+        return await app.json<{ filename: string }>("/api/inputs", {
+          method: "POST",
+          body: form,
+        });
+      };
+      // The result takes the skeleton's shape at the pixel count asked for,
+      // on SD 1.5's grid of 8 — ImageScaleToTotalPixels' own arithmetic.
+      const MEGAPIXELS = 0.1;
+      const scale = Math.sqrt(
+        MEGAPIXELS * 1024 * 1024 / (POSE_SIZE[0] * POSE_SIZE[1]),
+      );
+      const [width, height] = POSE_SIZE.map((side) =>
+        Math.round(side * scale / 8) * 8
+      );
+      const pose = async (image: string, detect: boolean) => {
+        const submitted = await app.json<JobResponse>("/api/jobs", {
+          method: "POST",
+          body: JSON.stringify({
+            workflow_id: "sd15-pose",
+            params: {
+              image,
+              detect_pose: detect,
+              prompt: "a dancer with both arms raised, full body, studio",
+              megapixels: MEGAPIXELS,
+              seed: SEED,
+              steps: STEPS,
+            },
+          }),
+        });
+        const done = await awaitJob(app, submitted.id);
+        assertEquals(done.status, "done", JSON.stringify(done.error));
+        const bytes = await Deno.readFile(
+          join(
+            app.paths.outputs,
+            dayOf(submitted.created_at),
+            `${submitted.id}-0.png`,
+          ),
+        );
+        assertEquals(readPngSize(bytes), { width, height });
+        return bytes;
+      };
+
+      // A ready skeleton, straight into the ControlNet.
+      const skeleton = await upload(
+        tinyPng({
+          width: POSE_SIZE[0],
+          height: POSE_SIZE[1],
+          pixel: skeletonPixel,
+        }),
+        "skeleton.png",
+      );
+      const posed = await pose(skeleton.filename, false);
+
+      // That result is a picture of a person in that pose: SDPose reads it
+      // back into a skeleton, on a CPU, inside the same graph.
+      const photo = await upload(posed, "posed.png");
+      await pose(photo.filename, true);
+    } finally {
+      await app.dispose();
+    }
+  },
+  {
+    sampler: true,
+    app: true,
+    files: [
+      "models/controlnet/control_v11p_sd15_openpose_fp16.safetensors",
+      "models/checkpoints/sdpose_wholebody_fp16.safetensors",
+    ],
+  },
+);

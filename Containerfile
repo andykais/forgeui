@@ -34,6 +34,10 @@ ARG COMFY_HOME=/opt/ComfyUI
 # worked last week" (docs/DESIGN-AUDIO.md §6).
 ARG BREEZE_NODES_REPO=https://github.com/Saganaki22/ComfyUI-Breeze-TTS-2.git
 ARG BREEZE_NODES_COMMIT=3461ca6011b7e833147b2e7edb779da7a08c6259
+# krea2-pose: Krea 2's pose LoRA is an edit LoRA, which stock ComfyUI's
+# Krea 2 cannot read (docs/DESIGN.md §4.6). Version 1.0.1.
+ARG KREA2_EDIT_NODES_REPO=https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit.git
+ARG KREA2_EDIT_NODES_COMMIT=7756566160c4a1b24bb1bd9f0ff3ced1a83d7547
 
 # Nothing in this image fetches model weights at run time. The bundled
 # speech workflows ask their loader not to (`download_if_missing: false`) and
@@ -86,6 +90,12 @@ RUN git clone "${BREEZE_NODES_REPO}" "${COMFY_HOME}/custom_nodes/ComfyUI-Breeze-
     && "${COMFY_HOME}/venv/bin/pip" install --no-cache-dir \
          -r "${COMFY_HOME}/custom_nodes/ComfyUI-Breeze-TTS-2/requirements.txt" \
     && "${COMFY_HOME}/venv/bin/python" -c "import transformers as t; v = tuple(int(part) for part in t.__version__.split('.')[:2]); assert v >= (4, 57), f'Breeze TTS 2 needs transformers>=4.57, found {t.__version__}'"
+
+# The Krea 2 Ostris Edit nodes, at the pin above. Two nodes and no
+# dependencies of their own (its pyproject lists none).
+RUN git clone "${KREA2_EDIT_NODES_REPO}" "${COMFY_HOME}/custom_nodes/ComfyUI-Krea2-Ostris-Edit" \
+    && git -C "${COMFY_HOME}/custom_nodes/ComfyUI-Krea2-Ostris-Edit" \
+         checkout "${KREA2_EDIT_NODES_COMMIT}"
 
 # Where the Breeze weights land. The pack finds existing weights anywhere it
 # is pointed — including the `breezetts2:` key ForgeUI writes into

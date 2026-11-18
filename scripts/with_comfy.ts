@@ -48,13 +48,20 @@ function exists(path: string): boolean {
   }
 }
 
-/** The checkpoints ComfyUI can see, so the tests need no filename told to them. */
+/**
+ * The checkpoints ComfyUI can see, so the tests need no filename told to them.
+ * SDPose's pose detector sits in the same folder (`sd15-pose`, §4.6) but is
+ * no checkpoint to generate with.
+ */
 function checkpoints(comfyDir: string): string[] {
   const dir = join(comfyDir, "models", "checkpoints");
   const names: string[] = [];
   try {
     for (const entry of Deno.readDirSync(dir)) {
-      if (entry.isFile && /\.(safetensors|ckpt)$/i.test(entry.name)) {
+      if (
+        entry.isFile && /\.(safetensors|ckpt)$/i.test(entry.name) &&
+        !/^sdpose/i.test(entry.name)
+      ) {
         names.push(entry.name);
       }
     }

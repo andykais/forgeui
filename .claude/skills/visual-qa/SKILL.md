@@ -51,14 +51,14 @@ changes anything under `src/frontend/` or `src/http/`.
    - **Pre-existing** → leave it and say so in the PR.
 
 3. **Keep the walk complete.** What it covers today, one `test()` per group: an
-   empty install; Generate (picker, panel, LoRAs, running/queued/failed, session
-   grid, viewer, layouts); Gallery; Models; Workflows; **Templates** (the list,
-   a bundled and a user template, Save as template, the applied strip, the
-   picker's template rows, a workflow's template links); **Inpaint** (Reuse
-   image, the inpaint panel and its Mask section, the mask editor in tint and
-   white, a painted mask, the section collapsed, a mask cleared by a picture of
-   another size); ComfyUI, Telemetry, Settings; edge states; and every screen
-   again at half a screen.
+   empty install; Generate (picker, panel, LoRAs, running/queued/failed, the
+   pose panel, session grid, viewer, layouts); Gallery; Models; Workflows;
+   **Templates** (the list, a bundled and a user template, Save as template, the
+   applied strip, the picker's template rows, a workflow's template links);
+   **Inpaint** (Reuse image, the inpaint panel and its Mask section, the mask
+   editor in tint and white, a painted mask, the section collapsed, a mask
+   cleared by a picture of another size); ComfyUI, Telemetry, Settings; edge
+   states; and every screen again at half a screen.
 
    The mask editor takes paint only once its picture has loaded: wait for
    `[data-mask-canvas][data-ready="true"]` before a stroke, or the stroke is
