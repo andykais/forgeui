@@ -292,10 +292,8 @@ test("Generate", async ({ page, request }) => {
     page.getByRole("button", { name: "Table" }).first().click());
   await page.getByRole("button", { name: /tiles/ }).first().click().catch(() => {});
 
-  await shot(page, group, "Pose panel", "Stable Diffusion 1.5 (pose): the picture, Detect the pose, the ControlNet under Advanced.", async () => {
-    await pickWorkflow(page, /^Stable Diffusion 1\.5 \(pose\)/);
-    await page.getByRole("button", { name: /^Advanced/ }).click();
-  });
+  await shot(page, group, "Pose panel", "Stable Diffusion 1.5 (pose): the picture, Detect the pose, strength and size; Advanced names the ControlNet and the detector.", () =>
+    pickWorkflow(page, /^Stable Diffusion 1\.5 \(pose\)/));
 });
 
 test("Gallery", async ({ page }) => {
