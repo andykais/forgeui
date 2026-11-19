@@ -1042,3 +1042,70 @@ Deno.test("absolute paths follow outputs.dir out of the data dir", async () => {
     await Deno.remove(outputsDir, { recursive: true });
   }
 });
+
+/**
+ * Every schema the bridge advertises in `tools/list` must be one llama.cpp
+ * can turn into a grammar: llama-server compiles the tool schemas of each
+ * chat request, and a boolean subschema (`items: false`, which zod writes
+ * for a tuple) fails the whole request with "schema must be an object",
+ * whatever tool the model meant to call. `additionalProperties: false` is
+ * the one boolean it accepts.
+ */
+Deno.test("tools/list advertises no boolean subschema llama.cpp refuses", async () => {
+  const handler = createMcpHandler(() =>
+    createBridgeServer({
+      forge: new ForgeUi({ url: "http://127.0.0.1:1" }),
+      llm: null,
+      freeVram: false,
+      progress: false,
+      defaultTimeoutMs: 30_000,
+    })
+  );
+  try {
+    const response = await handler.fetch(
+      new Request("http://bridge/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      }),
+    );
+    const body = await response.text();
+    const data = body.split("\n").find((line) => line.startsWith("data:"));
+    assert(data, `no JSON-RPC response in: ${body}`);
+    const { result } = JSON.parse(data.slice("data:".length)) as {
+      result: { tools: { name: string; inputSchema: unknown }[] };
+    };
+    assert(result.tools.some((tool) => tool.name === "make_mask"));
+
+    const refused: string[] = [];
+    const walk = (node: unknown, at: string): void => {
+      if (typeof node === "boolean") {
+        if (!at.endsWith("/additionalProperties")) refused.push(at);
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach((child, i) => walk(child, `${at}/${i}`));
+        return;
+      }
+      if (node === null || typeof node !== "object") return;
+      for (const [key, child] of Object.entries(node)) {
+        // Keywords whose values are data, not subschemas.
+        if (
+          ["enum", "const", "default", "examples", "required"].includes(key)
+        ) {
+          continue;
+        }
+        if (typeof child === "boolean" || typeof child === "object") {
+          walk(child, `${at}/${key}`);
+        }
+      }
+    };
+    for (const tool of result.tools) walk(tool.inputSchema, tool.name);
+    assertEquals(refused, []);
+  } finally {
+    await handler.close();
+  }
+});

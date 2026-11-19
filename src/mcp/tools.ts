@@ -743,9 +743,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         }),
         z.strictObject({
           shape: z.literal("polygon"),
-          points: z.array(
-            z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]),
-          ).min(3),
+          // [x, y] as a two-number array, not z.tuple: zod writes a tuple
+          // as `items: false`, a boolean schema llama.cpp's grammar builder
+          // refuses, failing every chat request that lists the tools.
+          points: z.array(z.array(z.number().min(0).max(1)).length(2))
+            .min(3).describe("[x, y] pairs, at least three"),
           erase: z.boolean().optional(),
         }),
       ])).describe("drawn in order, each over what is there"),
