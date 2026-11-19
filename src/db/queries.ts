@@ -1059,6 +1059,16 @@ export function upsertModel(db: Database, model: NewModel): void {
   );
 }
 
+/**
+ * Point a model at another of its files (§8.1). Two identical files are one
+ * model, and the row names the one generation uses; when that file goes, or
+ * changes into something else, another copy takes over rather than the
+ * model and everything hung off it going with it.
+ */
+export function setModelPath(db: Database, hash: string, path: string): void {
+  db.prepare(`UPDATE models SET path = ? WHERE hash = ?`).run(path, hash);
+}
+
 export function getModel(db: Database, hash: string): ModelRow | null {
   const record = db.prepare(
     `SELECT ${MODEL_COLUMNS} FROM models WHERE hash = ?`,

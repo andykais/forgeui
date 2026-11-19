@@ -483,6 +483,11 @@ export interface ModelEntry {
   /** Kept out of the Generate pickers; still listed on Models (§8.1). */
   hidden: boolean;
   present: boolean;
+  /**
+   * Every file on disk with this content, the one generation uses first
+   * (§8.1). Identical files are one model and one entry in a listing.
+   */
+  files?: { path: string; name: string; kind: string }[];
 }
 
 /** The model page: the header, plus its Samples strip (§8.1, §8.3). */

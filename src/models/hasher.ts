@@ -4,10 +4,13 @@ import { encodeHex } from "@std/encoding/hex";
 import { delay } from "@std/async/delay";
 import {
   deleteModelFile,
+  getModel,
+  getModelByPath,
   listModelFiles,
   markModelSeen,
   type ModelFileRow,
   refreshModelUsage,
+  setModelPath,
   upsertModel,
   upsertModelFile,
 } from "../db/queries.ts";
@@ -62,6 +65,14 @@ export interface ModelHasherOptions {
    */
   onDrained?: () => void;
   now?: () => number;
+  /**
+   * Whether a file is still on disk. Two identical files are one model, and
+   * the row keeps naming the copy it already names for as long as that copy
+   * is there — so the file generation uses does not flip to whichever copy
+   * was read last (§8.1). The library answers from its scan; the default
+   * asks the filesystem.
+   */
+  isPresent?: (path: string) => boolean;
   /** Injectable so tests can fail a read without a fixture that cannot be read. */
   hashFile?: (path: string, onBytes: (read: number) => void) => Promise<string>;
 }
@@ -110,6 +121,7 @@ export class ModelHasher {
   #onDrained?: () => void;
   #now: () => number;
   #hashFile: (path: string, onBytes: (read: number) => void) => Promise<string>;
+  #isPresent: (path: string) => boolean;
 
   #queue: ScannedModel[] = [];
   #queued = new Set<string>();
@@ -133,6 +145,7 @@ export class ModelHasher {
     this.#onDrained = options.onDrained;
     this.#now = options.now ?? Date.now;
     this.#hashFile = options.hashFile ?? hashFileStreaming;
+    this.#isPresent = options.isPresent ?? existsOnDisk;
     this.#files = listModelFiles(options.db);
   }
 
@@ -275,20 +288,70 @@ export class ModelHasher {
     // again, whether or not it ends up owning the `models` row.
     upsertModelFile(this.#db, file);
     this.#files.set(model.path, file);
-    upsertModel(this.#db, {
-      hash,
-      path: model.path,
-      kind: model.kind,
-      size: model.size,
-      mtime: model.mtime ?? 0,
-      last_seen_at: this.#now(),
-    });
+    // This file was the copy a model named, and it now holds something else:
+    // another copy of the old content carries the model on, rather than the
+    // row — and everything the owner hung off it — being dropped while
+    // identical bytes are still on disk (§8.1).
+    const previous = getModelByPath(this.#db, model.path);
+    if (previous && previous.hash !== hash) {
+      const heir = this.copyOf(previous.hash, model.path);
+      if (heir) setModelPath(this.#db, previous.hash, heir);
+    }
+    // One model, one file: a second copy of something already known leaves
+    // the row naming the first, so the path generation uses is stable (§8.1).
+    const existing = getModel(this.#db, hash);
+    const keep = existing !== null && existing.path !== model.path &&
+      this.#files.get(existing.path)?.hash === hash &&
+      this.#isPresent(existing.path);
+    upsertModel(
+      this.#db,
+      keep
+        ? {
+          hash,
+          path: existing.path,
+          kind: existing.kind,
+          size: existing.size,
+          mtime: existing.mtime,
+          last_seen_at: this.#now(),
+        }
+        : {
+          hash,
+          path: model.path,
+          kind: model.kind,
+          size: model.size,
+          mtime: model.mtime ?? 0,
+          last_seen_at: this.#now(),
+        },
+    );
     // A hash that was known before may already have outputs behind it.
     refreshModelUsage(this.#db, [hash]);
   }
 
+  /**
+   * Another file on disk with this content, if there is one: the first by
+   * path, so the choice does not depend on which was read last (§8.1).
+   */
+  copyOf(hash: string, except?: string): string | null {
+    let found: string | null = null;
+    for (const file of this.#files.values()) {
+      if (file.hash !== hash || file.path === except) continue;
+      if (found !== null && file.path >= found) continue;
+      if (!this.#isPresent(file.path)) continue;
+      found = file.path;
+    }
+    return found;
+  }
+
   #publish(): void {
     this.#onProgress?.(this.progress);
+  }
+}
+
+function existsOnDisk(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    return false;
   }
 }
 

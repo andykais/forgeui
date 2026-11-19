@@ -17,6 +17,7 @@ import {
   normalizeModelHash,
   refreshModelUsage,
   sampleCountByModel,
+  setModelPath,
   type SidecarModelRef,
   updateModelMeta,
   upsertModelProbe,
@@ -132,6 +133,22 @@ export interface ModelView {
   hash_error: string | null;
   /** False when the row survives but the file is no longer on disk. */
   present: boolean;
+  /**
+   * Every file on disk with this content, the one `path` names first (§8.1).
+   * Identical files are one model and one entry in a listing; this is where
+   * the other copies are. Generation always uses `path` — a pick of any copy
+   * is sent as that one. A file nobody has hashed yet is only itself, and a
+   * model whose files have all gone has none.
+   */
+  files: ModelFileView[];
+}
+
+/** One copy of a model on disk (§8.1). */
+export interface ModelFileView {
+  path: string;
+  /** What a workflow would bind to for this copy. */
+  name: string;
+  kind: string;
 }
 
 /**
@@ -327,6 +344,9 @@ export class ModelLibrary {
     this.hasher = new ModelHasher({
       db: options.db,
       now: options.now,
+      // What the last scan found is what is on disk, and it is already in
+      // memory: no stat per file.
+      isPresent: (path) => this.scanner.registry.has(path),
       onProgress: (progress) => this.#broadcastHashing(progress),
       onHashed: async ({ model, hash, fresh }) => {
         if (!fresh) return;
@@ -388,6 +408,7 @@ export class ModelLibrary {
       // Reading headers is cheap and its answer is what the pickers sort by,
       // so it happens before hashing rather than after it (§6).
       await this.#probe(result.models);
+      this.#rehome();
       // A pass over new files may find sidecars to link, so the index the
       // last pass built is stale.
       this.#index = null;
@@ -476,16 +497,25 @@ export class ModelLibrary {
   list(filters: ModelListFilters = {}): ModelView[] {
     const views: ModelView[] = [];
     const thumbs = this.#thumbs();
-    const files = listModelFiles(this.#db);
-    for (const model of this.scanner.registry.values()) {
+    const { groups, unhashed, rows } = this.#copies();
+    for (const model of unhashed) {
       if (filters.kind && model.kind !== filters.kind) continue;
-      views.push(this.#view(model, this.#rowFor(model.path, files), thumbs));
+      views.push(this.#view(model, null, thumbs, [model]));
+    }
+    // One entry per model, not per file: identical files share a hash, and
+    // listing each would offer the same model twice under two names (§8.1).
+    for (const [hash, copies] of groups) {
+      const row = rows.get(hash)!;
+      const chosen = preferredCopy(row, copies, filters.kind);
+      if (!chosen) continue;
+      views.push(this.#view(chosen, row, thumbs, copies));
     }
     // A hashed model whose file has gone still has a page and a history, so
     // it stays listed rather than disappearing from under its outputs.
-    for (const row of listModels(this.#db, filters.kind)) {
-      if (this.scanner.registry.has(row.path)) continue;
-      views.push(this.#view(null, row, thumbs));
+    for (const row of rows.values()) {
+      if (groups.has(row.hash)) continue;
+      if (filters.kind && row.kind !== filters.kind) continue;
+      views.push(this.#view(null, row, thumbs, []));
     }
     const filtered = views.filter((view) =>
       matchesClass(view, filters.class) &&
@@ -517,20 +547,110 @@ export class ModelLibrary {
 
   get(id: string): ModelDetail | null {
     const path = decodePathId(id);
-    const row = path !== null
-      ? this.#rowFor(path, listModelFiles(this.#db))
-      : getModel(this.#db, normalizeModelHash(id));
-    const scanned = path !== null
-      ? this.scanner.registry.get(path) ?? null
-      : row
-      ? this.scanner.registry.get(row.path) ?? null
-      : null;
-    if (!scanned && !row) return null;
-    const view = this.#view(scanned, row, this.#thumbs());
+    const { groups, rows, hashOf } = this.#copies();
+    // A path that belongs to a hashed model is that model, whichever of its
+    // copies it names: there is one page per model, not per file (§8.1).
+    const hash = path !== null
+      ? hashOf.get(path) ?? null
+      : normalizeModelHash(id);
+    const row = hash !== null ? rows.get(hash) ?? null : null;
+    let view: ModelView;
+    if (row) {
+      const copies = groups.get(row.hash) ?? [];
+      const chosen = preferredCopy(row, copies);
+      view = this.#view(chosen, row, this.#thumbs(), copies);
+    } else {
+      const scanned = path !== null
+        ? this.scanner.registry.get(path) ?? null
+        : null;
+      if (!scanned) return null;
+      view = this.#view(scanned, null, this.#thumbs(), [scanned]);
+    }
     return {
       ...view,
       samples: view.hash ? this.#samples?.list(view.hash) ?? [] : [],
     };
+  }
+
+  /**
+   * The name generation sends for a model picked by this name (§8.1): the
+   * file the model's row names, when the pick is another copy of the same
+   * bytes. A copy in a different folder kind is left alone — a loader only
+   * sees the folders of its own kind, so swapping across them would hand
+   * ComfyUI a name it cannot find — as is anything not yet hashed.
+   */
+  canonicalName(name: string, modelClass: ModelClass): string {
+    const overrides = this.#config.config.model_classes;
+    let picked: ScannedModel | null = null;
+    for (const model of this.scanner.registry.values()) {
+      if (model.name !== name) continue;
+      if (classOf(model.kind, overrides) !== modelClass) continue;
+      picked = model;
+      break;
+    }
+    if (!picked) return name;
+    const { groups, rows, hashOf } = this.#copies();
+    const hash = hashOf.get(picked.path);
+    const row = hash ? rows.get(hash) : undefined;
+    if (!hash || !row) return name;
+    const chosen = preferredCopy(row, groups.get(hash) ?? [], picked.kind);
+    return chosen?.name ?? name;
+  }
+
+  /**
+   * The files on disk grouped by the model they hashed to, the ones nobody
+   * has hashed yet, and every `models` row by hash (§8.1).
+   */
+  #copies(): {
+    groups: Map<string, ScannedModel[]>;
+    unhashed: ScannedModel[];
+    rows: Map<string, ModelRow>;
+    hashOf: Map<string, string>;
+  } {
+    const files = listModelFiles(this.#db);
+    const rows = new Map(listModels(this.#db).map((row) => [row.hash, row]));
+    const byPath = new Map([...rows.values()].map((row) => [row.path, row]));
+    const groups = new Map<string, ScannedModel[]>();
+    const unhashed: ScannedModel[] = [];
+    const hashOf = new Map<string, string>();
+    for (const model of this.scanner.registry.values()) {
+      // The row that names this file first, then what the file hashed to:
+      // the same order `#rowFor` has always resolved a path in.
+      const hash = byPath.get(model.path)?.hash ??
+        files.get(model.path)?.hash;
+      if (!hash || !rows.has(hash)) {
+        unhashed.push(model);
+        continue;
+      }
+      hashOf.set(model.path, hash);
+      const group = groups.get(hash);
+      if (group) group.push(model);
+      else groups.set(hash, [model]);
+    }
+    for (const group of groups.values()) {
+      group.sort((a, b) => a.path.localeCompare(b.path));
+    }
+    return { groups, unhashed, rows, hashOf };
+  }
+
+  /**
+   * After a scan: a model whose file has gone, but which has another copy on
+   * disk, is pointed at that copy (§8.1). Otherwise it would read as missing
+   * — and be generated with under a name that is no longer there — while
+   * identical bytes sit one folder over.
+   */
+  #rehome(): void {
+    const { groups, rows } = this.#copies();
+    for (const row of rows.values()) {
+      if (this.scanner.registry.has(row.path)) continue;
+      const copies = groups.get(row.hash);
+      if (!copies || copies.length === 0) continue;
+      try {
+        setModelPath(this.#db, row.hash, copies[0].path);
+      } catch (error) {
+        console.error(`could not re-home ${row.path}:`, error);
+      }
+    }
   }
 
   /**
@@ -688,6 +808,7 @@ export class ModelLibrary {
     scanned: ScannedModel | null,
     row: ModelRow | null,
     thumbs: ModelThumbs,
+    copies: readonly ScannedModel[],
   ): ModelView {
     const path = scanned?.path ?? row!.path;
     const filename = scanned?.filename ?? basename(path);
@@ -733,6 +854,11 @@ export class ModelLibrary {
       hashing: row === null && !failure,
       hash_error: row === null ? failure ?? null : null,
       present: scanned !== null,
+      // The copy this view is of first, then the rest in path order.
+      files: [
+        ...(scanned ? [scanned] : []),
+        ...copies.filter((copy) => copy.path !== scanned?.path),
+      ].map((copy) => ({ path: copy.path, name: copy.name, kind: copy.kind })),
     };
   }
 
@@ -958,4 +1084,20 @@ function matchesQuery(view: ModelView, q?: string): boolean {
     // whose summary says so, whatever its file is called.
     (view.summary?.toLowerCase().includes(needle) ?? false) ||
     view.tags.some((tag) => tag.toLowerCase().includes(needle));
+}
+
+/**
+ * Which of a model's files stands for it (§8.1): the one its row names while
+ * that is on disk, else the first by path. With a folder kind asked for, the
+ * same rule within that kind — a name is relative to its folder, and a
+ * loader only looks in the folders of its own kind — and nothing at all if
+ * no copy is there.
+ */
+export function preferredCopy(
+  row: ModelRow,
+  copies: readonly ScannedModel[],
+  kind?: string,
+): ScannedModel | null {
+  const pool = kind ? copies.filter((copy) => copy.kind === kind) : copies;
+  return pool.find((copy) => copy.path === row.path) ?? pool[0] ?? null;
 }

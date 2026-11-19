@@ -81,6 +81,10 @@ async function findModel(
   const all = [...visible.models, ...hidden.models];
   return all.find((model) => model.name === wanted) ??
     all.find((model) => model.filename === wanted) ??
+    // Another copy of the same bytes is the same model (§8.1).
+    all.find((model) =>
+      model.files?.some((file) => file.name === wanted) ?? false
+    ) ??
     all.find((model) =>
       model.hash !== null && model.hash.replace(/^sha256:/, "") === hash
     ) ??
