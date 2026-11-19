@@ -24,6 +24,7 @@ import type {
   SubmitJob,
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
+import { describeError } from "./llm.ts";
 import { runRound } from "./round.ts";
 import { registerWorkflowTools } from "./workflow_tools.ts";
 import { APP_VERSION } from "../version.ts";
@@ -51,7 +52,7 @@ const failure = (cause: unknown) => ({
   // bad param itself, and ForgeUI's message names which param it was.
   content: [{
     type: "text" as const,
-    text: cause instanceof Error ? cause.message : String(cause),
+    text: describeError(cause),
   }],
   isError: true,
 });

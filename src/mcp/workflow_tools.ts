@@ -20,7 +20,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { type ForgeUi, ForgeUiError } from "./forgeui.ts";
-import { type LlmHost, sourceFor } from "./llm.ts";
+import { describeError, type LlmHost, sourceFor } from "./llm.ts";
 import {
   checkGraphAgainstNodes,
   checkGraphShape,
@@ -217,9 +217,7 @@ function graphRefusal(check: ComfyCheck): string {
 /** ForgeUI's refusal, said in terms of which part of the request it was. */
 function saveRefusal(cause: unknown, workflowId?: string): string {
   if (!(cause instanceof ForgeUiError)) {
-    return `Nothing was saved: ${
-      cause instanceof Error ? cause.message : String(cause)
-    }`;
+    return `Nothing was saved: ${describeError(cause)}`;
   }
   const detail = cause.detail;
   if (cause.status === 403) {
