@@ -7,6 +7,7 @@ import {
   type ObjectInfo,
 } from "../../src/workflows/graph_check.ts";
 import { shippedBundledDir } from "../../src/workflows/loader.ts";
+import { PACK_OF_NODE } from "../../src/workflows/nodes.ts";
 import type { ApiGraph } from "../../src/workflows/types.ts";
 
 /** A slice of a real ComfyUI's `/object_info`, in its own shape. */
@@ -185,7 +186,12 @@ Deno.test("real node list: every bundled graph passes but for the node pack it n
       ),
     ) as ApiGraph;
     const { errors } = checkGraphAgainstNodes(graph, REAL);
-    const real = errors.filter((e) => !e.includes('no node type "BreezeTTS2'));
+    // The fixture is stock ComfyUI, so a pack's nodes are missing by design.
+    const real = errors.filter((e) =>
+      !Object.keys(PACK_OF_NODE).some((type) =>
+        e.includes(`no node type "${type}"`)
+      )
+    );
     assertEquals(real, [], entry.name);
   }
 });

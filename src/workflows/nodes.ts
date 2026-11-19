@@ -663,6 +663,58 @@ export const CORE_NODES: Record<string, NodeSchema> = {
     widgets: ["seconds", "batch_size"],
     outputs: ["LATENT"],
   },
+
+  // ------------------------------------------------------ Pose (§4.6, §10)
+  //
+  // A ControlNet is a second network that steers the sampler towards a
+  // control image; on SD 1.5 it rides on the conditioning, so the apply node
+  // sits between the prompt encoders and the sampler. `nodes.py`.
+  ControlNetLoader: {
+    widgets: ["control_net_name"],
+    outputs: ["CONTROL_NET"],
+  },
+  /** `vae` is optional and only the DiT families (SD3, Flux…) want it. */
+  ControlNetApplyAdvanced: {
+    inputs: ["positive", "negative", "control_net", "image", "vae"],
+    widgets: ["strength", "start_percent", "end_percent"],
+    outputs: ["positive", "negative"],
+  },
+  /*
+   * Core pose detection (`comfy_extras/nodes_sdpose.py`): SDPose reads the
+   * whole-body keypoints of the person in a photo, and the draw node renders
+   * them as the OpenPose-coloured skeleton a pose ControlNet was trained on.
+   * Without `bboxes` it treats the picture as one person.
+   */
+  SDPoseKeypointExtractor: {
+    inputs: ["model", "vae", "image", "bboxes"],
+    widgets: ["batch_size"],
+    outputs: ["keypoints"],
+  },
+  SDPoseDrawKeypoints: {
+    inputs: ["keypoints"],
+    widgets: [
+      "draw_body",
+      "draw_hands",
+      "draw_face",
+      "draw_feet",
+      "stick_width",
+      "face_point_size",
+      "score_threshold",
+      "draw_head",
+    ],
+    outputs: ["IMAGE"],
+  },
+  /** Resizes a reference picture to the nearest resolution an edit model knows. */
+  FluxKontextImageScale: {
+    inputs: ["image"],
+    outputs: ["IMAGE"],
+  },
+  /** How reference latents are placed; `index_timestep_zero` for Krea 2's edit LoRAs. */
+  FluxKontextMultiReferenceLatentMethod: {
+    inputs: ["conditioning"],
+    widgets: ["reference_latents_method"],
+    outputs: ["CONDITIONING"],
+  },
 };
 
 export const CORE_NODE_TYPES: readonly string[] = Object.keys(CORE_NODES);
@@ -756,6 +808,32 @@ export const NODE_PACKS: Record<string, NodePack> = {
         ],
         after: { seed: "fixed" },
         outputs: ["AUDIO"],
+      },
+    },
+  },
+  /*
+   * Ostris's Krea 2 edit nodes (`nodes.py`). Stock ComfyUI's Krea 2 ignores
+   * reference latents, so an edit LoRA trained with AI Toolkit needs both:
+   * the encoder puts up to three pictures into the conditioning, and the
+   * patch makes the model read them. `krea2-pose` hands it a pose skeleton
+   * (§4.6). The patch passes through when there are no references.
+   */
+  "ComfyUI-Krea2-Ostris-Edit": {
+    id: "ComfyUI-Krea2-Ostris-Edit",
+    name: "Krea 2 Ostris Edit",
+    url: "https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit",
+    version: "1.0.1",
+    nodes: {
+      TextEncodeKrea2OstrisEdit: {
+        inputs: ["clip", "vae", "image1", "image2", "image3"],
+        widgets: ["prompt"],
+        outputs: ["CONDITIONING"],
+      },
+      /** `kv_cache` only for a LoRA trained with it; off for every other. */
+      Krea2OstrisEditModelPatch: {
+        inputs: ["model"],
+        widgets: ["kv_cache"],
+        outputs: ["MODEL"],
       },
     },
   },

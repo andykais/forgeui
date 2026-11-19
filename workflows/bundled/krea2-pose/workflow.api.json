@@ -1,0 +1,229 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "krea2_turbo_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "type": "krea2",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "TextEncodeKrea2OstrisEdit",
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "image1": [
+        "16",
+        0
+      ]
+    }
+  },
+  "5": {
+    "class_type": "TextEncodeKrea2OstrisEdit",
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "image1": [
+        "16",
+        0
+      ]
+    }
+  },
+  "6": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": [
+        "17",
+        0
+      ],
+      "height": [
+        "17",
+        1
+      ],
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 10,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "21",
+        0
+      ],
+      "positive": [
+        "18",
+        0
+      ],
+      "negative": [
+        "19",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ]
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "7",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "ForgeUI/out",
+      "images": [
+        "8",
+        0
+      ]
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "13": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sdpose_wholebody_fp16.safetensors"
+    }
+  },
+  "14": {
+    "class_type": "SDPoseKeypointExtractor",
+    "inputs": {
+      "model": [
+        "13",
+        0
+      ],
+      "vae": [
+        "13",
+        2
+      ],
+      "image": [
+        "10",
+        0
+      ],
+      "batch_size": 1
+    }
+  },
+  "15": {
+    "class_type": "SDPoseDrawKeypoints",
+    "inputs": {
+      "keypoints": [
+        "14",
+        0
+      ],
+      "draw_body": true,
+      "draw_hands": true,
+      "draw_face": true,
+      "draw_feet": false,
+      "stick_width": 4,
+      "face_point_size": 3,
+      "score_threshold": 0.3,
+      "draw_head": true
+    }
+  },
+  "16": {
+    "class_type": "FluxKontextImageScale",
+    "inputs": {
+      "image": [
+        "15",
+        0
+      ]
+    }
+  },
+  "17": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "16",
+        0
+      ]
+    }
+  },
+  "18": {
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "4",
+        0
+      ]
+    }
+  },
+  "19": {
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "5",
+        0
+      ]
+    }
+  },
+  "20": {
+    "class_type": "Krea2OstrisEditModelPatch",
+    "inputs": {
+      "kv_cache": false,
+      "model": [
+        "1",
+        0
+      ]
+    }
+  },
+  "21": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "krea2_turbo_openpose_controlnet.safetensors",
+      "strength_model": 1.0,
+      "model": [
+        "20",
+        0
+      ]
+    }
+  }
+}

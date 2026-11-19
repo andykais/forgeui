@@ -28,6 +28,19 @@ export interface ContractTestOptions {
   sampler?: boolean;
   /** Boots the app, so it also needs the shared data dir. */
   app?: boolean;
+  /**
+   * Model files, relative to the ComfyUI install, without which the test
+   * cannot run: `setup-comfy.sh` can be told to skip the pose weights.
+   */
+  files?: string[];
+}
+
+function present(relative: string): boolean {
+  try {
+    return Deno.statSync(`${COMFY_DIR}/${relative}`).isFile;
+  } catch {
+    return false;
+  }
 }
 
 export function contractTest(
@@ -38,6 +51,8 @@ export function contractTest(
   const missing = COMFY_URL === undefined ||
     (options.sampler === true && CHECKPOINT === undefined) ||
     (options.app === true &&
-      (DATA_DIR === undefined || COMFY_DIR === undefined));
+      (DATA_DIR === undefined || COMFY_DIR === undefined)) ||
+    (options.files !== undefined &&
+      (COMFY_DIR === undefined || !options.files.every(present)));
   Deno.test({ name, ignore: missing, fn });
 }

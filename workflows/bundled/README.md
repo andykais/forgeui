@@ -1,6 +1,6 @@
 # Bundled workflows
 
-The 26 workflows of DESIGN §4.6, shipped with the app and copied into
+The 28 workflows of DESIGN §4.6, shipped with the app and copied into
 `<appdata>/workflows/bundled/` on every launch. Editing one in the app copies it
 to `<appdata>/workflows/user/<id>/` first, and the user copy shadows this one
 from then on (§4.6).
@@ -23,12 +23,14 @@ from then on (§4.6).
 | `krea2`               | Krea 2 Turbo                      | krea2        | image | prompt, enhance, model, size, seed, loras · steps, cfg, clip, vae, max_length (`when` enhance) advanced                                                                                                                                                                |
 | `krea2-img2img`       | Krea 2 Turbo (img2img)            | krea2        | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, clip, vae, model advanced                                                                          |
 | `krea2-inpaint`       | Krea 2 Turbo (inpaint)            | krea2        | image | image, prompt, creativity, seed, loras · **Mask** section: mask (`of` image), grow, feather · steps, cfg, sampler, scheduler, clip, vae, model advanced                                                                                                                |
+| `krea2-pose`          | Krea 2 Turbo (pose)               | krea2        | image | image, detect_pose, prompt, strength, seed, loras · pose_lora, pose_model (`when` detect_pose), steps, cfg, model, clip, vae advanced; **requires `ComfyUI-Krea2-Ostris-Edit`**                                                                                        |
 | `ltx2-ia2v`           | LTX-2.3 Image + Audio to Video    | ltx-2        | video | image, audio, prompt, negative, size, duration, start, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced |
 | `ltx2-i2v`            | LTX-2.3 Image to Video            | ltx-2        | video | image, prompt, negative, size, duration, fps, seed, loras, use_distilled, enhance · model, clip, distilled_lora + distilled_strength (`when` use_distilled), latent_upscale_model, enhancer_lora (`when` enhance), sampler, sigmas_base, sigmas advanced               |
 | `minimax-h3-ia2v`     | MiniMax H3 Image + Audio to Video | minimax-h3   | video | image, audio, prompt, size, duration, start, seed, loras, use_turbo · model, clip, vae, audio_vae, steps (`when` not use_turbo), turbo_lora + turbo_strength + turbo_steps (`when` use_turbo), sampler advanced                                                        |
 | `minimax-h3-i2v`      | MiniMax H3 Image to Video         | minimax-h3   | video | image, prompt, size, duration, seed, loras, use_turbo · model, clip, vae, audio_vae, steps (`when` not use_turbo), turbo_lora + turbo_strength + turbo_steps (`when` use_turbo), sampler advanced                                                                      |
 | `sd15`                | Stable Diffusion 1.5              | sd15         | image | prompt, negative, size, seed, loras · steps, cfg advanced                                                                                                                                                                                                              |
 | `sd15-inpaint`        | Stable Diffusion 1.5 (inpaint)    | sd15         | image | image, prompt, negative, creativity, seed, loras · **Mask** section: mask (`of` image), grow, feather · steps, cfg, sampler, scheduler, model advanced                                                                                                                 |
+| `sd15-pose`           | Stable Diffusion 1.5 (pose)       | sd15         | image | image, detect_pose, prompt, negative, strength, megapixels, seed, loras · start, end, controlnet, pose_model (`when` detect_pose), steps, cfg, model advanced                                                                                                          |
 | `sd15-img2img`        | Stable Diffusion 1.5 (img2img)    | sd15         | image | `category: img2img`; image, creativity, scale, prompt, negative, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, upscale_method, model advanced                                                                           |
 | `z-image-turbo`       | Z-Image Turbo                     | z-image      | image | prompt, model, size, loras, seed · steps, shift, clip, vae advanced                                                                                                                                                                                                    |
 | `z-image-img2img`     | Z-Image Turbo (img2img)           | z-image      | image | `category: img2img`; image, creativity, scale, prompt, seed, loras · use_upscale_model, upscale_model, model_scale, steps, cfg, sampler, scheduler, shift, upscale_method, clip, vae, model advanced                                                                   |
@@ -221,3 +223,23 @@ feeds both the interpolator and a `ComfyMathExpression` that multiplies the
 frame rate, so the result runs as long as the source and keeps its sound. The
 model is picked from the `interpolation` class (`frame_interpolation/`), which
 takes RIFE 4.25+ and FILM checkpoints, a raw `flownet.pkl` included.
+
+## The pose workflows
+
+`sd15-pose` and `krea2-pose` copy the pose of a person in a picture (DESIGN
+§4.6). Both detect it with core SDPose, whose checkpoint goes in `checkpoints/`:
+
+- `sdpose_wholebody_fp16.safetensors` (1.9 GB) from
+  [Comfy-Org/SDPose](https://huggingface.co/Comfy-Org/SDPose/tree/main/checkpoints)
+
+`sd15-pose` needs an SD 1.5 OpenPose ControlNet in `controlnet/`:
+
+- `control_v11p_sd15_openpose_fp16.safetensors` (723 MB) from
+  [comfyanonymous/ControlNet-v1-1_fp16_safetensors](https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors)
+
+`krea2-pose` needs the
+[Krea 2 Ostris Edit](https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit) nodes
+and the pose LoRA in `loras/`:
+
+- `krea2_turbo_openpose_controlnet.safetensors` (229 MB) from
+  [thedeoxen/Krea-2-pose-controlnet](https://huggingface.co/thedeoxen/Krea-2-pose-controlnet)
