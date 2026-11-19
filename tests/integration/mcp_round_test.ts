@@ -190,6 +190,37 @@ Deno.test("a busy Strata fails the round before anything is submitted", async ()
   }, { comfy: true });
 });
 
+Deno.test("an LLM server the bridge cannot reach is named, not 'fetch failed'", async () => {
+  await withTestApp(async (app) => {
+    // What Deno's fetch throws for a host it cannot resolve or connect to:
+    // the message alone says nothing, the cause says everything.
+    const unreachable = () =>
+      Promise.reject(
+        new TypeError("fetch failed", {
+          cause: new Error(
+            "error sending request for url (http://llama:8080/running): " +
+              "dns error: failed to lookup address information",
+          ),
+        }),
+      );
+    const llm = new LlamaSwap({ url: "http://llama:8080", fetch: unreachable });
+
+    const error = await runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 30_000,
+    }, { forge: new ForgeUi({ url: app.url }), llm }).then(
+      () => null,
+      (cause: Error) => cause,
+    );
+
+    assert(error, "the round is refused");
+    assertStringIncludes(error.message, "llama-swap at http://llama:8080");
+    assertStringIncludes(error.message, "dns error");
+    const jobs = await app.json<{ jobs: unknown[] }>("/api/jobs?status=all");
+    assertEquals(jobs.jobs.length, 0, "nothing was submitted");
+  }, { comfy: true });
+});
+
 Deno.test("an eager Strata loads again only after ComfyUI has let go", async () => {
   await withTestApp(async (app) => {
     const calls: string[] = [];

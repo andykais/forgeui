@@ -17,7 +17,7 @@ import type {
 } from "./forgeui.ts";
 import { ForgeUiError, isTerminal } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
-import { sourceFor } from "./llm.ts";
+import { describeError, LlmHostError, sourceFor } from "./llm.ts";
 
 /**
  * How often a round re-reads the jobs it is waiting on.
@@ -98,7 +98,22 @@ export async function runRound(
   // 1–2. The GPU, before anything is submitted into it.
   const modelId = llm === null ? null : await llm.currentModel();
   const source = sourceFor(modelId);
-  if (llm !== null) await llm.release();
+  if (llm !== null) {
+    try {
+      await llm.release();
+    } catch (cause) {
+      // The backend's own errors already say what it answered. One it never
+      // answered — the bridge cannot reach `--llm-url` — says only "fetch
+      // failed", which reads as ForgeUI being down when every other tool works.
+      if (cause instanceof LlmHostError) throw cause;
+      throw new LlmHostError(
+        `could not reach the LLM server (${llm.backend} at ${llm.url}) to ` +
+          `free the GPU before the round; check --llm-url is reachable from ` +
+          `where the bridge runs: ${describeError(cause)}`,
+        { cause },
+      );
+    }
+  }
 
   const origin: Origin = {
     source,
@@ -135,9 +150,7 @@ export async function runRound(
         // In a batch of six, "steps: out of range" is no use without which.
         throw new ForgeUiError(
           `job ${index + 1} of ${request.jobs.length} (${job.workflow_id}) ` +
-            `was refused, and the round with it: ${
-              cause instanceof Error ? cause.message : String(cause)
-            }`,
+            `was refused, and the round with it: ${describeError(cause)}`,
         );
       }
     }

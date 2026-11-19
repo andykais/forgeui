@@ -24,6 +24,7 @@ import type {
   SubmitJob,
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
+import { describeError } from "./llm.ts";
 import { runRound } from "./round.ts";
 import { registerWorkflowTools } from "./workflow_tools.ts";
 import { APP_VERSION } from "../version.ts";
@@ -51,7 +52,7 @@ const failure = (cause: unknown) => ({
   // bad param itself, and ForgeUI's message names which param it was.
   content: [{
     type: "text" as const,
-    text: cause instanceof Error ? cause.message : String(cause),
+    text: describeError(cause),
   }],
   isError: true,
 });
@@ -743,9 +744,11 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         }),
         z.strictObject({
           shape: z.literal("polygon"),
-          points: z.array(
-            z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]),
-          ).min(3),
+          // [x, y] as a two-number array, not z.tuple: zod writes a tuple
+          // as `items: false`, a boolean schema llama.cpp's grammar builder
+          // refuses, failing every chat request that lists the tools.
+          points: z.array(z.array(z.number().min(0).max(1)).length(2))
+            .min(3).describe("[x, y] pairs, at least three"),
           erase: z.boolean().optional(),
         }),
       ])).describe("drawn in order, each over what is there"),

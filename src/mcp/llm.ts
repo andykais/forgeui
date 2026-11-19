@@ -35,6 +35,27 @@ export interface LlmHost {
   restore(): Promise<void>;
 }
 
+/**
+ * An error's message with every `cause` under it.
+ *
+ * Deno's fetch rejects with a bare "fetch failed" and keeps the part worth
+ * reading — the URL, and whether it was DNS or a refused connection — in
+ * `cause`. A tool answer that shows only the message tells the model, and the
+ * person reading its transcript, nothing they can act on.
+ */
+export function describeError(error: unknown): string {
+  const parts: string[] = [];
+  let at: unknown = error;
+  for (let depth = 0; at !== undefined && at !== null && depth < 5; depth++) {
+    const text = at instanceof Error ? at.message : String(at);
+    if (text.length > 0 && !parts.some((part) => part.includes(text))) {
+      parts.push(text);
+    }
+    at = at instanceof Error ? at.cause : undefined;
+  }
+  return parts.join(": ");
+}
+
 /** `llm:qwen-vlm` — what lands in `origin.source` (DESIGN-AGENT-LOOP §6.2). */
 export function sourceFor(modelId: string | null): string {
   return modelId === null ? "llm:unknown" : `llm:${modelId}`;
