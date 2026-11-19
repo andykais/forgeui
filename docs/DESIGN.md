@@ -1129,16 +1129,36 @@ same keyset cursor the gallery uses.
   — so it was queued again on every single rescan, for ever, and the count
   never reached zero.
 
-  The corollary is that **`ModelView.id` is not unique across a list**: the
-  list walks files, and two files that hashed the same carry one id between
-  them. A keyed `{#each}` over it therefore throws `each_key_duplicate` and
-  renders nothing — which is how the model picker went blank for anyone with
-  one checkpoint reachable through two configured folders. So key a list on
-  what its rows actually mean: a picker writes a model's **name** into the
-  workflow, so it lists one row per name (`byChoice`); the gallery's filter
-  is a **hash**, so it lists one per model (`byModel`); the Models screen
-  lists files, and keys on the path. The id is the identity of a model, not
-  of a row in a list of files.
+  **Identical files are one model, in every listing and in every run.**
+  `GET /api/models` returns one entry per hash, not one per file: two copies
+  of a LoRA used to be two rows in the picker under two names, and which file
+  a run loaded depended on which row was clicked. The entry is the file the
+  `models` row names — its **canonical path** — and `files` lists every copy
+  on disk with that content, the canonical one first; `model_files` is where
+  they are recorded. The canonical path is stable: a second copy hashed later
+  leaves the row naming the first, rather than the row following whichever
+  copy was read last. It moves only when it has to — the file is gone at the
+  next scan, or it was rewritten into something else — and then to the first
+  remaining copy by path, keeping the name, notes and everything else on the
+  row; a model is dropped only when no copy is left. A request for a path
+  that is one of a model's copies (`GET /api/models/path:…`) answers with the
+  model.
+
+  **Generation always uses the canonical file.** A submit that names any
+  copy — a template saved before the copies were collapsed, an agent that
+  passed the other name — has the name swapped for the canonical one before
+  the graph is built, so the job, its sidecar and the graph ComfyUI loads all
+  name the one file. A name is relative to its folder and a loader sees only
+  the folders of its own kind, so the swap, and a `?kind=` listing, stay
+  within the kind the pick came from: a copy in another kind's folder is
+  never handed to a loader that cannot see it.
+
+  Keys in the UI follow what a row means: a picker writes a model's **name**
+  into the workflow, so it lists one row per name (`byChoice`); the gallery's
+  filter is a **hash**, so it lists one per model (`byModel`). With the list
+  collapsed both are one row per model, but a file still unhashed has only
+  its path, so they stay. The model page lists the other copies under the
+  canonical file's name, each with its own Copy path.
 - **Hashing progress counts the pass that is running**, not every pass since
   launch. Carrying the totals forward made each rescan report a window onto
   nothing — "74/86", the tail of the last pass plus the head of this one.
@@ -2203,7 +2223,7 @@ GET  /api/media/*?max_edge=N             a smaller copy, whole frame, never enla
 GET  /api/config                        contents of config.yaml (effective, after CLI overrides)
 PATCH /api/config                       partial update, written to config.yaml
 GET  /api/families                      hardcoded list with model/workflow counts
-GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, sample_count, last_used_at, added_at
+GET  /api/models?kind&class&family&q&tags&hidden&sort  q: substring, case-insensitive, over display name + filename + tags; returns output_count, sample_count, last_used_at, added_at; one entry per model, with `files` (every copy on disk, canonical first) (§8.1)
                                         tags: comma separated, all required; hidden=1 lists the hidden pile instead of the visible one
                                         sort: added (newest first, default) | oldest | name; added_at is the file's creation time, else its mtime
                                         also returns `classes`: the class of every configured folder kind, which is what the Models tabs group by

@@ -71,6 +71,11 @@ export interface ModelRow {
   sample_count: number;
   /** False once the file is gone; the row survives for its outputs (§8.1). */
   present: boolean;
+  /**
+   * Every copy on disk, the one generation uses first (§8.1). Identical
+   * files are one model; `name` is the one to pass.
+   */
+  files?: { path: string; name: string; kind: string }[];
   /** What it wants in a prompt (DESIGN-MODEL-IMPORT §5.5). */
   trigger_words?: string[];
   /**

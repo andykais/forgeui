@@ -196,6 +196,11 @@ export interface JobRunnerOptions {
   /** Whether a model of this class is on disk under this name (§5.1). */
   modelExists?: (name: string, modelClass: ModelClass) => boolean;
   /**
+   * The name to generate with for a model picked by this name: the copy its
+   * row names, when the pick is another file with the same bytes (§8.1).
+   */
+  canonicalModelName?: (name: string, modelClass: ModelClass) => string;
+  /**
    * Whether a graph may fetch weights while it runs. Read per submit rather
    * than captured, so changing it in Settings takes effect without a restart.
    */
@@ -230,6 +235,7 @@ export class JobRunner {
   #templates: TemplateStore | null;
   #resolveModels?: (models: SidecarModelRef[]) => SidecarModelRef[];
   #modelExists?: (name: string, modelClass: ModelClass) => boolean;
+  #canonicalModelName?: (name: string, modelClass: ModelClass) => string;
   #allowModelDownloads?: () => boolean;
   #telemetry?: TelemetryStore;
   #memory?: MemoryMonitor;
@@ -251,6 +257,7 @@ export class JobRunner {
     this.#templates = options.templates ?? null;
     this.#resolveModels = options.resolveModels;
     this.#modelExists = options.modelExists;
+    this.#canonicalModelName = options.canonicalModelName;
     this.#allowModelDownloads = options.allowModelDownloads;
     this.#telemetry = options.telemetry;
     this.#memory = options.memory;
@@ -299,7 +306,8 @@ export class JobRunner {
     // Params are checked before the connection: what is wrong with the panel
     // is wrong whether or not ComfyUI happens to be up, and saying so is more
     // use than "not connected".
-    const { values } = coerceParams(workflow.manifest, params);
+    const coerced = coerceParams(workflow.manifest, params).values;
+    const values = this.#canonicalModels(workflow.manifest, coerced);
     try {
       this.#assertModelsPresent(workflow.manifest, values);
       this.#assertMasksFit(workflow.manifest, values);
@@ -958,6 +966,43 @@ export class JobRunner {
   #inFlight(id: string): boolean {
     const status = getJob(this.#db, id)?.status;
     return status === "queued" || status === "running";
+  }
+
+  /**
+   * One model, one file (§8.1): a pick of any copy of a model is generated
+   * with as the copy the model's row names, so the job, its sidecar and the
+   * graph ComfyUI loads all agree on one path however the copy was chosen —
+   * a picker, a template saved before the copies were collapsed, or an
+   * agent that passed the other name.
+   */
+  #canonicalModels(
+    manifest: Manifest,
+    values: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const canonical = this.#canonicalModelName;
+    if (!canonical) return values;
+    const out = { ...values };
+    for (const param of manifest.params) {
+      const value = out[param.key];
+      if (param.type === "lora_list") {
+        if (!Array.isArray(value)) continue;
+        out[param.key] = (value as LoraRow[]).map((row) => ({
+          ...row,
+          name: canonical(row.name, "lora"),
+        }));
+        continue;
+      }
+      if (
+        param.type !== "model" && param.type !== "text_encoder" &&
+        param.type !== "vae"
+      ) {
+        continue;
+      }
+      if (typeof value !== "string" || value.length === 0) continue;
+      const modelClass = param.filter?.class ?? MODEL_PARAM_CLASS[param.type];
+      out[param.key] = canonical(value, modelClass);
+    }
+    return out;
   }
 
   /**

@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { startTestApp, type TestApp, withTestApp } from "../fixtures/app.ts";
 import { sha256Of, writeFakeSafetensors } from "../fixtures/models.ts";
-import type { ModelView } from "../../src/models/library.ts";
+import { type ModelView, pathId } from "../../src/models/library.ts";
 import type { JobRow } from "../../src/db/queries.ts";
 
 /**
@@ -1034,4 +1034,115 @@ Deno.test("a model on a branch that is switched off blocks nothing", async () =>
       "not-on-this-machine.safetensors",
     );
   }, { comfy: true });
+});
+
+Deno.test("identical files are one model, generated with as one file", async () => {
+  // The same LoRA twice on disk — a copy kept in a subfolder, which is how a
+  // library picks these up. They hash the same, so they are one model; a
+  // listing that walked files offered it twice, under two names, and which
+  // of the two a run loaded depended on which row was clicked (§8.1).
+  await withModels(async (app, fixtures) => {
+    const original = join(fixtures.loras, "film-grain-35mm.safetensors");
+    const copy = join(fixtures.loras, "old", "grain-copy.safetensors");
+    await Deno.mkdir(join(fixtures.loras, "old"), { recursive: true });
+    await Deno.copyFile(original, copy);
+    await scanAndHash(app);
+
+    const loras = (await models(app, "?class=lora")).models;
+    assertEquals(
+      loras.map((model) => model.filename).sort(),
+      ["film-grain-35mm.safetensors", "soft-studio-light.safetensors"],
+      "the copy is not a second entry",
+    );
+    const grain = loras.find((model) =>
+      model.filename === "film-grain-35mm.safetensors"
+    )!;
+    // Every copy is still on the record, the one generation uses first.
+    assertEquals(grain.path, original);
+    assertEquals(grain.files.map((file) => file.path), [original, copy]);
+    assertEquals(grain.files[1]!.name, join("old", "grain-copy.safetensors"));
+    assertEquals(
+      app.db.prepare("SELECT count(*) FROM model_files WHERE hash = ?")
+        .value<[number]>(grain.hash)?.[0],
+      2,
+    );
+    // Either path is the one model's page.
+    const byCopy = await app.json<ModelView>(
+      `/api/models/${encodeURIComponent(pathId(copy))}`,
+    );
+    assertEquals(byCopy.id, grain.hash);
+    assertEquals(byCopy.path, original);
+
+    // A rescan does not move it to whichever copy was read last.
+    await app.json(`/api/models/${grain.hash}/rescan`, { method: "POST" });
+    await scanAndHash(app);
+    assertEquals((await fixtureLora(app)).path, original);
+
+    // A pick of the copy — an older template, an agent — runs as the one.
+    const submitted = await app.fetch("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "ltx2-i2v",
+        params: {
+          image: "example.png",
+          prompt: "a paper crane",
+          enhance: false,
+          model: CHECKPOINT,
+          distilled_lora: join("old", "grain-copy.safetensors"),
+        },
+      }),
+    });
+    assertEquals(submitted.status, 201, await submitted.clone().text());
+    const job = await submitted.json() as JobRow;
+    assertEquals(job.params.distilled_lora, "film-grain-35mm.safetensors");
+    const named = Object.values(job.api_graph).flatMap((node) =>
+      Object.values(node.inputs)
+    );
+    assert(named.includes("film-grain-35mm.safetensors"));
+    assert(!named.includes(join("old", "grain-copy.safetensors")));
+
+    // Named, then the file it names goes: the copy carries the model on,
+    // name and all, rather than it reading as missing.
+    await app.json(`/api/models/${grain.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Film grain" }),
+    });
+    await Deno.remove(original);
+    await scanAndHash(app);
+    const moved = (await models(app, "?class=lora")).models.find((model) =>
+      model.hash === grain.hash
+    )!;
+    assertEquals(moved.path, copy);
+    assertEquals(moved.present, true);
+    assertEquals(moved.display_name, "Film grain");
+    assertEquals(moved.files.map((file) => file.path), [copy]);
+  }, { comfy: true });
+});
+
+Deno.test("a copy that changes into something else hands the model on", async () => {
+  await withModels(async (app, fixtures) => {
+    const original = join(fixtures.loras, "film-grain-35mm.safetensors");
+    const copy = join(fixtures.loras, "zz-copy.safetensors");
+    await Deno.copyFile(original, copy);
+    await scanAndHash(app);
+    const grain = await fixtureLora(app);
+    assertEquals(grain.path, original);
+    await app.json(`/api/models/${grain.hash}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes: "keep it under 0.5" }),
+    });
+
+    // The file the model names is overwritten with other weights. The
+    // identical copy is still there, so the model — and its notes — stay.
+    await writeFakeSafetensors(original, { name: "different", bytes: 8192 });
+    await scanAndHash(app);
+    const kept = await app.json<ModelView>(`/api/models/${grain.hash}`);
+    assertEquals(kept.path, copy);
+    assertEquals(kept.notes, "keep it under 0.5");
+    assertEquals(
+      (await models(app, "?class=lora")).models.length,
+      3,
+      "the rewritten file is a model of its own now",
+    );
+  });
 });

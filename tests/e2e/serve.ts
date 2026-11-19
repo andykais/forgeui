@@ -44,6 +44,14 @@ for (const name of ["film-grain-35mm", "soft-studio-light"]) {
   file.set(header, 8);
   await Deno.writeFile(join(loraDir, `${name}.safetensors`), file);
 }
+// A byte-identical copy in a subfolder: one model, one entry, and the model
+// page lists it under the file generation uses (§8.1). `zz-` keeps it after
+// the original by path, so the original stays the one generation uses.
+await Deno.mkdir(join(loraDir, "zz-backup"), { recursive: true });
+await Deno.copyFile(
+  join(loraDir, "film-grain-35mm.safetensors"),
+  join(loraDir, "zz-backup", "film-grain-35mm.safetensors"),
+);
 
 // Extra args reach the child verbatim (§3.1), which is how the demo slows
 // the fake down enough to watch progress arrive.
