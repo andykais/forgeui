@@ -232,6 +232,17 @@ test("Generate", async ({ page, request }) => {
     timeout: 60_000,
   }).catch(() => {});
 
+  // A running job stopped from its own card: the fake holds the job mid-graph
+  // until it is interrupted, so the card is there to be cancelled.
+  await shot(page, group, "Running job cancelled", "Cancel on the running card interrupts it.", async () => {
+    await request.post(`${comfyUrl}/__fake/scenario?name=cancel-while-running`);
+    await generate(page, /^Illustrious XL prompt/, "a kite over salt flats, cancelled mid-run");
+    const card = page.locator(".card.running");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator(".card.cancelled")).toBeVisible({ timeout: 30_000 });
+  });
+
   await shot(page, group, "Failed job", "The fake ComfyUI errors mid-graph.", async () => {
     await request.post(`${comfyUrl}/__fake/scenario?name=error-mid-graph`);
     await generate(page, /^Illustrious XL prompt/, "a heron in reeds, this one fails");

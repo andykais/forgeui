@@ -216,6 +216,8 @@ export class FakeComfy {
   /** Unexpected failures inside a replay; tests assert this stays empty. */
   readonly errors: unknown[] = [];
   interruptCount = 0;
+  /** The `prompt_id` the last `/interrupt` named, or null for a bare one. */
+  lastInterruptPromptId: string | null = null;
 
   #server!: Deno.HttpServer<Deno.NetAddr>;
   #options: FakeComfyOptions;
@@ -372,7 +374,7 @@ export class FakeComfy {
     if (req.method === "GET" && path === "/queue") return this.#getQueue();
     if (req.method === "POST" && path === "/queue") return this.#postQueue(req);
     if (req.method === "POST" && path === "/interrupt") {
-      return this.#interrupt();
+      return this.#interrupt(req);
     }
     if (req.method === "POST" && path === "/free") {
       this.freed++;
@@ -636,10 +638,14 @@ export class FakeComfy {
     return new Response(null, { status: 200 });
   }
 
-  #interrupt(): Response {
+  /** Like ComfyUI: a `prompt_id` that is not the running one is a no-op. */
+  async #interrupt(req: Request): Promise<Response> {
     this.interruptCount++;
+    const body = await req.json().catch(() => ({})) as { prompt_id?: unknown };
     const running = this.#runs.find((run) => run.status === "running");
-    if (running) {
+    const targeted = typeof body.prompt_id === "string" ? body.prompt_id : null;
+    this.lastInterruptPromptId = targeted;
+    if (running && (targeted === null || targeted === running.prompt_id)) {
       running.abortReason = "interrupted";
       running.abort.abort();
     }

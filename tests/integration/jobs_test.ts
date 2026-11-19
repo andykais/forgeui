@@ -378,6 +378,8 @@ Deno.test("cancelling a running job interrupts it", async () => {
 
     await app.fetch(`/api/jobs/${submitted.id}/cancel`, { method: "POST" });
     assertEquals(app.fake!.interruptCount, 1);
+    // Named, so ComfyUI cannot stop someone else's prompt on our behalf.
+    assertEquals(app.fake!.lastInterruptPromptId, submitted.prompt_id);
     await app.fake!.waitForPrompt(submitted.prompt_id!);
     const cancelled = await awaitJob(app, submitted.id);
     assertEquals(cancelled.status, "cancelled");

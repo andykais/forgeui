@@ -1505,7 +1505,8 @@ queued jobs, and connection + VRAM state at the right, on every screen. It
 has an idle form rather than disappearing, and collapses to a 6px bar. Queue
 state lives **only** here — no screen duplicates it. The strip offers only
 *Clear queue* and cancel of the running job; cancelling an individual queued
-job is done from its placeholder on the Generate page.
+job is done from its placeholder on the Generate page, and the running job
+can be cancelled from its progress card there too.
 
 Every media list (Generate session, Gallery, Models) shares one **tiles /
 table toggle** — small tiles, large tiles, table — stored per screen.
@@ -1908,8 +1909,13 @@ table toggle** — small tiles, large tiles, table — stored per screen.
   grid's rhythm, reflowing every finished tile around it for as long as a job
   was in flight. The numbers shrank instead. The preview **fits** rather than
   fills: a frame from the sampler is a handful of pixels to begin with, and
-  cropping it only makes the one thing it is for harder to read. Failed cards
-  expose the error inline with Retry.
+  cropping it only makes the one thing it is for harder to read. The card
+  carries a **Cancel** that interrupts the job (`POST /api/jobs/:id/cancel`,
+  which sends ComfyUI `/interrupt` naming the job's `prompt_id`, so a stale
+  row can never stop another client's prompt); it reads *Cancelling…* until
+  ComfyUI's `execution_interrupted` turns the card cancelled, since a node
+  that does not check for interrupts — a model load — can take a while to
+  stop. Failed cards expose the error inline with Retry.
 - Video and image tiles are one component; kind only changes the badge and
   hover playback (muted autoplay).
 - Tile actions (Edit in Generate, Rerun now, Use in workflow, Upscale) appear

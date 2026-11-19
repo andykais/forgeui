@@ -208,8 +208,18 @@ export class ComfyClient {
     });
   }
 
-  async interrupt(): Promise<void> {
-    await this.#request("/interrupt", { method: "POST" });
+  /**
+   * Interrupt the running prompt. With a `promptId`, ComfyUI interrupts only
+   * if that prompt is the one executing, so a stale job row can never stop
+   * another client's work; a ComfyUI too old to read the body interrupts
+   * whatever is running, which is the old behaviour.
+   */
+  async interrupt(promptId?: string): Promise<void> {
+    await this.#request("/interrupt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(promptId ? { prompt_id: promptId } : {}),
+    });
   }
 
   /**
