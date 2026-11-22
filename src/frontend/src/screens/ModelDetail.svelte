@@ -287,7 +287,6 @@
     void patch({ notes: notesDraft });
   }
 
-
   async function copy(text: string, what: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -520,7 +519,11 @@
     </nav>
 
     <header class="head">
-      <button class="back" title="Back to models (esc)" onclick={() => navigate("/models")}>
+      <button
+        class="back"
+        title="Back to models (esc)"
+        onclick={() => navigate("/models")}
+      >
         <ArrowLeft size={15} />
       </button>
 
@@ -613,6 +616,25 @@
             <span class="badge mono missing">file missing</span>
           {/if}
         </div>
+        <!--
+          Identical files are one model (§8.1): generation uses the one above,
+          and these are the other copies of the same bytes on disk.
+        -->
+        {#each (model.files ?? []).slice(1) as other (other.path)}
+          <div
+            class="file copy mono dim"
+            title="Same sha256; generation uses the file above"
+          >
+            <span>also at {other.name}</span>
+            <button
+              class="icon"
+              title="Copy path"
+              onclick={() => copy(other.path, "Path")}
+            >
+              <Copy size={12} />
+            </button>
+          </div>
+        {/each}
 
         <div class="hash mono dim">
           {#if model.hash}
@@ -668,13 +690,13 @@
             <a
               href={`https://civitaiarchive.com/sha256/${model.hash}`}
               target="_blank"
-              rel="noreferrer noopener"
-            >civitaiarchive</a>
+              rel="noreferrer noopener">civitaiarchive</a
+            >
             <a
               href={`https://civitai.red/search/models?sortBy=models_v9&query=${model.hash}`}
               target="_blank"
-              rel="noreferrer noopener"
-            >civitai</a>
+              rel="noreferrer noopener">civitai</a
+            >
           {/if}
         </div>
 
@@ -902,7 +924,6 @@
     background: var(--control);
   }
 
-
   .head {
     display: flex;
     gap: 12px;
@@ -978,7 +999,6 @@
     color: var(--text-3);
   }
 
-
   .badge {
     font-size: 10px;
     padding: 1px 6px;
@@ -996,7 +1016,6 @@
     background: var(--control);
     color: var(--error);
   }
-
 
   .file,
   .hash {
@@ -1099,7 +1118,6 @@
     background: var(--control-selected);
     color: var(--text);
   }
-
 
   .summary {
     background: var(--control);

@@ -393,6 +393,15 @@ test("Models", async ({ page }) => {
     page.getByRole("button", { name: /^Open sample/ }).first().click());
   await page.keyboard.press("Escape");
 
+  await shot(page, group, "Model with a copy", "Two identical files: one model, the copy listed under the file in use.", async () => {
+    const body = await (await page.request.get("/api/models?kind=loras")).json();
+    const grain = (body.models as { id: string; filename: string }[])
+      .find((model) => model.filename === "film-grain-35mm.safetensors");
+    if (!grain) throw new Error("no film-grain LoRA in /api/models");
+    await page.goto(`/models/${grain.id}`);
+    await expect(page.getByText("also at zz-backup/film-grain-35mm.safetensors")).toBeVisible();
+  });
+
   await shot(page, group, "Not found", "A model id that does not exist.", () =>
     page.goto("/models/does-not-exist"), true);
 });

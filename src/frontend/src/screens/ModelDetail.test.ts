@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import type { ModelDetail as ModelDetailType } from "../types.ts";
 
 /**
@@ -83,8 +77,7 @@ describe("the model page header", () => {
     patchModel.mockResolvedValue(detail({ display_name: "Grain" }));
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const input =
-      (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.value).toBe("Film grain 35mm");
     await fireEvent.input(input, { target: { value: "Grain" } });
     await fireEvent.blur(input);
@@ -97,14 +90,37 @@ describe("the model page header", () => {
     model.mockResolvedValue(detail());
     render(ModelDetail, { id: "a".repeat(64) });
 
-    const input =
-      (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "Something else" } });
     await fireEvent.keyDown(input, { key: "Escape" });
     await fireEvent.blur(input);
 
     expect(input.value).toBe("Film grain 35mm");
     expect(patchModel).not.toHaveBeenCalled();
+  });
+
+  test("the other copies of the same file are listed under the one in use", async () => {
+    model.mockResolvedValue(
+      detail({
+        files: [
+          {
+            path: "/models/loras/film-grain-35mm.safetensors",
+            name: "film-grain-35mm.safetensors",
+            kind: "loras",
+          },
+          {
+            path: "/models/loras/old/grain-copy.safetensors",
+            name: "old/grain-copy.safetensors",
+            kind: "loras",
+          },
+        ],
+      }),
+    );
+    render(ModelDetail, { id: "a".repeat(64) });
+
+    expect(await screen.findByText("also at old/grain-copy.safetensors")).toBeTruthy();
+    // The one in use is not repeated as a copy of itself.
+    expect(screen.queryByText("also at film-grain-35mm.safetensors")).toBeNull();
   });
 
   test("an unchanged name is not written back", async () => {
@@ -123,11 +139,9 @@ describe("the model page header", () => {
     render(ModelDetail, { id: "path:abc" });
 
     expect(await screen.findByText("hashing")).toBeTruthy();
-    const input =
-      (await screen.findByLabelText("Display name")) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Display name")) as HTMLInputElement;
     expect(input.disabled).toBe(true);
-    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).disabled)
-      .toBe(true);
+    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).disabled).toBe(true);
     // Tags are edited through the picker, which is not offered at all until
     // the model has an identity to hang them off.
     expect(screen.queryByTitle(/Add a tag/)).toBeNull();
@@ -187,18 +201,14 @@ describe("the model page header", () => {
     // resyncing every draft from it would throw the notes away.
     model.mockResolvedValue(detail());
     let resolveTags: (value: unknown) => void = () => {};
-    patchModel.mockImplementation(
-      (_id: string, body: Record<string, unknown>) => {
-        if ("tags" in body) {
-          return new Promise((resolve) => {
-            resolveTags = resolve;
-          });
-        }
-        return Promise.resolve(
-          detail({ notes: "typed while the tag was saving" }),
-        );
-      },
-    );
+    patchModel.mockImplementation((_id: string, body: Record<string, unknown>) => {
+      if ("tags" in body) {
+        return new Promise((resolve) => {
+          resolveTags = resolve;
+        });
+      }
+      return Promise.resolve(detail({ notes: "typed while the tag was saving" }));
+    });
     render(ModelDetail, { id: "a".repeat(64) });
 
     await fireEvent.click(await screen.findByTitle(/Add a tag/));
@@ -224,14 +234,12 @@ describe("the model page header", () => {
   test("Rescan is in the page's top row whatever state the model is in", async () => {
     // It has been lost twice from a row of small buttons that only some
     // models show; this holds it where it is always drawn.
-    for (
-      const state of [
-        detail(),
-        detail({ hash: null, hashing: true }),
-        detail({ present: false }),
-        detail({ hidden: true }),
-      ]
-    ) {
+    for (const state of [
+      detail(),
+      detail({ hash: null, hashing: true }),
+      detail({ present: false }),
+      detail({ hidden: true }),
+    ]) {
       model.mockResolvedValue(state);
       const page = render(ModelDetail, { id: "a".repeat(64) });
       await within(page.container).findByLabelText("Display name");
@@ -252,14 +260,11 @@ describe("the model page header", () => {
 
     // The import lands it: the rescan, then the page it was looking for.
     model.mockResolvedValue(detail());
-    await fireEvent.click(
-      within(page.container).getByRole("button", { name: "Rescan" }),
-    );
+    await fireEvent.click(within(page.container).getByRole("button", { name: "Rescan" }));
     expect(rescanModels).toHaveBeenCalledWith({ wait: true });
     expect(
-      ((await within(page.container).findByLabelText(
-        "Display name",
-      )) as HTMLInputElement).value,
+      ((await within(page.container).findByLabelText("Display name")) as HTMLInputElement)
+        .value,
     ).toBe("Film grain 35mm");
   });
 
@@ -273,9 +278,7 @@ describe("the model page header", () => {
     const first = render(ModelDetail, { id: "a".repeat(64) });
     const second = render(ModelDetail, { id: "a".repeat(64) });
     const nameIn = (container: HTMLElement) =>
-      within(container).findByLabelText("Display name") as Promise<
-        HTMLInputElement
-      >;
+      within(container).findByLabelText("Display name") as Promise<HTMLInputElement>;
     expect((await nameIn(first.container)).value).toBe("Film grain 35mm");
     expect((await nameIn(second.container)).value).toBe("Film grain 35mm");
 
@@ -288,9 +291,7 @@ describe("the model page header", () => {
     );
 
     await waitFor(async () =>
-      expect((await nameIn(first.container)).value).toBe(
-        "Film Grain (Civitai)",
-      )
+      expect((await nameIn(first.container)).value).toBe("Film Grain (Civitai)"),
     );
     // Waited out, import batches included, before the reload.
     expect(rescanModels).toHaveBeenCalledWith({ wait: true });

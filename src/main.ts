@@ -136,6 +136,7 @@ async function startAppWith(
     templates,
     resolveModels: (refs) => models.resolveModels(refs),
     modelExists: (name, cls) => models.hasModelNamed(name, cls),
+    canonicalModelName: (name, cls) => models.canonicalName(name, cls),
     allowModelDownloads: () => store.config.comfy.allow_model_downloads,
     telemetry,
     memory,
