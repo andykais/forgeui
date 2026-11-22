@@ -523,6 +523,7 @@ placeholder, so in pi a take is something to `save_to`, not to listen to.
 | Eviction seems to do nothing | llama-swap is not the thing that started `llama-server` (§5.2) |
 | pi packs a prompt the server rejects | `contextWindow` in `models.json` exceeds `--ctx-size` (§5.4) |
 | The tool call dies after N seconds | the harness's MCP timeout, not the bridge. §4; in pi, a missing `timeout` is 60 seconds (§5.1) |
+| stderr: `the client abandoned a generate call…` | the same timeout. The bridge cancelled the round's jobs so the LLM's reload does not land on a GPU ComfyUI is still using; raise `timeout` above your longest round |
 | pi has no `mcp__forgeui__*` tools | `exposure` is not `direct`, or an installed extension that registers `/mcp` has replaced the built-in MCP support (§5.1) |
 | `Mcp-Method header is absent` | you are hand-rolling a client; the 2026-07-28 HTTP binding mirrors `method` and `params.name` into headers |
 | Images are enormous in context | the model called `get_output_file` rather than `get_output_preview`, or ForgeUI's machine has no ffmpeg — the preview then says `max_edge … was not applied`. Install ffmpeg where ForgeUI runs, or resize client side: `inputLimits.images.resize` in `models.json` (§5.4) |

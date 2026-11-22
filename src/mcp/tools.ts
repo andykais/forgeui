@@ -1046,7 +1046,15 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
         project,
         note,
         timeoutMs: (timeout_s ?? options.defaultTimeoutMs / 1000) * 1000,
-      }, { forge, llm, freeVram: options.freeVram, onProgress });
+      }, {
+        forge,
+        llm,
+        freeVram: options.freeVram,
+        onProgress,
+        // pi's request timeout, a `notifications/cancelled`, a closed stream:
+        // the round stops its jobs rather than racing the reload (§5.3).
+        signal: ctx.mcpReq.signal,
+      });
       return text(result);
     } catch (cause) {
       return failure(cause);

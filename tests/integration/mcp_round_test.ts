@@ -343,3 +343,120 @@ Deno.test("freeing VRAM goes through the route, not the client", async () => {
     assertEquals(app.fake!.freed, 1);
   }, { comfy: true });
 });
+
+/**
+ * The harness gave up on the call — pi's request timeout — while ComfyUI was
+ * mid-sample. The harness's next completion reloads the LLM straight away, so
+ * the round must stop its jobs and hand the GPU back now, not when its own
+ * timeout runs out (DESIGN-AGENT-LOOP §5.3, §10).
+ */
+Deno.test("a round the client abandons cancels its jobs and hands the GPU back", async () => {
+  await withTestApp(async (app) => {
+    app.fake!.setScenario("cancel-while-running");
+    const calls: string[] = [];
+    const { fetcher, isLoaded } = fakeStrata(calls);
+    const llm = new Strata({
+      url: "http://strata",
+      reload: "eager",
+      fetch: fetcher,
+    });
+    const caller = new AbortController();
+
+    const started = Date.now();
+    const round = runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 600_000,
+    }, {
+      forge: new ForgeUi({ url: app.url }),
+      llm,
+      freeVram: true,
+      signal: caller.signal,
+    });
+    await app.fake!.waitForGate("interrupt");
+    caller.abort();
+    const result = await round;
+
+    assert(
+      Date.now() - started < 15_000,
+      `took ${Date.now() - started}ms; the round waited for its own timeout`,
+    );
+    assertEquals(app.fake!.interruptCount, 1, "ComfyUI was interrupted");
+    assertEquals(result.counts.cancelled, 1);
+    assertStringIncludes(result.jobs[0]!.error!, "MCP client stopped waiting");
+    const row = await app.json<{ status: string }>(
+      `/api/jobs/${result.jobs[0]!.job_id}`,
+    );
+    assertEquals(row.status, "cancelled", "the job really stopped");
+    assertEquals(app.fake!.freed, 1, "ComfyUI was asked to unload");
+    // Reloaded only after the job had stopped and VRAM was freed.
+    assertEquals(calls, ["unload", "load"]);
+    assertEquals(isLoaded(), true);
+  }, { comfy: true });
+});
+
+/** A bridge whose cancel never reaches ComfyUI. */
+class DeafCancelForgeUi extends ForgeUi {
+  override cancel(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("a cancel that has not landed keeps the LLM off the GPU", async () => {
+  // The machine-locking case: ComfyUI is still sampling, and an eager reload
+  // would put the LLM into the same memory. Better to leave it to the next
+  // completion than to load it on top.
+  await withTestApp(async (app) => {
+    app.fake!.setScenario("cancel-while-running");
+    const calls: string[] = [];
+    const { fetcher, isLoaded } = fakeStrata(calls);
+    const llm = new Strata({
+      url: "http://strata",
+      reload: "eager",
+      fetch: fetcher,
+    });
+    const caller = new AbortController();
+
+    const round = runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 600_000,
+    }, {
+      forge: new DeafCancelForgeUi({ url: app.url }),
+      llm,
+      signal: caller.signal,
+      stopTimeoutMs: 500,
+    });
+    await app.fake!.waitForGate("interrupt");
+    caller.abort();
+    await round;
+
+    assertEquals(calls, ["unload"], "no load while ComfyUI was busy");
+    assertEquals(isLoaded(), false);
+    app.fake!.openGate("interrupt");
+  }, { comfy: true });
+});
+
+Deno.test("a call cancelled before the round begins takes nothing from the LLM", async () => {
+  await withTestApp(async (app) => {
+    const calls: string[] = [];
+    const { fetcher } = fakeStrata(calls);
+    const caller = new AbortController();
+    caller.abort();
+    let refused: unknown = null;
+    try {
+      await runRound({
+        jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+        timeoutMs: 30_000,
+      }, {
+        forge: new ForgeUi({ url: app.url }),
+        llm: new Strata({ url: "http://strata", fetch: fetcher }),
+        signal: caller.signal,
+      });
+    } catch (cause) {
+      refused = cause;
+    }
+    assert(refused instanceof Error);
+    assertEquals(calls, []);
+    const jobs = await app.json<{ jobs: unknown[] }>("/api/jobs");
+    assertEquals(jobs.jobs.length, 0, "nothing was submitted");
+  }, { comfy: true });
+});

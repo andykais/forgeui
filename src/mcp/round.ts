@@ -28,6 +28,12 @@ import { describeError, LlmHostError, sourceFor } from "./llm.ts";
  */
 const RECONCILE_MS = 1000;
 
+/**
+ * How long a cancel may take to land. ComfyUI interrupts between sampler
+ * steps, and a step of a video model can take tens of seconds.
+ */
+const STOP_TIMEOUT_MS = 60_000;
+
 /** A timer that does not outlive the wait it was made for. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -73,6 +79,33 @@ export interface RoundDeps {
   freeVram?: boolean;
   /** Progress for a human watching, when the client asked for it (§5.3). */
   onProgress?: (done: number, total: number, message: string) => void;
+  /**
+   * The caller gave up on the call: the MCP client's request timeout, a
+   * `notifications/cancelled`, or a closed stream (DESIGN-AGENT-LOOP §5.3).
+   *
+   * A harness that has stopped waiting sends its next completion straight
+   * away, and that completion is what loads the LLM again — into a GPU, and
+   * RAM, that ComfyUI is still filling. So an abandoned round cancels its
+   * jobs, waits until they have actually stopped, and hands the GPU back
+   * then, not when its own timeout runs out minutes later.
+   */
+  signal?: AbortSignal;
+  /** How long a cancelled round waits for ComfyUI to stop. Tests shorten it. */
+  stopTimeoutMs?: number;
+}
+
+/** What a job cancelled because the caller left says about itself. */
+const ABANDONED =
+  "cancelled: the MCP client stopped waiting for this call (its request " +
+  "timeout?). Raise the harness's MCP timeout above the longest round";
+
+/** A promise that settles when `signal` aborts; never, without one. */
+function abortedBy(signal: AbortSignal | undefined): Promise<true> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    if (signal.aborted) return resolve(true);
+    signal.addEventListener("abort", () => resolve(true), { once: true });
+  });
 }
 
 function errorText(job: JobRow): string | undefined {
@@ -93,7 +126,13 @@ export async function runRound(
   request: RoundRequest,
   deps: RoundDeps,
 ): Promise<RoundResult> {
-  const { forge, llm } = deps;
+  const { forge, llm, signal } = deps;
+  const stopTimeoutMs = deps.stopTimeoutMs ?? STOP_TIMEOUT_MS;
+  // Nobody is waiting: take nothing from the LLM and submit nothing.
+  if (signal?.aborted) {
+    throw new ForgeUiError("the call was cancelled before the round began");
+  }
+  const abandoned = abortedBy(signal);
 
   // 1–2. The GPU, before anything is submitted into it.
   const modelId = llm === null ? null : await llm.currentModel();
@@ -132,10 +171,18 @@ export async function runRound(
   const submitted = new Map<string, RoundJob>();
   /** Ids as the job rows report them, resolved to files once the round ends. */
   const produced = new Map<string, string[]>();
+  /**
+   * Jobs a cancel could not stop in time. While there are any, ComfyUI still
+   * holds the GPU, and nothing here may invite the LLM back onto it.
+   */
+  let stillRunning: string[] = [];
   try {
     // 4. Submit. A rejection here is the model's to fix — a bad param names
     // itself — so the ids already queued are cancelled rather than orphaned.
     for (const [index, job] of request.jobs.entries()) {
+      // The client left while the batch was going in: submit no more. The
+      // wait below sees the abort and cancels what is already queued.
+      if (signal?.aborted) break;
       try {
         const row = await forge.submit(job, origin);
         submitted.set(row.id, {
@@ -146,7 +193,11 @@ export async function runRound(
           note: job.note,
         });
       } catch (cause) {
-        await stopAll(forge, [...submitted.keys()]);
+        stillRunning = await stopAll(
+          forge,
+          [...submitted.keys()],
+          stopTimeoutMs,
+        );
         // In a batch of six, "steps: out of range" is no use without which.
         throw new ForgeUiError(
           `job ${index + 1} of ${request.jobs.length} (${job.workflow_id}) ` +
@@ -178,15 +229,30 @@ export async function runRound(
     // A job can already be terminal before the first event arrives.
     await reconcile();
 
+    /** Cancel what is left, and say why on each job. */
+    const giveUp = async (why: string) => {
+      stillRunning = await stopAll(forge, [...pending], stopTimeoutMs);
+      for (const id of pending) {
+        const entry = submitted.get(id)!;
+        entry.status = "cancelled";
+        entry.error = why;
+      }
+    };
+
     while (pending.size > 0) {
+      if (signal?.aborted) {
+        console.error(
+          `forge mcp: the client abandoned a generate call with ` +
+            `${pending.size} job(s) unfinished; cancelling them before the ` +
+            `LLM can reload. Raise the harness's MCP timeout above the ` +
+            `longest round`,
+        );
+        await giveUp(ABANDONED);
+        break;
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        await stopAll(forge, [...pending]);
-        for (const id of pending) {
-          const entry = submitted.get(id)!;
-          entry.status = "cancelled";
-          entry.error = `timed out after ${request.timeoutMs}ms`;
-        }
+        await giveUp(`timed out after ${request.timeoutMs}ms`);
         break;
       }
       // The socket, or a tick. Every tick re-reads the rows that are still
@@ -199,18 +265,21 @@ export async function runRound(
       // a tick stays queued on the generator and swallows the next event
       // into a promise nobody awaits.
       const wait = Math.min(remaining, RECONCILE_MS);
+      // An abort wakes the wait at once: every second spent here after the
+      // client has left is a second the LLM may be loading into a full GPU.
       if (streamDone) {
-        await sleep(wait);
-        await reconcile();
+        await Promise.race([sleep(wait), abandoned]);
+        if (!signal?.aborted) await reconcile();
         continue;
       }
       pulling ??= pump.next();
       const tick = await Promise.race([
         pulling.then(() => false as const),
         sleep(wait).then(() => true as const),
+        abandoned,
       ]);
       if (tick) {
-        await reconcile();
+        if (!signal?.aborted) await reconcile();
         continue;
       }
       const next = await pulling;
@@ -249,7 +318,22 @@ export async function runRound(
     // 7. Only after ComfyUI has let go: an eager reload into a GPU still
     // holding the diffusion weights is the OOM the eviction was for. A no-op
     // unless asked for, and it never throws.
-    if (llm !== null) await llm.restore();
+    //
+    // And not at all while a cancel has not landed: a job ComfyUI is still
+    // running is still holding the GPU, and the reload is what would lock
+    // the machine. The next completion loads the model once it is free.
+    if (llm !== null) {
+      if (stillRunning.length > 0) {
+        console.error(
+          `forge mcp: ${stillRunning.length} job(s) had not stopped ` +
+            `${stopTimeoutMs / 1000}s after being cancelled ` +
+            `(${stillRunning.join(", ")}); not reloading the LLM onto a GPU ` +
+            `ComfyUI is still using`,
+        );
+      } else {
+        await llm.restore();
+      }
+    }
   }
 
   // The files, last: a chained job takes an output by id, and the model
@@ -284,13 +368,14 @@ export async function runRound(
  * Asking is not enough: `POST /cancel` returns before ComfyUI has torn the
  * job down, so a rollback that returns on the ask hands back a GPU that is
  * still busy — which is the one thing this whole design is trying not to do.
- * Bounded, because a round that has already failed must still end.
+ * Bounded, because a round that has already failed must still end; what it
+ * returns is the ids that had not stopped by then.
  */
 async function stopAll(
   forge: ForgeUi,
   ids: string[],
-  timeoutMs = 10_000,
-): Promise<void> {
+  timeoutMs: number,
+): Promise<string[]> {
   for (const id of ids) await forge.cancel(id).catch(() => {});
   const deadline = Date.now() + timeoutMs;
   const waiting = new Set(ids);
@@ -303,6 +388,7 @@ async function stopAll(
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
+  return [...waiting];
 }
 
 function settle(
