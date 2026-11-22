@@ -33,6 +33,7 @@ import {
 } from "./mcp/backends.ts";
 import { serveHttp, serveStdio } from "./mcp/serve.ts";
 import { createBridgeServer } from "./mcp/tools.ts";
+import { ON_TIMEOUT, type OnTimeout } from "./mcp/round.ts";
 import { APP_VERSION } from "./version.ts";
 
 /** Flags `serve` and `reindex` pass through to `src/main.ts` untouched. */
@@ -231,7 +232,22 @@ const mcp = new Command()
   .option("--timeout <seconds:number>", "Default ceiling for one round.", {
     default: 900,
   })
+  .option(
+    "--on-timeout <mode:string>",
+    "A round past --timeout: finish (let the jobs end, then answer with an " +
+      "error saying where the time went) or cancel (stop them and answer " +
+      "with what finished). A client that hangs up cancels either way.",
+    { default: "finish" },
+  )
   .action(async (options) => {
+    if (!ON_TIMEOUT.includes(options.onTimeout as OnTimeout)) {
+      console.error(
+        `forge mcp: --on-timeout must be one of ${ON_TIMEOUT.join(", ")}, ` +
+          `not ${JSON.stringify(options.onTimeout)}`,
+      );
+      Deno.exit(2);
+    }
+    const onTimeout = options.onTimeout as OnTimeout;
     const forge = new ForgeUi({ url: options.forgeui });
     let llmOptions;
     try {
@@ -253,6 +269,7 @@ const mcp = new Command()
         freeVram: options.freeVram,
         progress: options.progress ?? false,
         defaultTimeoutMs: options.timeout * 1000,
+        onTimeout,
       });
 
     if (options.stdio || options.http === undefined) {

@@ -321,8 +321,8 @@ something to engineer around. Where it cannot be configured, `wait: false`
 returns `{batch_id}` immediately and `generate_status(id)` polls; it costs a
 round of model time per poll, which is why it is not the default.
 
-**Progress notifications are not a timeout mechanism, and the model never sees
-them.** They go to the MCP *client*, and the model is unloaded for the whole
+**Progress notifications are not a timeout mechanism — except as a heartbeat,
+below — and the model never sees them.** They go to the MCP *client*, and the model is unloaded for the whole
 call. The spec defines `notifications/progress` against a `progressToken` but
 does not require a client to extend any deadline on receiving one, so relying
 on that would be relying on a behaviour nobody promised. They are therefore
@@ -333,10 +333,40 @@ bridge does not need per-job events for anything else. It waits on the single
 `batch` event.
 
 **Cancellation is real and is not optional.** On Streamable HTTP a client
-abandons a request by closing the response stream; when that happens the bridge
-calls `POST /api/jobs/batch/:id/cancel`. Without it, a client that timed out
+abandons a request by closing the response stream (on stdio, by sending
+`notifications/cancelled`); either aborts the call's signal, and the round
+cancels each job it submitted. Without it, a client that timed out
 leaves the GPU working on results nobody will read — which matters far more
-here than anywhere else, because that GPU is also the one the model needs back.
+here than anywhere else, because that GPU is also the one the model needs back:
+a harness that has stopped waiting sends its next completion at once, and that
+completion reloads the LLM into memory ComfyUI is still filling.
+
+*Built:* the round waits for the cancelled jobs to reach a terminal state (up
+to 60 s — ComfyUI interrupts between sampler steps), frees ComfyUI's VRAM, and
+returns. If a job has still not stopped by then, an eager Strata reload is
+skipped and stderr says so: the next completion loads the model, and loading it
+on top of a running job is what locks the machine.
+
+**The bridge's own timeout, and `--on-timeout`.** A hang-up cancels, always.
+A round that is merely slow — past `--timeout` or its `timeout_s`, with the
+client still listening — is decided by `forge mcp --on-timeout`:
+
+- `finish` (default): the jobs run to the end; the answer is then a tool
+  **error** (`isError`) carrying the full result plus `timed_out` and each
+  job's `queued_s`/`ran_s`. The work is kept and the overrun is something to
+  look into.
+- `cancel`: the jobs still running are cancelled, and the answer is the same
+  error with what finished.
+
+Neither answers while ComfyUI is still working, because the answer starts the
+model's next turn. For `finish` to be reachable, the client must still be
+listening — which is what the heartbeat is for: while a round runs, the bridge
+sends a progress notification every 20 s whenever the client issued a
+`progressToken`, with `progress` rising by a sliver each time as the spec
+requires. pi restarts its request timeout on each one. This is a convenience
+that relies on pi's behaviour, not a guarantee, which is why the hang-up path
+still cancels: a harness that ignores progress times out, and the round is
+then cancelled rather than left to collide with the reload.
 
 ### 5.4 Where it lives, and what it depends on
 
@@ -656,7 +686,8 @@ mechanics. A skill is optional, and it is about taste.
 | A job fails | counted in the batch, returned with its error text | the model can retry smaller, or change workflow |
 | **Every** job fails | the `batch` event still fires | terminal means terminal, not successful (§6.1) |
 | Proxy closes an idle connection | SSE keepalive every 15s | §5.3, transport layer, always on |
-| MCP client times out mid-`generate` | it closes the stream; the bridge cancels the batch | §5.3 — otherwise the GPU keeps working for nobody |
+| MCP client times out mid-`generate` | it closes the stream; the bridge cancels the round's jobs, waits for them to stop, frees VRAM | §5.3 — otherwise the GPU keeps working while the harness's next completion reloads the LLM on top of it |
+| A round runs past its own timeout | `--on-timeout finish`: it ends, and answers with an error saying where the time went; `cancel`: it is stopped there | §5.3 — never answered while ComfyUI is still working |
 | Client's timeout is shorter than a batch | configure it longer — a requirement of running the bridge | §5.3; `wait: false` where it cannot be configured |
 | Something else pings llama-swap mid-batch | it loads the model → OOM | **the main operational hazard.** One client only; a lock the bridge holds is the cheap mitigation |
 | **You generate from the web UI while the model is resident** | ComfyUI OOMs | the bridge cannot help — it never sees that request. `ttl` (§8) is the backstop; a `gpu_status` glance before a big job is the habit |
