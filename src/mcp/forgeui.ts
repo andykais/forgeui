@@ -48,6 +48,10 @@ export interface JobRow {
   outputs?: string[];
   /** §7's `JobError`: the column is `error_json`, the API says `error`. */
   error?: { type?: string; message?: string; node_id?: string | null } | null;
+  /** Epoch ms, as §7 stores them; how long a slow round spent where. */
+  created_at?: number;
+  started_at?: number | null;
+  finished_at?: number | null;
 }
 
 /** A model as `GET /api/models` lists it, narrowed to what a picker reads. */

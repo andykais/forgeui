@@ -460,3 +460,58 @@ Deno.test("a call cancelled before the round begins takes nothing from the LLM",
     assertEquals(jobs.jobs.length, 0, "nothing was submitted");
   }, { comfy: true });
 });
+
+Deno.test("--on-timeout finish lets the jobs end, then says the round overran", async () => {
+  await withTestApp(async (app) => {
+    app.fake!.setScenario("cancel-while-running");
+    const round = runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 200,
+      onTimeout: "finish",
+    }, { forge: new ForgeUi({ url: app.url }), llm: null, freeVram: true });
+    await app.fake!.waitForGate("interrupt");
+    // Well past the timeout, and the job is still running.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assertEquals(app.fake!.freed, 0, "the GPU is not handed back mid-job");
+    app.fake!.openGate("interrupt");
+    const result = await round;
+
+    assertEquals(app.fake!.interruptCount, 0, "nothing was cancelled");
+    assertEquals(result.counts.done, 1);
+    assert(result.jobs[0]!.outputs.length > 0, "the work is kept");
+    assertEquals(result.timed_out?.action, "finished");
+    assertEquals(result.timed_out?.timeout_s, 0.2);
+    assertStringIncludes(result.timed_out!.message, "left to finish");
+    assertEquals(typeof result.jobs[0]!.ran_s, "number");
+    assertEquals(typeof result.jobs[0]!.queued_s, "number");
+    assertEquals(app.fake!.freed, 1, "and handed back once it ended");
+  }, { comfy: true });
+});
+
+Deno.test("--on-timeout cancel stops the jobs at the timeout", async () => {
+  await withTestApp(async (app) => {
+    app.fake!.setScenario("cancel-while-running");
+    const result = await runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 500,
+      onTimeout: "cancel",
+    }, { forge: new ForgeUi({ url: app.url }), llm: null });
+
+    assertEquals(app.fake!.interruptCount, 1);
+    assertEquals(result.counts.cancelled, 1);
+    assertEquals(result.timed_out?.action, "cancelled");
+    assertEquals(typeof result.jobs[0]!.ran_s, "number");
+  }, { comfy: true });
+});
+
+Deno.test("a round inside its timeout says nothing about one", async () => {
+  await withTestApp(async (app) => {
+    const result = await runRound({
+      jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+      timeoutMs: 30_000,
+      onTimeout: "finish",
+    }, { forge: new ForgeUi({ url: app.url }), llm: null });
+    assertEquals(result.timed_out, undefined);
+    assertEquals(result.counts.done, 1);
+  }, { comfy: true });
+});

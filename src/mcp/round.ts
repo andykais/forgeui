@@ -43,11 +43,28 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/**
+ * What a round does when it runs past `timeoutMs` (`forge mcp --on-timeout`).
+ *
+ * - `finish`: let the jobs run to the end, then answer with an error that says
+ *   the round overran and how long each job queued and ran — something to
+ *   investigate, with the work kept.
+ * - `cancel`: cancel what is still running and answer with what finished.
+ *
+ * Neither ever answers while ComfyUI is still working: an answer is what
+ * starts the model's next turn, and that turn reloads the LLM.
+ */
+export type OnTimeout = "finish" | "cancel";
+
+export const ON_TIMEOUT: readonly OnTimeout[] = ["finish", "cancel"];
+
 export interface RoundRequest {
   jobs: SubmitJob[];
   project?: string;
   note?: string;
   timeoutMs: number;
+  /** Default `cancel`. */
+  onTimeout?: OnTimeout;
 }
 
 export interface RoundJob {
@@ -62,6 +79,10 @@ export interface RoundJob {
   outputs: OutputRef[];
   note?: string;
   error?: string;
+  /** Seconds between submit and ComfyUI starting it. */
+  queued_s?: number;
+  /** Seconds ComfyUI spent on it. */
+  ran_s?: number;
 }
 
 export interface RoundResult {
@@ -69,6 +90,14 @@ export interface RoundResult {
   project?: string;
   counts: { done: number; failed: number; cancelled: number };
   jobs: RoundJob[];
+  /** Set when the round ran past its timeout; the answer is then an error. */
+  timed_out?: {
+    timeout_s: number;
+    elapsed_s: number;
+    /** What happened to the jobs still running at the timeout. */
+    action: "finished" | "cancelled";
+    message: string;
+  };
 }
 
 export interface RoundDeps {
@@ -128,6 +157,10 @@ export async function runRound(
 ): Promise<RoundResult> {
   const { forge, llm, signal } = deps;
   const stopTimeoutMs = deps.stopTimeoutMs ?? STOP_TIMEOUT_MS;
+  const onTimeout = request.onTimeout ?? "cancel";
+  const startedAt = Date.now();
+  /** When the timeout passed, and with how many jobs still running. */
+  let overran: { pending: number } | null = null;
   // Nobody is waiting: take nothing from the LLM and submit nothing.
   if (signal?.aborted) {
     throw new ForgeUiError("the call was cancelled before the round began");
@@ -208,7 +241,7 @@ export async function runRound(
 
     // 5. Wait. Terminal means terminal, not successful: a round where every
     // job fails still finishes, or the GPU is held by a call nobody ends.
-    const deadline = Date.now() + request.timeoutMs;
+    let deadline = Date.now() + request.timeoutMs;
     const pending = new Set(submitted.keys());
     /** The pull in flight, held across ticks; see the race below. */
     let pulling:
@@ -236,6 +269,9 @@ export async function runRound(
         const entry = submitted.get(id)!;
         entry.status = "cancelled";
         entry.error = why;
+        // How long it had been queued and running, for whoever investigates.
+        const row = await forge.job(id).catch(() => null);
+        if (row) timesFrom(entry, row);
       }
     };
 
@@ -250,11 +286,23 @@ export async function runRound(
         await giveUp(ABANDONED);
         break;
       }
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        await giveUp(`timed out after ${request.timeoutMs}ms`);
-        break;
+      if (deadline - Date.now() <= 0) {
+        overran = { pending: pending.size };
+        if (onTimeout === "cancel") {
+          await giveUp(`timed out after ${request.timeoutMs}ms`);
+          break;
+        }
+        // Keep waiting, as long as it takes. The client is still listening
+        // (a hang-up is the abort above, which cancels in either mode), and
+        // the LLM stays off the GPU until ComfyUI is done.
+        console.error(
+          `forge mcp: a round passed its ${request.timeoutMs / 1000}s ` +
+            `timeout with ${pending.size} job(s) running; letting them ` +
+            `finish (--on-timeout finish)`,
+        );
+        deadline = Infinity;
       }
+      const remaining = deadline - Date.now();
       // The socket, or a tick. Every tick re-reads the rows that are still
       // pending: the events are the fast path, and this is the floor under
       // it — a dropped socket or a missed frame must not cost the whole
@@ -350,7 +398,7 @@ export async function runRound(
   );
 
   const jobs = [...submitted.values()];
-  return {
+  const result: RoundResult = {
     source,
     project: request.project,
     counts: {
@@ -360,6 +408,24 @@ export async function runRound(
     },
     jobs,
   };
+  if (overran !== null) {
+    const timeout_s = request.timeoutMs / 1000;
+    const elapsed_s = Math.round((Date.now() - startedAt) / 1000);
+    const action = onTimeout === "finish" ? "finished" : "cancelled";
+    result.timed_out = {
+      timeout_s,
+      elapsed_s,
+      action,
+      message: action === "finished"
+        ? `the round took ${elapsed_s}s, past its ${timeout_s}s timeout; ` +
+          `the ${overran.pending} job(s) still running then were left to ` +
+          `finish. Each job's queued_s and ran_s say where the time went`
+        : `the round passed its ${timeout_s}s timeout and the ` +
+          `${overran.pending} job(s) still running were cancelled. Each ` +
+          `job's queued_s and ran_s say where the time went`,
+    };
+  }
+  return result;
 }
 
 /**
@@ -391,6 +457,16 @@ async function stopAll(
   return [...waiting];
 }
 
+/** `queued_s` and `ran_s`, to a tenth of a second, from a job row. */
+function timesFrom(entry: RoundJob, row: JobRow): void {
+  const seconds = (from?: number | null, to?: number | null) =>
+    typeof from === "number" && typeof to === "number"
+      ? Math.round((to - from) / 100) / 10
+      : undefined;
+  entry.queued_s = seconds(row.created_at, row.started_at);
+  entry.ran_s = seconds(row.started_at, row.finished_at ?? Date.now());
+}
+
 function settle(
   submitted: Map<string, RoundJob>,
   produced: Map<string, string[]>,
@@ -403,6 +479,7 @@ function settle(
   if (!entry) return;
   entry.status = row.status;
   produced.set(row.id, row.outputs ?? []);
+  timesFrom(entry, row);
   entry.error = errorText(row);
   pending.delete(row.id);
   deps.onProgress?.(

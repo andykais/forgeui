@@ -141,8 +141,9 @@ deno task compile          # produces ./forge
 | `--http host:port` | Streamable HTTP |
 | `--stdio` | the harness launches the bridge as a subprocess instead |
 | `--no-free-vram` | skip asking ComfyUI to unload after a round |
-| `--progress` | relay progress notifications, one per finished job. **The model never sees these** — it is unloaded for the whole call. Turn them on if your harness renders them for you; pi does, and also restarts its request timeout on each one (§5.1) |
-| `--timeout` | default ceiling for one round, seconds (900) |
+| `--progress` | relay progress notifications, one per finished job. **The model never sees these** — it is unloaded for the whole call. Turn them on if your harness renders them for you; pi does (§5.1). A heartbeat every 20 s is sent either way |
+| `--timeout` | default ceiling for one round, seconds (900). The model can ask for its own with `timeout_s` |
+| `--on-timeout` | what a round past that ceiling does: `finish` (default) lets the jobs end, then answers with an **error** carrying the outputs and each job's `queued_s`/`ran_s`, so you can see where the time went; `cancel` stops what is still running and answers with what finished. Neither answers while ComfyUI is still working. A client that hangs up cancels in both modes — see §4 |
 
 A systemd unit, if you want it to come back after a reboot:
 
@@ -212,10 +213,19 @@ exactly that reason.
 
 **Raise the harness's MCP request timeout above your longest batch.** (In pi
 that setting is `timeout`, in seconds — §5.1.) A
-`generate` of six Flux images can run for minutes, and nothing the bridge
-sends can make a client wait longer than it has decided to. If your harness's
-timeout is fixed and short, call `generate` with `wait: false` and poll
-instead. Everything else here works out of the box; this one does not.
+`generate` of six Flux images can run for minutes. While a round runs the
+bridge sends a progress notification every 20 s, and pi restarts its timeout
+on each one, so in pi a round normally outlives a short `timeout`; a harness
+that does not do that needs the setting sized for the whole batch.
+
+It matters because of what happens when a harness gives up. It answers the
+model with an error, the model's next turn **reloads the LLM**, and if ComfyUI
+were still generating the two would fill the same memory — on a box that runs
+both, that locks the machine. So a call the client hangs up on is cancelled:
+the bridge interrupts its jobs, waits for them to stop, frees VRAM, and only
+then is the GPU anyone's. A round that runs long while the client is still
+listening is what `--on-timeout` decides: `finish` (the default) lets it end
+and answers with an error to investigate; `cancel` stops it at `--timeout`.
 
 ---
 
@@ -523,7 +533,8 @@ placeholder, so in pi a take is something to `save_to`, not to listen to.
 | Eviction seems to do nothing | llama-swap is not the thing that started `llama-server` (§5.2) |
 | pi packs a prompt the server rejects | `contextWindow` in `models.json` exceeds `--ctx-size` (§5.4) |
 | The tool call dies after N seconds | the harness's MCP timeout, not the bridge. §4; in pi, a missing `timeout` is 60 seconds (§5.1) |
-| stderr: `the client abandoned a generate call…` | the same timeout. The bridge cancelled the round's jobs so the LLM's reload does not land on a GPU ComfyUI is still using; raise `timeout` above your longest round |
+| stderr: `the client abandoned a generate call…` | the harness hung up: you pressed Esc, or its timeout fired despite the heartbeat (no `progressToken` sent, or a harness that does not restart its timeout on progress). The bridge cancelled the round's jobs so the LLM's reload does not land on a GPU ComfyUI is still using; raise `timeout` above your longest round |
+| `generate` answers with an error, `timed_out.action: "finished"` | the round ran past `--timeout` (or `timeout_s`) and was left to finish (`--on-timeout finish`). The outputs are there; each job's `queued_s` and `ran_s` say whether it waited behind other work or was slow itself |
 | pi has no `mcp__forgeui__*` tools | `exposure` is not `direct`, or an installed extension that registers `/mcp` has replaced the built-in MCP support (§5.1) |
 | `Mcp-Method header is absent` | you are hand-rolling a client; the 2026-07-28 HTTP binding mirrors `method` and `params.name` into headers |
 | Images are enormous in context | the model called `get_output_file` rather than `get_output_preview`, or ForgeUI's machine has no ffmpeg — the preview then says `max_edge … was not applied`. Install ffmpeg where ForgeUI runs, or resize client side: `inputLimits.images.resize` in `models.json` (§5.4) |

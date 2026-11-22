@@ -1,7 +1,7 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { withTestApp } from "../fixtures/app.ts";
 import { ForgeUi } from "../../src/mcp/forgeui.ts";
-import { createBridgeServer } from "../../src/mcp/tools.ts";
+import { type BridgeOptions, createBridgeServer } from "../../src/mcp/tools.ts";
 import { serveHttp } from "../../src/mcp/serve.ts";
 
 /**
@@ -65,7 +65,11 @@ Deno.test("a client that hangs up on generate cancels the round", async () => {
 });
 
 /** Starts the bridge's HTTP binding against `forge`; returns its port. */
-async function bridge(forge: ForgeUi, signal: AbortSignal) {
+async function bridge(
+  forge: ForgeUi,
+  signal: AbortSignal,
+  extra: Partial<BridgeOptions> = {},
+) {
   const listening = Promise.withResolvers<number>();
   const server = serveHttp(() =>
     createBridgeServer({
@@ -74,6 +78,7 @@ async function bridge(forge: ForgeUi, signal: AbortSignal) {
       freeVram: true,
       progress: false,
       defaultTimeoutMs: 600_000,
+      ...extra,
     }), {
     hostname: "127.0.0.1",
     port: 0,
@@ -115,6 +120,84 @@ Deno.test("a client that waits still gets its round", async () => {
     }).then((response) => response.text());
     assertStringIncludes(body, '\\"done\\": 2');
     assertEquals(app.fake!.interruptCount, 0);
+    stop.abort();
+    await server.finished;
+  }, { comfy: true });
+});
+
+Deno.test("a round keeps pi's timeout at bay, and an overrun is an error", async () => {
+  // pi restarts its request timeout on each progress notification, so the
+  // heartbeat is what lets a long round finish instead of being abandoned.
+  await withTestApp(async (app) => {
+    app.fake!.setScenario("cancel-while-running");
+    const stop = new AbortController();
+    const { server, port } = await bridge(
+      new ForgeUi({ url: app.url }),
+      stop.signal,
+      { defaultTimeoutMs: 200, onTimeout: "finish", heartbeatMs: 100 },
+    );
+    const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "generate",
+          _meta: { progressToken: "p1" },
+          arguments: {
+            jobs: [{ workflow_id: "krea2", params: { prompt: "a heron" } }],
+          },
+        },
+      }),
+    });
+    const reader = response.body!.pipeThrough(new TextDecoderStream())
+      .getReader();
+    const messages: {
+      method?: string;
+      params?: { progress: number };
+      result?: { isError?: boolean; content: { text: string }[] };
+    }[] = [];
+    let buffer = "";
+    let opened = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += value;
+      for (const line of buffer.split("\n").slice(0, -1)) {
+        if (line.startsWith("data:")) {
+          messages.push(JSON.parse(line.slice("data:".length)));
+        }
+      }
+      buffer = buffer.slice(buffer.lastIndexOf("\n") + 1);
+      const beats = messages.filter((m) =>
+        m.method === "notifications/progress"
+      );
+      // Several beats past the 200 ms timeout, then let the job end.
+      if (!opened && beats.length >= 5) {
+        opened = true;
+        app.fake!.openGate("interrupt");
+      }
+    }
+
+    const progress = messages
+      .filter((m) => m.method === "notifications/progress")
+      .map((m) => m.params!.progress);
+    assert(progress.length >= 5, `only ${progress.length} heartbeats`);
+    for (let i = 1; i < progress.length; i++) {
+      assert(progress[i]! > progress[i - 1]!, `progress fell: ${progress}`);
+    }
+    const answer = messages.find((m) => m.result)!.result!;
+    assertEquals(answer.isError, true, "an overrun is an error to pi");
+    const round = JSON.parse(answer.content[0]!.text);
+    assertEquals(round.counts.done, 1, "and the work finished");
+    assertEquals(round.timed_out.action, "finished");
+    assertEquals(app.fake!.interruptCount, 0);
+
     stop.abort();
     await server.finished;
   }, { comfy: true });

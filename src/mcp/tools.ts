@@ -25,7 +25,7 @@ import type {
 } from "./forgeui.ts";
 import type { LlmHost } from "./llm.ts";
 import { describeError } from "./llm.ts";
-import { runRound } from "./round.ts";
+import { type OnTimeout, runRound } from "./round.ts";
 import { registerWorkflowTools } from "./workflow_tools.ts";
 import { APP_VERSION } from "../version.ts";
 
@@ -38,7 +38,23 @@ export interface BridgeOptions {
   progress: boolean;
   /** Ceiling for a round, when the model does not name one. */
   defaultTimeoutMs: number;
+  /** What a round past that ceiling does (`--on-timeout`). Default finish. */
+  onTimeout?: OnTimeout;
+  /** How often a running round tells the client it is alive. Tests shorten it. */
+  heartbeatMs?: number;
 }
+
+/**
+ * How often a round pings the client while it runs.
+ *
+ * pi restarts its MCP request timeout on every progress notification (§5.1 of
+ * MCP-BRIDGE), so a ping well inside its 60 s default keeps the call open for
+ * as long as the round takes. That is what lets `--on-timeout finish` work:
+ * if pi's own timeout fired instead, pi would answer the model with an error,
+ * the model's next turn would reload the LLM, and the bridge would have to
+ * cancel the jobs to keep the two out of the same memory.
+ */
+const HEARTBEAT_MS = 20_000;
 
 const text = (value: unknown) => ({
   content: [{
@@ -1015,7 +1031,12 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
       note: z.string().optional().describe(
         "what this round is testing, e.g. pushing the LoRA past 0.9",
       ),
-      timeout_s: z.number().int().min(30).max(7200).optional(),
+      timeout_s: z.number().int().min(30).max(7200).optional().describe(
+        "how long this round should take at most. Past it the round is " +
+          "answered as an error with how long each job queued and ran; " +
+          "whether the jobs were left to finish depends on how the bridge " +
+          "was started",
+      ),
     }),
   }, async ({ jobs: requested, project, note, timeout_s }, ctx) => {
     // Templates are applied here, as the panel applies them (§4.8): their
@@ -1028,36 +1049,65 @@ export function createBridgeServer(options: BridgeOptions): McpServer {
     } catch (cause) {
       return failure(cause);
     }
-    // Only when the client asked for progress: a notification against a token
-    // it never issued is one the spec says not to send, and the model cannot
-    // see these anyway — it is unloaded for the whole call (§5.3).
+    // Only against a token the client issued: a notification against one it
+    // never issued is one the spec says not to send. The model cannot see
+    // these — it is unloaded for the whole call (§5.3) — but the client can:
+    // per-job lines for a human when `--progress` asks for them, and a
+    // heartbeat always, which keeps pi's request timeout from firing while
+    // the round is still working.
     const token = ctx.mcpReq._meta?.progressToken;
-    const onProgress = options.progress && token !== undefined
-      ? (done: number, total: number, message: string) => {
-        void ctx.mcpReq.notify({
-          method: "notifications/progress",
-          params: { progressToken: token, progress: done, total, message },
-        }).catch(() => {});
-      }
-      : undefined;
+    const started = Date.now();
+    let done = 0;
+    let total = jobs.length;
+    // The spec wants `progress` to rise with every notification, heartbeats
+    // included, so a beat adds a sliver that the next finished job outgrows.
+    let beats = 0;
+    const notify = (message: string) => {
+      if (token === undefined) return;
+      const progress = done + Math.min(0.999, beats / 1000);
+      void ctx.mcpReq.notify({
+        method: "notifications/progress",
+        params: { progressToken: token, progress, total, message },
+      }).catch(() => {});
+    };
+    const onProgress = (finished: number, of: number, message: string) => {
+      done = finished;
+      total = of;
+      beats = 0;
+      if (options.progress) notify(message);
+    };
+    const heartbeat = setInterval(() => {
+      beats++;
+      notify(
+        `${done}/${total} done, ${Math.round((Date.now() - started) / 1000)}s`,
+      );
+    }, options.heartbeatMs ?? HEARTBEAT_MS);
+    Deno.unrefTimer(heartbeat);
     try {
       const result = await runRound({
         jobs,
         project,
         note,
         timeoutMs: (timeout_s ?? options.defaultTimeoutMs / 1000) * 1000,
+        onTimeout: options.onTimeout ?? "finish",
       }, {
         forge,
         llm,
         freeVram: options.freeVram,
         onProgress,
-        // pi's request timeout, a `notifications/cancelled`, a closed stream:
-        // the round stops its jobs rather than racing the reload (§5.3).
+        // A closed stream or a `notifications/cancelled`: the model's next
+        // turn is coming, so the round stops its jobs rather than racing the
+        // reload — whatever `--on-timeout` says (§5.3).
         signal: ctx.mcpReq.signal,
       });
+      // Past its timeout, the round is an error to the harness — something to
+      // look into — even though its work is all there.
+      if (result.timed_out) return { ...text(result), isError: true };
       return text(result);
     } catch (cause) {
       return failure(cause);
+    } finally {
+      clearInterval(heartbeat);
     }
   });
 
